@@ -14,6 +14,7 @@
  */
 
 import type { ScaleLike } from "../../../utils/musicalScales";
+import type { ParamFramesPayload } from "../../../types/api";
 
 import { transposePitchByScaleSteps } from "../../../utils/musicalScales";
 import {
@@ -23,6 +24,16 @@ import {
     CHILD_PITCH_OFFSET_DEGREES_RANGE,
 } from "./childPitchOffsetParams";
 import { clamp } from "../timeline";
+
+interface ChildOffsetParamsApi {
+    getParamFrames: (
+        trackId: string,
+        param: string,
+        startFrame: number,
+        frameCount: number,
+        stride?: number,
+    ) => Promise<ParamFramesPayload>;
+}
 
 export function resolveChildLineage(
     tracks: Array<{ id: string; parentId?: string | null }>,
@@ -51,7 +62,7 @@ export async function buildChildOffsetPasteValues(args: {
     frameCount: number;
     clipboardPitch: number[];
     mode: "cents" | "degrees";
-    paramsApi: any;
+    paramsApi: ChildOffsetParamsApi;
     pitchDeltaToDegreeSteps: (basePitch: number, targetPitch: number, scale: ScaleLike) => number;
     projectScale: ScaleLike | undefined;
 }): Promise<number[] | null> {
@@ -101,7 +112,7 @@ export async function buildChildOffsetPasteValues(args: {
     const curvePayloads = await Promise.all(curvePromises);
 
     const rootEdit = Array.isArray(rootPitchPayload.edit)
-        ? rootPitchPayload.edit.map((v: any) => Number(v) || 0)
+        ? rootPitchPayload.edit.map((v) => Number(v) || 0)
         : [];
 
     const curvesByTrack = new Map<string, { cents: number[]; degrees: number[] }>();
@@ -112,11 +123,11 @@ export async function buildChildOffsetPasteValues(args: {
         curvesByTrack.set(trackId, {
             cents:
                 centsPayload?.ok && Array.isArray(centsPayload.edit)
-                    ? centsPayload.edit.map((v: any) => Number(v) || 0)
+                    ? centsPayload.edit.map((v) => Number(v) || 0)
                     : [],
             degrees:
                 degreesPayload?.ok && Array.isArray(degreesPayload.edit)
-                    ? degreesPayload.edit.map((v: any) => Number(v) || 0)
+                    ? degreesPayload.edit.map((v) => Number(v) || 0)
                     : [],
         });
     }

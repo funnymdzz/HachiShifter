@@ -518,8 +518,17 @@ export function drawPianoRoll(args: {
                     // 退化：若跨度相对较大，回退到更粗的步长以避免过多刻度
                     const approxCount = range / chosen;
                     if (approxCount > 12) {
-                        const fallbackStep = Math.max(candidates[0], niceAxisStep(range, 8));
-                        chosen = fallbackStep;
+                        // 使用针对约 8 个刻度的 "好看" 步长作为回退，
+                        // 并确保它比当前 chosen 更大；否则尝试下一个更大的候选值。
+                        const niceStep = niceAxisStep(range, 8);
+                        if (niceStep > chosen) {
+                            chosen = niceStep;
+                        } else {
+                            const largerCandidate = candidates.find((c) => c > chosen);
+                            if (largerCandidate !== undefined) {
+                                chosen = largerCandidate;
+                            }
+                        }
                     }
 
                     const firstMark = Math.ceil(vMin / chosen) * chosen;

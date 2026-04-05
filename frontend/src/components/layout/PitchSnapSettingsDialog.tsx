@@ -9,6 +9,7 @@ import {
 } from "../../features/session/sessionSlice";
 import type { PitchSnapUnit } from "../../features/session/sessionTypes";
 import { useEffect, useState } from "react";
+import { applySelectWheelChange } from "../../utils/selectWheel";
 
 interface Props {
     open: boolean;
@@ -49,7 +50,20 @@ export function PitchSnapSettingsDialog({ open, onOpenChange }: Props) {
                                 void dispatch(persistUiSettings());
                             }}
                         >
-                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Trigger
+                                style={{ flex: 1 }}
+                                onWheel={(event) => {
+                                    applySelectWheelChange({
+                                        event,
+                                        currentValue: pitchSnapUnit,
+                                        options: ["semitone", "scale"],
+                                        onChange: (next) => {
+                                            dispatch(setPitchSnapUnit(next as PitchSnapUnit));
+                                            void dispatch(persistUiSettings());
+                                        },
+                                    });
+                                }}
+                            />
                             <Select.Content>
                                 <Select.Item value="semitone">
                                     {tAny("quantize_semitone")}

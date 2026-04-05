@@ -225,6 +225,8 @@ textarea {
 .rt-TextArea,
 .rt-DialogContent,
 .rt-DropdownMenuContent,
+.rt-SelectContent,
+.rt-SelectItem,
 .rt-ContextMenuContent,
 .rt-PopoverContent,
 .rt-TooltipContent {

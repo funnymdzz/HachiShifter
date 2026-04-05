@@ -217,11 +217,13 @@ fn save_project_archive_to_zip_inner(
             continue;
         };
         if source_path.trim().is_empty() {
+            clip.source_path = None;
             continue;
         }
 
         if let Some(existing) = source_to_entry.get(&source_path) {
             clip.source_path_relative = Some(existing.clone());
+            clip.source_path = None;
             continue;
         }
 
@@ -231,6 +233,7 @@ fn save_project_archive_to_zip_inner(
                 "Skip missing or non-absolute source: {} (clip={})",
                 source_path, clip.id
             ));
+            clip.source_path = None;
             continue;
         }
 
@@ -259,6 +262,7 @@ fn save_project_archive_to_zip_inner(
 
         source_to_entry.insert(source_path.clone(), unique_entry.clone());
         clip.source_path_relative = Some(unique_entry.clone());
+        clip.source_path = None;
         archive_logs.push(format!(
             "Archive source: {} -> {}",
             source_path, unique_entry
@@ -267,39 +271,124 @@ fn save_project_archive_to_zip_inner(
 
     let bytes = serialize_project_file_for_path(&pf, Path::new(&project_entry_name))?;
 
-    let file = fs::File::create(zip_path).map_err(|e| e.to_string())?;
-    let mut zip = zip::ZipWriter::new(file);
-    let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-
-    zip.start_file(project_entry_name.clone(), options)
-        .map_err(|e| e.to_string())?;
-    zip.write_all(&bytes).map_err(|e| e.to_string())?;
-
-    let mut written_entries = std::collections::HashSet::<String>::new();
-    for (source_path, zip_entry) in &source_to_entry {
-        if !written_entries.insert(zip_entry.clone()) {
-            continue;
+    // 为了保证保存的原子性，先写入临时文件，成功后再重命名为最终路径。
+    let tmp_path = {
+        let ext = zip_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if ext.is_empty() {
+            // 没有扩展名的情况，直接追加后缀
+            zip_path.with_extension("tmp_save")
+        } else {
+            // 保留原有扩展名，并追加 .tmp_save 后缀，例如 .zip.tmp_save
+            let new_ext = format!("{}.tmp_save", ext);
+            zip_path.with_extension(new_ext)
         }
-        // 使用流式写入，避免将整个文件读入内存。
-        let mut src_file = fs::File::open(source_path).map_err(|e| e.to_string())?;
-        zip.start_file(zip_entry, options).map_err(|e| e.to_string())?;
-        std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
+    };
+
+    let write_result: Result<(), String> = (|| {
+        let file = fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options =
+            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+        zip.start_file(project_entry_name.clone(), options)
+            .map_err(|e| e.to_string())?;
+        zip.write_all(&bytes).map_err(|e| e.to_string())?;
+
+        let mut written_entries = std::collections::HashSet::<String>::new();
+        for (source_path, zip_entry) in &source_to_entry {
+            if !written_entries.insert(zip_entry.clone()) {
+                continue;
+            }
+            // 使用流式写入，避免将整个文件读入内存。
+            let mut src_file = fs::File::open(source_path).map_err(|e| e.to_string())?;
+            zip.start_file(zip_entry, options).map_err(|e| e.to_string())?;
+            std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
+        }
+
+        let log_name = format!(
+            "{}_{}.log",
+            project_name,
+            Local::now().format("%Y%m%d_%H%M%S")
+        );
+        archive_logs.push(format!(
+            "Archive completed at {}",
+            Local::now().format("%Y-%m-%d %H:%M:%S")
+        ));
+        zip.start_file(log_name.clone(), options)
+            .map_err(|e| e.to_string())?;
+        let mut log_text = archive_logs.join("\n");
+        log_text.push('\n');
+        zip.write_all(log_text.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        // 确保 ZipWriter 正常完成写入并刷新到底层文件。
+        zip.finish().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+
+    match write_result {
+        Ok(()) => {
+            // 写入成功后，用可回滚的方式替换最终 zip 文件，兼容 Windows 上目标已存在时
+            // `fs::rename` 不能直接覆盖的问题。
+            let backup_path = {
+                let file_name = zip_path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("archive.zip");
+                zip_path.with_file_name(format!("{file_name}.replace_backup"))
+            };
+
+            let destination_existed = zip_path.exists();
+            let mut backup_created = false;
+
+            if destination_existed {
+                if backup_path.exists() {
+                    fs::remove_file(&backup_path).map_err(|e| {
+                        format!("Failed to remove stale archive backup {:?}: {}", backup_path, e)
+                    })?;
+                }
+
+                fs::rename(zip_path, &backup_path).map_err(|e| {
+                    format!(
+                        "Failed to move existing archive {:?} to backup {:?}: {}",
+                        zip_path, backup_path, e
+                    )
+                })?;
+                backup_created = true;
+            }
+
+            if let Err(rename_err) = fs::rename(&tmp_path, zip_path) {
+                let _ = fs::remove_file(&tmp_path);
+
+                if backup_created {
+                    let _ = fs::remove_file(zip_path);
+                    let _ = fs::rename(&backup_path, zip_path);
+                }
+
+                return Err(format!(
+                    "Failed to replace archive {:?} with temporary file {:?}: {}",
+                    zip_path, tmp_path, rename_err
+                ));
+            }
+
+            if backup_created {
+                fs::remove_file(&backup_path).map_err(|e| {
+                    format!(
+                        "Archive replaced, but failed to remove backup {:?}: {}",
+                        backup_path, e
+                    )
+                })?;
+            }
+        }
+        Err(e) => {
+            // 写入失败，尝试清理临时文件，然后返回原始错误。
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
     }
-
-    let log_name = format!(
-        "{}_{}.log",
-        project_name,
-        Local::now().format("%Y%m%d_%H%M%S")
-    );
-    archive_logs.push(format!("Archive completed at {}", Local::now().format("%Y-%m-%d %H:%M:%S")));
-    zip.start_file(log_name.clone(), options)
-        .map_err(|e| e.to_string())?;
-    let mut log_text = archive_logs.join("\n");
-    log_text.push('\n');
-    zip.write_all(log_text.as_bytes())
-        .map_err(|e| e.to_string())?;
-
-    zip.finish().map_err(|e| e.to_string())?;
 
     Ok(get_timeline_state_from_ref(state))
 }

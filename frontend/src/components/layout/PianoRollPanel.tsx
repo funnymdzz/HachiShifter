@@ -116,6 +116,8 @@ import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
+import { applySelectWheelChange } from "../../utils/selectWheel";
+import { parseCustomScaleToken } from "../../utils/scaleSelection";
 
 const NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -142,6 +144,24 @@ export const PianoRollPanel: React.FC = () => {
                 ? s.project.customScale.notes
                 : s.project.baseScale,
         [s.project.baseScale, s.project.customScale, s.project.useCustomScale],
+    );
+    const resolveScaleFromToken = useCallback(
+        (scaleToken: string): ScaleLike => {
+            if (scaleToken === "__project__") {
+                return effectiveProjectScale;
+            }
+
+            const customScaleId = parseCustomScaleToken(scaleToken);
+            if (customScaleId) {
+                const preset = s.customScalePresets.find((item) => item.id === customScaleId);
+                if (preset) {
+                    return preset.notes;
+                }
+            }
+
+            return isScaleKey(scaleToken) ? scaleToken : "C";
+        },
+        [effectiveProjectScale, s.customScalePresets],
     );
     const editParam = s.editParam as ParamName;
     // pitchSnapOpen 已在顶部工具栏 JSX 内声明和使用，无需重复声明
@@ -2133,12 +2153,7 @@ export const PianoRollPanel: React.FC = () => {
                 case "transposeDegrees": {
                     const degrees = Number(data?.degrees ?? 0);
                     const scaleToken = String(data?.scale ?? "__project__");
-                    const scale: ScaleLike =
-                        scaleToken === "__project__"
-                            ? effectiveProjectScale
-                            : isScaleKey(scaleToken)
-                              ? scaleToken
-                              : "C";
+                    const scale: ScaleLike = resolveScaleFromToken(scaleToken);
                     const degreeSteps = degreeInputToScaleSteps(degrees);
                     if (degreeSteps === 0) return;
                     await applySelectionEditWithEdgeSmoothing(
@@ -2290,12 +2305,7 @@ export const PianoRollPanel: React.FC = () => {
 
                     const unit = (data?.unit as string) ?? "semitone";
                     const scaleToken = String(data?.scale ?? "__project__");
-                    const scale: ScaleLike =
-                        scaleToken === "__project__"
-                            ? effectiveProjectScale
-                            : isScaleKey(scaleToken)
-                              ? scaleToken
-                              : "C";
+                    const scale: ScaleLike = resolveScaleFromToken(scaleToken);
                     const toleranceCents = Math.abs(
                         Math.round(Number(data?.toleranceCents ?? 0) || 0),
                     );
@@ -2391,12 +2401,7 @@ export const PianoRollPanel: React.FC = () => {
 
                     const unit = (data?.unit as string) ?? "semitone";
                     const scaleToken = String(data?.scale ?? "__project__");
-                    const scale: ScaleLike =
-                        scaleToken === "__project__"
-                            ? effectiveProjectScale
-                            : isScaleKey(scaleToken)
-                              ? scaleToken
-                              : "C";
+                    const scale: ScaleLike = resolveScaleFromToken(scaleToken);
                     const toleranceCents = Math.abs(
                         Math.round(Number(data?.toleranceCents ?? 0) || 0),
                     );
@@ -3189,7 +3194,38 @@ export const PianoRollPanel: React.FC = () => {
                                     );
                                 }}
                             >
-                                <Select.Trigger className="min-w-[140px]" />
+                                <Select.Trigger
+                                    className="min-w-[140px]"
+                                    onWheel={(event) => {
+                                        const currentValue = [
+                                            "world_dll",
+                                            "nsf_hifigan_onnx",
+                                            "vslib",
+                                            "none",
+                                        ].includes(rootTrack.pitchAnalysisAlgo)
+                                            ? rootTrack.pitchAnalysisAlgo
+                                            : "nsf_hifigan_onnx";
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue,
+                                            options: [
+                                                "world_dll",
+                                                "nsf_hifigan_onnx",
+                                                "vslib",
+                                                "none",
+                                            ],
+                                            onChange: (next) => {
+                                                if (!rootTrackId) return;
+                                                dispatch(
+                                                    setTrackStateRemote({
+                                                        trackId: rootTrackId,
+                                                        pitchAnalysisAlgo: next,
+                                                    }),
+                                                );
+                                            },
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="world_dll">world</Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">nsf-hifigan</Select.Item>

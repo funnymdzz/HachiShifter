@@ -22,6 +22,7 @@ import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade, computeAutoCrossfadeFromPayload } from "./autoCrossfade";
+import { buildDropToNewTrackMoves, computeSelectedTrackSpan } from "./clipDropMoveUtils";
 import { webApi } from "../../../../services/webviewApi";
 
 export const NEW_TRACK_SENTINEL = "__hs_new_track__";
@@ -421,6 +422,31 @@ export function useClipDrag(deps: {
                 return createdIds;
             }
 
+            const applyOptimisticMoves = (
+                moves: Array<{
+                    clipId: string;
+                    startSec: number;
+                    trackId: string;
+                }>,
+            ) => {
+                batch(() => {
+                    for (const move of moves) {
+                        dispatch(
+                            moveClipStart({
+                                clipId: move.clipId,
+                                startSec: move.startSec,
+                            }),
+                        );
+                        dispatch(
+                            moveClipTrack({
+                                clipId: move.clipId,
+                                trackId: move.trackId,
+                            }),
+                        );
+                    }
+                });
+            };
+
             if (drag.copyMode) {
                 // copyMode 下原 clip 未被移动，直接根据 ghost 偏移量计算副本位置
                 // copyMode 不使用交互锁（原 clip 未被拖动改变位置）
@@ -487,17 +513,21 @@ export function useClipDrag(deps: {
                             if (dropToNewTrack) {
                                 if (drag.hasMixedTrackSelection) {
                                     // mixed selection: create multiple new tracks matching source span
-                                    const idxs = Object.values(drag.initialTrackIndexById);
-                                    const minIdx = Math.min(...idxs);
-                                    const maxIdx = Math.max(...idxs);
-                                    const span = maxIdx - minIdx + 1;
+                                    const spanInfo = computeSelectedTrackSpan({
+                                        clipIds: drag.clipIds,
+                                        initialById: drag.initialById,
+                                        trackIndexById: drag.initialTrackIndexById,
+                                    });
+                                    if (!spanInfo) throw new Error("create_track_failed");
+
+                                    const minIdx = spanInfo.minTrackIndex;
+                                    const span = spanInfo.span;
                                     const created = await createNewTracksForDrop(span);
                                     if (created.length === span) {
                                         for (const tpl of templates) {
-                                            const srcIdx =
-                                                drag.initialTrackIndexById[tpl.trackId] ?? null;
-                                            if (srcIdx == null) continue;
-                                            const offset = srcIdx - minIdx;
+                                            const srcIdx = drag.initialTrackIndexById[tpl.trackId];
+                                            if (!Number.isFinite(srcIdx)) continue;
+                                            const offset = Number(srcIdx) - minIdx;
                                             tpl.trackId = created[offset] ?? tpl.trackId;
                                         }
                                         maybeSelectTargetTrack(created[0] ?? null);
@@ -578,40 +608,31 @@ export function useClipDrag(deps: {
                     void (async () => {
                         try {
                             if (drag.hasMixedTrackSelection) {
-                                const idxs = Object.values(drag.initialTrackIndexById);
-                                const minIdx = Math.min(...idxs);
-                                const maxIdx = Math.max(...idxs);
-                                const span = maxIdx - minIdx + 1;
+                                const spanInfo = computeSelectedTrackSpan({
+                                    clipIds: drag.clipIds,
+                                    initialById: drag.initialById,
+                                    trackIndexById: drag.initialTrackIndexById,
+                                });
+                                if (!spanInfo) throw new Error("create_track_failed");
+
+                                const minIdx = spanInfo.minTrackIndex;
+                                const span = spanInfo.span;
                                 const created = await createNewTracksForDrop(span);
                                 if (created.length !== span) throw new Error("create_track_failed");
                                 maybeSelectTargetTrack(created[0] ?? null);
-                                const moves = drag.clipIds
-                                    .map((id) => {
-                                        const initial = drag.initialById[id];
-                                        const now = sessionRef.current.clips.find(
-                                            (c) => c.id === id,
-                                        );
-                                        if (!initial || !now) return null;
-                                        const srcIdx = drag.initialTrackIndexById[initial.trackId];
-                                        const offset = srcIdx - minIdx;
-                                        const targetTrack = created[offset];
-                                        return targetTrack
-                                            ? {
-                                                  clipId: id,
-                                                  startSec: Number(now.startSec),
-                                                  trackId: targetTrack,
-                                              }
-                                            : null;
-                                    })
-                                    .filter(
-                                        (
-                                            move,
-                                        ): move is {
-                                            clipId: string;
-                                            startSec: number;
-                                            trackId: string;
-                                        } => move != null,
-                                    );
+                                const moves = buildDropToNewTrackMoves({
+                                    clipIds: drag.clipIds,
+                                    initialById: drag.initialById,
+                                    deltaSec: drag.lastDeltaBeat,
+                                    resolveTargetTrackId: (_clipId, initialTrackId) => {
+                                        const srcIdx = drag.initialTrackIndexById[initialTrackId];
+                                        if (!Number.isFinite(srcIdx)) return null;
+                                        const offset = Number(srcIdx) - minIdx;
+                                        return created[offset] ?? null;
+                                    },
+                                });
+                                if (moves.length === 0) throw new Error("create_track_failed");
+                                applyOptimisticMoves(moves);
                                 if (moves.length > 1) {
                                     await dispatch(
                                         moveClipsRemote({
@@ -635,28 +656,14 @@ export function useClipDrag(deps: {
                                 const newTrackId = await createNewTrackForDrop();
                                 if (!newTrackId) throw new Error("create_track_failed");
                                 maybeSelectTargetTrack(newTrackId);
-                                const moves = drag.clipIds
-                                    .map((id) => {
-                                        const initial = drag.initialById[id];
-                                        const now = sessionRef.current.clips.find(
-                                            (c) => c.id === id,
-                                        );
-                                        if (!initial || !now) return null;
-                                        return {
-                                            clipId: id,
-                                            startSec: Number(now.startSec),
-                                            trackId: newTrackId,
-                                        };
-                                    })
-                                    .filter(
-                                        (
-                                            move,
-                                        ): move is {
-                                            clipId: string;
-                                            startSec: number;
-                                            trackId: string;
-                                        } => move != null,
-                                    );
+                                const moves = buildDropToNewTrackMoves({
+                                    clipIds: drag.clipIds,
+                                    initialById: drag.initialById,
+                                    deltaSec: drag.lastDeltaBeat,
+                                    resolveTargetTrackId: () => newTrackId,
+                                });
+                                if (moves.length === 0) throw new Error("create_track_failed");
+                                applyOptimisticMoves(moves);
                                 if (moves.length > 1) {
                                     await dispatch(
                                         moveClipsRemote({
@@ -683,16 +690,24 @@ export function useClipDrag(deps: {
                                 applyAutoCrossfade(latestSession, drag.clipIds, dispatch);
                             }
                         } catch {
-                            for (const id of drag.clipIds) {
-                                const initial = drag.initialById[id];
-                                if (!initial) continue;
-                                dispatch(
-                                    moveClipTrack({
-                                        clipId: id,
-                                        trackId: initial.trackId,
-                                    }),
-                                );
-                            }
+                            batch(() => {
+                                for (const id of drag.clipIds) {
+                                    const initial = drag.initialById[id];
+                                    if (!initial) continue;
+                                    dispatch(
+                                        moveClipStart({
+                                            clipId: id,
+                                            startSec: Math.max(0, initial.startSec),
+                                        }),
+                                    );
+                                    dispatch(
+                                        moveClipTrack({
+                                            clipId: id,
+                                            trackId: initial.trackId,
+                                        }),
+                                    );
+                                }
+                            });
                         } finally {
                             void webApi.endUndoGroup();
                             dispatch(endInteraction());

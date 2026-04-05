@@ -12,6 +12,7 @@ import { fileBrowserApi } from "../../services/api/fileBrowser";
 import { coreApi } from "../../services/api/core";
 import { ProgressBar } from "../ProgressBar";
 import type { TrackInfo } from "../../features/session/sessionTypes";
+import { applySelectWheelChange } from "../../utils/selectWheel";
 
 interface ExportAudioDialogProps {
     open: boolean;
@@ -39,6 +40,10 @@ interface TargetGroup {
     title: string;
     isGroup: boolean;
     options: TargetOption[];
+}
+
+function normalizePathKey(input: string) {
+    return input.trim().replace(/\\/g, "/").replace(/\/+/g, "/").toLowerCase();
 }
 
 function buildTargetGroups(
@@ -218,7 +223,18 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         open: boolean;
         path: string;
         applyAll: boolean;
-    }>({ open: false, path: "", applyAll: false });
+        kind: "exists" | "source-path";
+    }>({ open: false, path: "", applyAll: false, kind: "exists" });
+
+    const sourceClipPathKeys = useMemo(() => {
+        const keys = new Set<string>();
+        for (const clip of session.clips) {
+            if (!clip.sourcePath) continue;
+            const key = normalizePathKey(clip.sourcePath);
+            if (key) keys.add(key);
+        }
+        return keys;
+    }, [session.clips]);
     const conflictResolverRef = useRef<
         ((value: { choice: "overwrite" | "skip" | "cancel"; applyAll: boolean }) => void) | null
     >(null);
@@ -414,12 +430,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
     }
 
     function selectExcludeMutedTargets() {
-        setSelectedTargetIds((prev) =>
-            prev.filter((id) => {
-                const target = allTargets.find((item) => item.id === id);
-                if (!target) return false;
-                return !target.excludedByRule;
-            }),
+        setSelectedTargetIds(
+            allTargets.filter((target) => !target.excludedByRule).map((target) => target.id),
         );
     }
 
@@ -484,7 +496,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
         window.requestAnimationFrame(focusAndRestore);
     }
 
-    async function askConflict(path: string) {
+    async function askConflict(path: string, kind: "exists" | "source-path") {
         return new Promise<{ choice: "overwrite" | "skip" | "cancel"; applyAll: boolean }>(
             (resolve) => {
                 setAwaitingConflictDecision(true);
@@ -492,14 +504,14 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                     setAwaitingConflictDecision(false);
                     resolve(value);
                 };
-                setConflictDialog({ open: true, path, applyAll: false });
+                setConflictDialog({ open: true, path, applyAll: false, kind });
             },
         );
     }
 
     async function resolveExportConflicts(request: any) {
         const plan = await coreApi.previewExportAudioPlan(request as any);
-        if (!plan?.ok || !Array.isArray(plan.existingPaths) || plan.existingPaths.length === 0) {
+        if (!plan?.ok || !Array.isArray(plan.targets)) {
             return {
                 overwriteExistingPaths: [] as string[],
                 skipExistingPaths: [] as string[],
@@ -507,11 +519,26 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
             };
         }
 
+        const existingKeys = new Set(
+            (Array.isArray(plan.existingPaths) ? plan.existingPaths : []).map((path) =>
+                normalizePathKey(path),
+            ),
+        );
+
+        const targetPaths = Array.from(
+            new Set((plan.targets ?? []).map((target) => target.path).filter(Boolean)),
+        );
+
         const overwriteExistingPaths: string[] = [];
         const skipExistingPaths: string[] = [];
         let applyAllChoice: "overwrite" | "skip" | null = null;
 
-        for (const path of plan.existingPaths) {
+        for (const path of targetPaths) {
+            const pathKey = normalizePathKey(path);
+            const isExisting = existingKeys.has(pathKey);
+            const isSourceClipPath = sourceClipPathKeys.has(pathKey);
+            if (!isExisting && !isSourceClipPath) continue;
+
             if (applyAllChoice === "overwrite") {
                 overwriteExistingPaths.push(path);
                 continue;
@@ -520,7 +547,8 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 skipExistingPaths.push(path);
                 continue;
             }
-            const result = await askConflict(path);
+
+            const result = await askConflict(path, isSourceClipPath ? "source-path" : "exists");
             if (result.choice === "cancel") {
                 return { overwriteExistingPaths: [], skipExistingPaths: [], canceled: true };
             }
@@ -778,7 +806,17 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 value={mode}
                                 onValueChange={(value) => setMode(value as ExportMode)}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: mode,
+                                            options: ["project", "separated"],
+                                            onChange: (next) => setMode(next as ExportMode),
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="project">
                                         {tAny("export_dialog_mode_project")}
@@ -798,7 +836,18 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 value={rangeKind}
                                 onValueChange={(value) => setRangeKind(value as ExportRangeKind)}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: rangeKind,
+                                            options: ["all", "custom"],
+                                            onChange: (next) =>
+                                                setRangeKind(next as ExportRangeKind),
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="all">
                                         {tAny("export_dialog_range_all")}
@@ -854,7 +903,24 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 value={sampleRate}
                                 onValueChange={(value) => setSampleRate(value)}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: sampleRate,
+                                            options: [
+                                                "22050",
+                                                "32000",
+                                                "44100",
+                                                "48000",
+                                                "88200",
+                                                "96000",
+                                            ],
+                                            onChange: setSampleRate,
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="22050">22050 Hz</Select.Item>
                                     <Select.Item value="32000">32000 Hz</Select.Item>
@@ -879,7 +945,26 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                     }
                                 }}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: String(bitDepth),
+                                            options: ["16", "24", "32"],
+                                            onChange: (next) => {
+                                                const parsed = Number(next);
+                                                if (
+                                                    parsed === 16 ||
+                                                    parsed === 24 ||
+                                                    parsed === 32
+                                                ) {
+                                                    setBitDepth(parsed);
+                                                }
+                                            },
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="16">16-bit</Select.Item>
                                     <Select.Item value="24">24-bit</Select.Item>
@@ -1146,8 +1231,22 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                 }}
             >
                 <Dialog.Content style={{ maxWidth: 620 }}>
-                    <Dialog.Title>导出目标已存在</Dialog.Title>
-                    <Dialog.Description style={{ userSelect: "text", wordBreak: "break-all" }}>
+                    <Dialog.Title>
+                        {conflictDialog.kind === "source-path"
+                            ? tAny("export_conflict_source_title")
+                            : tAny("export_conflict_exists_title")}
+                    </Dialog.Title>
+                    <Dialog.Description
+                        style={{
+                            userSelect: "text",
+                            wordBreak: "break-all",
+                            whiteSpace: "pre-wrap",
+                        }}
+                    >
+                        {conflictDialog.kind === "source-path"
+                            ? tAny("export_conflict_source_desc")
+                            : tAny("export_conflict_exists_desc")}
+                        {"\n"}
                         {conflictDialog.path}
                     </Dialog.Description>
                     <label className="flex items-center gap-2 text-sm mt-3">
@@ -1161,12 +1260,12 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 }))
                             }
                         />
-                        <span>对之后所有已存在的文件进行相同操作</span>
+                        <span>{tAny("export_conflict_apply_all")}</span>
                     </label>
                     <Flex justify="end" gap="2" mt="4">
                         <Button
-                            variant="soft"
-                            color="gray"
+                            variant={conflictDialog.kind === "source-path" ? "solid" : "soft"}
+                            color={conflictDialog.kind === "source-path" ? "amber" : "gray"}
                             onClick={() => {
                                 const resolver = conflictResolverRef.current;
                                 conflictResolverRef.current = null;
@@ -1174,7 +1273,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 resolver?.({ choice: "skip", applyAll: conflictDialog.applyAll });
                             }}
                         >
-                            跳过
+                            {tAny("export_conflict_skip")}
                         </Button>
                         <Button
                             variant="soft"
@@ -1186,9 +1285,11 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 resolver?.({ choice: "cancel", applyAll: false });
                             }}
                         >
-                            取消导出
+                            {tAny("export_conflict_cancel")}
                         </Button>
                         <Button
+                            variant={conflictDialog.kind === "source-path" ? "soft" : "solid"}
+                            color={conflictDialog.kind === "source-path" ? "gray" : "blue"}
                             onClick={() => {
                                 const resolver = conflictResolverRef.current;
                                 conflictResolverRef.current = null;
@@ -1199,7 +1300,7 @@ export function ExportAudioDialog({ open, onOpenChange }: ExportAudioDialogProps
                                 });
                             }}
                         >
-                            覆盖
+                            {tAny("export_conflict_overwrite")}
                         </Button>
                     </Flex>
                 </Dialog.Content>

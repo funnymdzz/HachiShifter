@@ -88,9 +88,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     },
     "modifier.pianoKeysVerticalZoom": { key: "__none__", modifierOnly: true },
     "modifier.paramMorph": { key: "alt", modifierOnly: true, alt: true },
-    // 目前微调操作有逻辑问题，没法完全实现，暂时禁用快捷键
-    // "modifier.paramFineAdjust": { key: "control", modifierOnly: true, ctrl: true },
-    "modifier.paramFineAdjust": { key: "__none__", modifierOnly: true },
+    "modifier.paramFineAdjust": { key: "control", modifierOnly: true, ctrl: true },
     "modifier.vibratoAmplitudeAdjust": { key: "__none__", modifierOnly: true },
     "modifier.vibratoFrequencyAdjust": { key: "alt", modifierOnly: true, alt: true },
 

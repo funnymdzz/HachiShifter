@@ -19,9 +19,11 @@ import {
     QUICK_SEARCH_POPUP_HEIGHT,
     QUICK_SEARCH_POPUP_WIDTH,
 } from "./quickSearchPosition";
+import { applySelectWheelChange } from "../../utils/selectWheel";
 
 /** 支持的音频扩展名 */
 const AUDIO_EXTENSIONS = new Set(["wav", "mp3", "flac", "ogg", "aac", "aif", "aiff", "m4a"]);
+const SORT_MODE_OPTIONS = ["name", "date", "size"] as const;
 
 function isAudioFile(entry: FileEntry): boolean {
     return !entry.isDir && !!entry.extension && AUDIO_EXTENSIONS.has(entry.extension);
@@ -402,6 +404,15 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                                 height: 20,
                                 minWidth: 52,
                                 flexShrink: 0,
+                            }}
+                            onWheel={(event) => {
+                                applySelectWheelChange({
+                                    event,
+                                    currentValue: sortMode,
+                                    options: SORT_MODE_OPTIONS,
+                                    onChange: (next) =>
+                                        setSortMode(next as "name" | "date" | "size"),
+                                });
                             }}
                         />
                         <Select.Content>

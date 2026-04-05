@@ -96,6 +96,7 @@ export interface TimelineStateResult {
     scrollVerticalKb: Keybinding;
     horizontalZoomKb: Keybinding;
     verticalZoomKb: Keybinding;
+    paramFineAdjustKb: Keybinding;
     slipEditKb: Keybinding;
     noSnapKb: Keybinding;
     copyDragKb: Keybinding;
@@ -345,6 +346,9 @@ export function useTimelineState(): TimelineStateResult {
     const verticalZoomKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.pianoRollVerticalZoom"),
     );
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
     const stretchKbRef = useRef<Keybinding>(stretchKb);
     useEffect(() => {
         stretchKbRef.current = stretchKb;
@@ -490,14 +494,16 @@ export function useTimelineState(): TimelineStateResult {
     }
 
     function rowTopForTrackId(trackId: string | null) {
+        const tracks = sessionRef.current.tracks;
+        const rowHeightPx = rowHeightRef.current;
         if (!trackId) {
-            return s.tracks.length * rowHeight;
+            return tracks.length * rowHeightPx;
         }
-        const idx = s.tracks.findIndex((t) => t.id === trackId);
+        const idx = tracks.findIndex((t) => t.id === trackId);
         if (idx < 0) {
-            return s.tracks.length * rowHeight;
+            return tracks.length * rowHeightPx;
         }
-        return idx * rowHeight;
+        return idx * rowHeightPx;
     }
 
     // ── Drop preview helpers ─────────────────────────────────
@@ -745,6 +751,7 @@ export function useTimelineState(): TimelineStateResult {
         scrollVerticalKb,
         horizontalZoomKb,
         verticalZoomKb,
+        paramFineAdjustKb,
         slipEditKb,
         noSnapKb,
         copyDragKb,

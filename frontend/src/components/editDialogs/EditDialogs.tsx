@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Dialog, Flex, Text, TextField, Button, Select } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { ScaleKey } from "../../utils/musicalScales";
-import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
 import { useAppSelector } from "../../app/hooks";
 import { isModifierActive, selectKeybinding } from "../../features/keybindings/keybindingsSlice";
+import { applySelectWheelChange } from "../../utils/selectWheel";
+import { buildScaleSelectGroups } from "../../utils/scaleSelection";
 
 interface Props {
     open: boolean;
@@ -23,6 +24,9 @@ export function TransposeCentsDialog({
     const tAny = t as (key: string) => string;
     const [cents, setCents] = useState("0");
     const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
 
     useEffect(() => {
         if (open) setSmoothness(String(Math.round(defaultSmoothness)));
@@ -51,19 +55,26 @@ export function TransposeCentsDialog({
                         <Text size="2" style={{ minWidth: 80 }}>
                             {tAny("edge_smoothness")}
                         </Text>
-                        <TextField.Root
-                            size="2"
-                            type="number"
+                        <input
+                            type="range"
                             min={0}
                             max={100}
-                            value={smoothness}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                setSmoothness(e.target.value)
-                            }
+                            step={1}
+                            value={Math.round(Number(smoothness) || 0)}
+                            onWheel={(e) => {
+                                e.preventDefault();
+                                const fine = isModifierActive(paramFineAdjustKb, e.nativeEvent);
+                                const step = fine ? 1 : 5;
+                                const dir = e.deltaY < 0 ? 1 : -1;
+                                const current = Math.round(Number(smoothness) || 0);
+                                const next = Math.max(0, Math.min(100, current + dir * step));
+                                setSmoothness(String(next));
+                            }}
+                            onChange={(e) => setSmoothness(e.currentTarget.value)}
                             style={{ flex: 1 }}
                         />
-                        <Text size="1" color="gray">
-                            %
+                        <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+                            {Math.round(Number(smoothness) || 0)}%
                         </Text>
                     </Flex>
                 </Flex>
@@ -116,6 +127,18 @@ export function TransposeDegreesDialog({
         defaultUseProjectScale ? "__project__" : defaultScale,
     );
     const [smoothness, setSmoothness] = useState(String(Math.round(defaultSmoothness)));
+    const paramFineAdjustKb = useAppSelector((state) =>
+        selectKeybinding(state, "modifier.paramFineAdjust"),
+    );
+    const customScalePresets = useAppSelector((state) => state.session.customScalePresets);
+    const scaleSelectGroups = useMemo(
+        () =>
+            buildScaleSelectGroups(
+                projectScaleLabel ?? tAny("project_scale_generic"),
+                customScalePresets,
+            ),
+        [projectScaleLabel, customScalePresets, tAny],
+    );
 
     useEffect(() => {
         if (open) {
@@ -148,15 +171,31 @@ export function TransposeDegreesDialog({
                             {tAny("base_scale")}
                         </Text>
                         <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
-                            <Select.Trigger style={{ flex: 1 }} />
+                            <Select.Trigger
+                                style={{ flex: 1 }}
+                                onWheel={(event) => {
+                                    applySelectWheelChange({
+                                        event,
+                                        currentValue: scaleValue,
+                                        options: scaleSelectGroups.wheelOptions,
+                                        onChange: setScaleValue,
+                                    });
+                                }}
+                            />
                             <Select.Content>
-                                <Select.Item value="__project__">
-                                    {projectScaleLabel ?? tAny("project_scale_generic")}
+                                <Select.Item value={scaleSelectGroups.projectOption.value}>
+                                    {scaleSelectGroups.projectOption.label}
                                 </Select.Item>
                                 <Select.Separator />
-                                {SCALE_KEYS.map((k) => (
-                                    <Select.Item key={k} value={k}>
-                                        {SCALE_LABELS[k]}
+                                {scaleSelectGroups.builtinOptions.map((option) => (
+                                    <Select.Item key={option.value} value={option.value}>
+                                        {option.label}
+                                    </Select.Item>
+                                ))}
+                                {scaleSelectGroups.customOptions.length > 0 && <Select.Separator />}
+                                {scaleSelectGroups.customOptions.map((option) => (
+                                    <Select.Item key={option.value} value={option.value}>
+                                        {option.label}
                                     </Select.Item>
                                 ))}
                             </Select.Content>
@@ -166,19 +205,26 @@ export function TransposeDegreesDialog({
                         <Text size="2" style={{ minWidth: 80 }}>
                             {tAny("edge_smoothness")}
                         </Text>
-                        <TextField.Root
-                            size="2"
-                            type="number"
+                        <input
+                            type="range"
                             min={0}
                             max={100}
-                            value={smoothness}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                                setSmoothness(e.target.value)
-                            }
+                            step={1}
+                            value={Math.round(Number(smoothness) || 0)}
+                            onWheel={(e) => {
+                                e.preventDefault();
+                                const fine = isModifierActive(paramFineAdjustKb, e.nativeEvent);
+                                const step = fine ? 1 : 5;
+                                const dir = e.deltaY < 0 ? 1 : -1;
+                                const current = Math.round(Number(smoothness) || 0);
+                                const next = Math.max(0, Math.min(100, current + dir * step));
+                                setSmoothness(String(next));
+                            }}
+                            onChange={(e) => setSmoothness(e.currentTarget.value)}
                             style={{ flex: 1 }}
                         />
-                        <Text size="1" color="gray">
-                            %
+                        <Text size="1" style={{ minWidth: 40, textAlign: "right" }}>
+                            {Math.round(Number(smoothness) || 0)}%
                         </Text>
                     </Flex>
                 </Flex>
@@ -639,6 +685,15 @@ export function QuantizeDialog({
     const [scaleValue, setScaleValue] = useState<string>(
         defaultUseProjectScale ? "__project__" : defaultScale,
     );
+    const customScalePresets = useAppSelector((state) => state.session.customScalePresets);
+    const scaleSelectGroups = useMemo(
+        () =>
+            buildScaleSelectGroups(
+                projectScaleLabel ?? tAny("project_scale_generic"),
+                customScalePresets,
+            ),
+        [projectScaleLabel, customScalePresets, tAny],
+    );
     const [toleranceCents, setToleranceCents] = useState<string>(String(toleranceDefault));
     const [quantizeUnit, setQuantizeUnit] = useState<string>(String(defaultQuantizeUnit));
 
@@ -665,7 +720,18 @@ export function QuantizeDialog({
                                 size="2"
                                 onValueChange={(v) => setUnit(v as "semitone" | "scale")}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: unit,
+                                            options: ["semitone", "scale"],
+                                            onChange: (next) =>
+                                                setUnit(next as "semitone" | "scale"),
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="semitone">
                                         {tAny("quantize_semitone")}
@@ -683,15 +749,33 @@ export function QuantizeDialog({
                                 {tAny("base_scale")}
                             </Text>
                             <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: scaleValue,
+                                            options: scaleSelectGroups.wheelOptions,
+                                            onChange: setScaleValue,
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
-                                    <Select.Item value="__project__">
-                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    <Select.Item value={scaleSelectGroups.projectOption.value}>
+                                        {scaleSelectGroups.projectOption.label}
                                     </Select.Item>
                                     <Select.Separator />
-                                    {SCALE_KEYS.map((k) => (
-                                        <Select.Item key={k} value={k}>
-                                            {SCALE_LABELS[k]}
+                                    {scaleSelectGroups.builtinOptions.map((option) => (
+                                        <Select.Item key={option.value} value={option.value}>
+                                            {option.label}
+                                        </Select.Item>
+                                    ))}
+                                    {scaleSelectGroups.customOptions.length > 0 && (
+                                        <Select.Separator />
+                                    )}
+                                    {scaleSelectGroups.customOptions.map((option) => (
+                                        <Select.Item key={option.value} value={option.value}>
+                                            {option.label}
                                         </Select.Item>
                                     ))}
                                 </Select.Content>
@@ -793,6 +877,15 @@ export function MeanQuantizeDialog({
     const [scaleValue, setScaleValue] = useState<string>(
         defaultUseProjectScale ? "__project__" : defaultScale,
     );
+    const customScalePresets = useAppSelector((state) => state.session.customScalePresets);
+    const scaleSelectGroups = useMemo(
+        () =>
+            buildScaleSelectGroups(
+                projectScaleLabel ?? tAny("project_scale_generic"),
+                customScalePresets,
+            ),
+        [projectScaleLabel, customScalePresets, tAny],
+    );
     const [toleranceCents, setToleranceCents] = useState<string>(String(toleranceDefault));
     const [quantizeUnit, setQuantizeUnit] = useState<string>(String(defaultQuantizeUnit));
 
@@ -819,7 +912,18 @@ export function MeanQuantizeDialog({
                                 size="2"
                                 onValueChange={(v) => setUnit(v as "semitone" | "scale")}
                             >
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: unit,
+                                            options: ["semitone", "scale"],
+                                            onChange: (next) =>
+                                                setUnit(next as "semitone" | "scale"),
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
                                     <Select.Item value="semitone">
                                         {tAny("quantize_semitone")}
@@ -837,15 +941,33 @@ export function MeanQuantizeDialog({
                                 {tAny("base_scale")}
                             </Text>
                             <Select.Root value={scaleValue} size="2" onValueChange={setScaleValue}>
-                                <Select.Trigger style={{ flex: 1 }} />
+                                <Select.Trigger
+                                    style={{ flex: 1 }}
+                                    onWheel={(event) => {
+                                        applySelectWheelChange({
+                                            event,
+                                            currentValue: scaleValue,
+                                            options: scaleSelectGroups.wheelOptions,
+                                            onChange: setScaleValue,
+                                        });
+                                    }}
+                                />
                                 <Select.Content>
-                                    <Select.Item value="__project__">
-                                        {projectScaleLabel ?? tAny("project_scale_generic")}
+                                    <Select.Item value={scaleSelectGroups.projectOption.value}>
+                                        {scaleSelectGroups.projectOption.label}
                                     </Select.Item>
                                     <Select.Separator />
-                                    {SCALE_KEYS.map((k) => (
-                                        <Select.Item key={k} value={k}>
-                                            {SCALE_LABELS[k]}
+                                    {scaleSelectGroups.builtinOptions.map((option) => (
+                                        <Select.Item key={option.value} value={option.value}>
+                                            {option.label}
+                                        </Select.Item>
+                                    ))}
+                                    {scaleSelectGroups.customOptions.length > 0 && (
+                                        <Select.Separator />
+                                    )}
+                                    {scaleSelectGroups.customOptions.map((option) => (
+                                        <Select.Item key={option.value} value={option.value}>
+                                            {option.label}
                                         </Select.Item>
                                     ))}
                                 </Select.Content>

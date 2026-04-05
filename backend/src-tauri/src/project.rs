@@ -1,5 +1,6 @@
 use crate::state::{SynthPipelineKind, TimelineState};
 use serde::{Deserialize, Serialize};
+use std::path::Component;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,22 +162,70 @@ pub fn project_name_from_path(path: &Path) -> String {
 }
 
 fn compute_relative_source_path(source_path: &Path, project_path: &Path) -> Option<String> {
-    let dir = project_path.parent().unwrap_or_else(|| Path::new("."));
-    let stripped = source_path.strip_prefix(dir).ok()?;
-    if stripped.as_os_str().is_empty() {
+    let project_dir = project_path.parent().unwrap_or_else(|| Path::new("."));
+    let base_dir_abs = if project_dir.is_absolute() {
+        project_dir.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(project_dir)
+    };
+    let source_abs = if source_path.is_absolute() {
+        source_path.to_path_buf()
+    } else {
+        base_dir_abs.join(source_path)
+    };
+
+    let base_components: Vec<Component<'_>> = base_dir_abs.components().collect();
+    let source_components: Vec<Component<'_>> = source_abs.components().collect();
+
+    let mut common = 0usize;
+    while common < base_components.len()
+        && common < source_components.len()
+        && base_components[common] == source_components[common]
+    {
+        common += 1;
+    }
+
+    if common == 0 {
         return None;
     }
-    Some(stripped.to_string_lossy().to_string())
+
+    let mut rel_parts: Vec<String> = Vec::new();
+
+    for comp in &base_components[common..] {
+        if matches!(comp, Component::Normal(_)) {
+            rel_parts.push("..".to_string());
+        }
+    }
+
+    for comp in &source_components[common..] {
+        match comp {
+            Component::Normal(part) => rel_parts.push(part.to_string_lossy().to_string()),
+            Component::ParentDir => rel_parts.push("..".to_string()),
+            Component::CurDir => {}
+            _ => {}
+        }
+    }
+
+    if rel_parts.is_empty() {
+        return None;
+    }
+
+    Some(rel_parts.join("/"))
 }
 
 pub fn prepare_source_paths_for_save(mut tl: TimelineState, project_path: &Path) -> TimelineState {
     for c in tl.clips.iter_mut() {
         if let Some(sp) = c.source_path.clone() {
-            let p = PathBuf::from(&sp);
-            if p.is_absolute() {
-                c.source_path_relative = compute_relative_source_path(&p, project_path);
-            } else {
+            let trimmed = sp.trim();
+            if trimmed.is_empty() {
                 c.source_path_relative = None;
+            } else {
+                let p = PathBuf::from(trimmed);
+                if p.is_absolute() {
+                    c.source_path_relative = compute_relative_source_path(&p, project_path);
+                } else {
+                    c.source_path_relative = Some(trimmed.replace('\\', "/"));
+                }
             }
         } else {
             c.source_path_relative = None;

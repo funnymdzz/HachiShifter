@@ -46,6 +46,15 @@ export const enUS = {
     export_dialog_error_invalid_time_format:
         "Output path contains an invalid time format. Please replace invalid '%' with '%%'.",
     export_dialog_progress: "Exporting audio...",
+    export_conflict_exists_title: "Export Target Already Exists",
+    export_conflict_exists_desc: "The following export target already exists:",
+    export_conflict_source_title: "Critical Warning: Export Target Matches Project Media",
+    export_conflict_source_desc:
+        "The export target path matches an audio clip source file used by the current project.\nOverwriting this file may permanently damage project media and cause irreversible data loss. Proceed carefully.",
+    export_conflict_apply_all: "Apply the same action to subsequent similar conflicts",
+    export_conflict_skip: "Skip",
+    export_conflict_cancel: "Cancel Export",
+    export_conflict_overwrite: "Overwrite",
     export_track_label_root_suffix: "(Root)",
     export_track_label_sub_suffix: "(Sub)",
     menu_clear_waveform_cache: "Clear Waveform Cache",
@@ -447,6 +456,7 @@ export const enUS = {
     custom_scale_name: "Name",
     custom_scale_notes: "Scale Notes",
     custom_scale_save_apply: "Save and Apply",
+    custom_scale_delete: "Delete",
     custom_scale_default_name: "Custom Scale",
     custom_scale_short: "Custom",
     project_scale_prefix: "Project Scale",

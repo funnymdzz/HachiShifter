@@ -429,6 +429,28 @@ function applyAutoCrossfadeInReducer(state: SessionState, movedIds: string[]) {
     }
 }
 
+function mapTimelineTracks(tracks: TimelineState["tracks"]): TrackInfo[] {
+    return tracks.map((track) => ({
+        id: track.id,
+        name: track.name,
+        parentId: track.parent_id ?? null,
+        depth: track.depth ?? 0,
+        childTrackIds: track.child_track_ids ?? [],
+        muted: Boolean(track.muted),
+        solo: Boolean(track.solo),
+        volume: clamp(Number(track.volume ?? 1), 0, MAX_TRACK_VOLUME),
+
+        composeEnabled: Boolean(track.compose_enabled),
+        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "nsf_hifigan_onnx"),
+        color: track.color || undefined,
+    }));
+}
+
+function applyTimelineTracksOnly(state: SessionState, timeline: TimelineState) {
+    state.tracks = mapTimelineTracks(timeline.tracks);
+    state.selectedTrackId = timeline.selected_track_id;
+}
+
 /**
  * 将后端返回的 TimelineState 全量覆写到前端 Redux state。
  *
@@ -448,20 +470,7 @@ function applyTimelineState(
         return;
     }
 
-    state.tracks = timeline.tracks.map((track) => ({
-        id: track.id,
-        name: track.name,
-        parentId: track.parent_id ?? null,
-        depth: track.depth ?? 0,
-        childTrackIds: track.child_track_ids ?? [],
-        muted: Boolean(track.muted),
-        solo: Boolean(track.solo),
-        volume: clamp(Number(track.volume ?? 1), 0, MAX_TRACK_VOLUME),
-
-        composeEnabled: Boolean(track.compose_enabled),
-        pitchAnalysisAlgo: String(track.pitch_analysis_algo ?? "nsf_hifigan_onnx"),
-        color: track.color || undefined,
-    }));
+    applyTimelineTracksOnly(state, timeline);
 
     state.clips = timeline.clips.map((clip: TimelineClip) => {
         const parsed = {
@@ -939,6 +948,12 @@ const sessionSlice = createSlice({
             } else {
                 state.customScalePresets.push(incoming);
             }
+        },
+        removeCustomScalePreset(state, action: PayloadAction<string>) {
+            const presetId = action.payload;
+            state.customScalePresets = state.customScalePresets.filter(
+                (preset) => preset.id !== presetId,
+            );
         },
         togglePlayheadZoom(state) {
             state.playheadZoomEnabled = !state.playheadZoomEnabled;
@@ -2465,6 +2480,12 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
+                // 交互锁期间（如拖拽中）仅同步轨道列表，
+                // 避免 add_track 的后端快照覆盖前端 clip 乐观位置并产生闪烁。
+                if (state._interactionLockCount > 0) {
+                    applyTimelineTracksOnly(state, payload);
+                    return;
+                }
                 applyTimelineState(state, payload, { force: true });
             })
 
@@ -2560,6 +2581,7 @@ export const {
     setPitchSnapToleranceCents,
     setScaleHighlightMode,
     upsertCustomScalePreset,
+    removeCustomScalePreset,
     toggleLockParamLines,
     setSelectedClip,
     setSelectedClipPreservingTrack,

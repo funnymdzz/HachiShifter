@@ -27,9 +27,11 @@ import {
 } from "../../features/fileBrowser/fileBrowserSlice";
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import type { FileEntry } from "../../services/api/fileBrowser";
+import { applySelectWheelChange } from "../../utils/selectWheel";
 
 /** 支持的音频扩展名 */
 const AUDIO_EXTENSIONS = new Set(["wav", "mp3", "flac", "ogg", "aac", "aif", "aiff", "m4a"]);
+const SORT_MODE_OPTIONS: SortMode[] = ["name", "date", "size"];
 
 function isAudioFile(entry: FileEntry): boolean {
     return !entry.isDir && !!entry.extension && AUDIO_EXTENSIONS.has(entry.extension);
@@ -558,7 +560,17 @@ export const FileBrowserPanel: React.FC = () => {
                         size="1"
                         onValueChange={(v) => dispatch(setSortMode(v as SortMode))}
                     >
-                        <Select.Trigger style={{ fontSize: 11, height: 22, flex: 1 }} />
+                        <Select.Trigger
+                            style={{ fontSize: 11, height: 22, flex: 1 }}
+                            onWheel={(event) => {
+                                applySelectWheelChange({
+                                    event,
+                                    currentValue: fb.sortMode,
+                                    options: SORT_MODE_OPTIONS,
+                                    onChange: (next) => dispatch(setSortMode(next as SortMode)),
+                                });
+                            }}
+                        />
                         <Select.Content>
                             <Select.Item value="name">{tAny("fb_sort_name")}</Select.Item>
                             <Select.Item value="date">{tAny("fb_sort_date")}</Select.Item>

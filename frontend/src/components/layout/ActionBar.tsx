@@ -24,6 +24,7 @@ import {
     setProjectCustomScaleRemote,
 } from "../../features/session/sessionSlice";
 import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
+import { applySelectWheelChange } from "../../utils/selectWheel";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
 
 export function ActionBar() {
@@ -36,6 +37,12 @@ export function ActionBar() {
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
     const [customScaleOpen, setCustomScaleOpen] = useState(false);
     const [gridSnapMenuPos, setGridSnapMenuPos] = useState<{ x: number; y: number } | null>(null);
+
+    const baseScaleWheelOptions = [
+        ...SCALE_KEYS,
+        ...(s.project?.customScale ? (["__custom__"] as const) : []),
+        "__custom_dialog__",
+    ];
 
     const [bpmText, setBpmText] = useState(() => String(Math.round(s.bpm || 120)));
     const bpmDirtyRef = useRef(false);
@@ -147,7 +154,46 @@ export function ActionBar() {
                         );
                     }}
                 >
-                    <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
+                    <Select.Trigger
+                        style={{ backgroundColor: "var(--qt-base)" }}
+                        onWheel={(event) => {
+                            applySelectWheelChange({
+                                event,
+                                currentValue: s.grid,
+                                options: [
+                                    "1/1",
+                                    "1/2",
+                                    "1/4",
+                                    "1/8",
+                                    "1/16",
+                                    "1/32",
+                                    "1/64",
+                                    "1/1d",
+                                    "1/2d",
+                                    "1/4d",
+                                    "1/8d",
+                                    "1/16d",
+                                    "1/32d",
+                                    "1/64d",
+                                    "1/1t",
+                                    "1/2t",
+                                    "1/4t",
+                                    "1/8t",
+                                    "1/16t",
+                                    "1/32t",
+                                    "1/64t",
+                                ],
+                                onChange: (next) => {
+                                    void dispatch(
+                                        setProjectTimelineSettingsRemote({
+                                            beatsPerBar: s.beats,
+                                            gridSize: next,
+                                        }),
+                                    );
+                                },
+                            });
+                        }}
+                    />
                     <Select.Content style={{ maxHeight: "none", overflow: "visible" }}>
                         <Select.Group>
                             <Select.Label>{tAny("grid_note_normal")}</Select.Label>
@@ -205,7 +251,35 @@ export function ActionBar() {
                         }
                     }}
                 >
-                    <Select.Trigger style={{ backgroundColor: "var(--qt-base)" }} />
+                    <Select.Trigger
+                        style={{ backgroundColor: "var(--qt-base)" }}
+                        onWheel={(event) => {
+                            const currentValue =
+                                s.project?.useCustomScale && s.project?.customScale
+                                    ? "__custom__"
+                                    : (s.project?.baseScale ?? "C");
+                            applySelectWheelChange({
+                                event,
+                                currentValue,
+                                options: baseScaleWheelOptions,
+                                onChange: (next) => {
+                                    if (next === "__custom_dialog__") {
+                                        setCustomScaleOpen(true);
+                                        return;
+                                    }
+                                    if (next === "__custom__" && s.project?.customScale) {
+                                        dispatch(
+                                            setProjectCustomScaleRemote(s.project.customScale),
+                                        );
+                                        return;
+                                    }
+                                    if ((SCALE_KEYS as readonly string[]).includes(next)) {
+                                        dispatch(setProjectBaseScaleRemote(next));
+                                    }
+                                },
+                            });
+                        }}
+                    />
                     <Select.Content style={{ maxHeight: "none", overflow: "visible" }}>
                         <Select.Group>
                             {SCALE_KEYS.map((k) => (
