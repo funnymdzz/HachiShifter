@@ -447,6 +447,12 @@ export const TrackList: React.FC<{
         return false;
     }
 
+    function isArrowNavigationKey(key: string): boolean {
+        return (
+            key === "arrowup" || key === "arrowdown" || key === "arrowleft" || key === "arrowright"
+        );
+    }
+
     function startPanPointerLocal(e: React.PointerEvent) {
         // Intercept middle-button mouse to prevent browser native autoscroll
         if (e.pointerType === "mouse" && e.button === 1) {
@@ -781,7 +787,24 @@ export const TrackList: React.FC<{
                     (listRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
                     if (listScrollRef) listScrollRef.current = el;
                 }}
-                onPointerDown={(e) => startPanPointerLocal?.(e)}
+                data-track-list-panel
+                onFocusCapture={() => {
+                    document.body.setAttribute("data-hs-focus-window", "trackHeader");
+                }}
+                onMouseDownCapture={() => {
+                    document.body.setAttribute("data-hs-focus-window", "trackHeader");
+                }}
+                onPointerDown={(e) => {
+                    document.body.setAttribute("data-hs-focus-window", "trackHeader");
+                    startPanPointerLocal?.(e);
+                }}
+                onKeyDownCapture={(e) => {
+                    if (isEditableTarget(e.target)) return;
+                    const key = e.key.toLowerCase();
+                    if (isArrowNavigationKey(key)) {
+                        e.preventDefault();
+                    }
+                }}
                 onAuxClick={(e) => {
                     // Prevent native autoscroll overlay on middle click
                     e.preventDefault();
@@ -834,6 +857,11 @@ export const TrackList: React.FC<{
                             key={track.id}
                             style={{ height: rowHeight }}
                             className="border-b border-qt-border relative group overflow-hidden"
+                            onPointerDownCapture={(e) => {
+                                if (e.button !== 0) return;
+                                if (selectedTrackId === track.id) return;
+                                onSelectTrack(track.id);
+                            }}
                             onContextMenu={(e) => {
                                 e.preventDefault();
                                 setTrackCtxMenu({
@@ -953,7 +981,6 @@ export const TrackList: React.FC<{
                                     setDragUi(null);
 
                                     if (!moved) {
-                                        onSelectTrack(drag.trackId);
                                         return;
                                     }
 

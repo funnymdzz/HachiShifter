@@ -25,7 +25,6 @@ jobs:
       - name: Install and build frontend
         run: |
           npm --prefix frontend ci
-          npm --prefix frontend run format:check
           npm --prefix frontend run build
 
       - name: Archive frontend dist

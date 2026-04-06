@@ -1037,6 +1037,16 @@ export function usePianoRollInteractions(args: {
 
     const onScrollerKeyDown = useCallback(
         (e: KeyboardEvent<HTMLDivElement>) => {
+            const key = e.key.toLowerCase();
+            if (
+                key === "arrowup" ||
+                key === "arrowdown" ||
+                key === "arrowleft" ||
+                key === "arrowright"
+            ) {
+                e.preventDefault();
+            }
+
             if (!rootTrackId) return;
             if (editParam === "pitch" && !pitchEnabled) return;
 

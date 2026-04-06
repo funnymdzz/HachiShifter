@@ -936,6 +936,20 @@ function AppInner() {
                     void dispatch(addTrackRemote({ parentTrackId: parentId }));
                     break;
                 }
+                case "track.selectUp":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:selectAdjacentTrack", {
+                            detail: { direction: -1 },
+                        }),
+                    );
+                    break;
+                case "track.selectDown":
+                    window.dispatchEvent(
+                        new CustomEvent("hifi:selectAdjacentTrack", {
+                            detail: { direction: 1 },
+                        }),
+                    );
+                    break;
                 case "pianoRoll.shiftParamUp":
                 case "pianoRoll.shiftParamDown": {
                     const isUp = actionId === "pianoRoll.shiftParamUp";

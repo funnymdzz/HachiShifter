@@ -338,6 +338,8 @@ export const jaJP = {
     kb_project_save_as: "名前を付けて保存",
     kb_project_export: "オーディオをエクスポート",
     kb_track_add: "トラックを追加",
+    kb_track_select_up: "ひとつ上のトラックを選択",
+    kb_track_select_down: "ひとつ下のトラックを選択",
     kb_clip_delete: "クリップを削除",
     kb_clip_copy: "クリップをコピー",
     kb_clip_cut: "クリップをカット",

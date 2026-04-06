@@ -332,6 +332,8 @@ export const enUS = {
     kb_project_save_as: "Save As",
     kb_project_export: "Export Audio",
     kb_track_add: "Add Track",
+    kb_track_select_up: "Select Previous Track",
+    kb_track_select_down: "Select Next Track",
     kb_clip_delete: "Delete Clip",
     kb_clip_copy: "Copy Clip",
     kb_clip_cut: "Cut Clip",

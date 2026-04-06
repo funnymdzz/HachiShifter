@@ -1041,11 +1041,14 @@ const sessionSlice = createSlice({
             state.selectedClipId = action.payload;
             state.selectedPointId = null;
             if (action.payload) {
-                state.selectedTrackId = resolveTrackIdForClipSelection({
+                const nextTrackId = resolveTrackIdForClipSelection({
                     currentTrackId: state.selectedTrackId,
                     clips: state.clips,
                     clipId: action.payload,
                 });
+                if (nextTrackId !== state.selectedTrackId) {
+                    state.selectedTrackId = nextTrackId;
+                }
                 ensureClipAutomation(state, action.payload);
             }
         },
@@ -2403,13 +2406,18 @@ const sessionSlice = createSlice({
             .addCase(selectClipRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
+                    __preserveTrackFocus?: boolean;
                 } & TimelineState;
                 if (!payload.ok) {
                     return;
                 }
                 const currentPlayheadSec = state.playheadSec;
+                const currentSelectedTrackId = state.selectedTrackId;
                 applyTimelineState(state, payload);
                 state.playheadSec = currentPlayheadSec;
+                if (payload.__preserveTrackFocus) {
+                    state.selectedTrackId = currentSelectedTrackId;
+                }
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {

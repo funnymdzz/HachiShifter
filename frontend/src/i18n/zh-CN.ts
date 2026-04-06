@@ -325,6 +325,8 @@ export const zhCN = {
     kb_project_save_as: "另存为",
     kb_project_export: "导出音频",
     kb_track_add: "新建轨道",
+    kb_track_select_up: "选择上一条轨道",
+    kb_track_select_down: "选择下一条轨道",
     kb_clip_delete: "删除音频块",
     kb_clip_copy: "复制音频块",
     kb_clip_cut: "剪切音频块",

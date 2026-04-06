@@ -19,7 +19,6 @@ import {
     selectTrackRemote,
     setTrackStateRemote,
     seekPlayhead,
-    selectClipRemote,
     moveTrackRemote,
     setClipMuted,
     importAudioAtPosition,
@@ -166,6 +165,7 @@ export const TimelinePanel: React.FC = () => {
         splitClipIdsAtPlayhead,
         splitSelectedAtPlayhead,
         selectClipRangeByRect,
+        rangeSelectAnchorClipId,
         pasteClipsAtPlayhead,
         clearContextMenu,
         ensureTrackLaneSelected,
@@ -173,6 +173,7 @@ export const TimelinePanel: React.FC = () => {
         openTrackLaneContextMenu,
         seekFromTrackLaneClientX,
         toggleTrackLaneClipMuted,
+        toggleTrackLaneCtrlSelection,
         toggleTrackLaneMultiSelect,
         commitTrackLaneRename,
         handleTrackLaneRenameDone,
@@ -205,11 +206,13 @@ export const TimelinePanel: React.FC = () => {
         dispatch,
         sessionRef,
         scrollRef,
+        trackListScrollRef,
         pxPerSecRef,
         viewportWidthRef,
         keyboardZoomPendingRef,
         pxPerSec,
         setPxPerSec,
+        rowHeight,
         multiSelectedClipIds,
         setMultiSelectedClipIds,
         clipClipboardRef,
@@ -303,15 +306,7 @@ export const TimelinePanel: React.FC = () => {
         gridSnapEnabled: s.gridSnapEnabled,
         copyDragKb,
         autoCrossfadeEnabled: s.autoCrossfadeEnabled,
-        onCtrlClick: (clipId: string) => {
-            setMultiSelectedClipIds((prev) => {
-                if (prev.includes(clipId)) {
-                    return prev.filter((id) => id !== clipId);
-                }
-                return [...prev, clipId];
-            });
-            void dispatch(selectClipRemote(clipId));
-        },
+        onCtrlClick: toggleTrackLaneCtrlSelection,
     });
 
     const newTrackGhostClips = useMemo(() => {
@@ -367,7 +362,10 @@ export const TimelinePanel: React.FC = () => {
                 trackVolumeUi={trackVolumeUi}
                 listScrollRef={trackListScrollRef}
                 onSelectTrack={(trackId) => {
-                    dispatch(selectTrackRemote(trackId));
+                    if (sessionRef.current.selectedTrackId === trackId) {
+                        return;
+                    }
+                    void dispatch(selectTrackRemote(trackId));
                 }}
                 onRemoveTrack={(trackId) => {
                     dispatch(removeTrackRemote(trackId));
@@ -852,6 +850,7 @@ export const TimelinePanel: React.FC = () => {
                                     ensureSelected={ensureTrackLaneSelected}
                                     selectClipRemote={selectTrackLaneClipRemote}
                                     onShiftRangeSelect={selectClipRangeByRect}
+                                    rangeSelectAnchorClipId={rangeSelectAnchorClipId}
                                     openContextMenu={openTrackLaneContextMenu}
                                     seekFromClientX={seekFromTrackLaneClientX}
                                     ghostDrag={ghostDrag}
@@ -859,6 +858,7 @@ export const TimelinePanel: React.FC = () => {
                                     startClipDrag={startClipDrag}
                                     startEditDrag={startEditDrag}
                                     toggleClipMuted={toggleTrackLaneClipMuted}
+                                    onCtrlToggleSelect={toggleTrackLaneCtrlSelection}
                                     clearContextMenu={clearContextMenu}
                                     toggleMultiSelect={toggleTrackLaneMultiSelect}
                                     renamingClipId={renamingClipId}

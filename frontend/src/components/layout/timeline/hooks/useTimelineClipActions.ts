@@ -25,6 +25,7 @@ import {
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setplayheadSec,
     setSelectedClip,
+    setSelectedClipPreservingTrack,
     replaceClipSourceRemote,
     splitClipRemote,
 } from "../../../../features/session/sessionSlice";
@@ -118,7 +119,8 @@ export interface UseTimelineClipActionsResult {
     replaceClipSources: (ids: string[]) => Promise<void>;
     splitClipIdsAtPlayhead: (clipIds: string[]) => string[];
     splitSelectedAtPlayhead: () => void;
-    selectClipRangeByRect: (targetClipId: string) => void;
+    selectClipRangeByRect: (targetClipId: string, anchorClipIdOverride?: string | null) => void;
+    rangeSelectAnchorClipId: string | null;
     pasteClipsAtPlayhead: () => void;
     clearContextMenu: () => void;
 
@@ -128,6 +130,7 @@ export interface UseTimelineClipActionsResult {
     openTrackLaneContextMenu: (clipId: string, clientX: number, clientY: number) => void;
     seekFromTrackLaneClientX: (clientX: number, commit: boolean) => void;
     toggleTrackLaneClipMuted: (clipId: string, nextMuted: boolean) => void;
+    toggleTrackLaneCtrlSelection: (clipId: string) => void;
     toggleTrackLaneMultiSelect: (clipId: string) => void;
     commitTrackLaneRename: (clipId: string, newName: string) => void;
     handleTrackLaneRenameDone: () => void;
@@ -373,12 +376,16 @@ export function useTimelineClipActions(
 
     // ── selectClipRangeByRect ────────────────────────────────
     const selectClipRangeByRect = React.useCallback(
-        (targetClipId: string) => {
+        (targetClipId: string, anchorClipIdOverride?: string | null) => {
             const session = sessionRef.current;
             const target = session.clips.find((c) => c.id === targetClipId);
             if (!target) return;
 
-            const anchorId = lastClickedClipIdRef.current ?? session.selectedClipId ?? targetClipId;
+            const anchorId =
+                anchorClipIdOverride ??
+                lastClickedClipIdRef.current ??
+                session.selectedClipId ??
+                targetClipId;
             const anchor = session.clips.find((c) => c.id === anchorId) ?? target;
 
             const trackIndexById = new Map(session.tracks.map((track, index) => [track.id, index]));
@@ -407,7 +414,7 @@ export function useTimelineClipActions(
                     }
                     const clipStart = clip.startSec;
                     const clipEnd = clip.startSec + clip.lengthSec;
-                    return clipStart >= minStartSec && clipEnd <= maxEndSec;
+                    return clipEnd >= minStartSec && clipStart <= maxEndSec;
                 })
                 .map((clip) => clip.id);
 
@@ -515,10 +522,78 @@ export function useTimelineClipActions(
     const selectTrackLaneClipRemote = React.useCallback(
         (clipId: string) => {
             lastClickedClipIdRef.current = clipId;
-            void dispatch(selectClipRemote(clipId));
+            const clip = sessionRef.current.clips.find((entry) => entry.id === clipId);
+            const clipTrackId = clip?.trackId ?? null;
+            if (
+                sessionRef.current.selectedClipId === clipId &&
+                clipTrackId != null &&
+                clipTrackId === sessionRef.current.selectedTrackId
+            ) {
+                return;
+            }
+            const preserveTrackFocus = Boolean(
+                clip && clip.trackId === sessionRef.current.selectedTrackId,
+            );
+            void dispatch(
+                selectClipRemote({
+                    clipId,
+                    preserveTrackFocus,
+                }),
+            );
         },
         [dispatch],
     );
+
+    const toggleTrackLaneCtrlSelection = React.useCallback(
+        (clipId: string) => {
+            lastClickedClipIdRef.current = clipId;
+
+            const currentSelectionIds =
+                multiSelectedClipIdsRef.current.length > 0
+                    ? [...multiSelectedClipIdsRef.current]
+                    : sessionRef.current.selectedClipId
+                      ? [sessionRef.current.selectedClipId]
+                      : [];
+
+            const alreadySelected = currentSelectionIds.includes(clipId);
+            const nextSelectionIds = alreadySelected
+                ? currentSelectionIds.filter((id) => id !== clipId)
+                : [...currentSelectionIds, clipId];
+
+            setMultiSelectedClipIds(nextSelectionIds);
+
+            if (nextSelectionIds.length === 0) {
+                dispatch(setSelectedClipPreservingTrack(null));
+                return;
+            }
+
+            const nextPrimaryClipId = alreadySelected
+                ? (nextSelectionIds[nextSelectionIds.length - 1] ?? null)
+                : clipId;
+            if (!nextPrimaryClipId) {
+                dispatch(setSelectedClipPreservingTrack(null));
+                return;
+            }
+
+            const nextPrimaryClip = sessionRef.current.clips.find(
+                (entry) => entry.id === nextPrimaryClipId,
+            );
+            const preserveTrackFocus = Boolean(
+                nextPrimaryClip && nextPrimaryClip.trackId === sessionRef.current.selectedTrackId,
+            );
+
+            void dispatch(
+                selectClipRemote({
+                    clipId: nextPrimaryClipId,
+                    preserveTrackFocus,
+                }),
+            );
+        },
+        [dispatch, setMultiSelectedClipIds],
+    );
+
+    const rangeSelectAnchorClipId =
+        lastClickedClipIdRef.current ?? sessionRef.current.selectedClipId ?? null;
 
     const openTrackLaneContextMenu = React.useCallback(
         (clipId: string, clientX: number, clientY: number) => {
@@ -629,6 +704,7 @@ export function useTimelineClipActions(
         splitClipIdsAtPlayhead,
         splitSelectedAtPlayhead,
         selectClipRangeByRect,
+        rangeSelectAnchorClipId,
         pasteClipsAtPlayhead,
         clearContextMenu,
 
@@ -637,6 +713,7 @@ export function useTimelineClipActions(
         openTrackLaneContextMenu,
         seekFromTrackLaneClientX,
         toggleTrackLaneClipMuted,
+        toggleTrackLaneCtrlSelection,
         toggleTrackLaneMultiSelect,
         commitTrackLaneRename,
         handleTrackLaneRenameDone,

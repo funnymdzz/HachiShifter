@@ -409,6 +409,8 @@ export const koKR = {
     kb_project_save_as: "다른 이름으로 저장",
     kb_project_export: "오디오 내보내기",
     kb_track_add: "트랙 추가",
+    kb_track_select_up: "이전 트랙 선택",
+    kb_track_select_down: "다음 트랙 선택",
     kb_clip_delete: "클립 삭제",
     kb_clip_copy: "클립 복사",
     kb_clip_cut: "클립 잘라내기",

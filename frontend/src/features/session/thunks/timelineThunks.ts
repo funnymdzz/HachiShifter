@@ -361,7 +361,27 @@ export const glueClipsRemote = createAsyncThunk(
 
 export const selectClipRemote = createAsyncThunk(
     "session/selectClipRemote",
-    async (clipId: string | null) => {
-        return webApi.selectClip(clipId);
+    async (
+        arg:
+            | string
+            | null
+            | {
+                  clipId: string | null;
+                  preserveTrackFocus?: boolean;
+              },
+    ) => {
+        const clipId =
+            typeof arg === "object" && arg !== null && "clipId" in arg ? arg.clipId : arg;
+        const preserveTrackFocus =
+            typeof arg === "object" && arg !== null ? Boolean(arg.preserveTrackFocus) : false;
+
+        const payload = await webApi.selectClip(clipId);
+        if (payload && typeof payload === "object") {
+            return {
+                ...payload,
+                __preserveTrackFocus: preserveTrackFocus,
+            };
+        }
+        return payload;
     },
 );

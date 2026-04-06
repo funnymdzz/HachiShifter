@@ -18,8 +18,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
     "playback.seekLeft": { key: "arrowleft" },
     "playback.seekRight": { key: "arrowright" },
-    "timeline.zoomIn": { key: "arrowup" },
-    "timeline.zoomOut": { key: "arrowdown" },
+    "timeline.zoomIn": { key: "__none__" },
+    "timeline.zoomOut": { key: "__none__" },
 
     // 编辑
     "edit.undo": { key: "z", ctrl: true },
@@ -47,6 +47,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
 
     // 轨道
     "track.add": { key: "t", ctrl: true },
+    "track.selectUp": { key: "arrowup" },
+    "track.selectDown": { key: "arrowdown" },
 
     // Clip 操作
     "clip.delete": { key: "delete" },
@@ -197,6 +199,8 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     "project.export": { labelKey: "kb_project_export", group: "project" },
 
     "track.add": { labelKey: "kb_track_add", group: "project" },
+    "track.selectUp": { labelKey: "kb_track_select_up", group: "project" },
+    "track.selectDown": { labelKey: "kb_track_select_down", group: "project" },
 
     "clip.delete": { labelKey: "kb_clip_delete", group: "clip" },
     "clip.copy": { labelKey: "kb_clip_copy", group: "clip" },

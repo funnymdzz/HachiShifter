@@ -63,6 +63,7 @@ export type ClipDragState = {
     lastTrackId: string | null;
     lastDeltaBeat: number;
     copyMode: boolean;
+    ctrlSelectionToggle: boolean;
     startClientX: number;
     startClientY: number;
     hasMoved: boolean;
@@ -232,6 +233,7 @@ export function useClipDrag(deps: {
             lastTrackId: targetTrackId,
             lastDeltaBeat: 0,
             copyMode: isModifierActive(copyDragKb, e.nativeEvent),
+            ctrlSelectionToggle: e.ctrlKey || e.metaKey,
             startClientX: e.clientX,
             startClientY: e.clientY,
             hasMoved: false,
@@ -368,7 +370,7 @@ export function useClipDrag(deps: {
 
             if (!drag.hasMoved) {
                 // Ctrl+点击（未移动）：执行多选切换
-                if (drag.copyMode && onCtrlClick) {
+                if (drag.ctrlSelectionToggle && onCtrlClick) {
                     onCtrlClick(drag.anchorClipId);
                 }
                 window.removeEventListener("pointermove", onMove);

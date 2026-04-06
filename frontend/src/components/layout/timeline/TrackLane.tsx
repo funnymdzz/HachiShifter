@@ -56,10 +56,14 @@ export const TrackLane = React.memo(function TrackLane(props: {
             | "gain",
     ) => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
+    /** Ctrl+左键选择切换（会更新主选中 clip） */
+    onCtrlToggleSelect: (clipId: string) => void;
     /** Ctrl+左键多选切换 */
     toggleMultiSelect: (clipId: string) => void;
     /** Shift+点击范围选择 */
-    onShiftRangeSelect: (clipId: string) => void;
+    onShiftRangeSelect: (clipId: string, anchorClipIdOverride?: string | null) => void;
+    /** Shift 范围选择锚点（点击前快照） */
+    rangeSelectAnchorClipId: string | null;
 
     clearContextMenu: () => void;
 
@@ -95,8 +99,10 @@ export const TrackLane = React.memo(function TrackLane(props: {
         startClipDrag,
         startEditDrag,
         toggleClipMuted,
+        onCtrlToggleSelect,
         toggleMultiSelect,
         onShiftRangeSelect,
+        rangeSelectAnchorClipId,
         clearContextMenu,
         renamingClipId,
         onRenameCommit,
@@ -218,8 +224,10 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         startClipDrag={startClipDrag}
                         startEditDrag={startEditDrag}
                         toggleClipMuted={toggleClipMuted}
+                        onCtrlToggleSelect={onCtrlToggleSelect}
                         toggleMultiSelect={toggleMultiSelect}
                         onShiftRangeSelect={onShiftRangeSelect}
+                        rangeSelectAnchorClipId={rangeSelectAnchorClipId}
                         clearContextMenu={clearContextMenu}
                         triggerRename={renamingClipId === clip.id}
                         onRenameCommit={onRenameCommit}

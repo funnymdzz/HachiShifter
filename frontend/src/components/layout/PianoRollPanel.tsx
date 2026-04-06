@@ -2479,11 +2479,19 @@ export const PianoRollPanel: React.FC = () => {
             const detail = (e as CustomEvent).detail;
             if (!detail?.op) return;
             const { op, ...data } = detail;
+            const active = document.activeElement as HTMLElement | null;
+            const inPianoRoll =
+                active?.hasAttribute("data-piano-roll-scroller") ||
+                active?.closest?.("[data-piano-roll-scroller]") ||
+                document.body.getAttribute("data-hs-focus-window") === "pianoRoll";
+            const inTrackHeader =
+                Boolean(active?.closest?.("[data-track-list-panel]")) ||
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+
+            if (op === "paste" && !inPianoRoll && !inTrackHeader) {
+                return;
+            }
             if (op === "selectAll" || op === "deselect") {
-                const active = document.activeElement as HTMLElement | null;
-                const inPianoRoll =
-                    active?.hasAttribute("data-piano-roll-scroller") ||
-                    active?.closest?.("[data-piano-roll-scroller]");
                 if (!inPianoRoll || s.toolMode !== "select") {
                     return;
                 }

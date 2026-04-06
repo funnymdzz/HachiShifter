@@ -35,8 +35,10 @@ export const ClipItem = React.memo(function ClipItem({
     startClipDrag,
     startEditDrag,
     toggleClipMuted,
+    onCtrlToggleSelect,
     toggleMultiSelect: _toggleMultiSelect,
     onShiftRangeSelect,
+    rangeSelectAnchorClipId,
     clearContextMenu,
     triggerRename,
     onRenameCommit,
@@ -82,10 +84,14 @@ export const ClipItem = React.memo(function ClipItem({
             | "gain",
     ) => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
+    /** Ctrl+左键选择切换（会更新主选中 clip） */
+    onCtrlToggleSelect: (clipId: string) => void;
     /** Ctrl+左键多选切换 */
     toggleMultiSelect: (clipId: string) => void;
     /** Shift+点击范围选择（跨轨按包围矩形选中） */
-    onShiftRangeSelect: (clipId: string) => void;
+    onShiftRangeSelect: (clipId: string, anchorClipIdOverride?: string | null) => void;
+    /** Shift 范围选择锚点（点击前快照） */
+    rangeSelectAnchorClipId: string | null;
 
     clearContextMenu: () => void;
 
@@ -111,10 +117,19 @@ export const ClipItem = React.memo(function ClipItem({
             e.stopPropagation();
             clearContextMenu();
 
-            if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                ensureSelected(clip.id);
+            const alt = Boolean(altPressed || e.altKey || e.nativeEvent.getModifierState?.("Alt"));
+            const ctrlOrMeta = e.ctrlKey || e.metaKey;
+            const doShiftRangeSelect = e.shiftKey && !alt && !ctrlOrMeta;
+            const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+            const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
+            const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+
+            if (shouldPrimeSelection) {
+                if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                    ensureSelected(clip.id);
+                }
+                selectClipRemote(clip.id);
             }
-            selectClipRemote(clip.id);
 
             const startX = e.clientX;
             const startY = e.clientY;
@@ -145,6 +160,14 @@ export const ClipItem = React.memo(function ClipItem({
                 window.removeEventListener("pointerup", onEnd, true);
                 window.removeEventListener("pointercancel", onEnd, true);
                 if (!dragStarted) {
+                    if (doCtrlToggleOnly) {
+                        onCtrlToggleSelect(clip.id);
+                        return;
+                    }
+                    if (doShiftRangeSelect) {
+                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
+                        return;
+                    }
                     seekFromClientX(ev.clientX, true);
                 }
             };
@@ -159,9 +182,13 @@ export const ClipItem = React.memo(function ClipItem({
             ensureSelected,
             isInMultiSelectedSet,
             multiSelectedCount,
+            onCtrlToggleSelect,
+            onShiftRangeSelect,
+            rangeSelectAnchorClipId,
             seekFromClientX,
             selectClipRemote,
             startEditDrag,
+            altPressed,
         ],
     );
 
@@ -209,13 +236,16 @@ export const ClipItem = React.memo(function ClipItem({
                 const alt = Boolean(
                     altPressed || e.altKey || e.nativeEvent.getModifierState?.("Alt"),
                 );
+                const ctrlOrMeta = e.ctrlKey || e.metaKey;
 
                 // Shift+点击范围选择在 pointerup 时处理（避免阻止拖动）
-                const doShiftRangeSelect = e.shiftKey && !alt && !e.ctrlKey && !e.metaKey;
+                const doShiftRangeSelect = e.shiftKey && !alt && !ctrlOrMeta;
+                const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+                const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
 
                 // Seek should happen on click, not on drag.
                 // Track whether the pointer moved beyond a small deadzone.
-                const allowSeek = !alt && !e.ctrlKey && !e.metaKey;
+                const allowSeek = !alt && !ctrlOrMeta && !e.shiftKey;
                 const startX = e.clientX;
                 const startY = e.clientY;
                 let moved = false;
@@ -234,7 +264,7 @@ export const ClipItem = React.memo(function ClipItem({
                     window.removeEventListener("pointercancel", onUp, true);
                     // Shift+点击且未移动时执行范围选择
                     if (doShiftRangeSelect && !moved) {
-                        onShiftRangeSelect(clip.id);
+                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
                     } else if (!moved && allowSeek) {
                         seekFromClientX(ev.clientX, true);
                     }
@@ -248,10 +278,13 @@ export const ClipItem = React.memo(function ClipItem({
                 e.stopPropagation();
                 clearContextMenu();
 
-                if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                    ensureSelected(clip.id);
+                const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+                if (shouldPrimeSelection) {
+                    if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                        ensureSelected(clip.id);
+                    }
+                    selectClipRemote(clip.id);
                 }
-                selectClipRemote(clip.id);
                 startClipDrag(e, clip.id, clip.startSec, alt);
             }}
             title={clip.sourcePath ?? clip.name}
@@ -263,6 +296,9 @@ export const ClipItem = React.memo(function ClipItem({
                 isInMultiSelectedSet={isInMultiSelectedSet}
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}
+                onCtrlToggleSelect={onCtrlToggleSelect}
+                onShiftRangeSelect={onShiftRangeSelect}
+                rangeSelectAnchorClipId={rangeSelectAnchorClipId}
                 seekFromClientX={seekFromClientX}
                 startEditDrag={startEditDrag}
             />

@@ -14,6 +14,7 @@ import { useEffect } from "react";
 import type { AppDispatch, RootState } from "../../../../app/store";
 import {
     seekPlayhead,
+    selectTrackRemote,
     setplayheadSec,
     setSelectedClip,
     setSelectedClipPreservingTrack,
@@ -29,6 +30,7 @@ export interface UseTimelineEventHandlersArgs {
     dispatch: AppDispatch;
     sessionRef: React.MutableRefObject<RootState["session"]>;
     scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+    trackListScrollRef: React.MutableRefObject<HTMLDivElement | null>;
     pxPerSecRef: React.MutableRefObject<number>;
     viewportWidthRef: React.MutableRefObject<number>;
     keyboardZoomPendingRef: React.MutableRefObject<{
@@ -39,6 +41,7 @@ export interface UseTimelineEventHandlersArgs {
     // state values
     pxPerSec: number;
     setPxPerSec: React.Dispatch<React.SetStateAction<number>>;
+    rowHeight: number;
 
     // multi-select
     multiSelectedClipIds: string[];
@@ -97,10 +100,12 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         dispatch,
         sessionRef,
         scrollRef,
+        trackListScrollRef,
         pxPerSecRef,
         keyboardZoomPendingRef,
         pxPerSec,
         setPxPerSec,
+        rowHeight,
         multiSelectedClipIds,
         setMultiSelectedClipIds,
         clipClipboardRef,
@@ -141,11 +146,17 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
             const inPianoRoll =
                 active?.hasAttribute("data-piano-roll-scroller") ||
                 active?.closest?.("[data-piano-roll-scroller]");
+            const inTrackHeader =
+                Boolean(active?.closest?.("[data-track-list-panel]")) ||
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
             const deferToPianoRollForSelection =
                 inPianoRoll &&
                 sessionRef.current.toolMode === "select" &&
                 (op === "selectAll" || op === "deselect");
             if (deferToPianoRollForSelection) return;
+            if (op === "paste" && (inPianoRoll || inTrackHeader)) {
+                return;
+            }
             if (inPianoRoll && op !== "selectAll" && op !== "deselect") {
                 return;
             }
@@ -173,6 +184,82 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         window.addEventListener("hifi:editOp", onEditOp as EventListener);
         return () => window.removeEventListener("hifi:editOp", onEditOp as EventListener);
     }, [pasteClipsAtPlayhead, splitSelectedAtPlayhead]);
+
+    // ── hifi:selectAdjacentTrack ────────────────────────────
+    useEffect(() => {
+        function onSelectAdjacentTrack(e: Event) {
+            const direction = Math.sign(
+                Number((e as CustomEvent<{ direction?: number }>).detail?.direction ?? 0),
+            );
+            if (!direction) return;
+
+            const tracks = sessionRef.current.tracks;
+            if (tracks.length === 0) return;
+
+            const currentTrackId = sessionRef.current.selectedTrackId ?? tracks[0]?.id ?? null;
+            if (!currentTrackId) return;
+
+            let currentIndex = tracks.findIndex((track) => track.id === currentTrackId);
+            if (currentIndex < 0) currentIndex = 0;
+
+            const nextIndex = Math.max(0, Math.min(tracks.length - 1, currentIndex + direction));
+            if (nextIndex === currentIndex) return;
+
+            const nextTrackId = tracks[nextIndex]?.id;
+            if (!nextTrackId) return;
+
+            void dispatch(selectTrackRemote(nextTrackId));
+
+            const ensureTrackVisible = (el: HTMLDivElement): number | null => {
+                const trackTop = nextIndex * rowHeight;
+                const trackBottom = trackTop + rowHeight;
+                let nextScrollTop = el.scrollTop;
+
+                if (trackTop < el.scrollTop) {
+                    nextScrollTop = trackTop;
+                } else if (trackBottom > el.scrollTop + el.clientHeight) {
+                    nextScrollTop = trackBottom - el.clientHeight;
+                }
+
+                const maxScrollTop = Math.max(0, el.scrollHeight - el.clientHeight);
+                nextScrollTop = Math.max(0, Math.min(maxScrollTop, nextScrollTop));
+                if (Math.abs(nextScrollTop - el.scrollTop) <= 0.5) return null;
+                el.scrollTop = nextScrollTop;
+                return nextScrollTop;
+            };
+
+            const timelineScroller = scrollRef.current;
+            const trackScroller = trackListScrollRef.current;
+
+            const timelineNextScrollTop = timelineScroller
+                ? ensureTrackVisible(timelineScroller)
+                : null;
+
+            if (!trackScroller) return;
+            if (timelineNextScrollTop != null) {
+                if (Math.abs(trackScroller.scrollTop - timelineNextScrollTop) > 0.5) {
+                    trackScroller.scrollTop = timelineNextScrollTop;
+                }
+                return;
+            }
+
+            const trackNextScrollTop = ensureTrackVisible(trackScroller);
+            if (
+                trackNextScrollTop != null &&
+                timelineScroller &&
+                Math.abs(timelineScroller.scrollTop - trackNextScrollTop) > 0.5
+            ) {
+                timelineScroller.scrollTop = trackNextScrollTop;
+            }
+        }
+
+        window.addEventListener("hifi:selectAdjacentTrack", onSelectAdjacentTrack as EventListener);
+        return () =>
+            window.removeEventListener(
+                "hifi:selectAdjacentTrack",
+                onSelectAdjacentTrack as EventListener,
+            );
+    }, [dispatch, rowHeight]);
 
     // ── hifi:nudgePlayhead ───────────────────────────────────
     useEffect(() => {

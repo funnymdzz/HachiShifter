@@ -326,6 +326,8 @@ export const zhTW = {
     kb_project_save_as: "另存新檔",
     kb_project_export: "匯出音訊",
     kb_track_add: "新建軌道",
+    kb_track_select_up: "選取上一條軌道",
+    kb_track_select_down: "選取下一條軌道",
     kb_clip_delete: "刪除音訊片段",
     kb_clip_copy: "複製音訊片段",
     kb_clip_cut: "剪下音訊片段",

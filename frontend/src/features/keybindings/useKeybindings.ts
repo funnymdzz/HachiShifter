@@ -8,6 +8,14 @@ const IS_MAC =
     typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
 const EXCLUDE_QUICK_SEARCH = new Set(["quickSearch"]);
 const EXCLUDE_BOTH = new Set(["paramEditorSelect", "quickSearch"]);
+const REPEATABLE_ACTIONS = new Set<ActionId>([
+    "playback.seekLeft",
+    "playback.seekRight",
+    "timeline.zoomIn",
+    "timeline.zoomOut",
+    "track.selectUp",
+    "track.selectDown",
+]);
 /**
  * 判断当前焦点是否在可编辑元素上（输入框等），此时不拦截快捷键
  */
@@ -118,7 +126,6 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
 
     useEffect(() => {
         function onKeyDown(e: KeyboardEvent) {
-            if (e.repeat) return;
             if (isEditableTarget(document.activeElement) || isEditableTarget(e.target)) return;
 
             // 快捷键设置对话框打开时，阻塞所有快捷键
@@ -127,11 +134,31 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
             // Quick Search 打开时，交给弹窗自身输入框处理（避免 ↑/↓ 与时间轴缩放冲突）
             if (document.body.hasAttribute("data-quick-search-open")) return;
 
-            // PianoRoll scroller 内的快捷键由其自身 onKeyDown 处理，不拦截
             const active = document.activeElement as HTMLElement | null;
+            const focusWindow = document.body.getAttribute("data-hs-focus-window");
             const inPianoRoll =
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]");
+                active?.closest?.("[data-piano-roll-scroller]") ||
+                focusWindow === "pianoRoll";
+            const inTimeline =
+                active?.hasAttribute("data-timeline-scroller") ||
+                active?.closest?.("[data-timeline-scroller]") ||
+                focusWindow === "timeline";
+            const inTrackHeader =
+                Boolean(active?.closest?.("[data-track-list-panel]")) ||
+                focusWindow === "trackHeader";
+
+            const key = normalizeEventKey(e);
+            const isArrowKey =
+                key === "arrowup" ||
+                key === "arrowdown" ||
+                key === "arrowleft" ||
+                key === "arrowright";
+            if (isArrowKey && (inPianoRoll || inTimeline || inTrackHeader)) {
+                e.preventDefault();
+            }
+
+            // PianoRoll scroller 内的快捷键由其自身 onKeyDown 处理，不拦截
             if (inPianoRoll) {
                 // 查找匹配的 actionId，如果属于 pianoRoll.* 则放行给 PianoRoll 自己处理
                 const matchedAction = findMatchingAction(e, keybindingsRef.current);
@@ -161,6 +188,9 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                         EXCLUDE_BOTH,
                     );
                     if (fallbackAction) {
+                        if (e.repeat && !REPEATABLE_ACTIONS.has(fallbackAction)) {
+                            return;
+                        }
                         e.preventDefault();
                         e.stopPropagation();
                         handlerRef.current(fallbackAction);
@@ -181,6 +211,7 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 inPianoRoll ? EXCLUDE_QUICK_SEARCH : EXCLUDE_BOTH,
             );
             if (!actionId) return;
+            if (e.repeat && !REPEATABLE_ACTIONS.has(actionId)) return;
 
             e.preventDefault();
             e.stopPropagation();

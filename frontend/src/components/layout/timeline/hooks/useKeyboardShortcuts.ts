@@ -100,12 +100,24 @@ export function useKeyboardShortcuts(deps: {
                       ? [s.selectedClipId]
                       : [];
 
+            const active = document.activeElement as HTMLElement | null;
+            const inPianoRoll =
+                active?.hasAttribute("data-piano-roll-scroller") ||
+                active?.closest?.("[data-piano-roll-scroller]");
+            const inTrackHeader =
+                Boolean(active?.closest?.("[data-track-list-panel]")) ||
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+
+            // clip.paste 与 pianoRoll.paste 冲突时：参数编辑器 / 轨道头焦点优先参数粘贴
+            if (actionId === "clip.paste" && (inPianoRoll || inTrackHeader)) {
+                e.preventDefault();
+                e.stopPropagation();
+                window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op: "paste" } }));
+                return;
+            }
+
             // clip.copy / clip.cut / clip.paste: 焦点在 PianoRoll 时优先交给参数编辑器。
             if (actionId === "clip.copy" || actionId === "clip.cut" || actionId === "clip.paste") {
-                const active = document.activeElement as HTMLElement | null;
-                const inPianoRoll =
-                    active?.hasAttribute("data-piano-roll-scroller") ||
-                    active?.closest?.("[data-piano-roll-scroller]");
                 if (inPianoRoll) {
                     if (s.toolMode === "select") {
                         e.preventDefault();
