@@ -158,7 +158,12 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                         if (regexEnabled) {
                             try {
                                 const re = new RegExp(q.trim(), "i");
-                                audioResults = audioResults.filter((e) => re.test(e.name));
+                                audioResults = audioResults.filter((e) => {
+                                    const name = e.name || "";
+                                    const dot = name.lastIndexOf(".");
+                                    const stem = dot > 0 ? name.substring(0, dot) : name;
+                                    return re.test(stem);
+                                });
                             } catch {
                                 // 正则无效，返回空结果
                                 audioResults = [];
@@ -237,6 +242,14 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
         },
         [dispatch, selectedTrackId, playheadSec, onClose],
     );
+
+    const focusSearchInput = useCallback(() => {
+        if (inputRef.current?.disabled) return;
+
+        requestAnimationFrame(() => {
+            inputRef.current?.focus();
+        });
+    }, []);
 
     // 将原生 React.KeyboardEvent 适配为 DOM KeyboardEvent 进行匹配
     const matchKey = useCallback(
@@ -381,7 +394,10 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                         variant={regexEnabled ? "solid" : "ghost"}
                         color="gray"
                         title={tAny("fb_regex") || "Regex"}
-                        onClick={() => setRegexEnabled((v) => !v)}
+                        onClick={() => {
+                            setRegexEnabled((v) => !v);
+                            focusSearchInput();
+                        }}
                         style={{
                             fontFamily: "monospace",
                             fontSize: 10,
@@ -396,7 +412,9 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                     <Select.Root
                         value={sortMode}
                         size="1"
-                        onValueChange={(v) => setSortMode(v as "name" | "date" | "size")}
+                        onValueChange={(v) => {
+                            setSortMode(v as "name" | "date" | "size");
+                        }}
                     >
                         <Select.Trigger
                             style={{
@@ -410,12 +428,19 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                                     event,
                                     currentValue: sortMode,
                                     options: SORT_MODE_OPTIONS,
-                                    onChange: (next) =>
-                                        setSortMode(next as "name" | "date" | "size"),
+                                    onChange: (next) => {
+                                        setSortMode(next as "name" | "date" | "size");
+                                        focusSearchInput();
+                                    },
                                 });
                             }}
                         />
-                        <Select.Content>
+                        <Select.Content
+                            onCloseAutoFocus={(event) => {
+                                event.preventDefault();
+                                focusSearchInput();
+                            }}
+                        >
                             <Select.Item value="name">{tAny("fb_sort_name") || "Name"}</Select.Item>
                             <Select.Item value="date">{tAny("fb_sort_date") || "Date"}</Select.Item>
                             <Select.Item value="size">{tAny("fb_sort_size") || "Size"}</Select.Item>

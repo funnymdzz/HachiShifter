@@ -364,7 +364,7 @@ export const zhCN = {
     kb_quick_search_open: "打开快速搜索",
     kb_quick_search_nav_up: "向上切换候选项",
     kb_quick_search_nav_down: "向下切换候选项",
-    kb_quick_search_preview: "预览/ 试听",
+    kb_quick_search_preview: "预览 / 试听",
     kb_quick_search_confirm: "放置音频",
     kb_quick_search_close: "关闭",
     vs_paste_clipboard_not_found: "未找到 VocalShifter 剪贴板数据。",

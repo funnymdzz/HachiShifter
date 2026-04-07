@@ -6,9 +6,8 @@ import { isNoneBinding, isModifierActive } from "../../../features/keybindings/k
 import type { Keybinding } from "../../../features/keybindings/types";
 import type { MessageKey } from "../../../i18n/messages";
 import { MAX_ROW_HEIGHT, MIN_ROW_HEIGHT, TRACK_ADD_ROW_HEIGHT } from "./constants";
-import { applySelectWheelChange } from "../../../utils/selectWheel";
 
-/** ??????????? add_track ????? */
+/** Color palette options shown when creating a new track. */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
     { value: "#228be6", key: "color_blue" }, // Open Color blue6
     { value: "#ae3ec9", key: "color_purple" }, // Open Color grape6
@@ -1198,29 +1197,6 @@ export const TrackList: React.FC<{
                                                         <Select.Trigger
                                                             style={{
                                                                 minWidth: 80,
-                                                            }}
-                                                            onWheel={(event) => {
-                                                                applySelectWheelChange({
-                                                                    event,
-                                                                    currentValue:
-                                                                        PITCH_ANALYSIS_ALGO_OPTIONS.includes(
-                                                                            track.pitchAnalysisAlgo as
-                                                                                | "world_dll"
-                                                                                | "nsf_hifigan_onnx"
-                                                                                | "vslib"
-                                                                                | "none",
-                                                                        )
-                                                                            ? track.pitchAnalysisAlgo
-                                                                            : "nsf_hifigan_onnx",
-                                                                    options:
-                                                                        PITCH_ANALYSIS_ALGO_OPTIONS,
-                                                                    onChange: (next) => {
-                                                                        onAlgoChange(
-                                                                            track.id,
-                                                                            next,
-                                                                        );
-                                                                    },
-                                                                });
                                                             }}
                                                         />
                                                         <Select.Content>
