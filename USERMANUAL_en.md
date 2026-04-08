@@ -218,10 +218,10 @@ Parameters:
 - `Output Folder`: Set the output folder. Supported placeholders:
     - `<ProjectFolder>`: The folder containing the current project. If the project has not been saved, defaults to the `Documents` folder.
     - `<ProjectName>`: The current project's filename without extension.
-      For Project export, the default Output Folder is `<ProjectFolder>`; for Separated export, the default is `<ProjectFolder>/<ProjectName>`.
+    - For Project export, the default Output Folder is `<ProjectFolder>`; for Separated export, the default is `<ProjectFolder>/<ProjectName>`.
 - `Output File Name`: Set the output filename. Supported placeholders:
     - `<ProjectName>`: The current project's filename without extension.
-      Default is `<ProjectName>.wav`.
+    - Default is `<ProjectName>.wav`.
 - `Separated Track Name Pattern`: Set the naming pattern for separated tracks. Supported placeholders:
     - `<ProjectName>`: The current project's filename without extension.
     - `<ExportIndex>`: Sequential index of the track during export, starting from `0`.
@@ -229,7 +229,7 @@ Parameters:
     - `<TrackName>`: The track's name in the project.
     - `<TrackType>`: Track type: `Root` or `Sub`.
     - `<TrackId>`: Internal ID of the track (not recommended for general users).
-      Default pattern is `<ExportIndex>_<TrackName>.wav`.
+    - Default pattern is `<ExportIndex>_<TrackName>.wav`.
 - `Separated Track Targets Panel`: Select which tracks to export. By default, only non-muted normal tracks and root tracks are selected.
     - If you check a track that is originally muted, it will be exported regardless of mute state.
     - If you check a root track of a track group, the entire group is exported as a single audio file, and the exported audio excludes data from muted child tracks.
