@@ -2,7 +2,7 @@
 
 [简体中文](README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
-HiFiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for human voice, integrating splicing and tuning for human VOCALOID production.
+HiFiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for vocal, integrating splicing and tuning for Jinriki VOCALOID production.
 
 **The project is still under active development. Full-chain testing has not been completed, so there may be many bugs or instability issues.**
 
@@ -22,7 +22,7 @@ HiFiShifter provides a unified rendering interface to facilitate future algorith
 
 Our recommended workflow is:
 
-1. Prepare short clip sources needed for human voice using other DAWs or slicing software.
+1. Prepare short clip sources needed for vocal using other DAWs or slicing software.
 2. Complete audio splicing and tuning in HiFiShifter.
 
 HiFiShifter also supports the following operations to facilitate migration from other software:
