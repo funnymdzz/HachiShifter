@@ -12,7 +12,7 @@ Download the HiFiShifter installer corresponding to your operating system and ar
   If you are a Windows user and do not know the difference between `x86_64` and `arm64`, choose `x86_64`. Only if you clearly understand `arm64` and have a Windows ARM device, you may download the `arm64` version.
 
 - For macOS, an unsigned dmg installer is provided. Since it is not signed, installation requires a few extra steps to allow the app to run.  
-  macOS users with M-series chips should install the `arm64` version. Only older Intel Hackintosh users need the `x86_64` version.
+  macOS users with M-series chips should install the `arm64` version. Only older Intel users need the `x86_64` version.
 
 - For Linux, an AppImage package is provided. You need to go to file `Properties -> Permissions` and check `Allow executing file as program`, then you can run it directly.
 
