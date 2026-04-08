@@ -1,6 +1,6 @@
 # HiFiShifter ユーザーマニュアル
 
-[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md)| [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
+[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md) | [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
 
 HiFiShifterは、グラフィカルなボーカル編集・合成ツールです。マルチトラックのオーディオクリップ処理をサポートし、トラックグループ単位で複数のボコーダーを使用してボーカルのピッチ補正やパラメータ調整を行い、人力VOCALOID制作における編集と調声を一体化します。
 

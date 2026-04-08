@@ -1,6 +1,6 @@
 # HiFiShifter 사용자 매뉴얼
 
-[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md)| [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
+[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md) | [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
 
 HiFiShifter는 그래픽 보컬 편집 및 합성 도구입니다. 멀티트랙 오디오 클립 처리를 지원하며, 트랙 그룹 단위로 여러 보코더를 사용하여 보컬의 피치 보정 및 파라미터 조정을 수행하여 인간 VOCALOID 제작의 편집과 튜닝을 통합합니다.
 

@@ -1,6 +1,6 @@
 # HiFiShifter 用户手册
 
-[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md)| [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
+[简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md) | [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
 
 HiFiShifter 是一款图形化人声编辑与合成工具。它支持多轨道音频切片处理，并以轨道组为单位，使用多种声码器完成人声修音、人力调参功能，实现人力VOCALOID制作的拼调一体化。
 
