@@ -60,6 +60,25 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+You can switch frontend startup mode via `TAURI_UI_MODE`:
+
+- Default `dev` (hot reload with Vite dev server)
+- `build` (build frontend first, then start with static assets)
+
+Linux/macOS (bash/zsh):
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell:
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **Note:** WORLD vocoder and Signalsmith Stretch are now statically compiled via cc crate, no additional configuration needed. First build will automatically compile C++ source code (takes about 1-2 minutes).
 
 ### ONNX Inference (Optional)

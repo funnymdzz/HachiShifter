@@ -22,6 +22,29 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+可通过环境变量切换前端模式：
+
+- 默认（`dev`，热更新）：
+
+```bash
+cd backend/src-tauri
+cargo tauri dev
+```
+
+- `build`（先完整构建，再用 preview 提供静态资源）：
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell：
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 ## 最小后端接口（迁移起点）
 
 - `ping` → `{ ok: true, message: "pong" }`

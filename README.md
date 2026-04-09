@@ -145,6 +145,25 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+前端启动模式可通过环境变量 `TAURI_UI_MODE` 切换：
+
+- 默认 `dev`（热更新，使用 Vite dev server）
+- `build`（先完整构建前端，再以静态资源方式启动）
+
+Linux/macOS (bash/zsh):
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell:
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **注意：** 首次编译需要很长的时间，请耐心等待
 
 ## 文档
