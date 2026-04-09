@@ -5,7 +5,11 @@
 			"label": "cargo-check-backend-lib",
 			"type": "shell",
 			"command": "cargo",
-			"args": ["check", "--lib", "-q"],
+			"args": [
+				"check",
+				"--lib",
+				"-q"
+			],
 			"options": {
 				"cwd": "${workspaceFolder}"
 			},
@@ -16,12 +20,49 @@
 			"label": "cargo-check-backend-lib-tauri",
 			"type": "shell",
 			"command": "cargo",
-			"args": ["check", "--lib", "-q"],
+			"args": [
+				"check",
+				"--lib",
+				"-q"
+			],
 			"options": {
 				"cwd": "${workspaceFolder}/backend/src-tauri"
 			},
 			"isBackground": false,
 			"group": "build"
+		},
+		{
+			"label": "git-mv-root-docs-to-i18n",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"e:/Code/HifiShifter",
+				"mv",
+				"README_en.md",
+				"README_ja.md",
+				"README_ko.md",
+				"README_zh-TW.md",
+				"USERMANUAL.md",
+				"USERMANUAL_en.md",
+				"USERMANUAL_ja.md",
+				"USERMANUAL_ko.md",
+				"USERMANUAL_zh-TW.md",
+				"docs/i18n/"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "git-status-after-doc-reorg",
+			"type": "shell",
+			"command": "git",
+			"args": [
+				"-C",
+				"e:/Code/HifiShifter",
+				"status",
+				"--short"
+			],
+			"isBackground": false
 		}
 	]
 }

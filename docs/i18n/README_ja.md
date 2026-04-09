@@ -1,12 +1,12 @@
 # HiFiShifter
 
-[简体中文](README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
+[简体中文](../../README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
 HiFiShifterは、グラフィカルなボーカル編集・合成ツールです。マルチトラックのオーディオクリップ処理をサポートし、トラックグループ単位で複数のボコーダーを使用してボーカルのピッチ補正やパラメータ調整を行い、人力VOCALOID制作における編集と調声を一体化します。
 
 **このプロジェクトはまだ開発中です。全体的なテストは完了しておらず、多くのバグや不安定な問題が存在する可能性があります。**
 
-![プレビュー](docs/preview.png)
+![プレビュー](../preview.png)
 
 ## インストール
 
@@ -164,12 +164,31 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+`TAURI_UI_MODE` 環境変数でフロントエンドの起動モードを切り替えできます：
+
+- `dev`：開発モード（デフォルト、Vite dev server を使用しホットリロード対応）
+- `build`：ビルドモード（フロントエンド静的アセットを先にビルドしてから起動）
+
+Linux/macOS（bash/zsh）：
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell：
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **注意：** 初回コンパイルには非常に長い時間がかかります。しばらくお待ちください。
 
 ## ドキュメント
 
 - [ユーザーマニュアル](USERMANUAL_ja.md)
-- [Todoリスト](todo.md)
+- [Todoリスト](../../todo.md)
 
 ## 謝辞
 
@@ -183,4 +202,4 @@ cargo tauri dev
 
 ## ライセンス
 
-このプロジェクトは [MITライセンス](LICENSE) の下で公開されています。
+このプロジェクトは [MITライセンス](../../LICENSE) の下で公開されています。
