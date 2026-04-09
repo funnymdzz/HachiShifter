@@ -2,6 +2,14 @@ use crate::project::CustomScale;
 use std::fs;
 use std::path::Path;
 
+// 最小合理窗口尺寸与坐标阈值，用于校验从磁盘读取到的窗口状态，避免异常值导致窗口无法显示。
+const MIN_WINDOW_WIDTH: f64 = 200.0;
+const MIN_WINDOW_HEIGHT: f64 = 160.0;
+// 某些平台/环境会把不可用的位置写成 -32768 之类的哨兵值，认为这是无效坐标。
+const INVALID_COORD_MIN: i32 = -32000;
+// 也拒绝极端大的坐标值（防止溢出或误写入极端数值）
+const MAX_COORD_ABS: i32 = 1_000_000;
+
 /// UI 设置（持久化到 app_config.json）
 ///
 /// 该文件负责管理应用的可序列化配置项，包括 UI 相关的偏好
@@ -184,8 +192,37 @@ fn save_config(config_dir: &Path, cfg: &AppConfig) {
 }
 
 /// 读取持久化的窗口状态，如果不存在则返回默认值
+fn sanitize_window_state(mut ws: WindowState) -> WindowState {
+    // 宽高校验：必须是有限数且不小于最小尺寸，过大的值视为异常
+    if let Some(w) = ws.width {
+        if !w.is_finite() || w < MIN_WINDOW_WIDTH || w > 100_000.0 {
+            ws.width = None;
+        }
+    }
+    if let Some(h) = ws.height {
+        if !h.is_finite() || h < MIN_WINDOW_HEIGHT || h > 100_000.0 {
+            ws.height = None;
+        }
+    }
+
+    // 坐标校验：拒绝典型的哨兵值（如 -32768）或极端不合理的坐标
+    if let Some(x) = ws.x {
+        if x <= INVALID_COORD_MIN || x.abs() > MAX_COORD_ABS {
+            ws.x = None;
+        }
+    }
+    if let Some(y) = ws.y {
+        if y <= INVALID_COORD_MIN || y.abs() > MAX_COORD_ABS {
+            ws.y = None;
+        }
+    }
+
+    ws
+}
+
 pub fn load_window_state(config_dir: &Path) -> WindowState {
-    load_config(config_dir).window
+    let ws = load_config(config_dir).window;
+    sanitize_window_state(ws)
 }
 
 /// 将窗口状态写回配置文件（保留其他字段）
