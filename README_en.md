@@ -23,10 +23,10 @@ HifiShifter is a graphical vocal editing and synthesis tool based on deep learni
 - **Multi-language (i18n) and themes**: Supports Chinese/English and dark/light themes.
 - **Modern interface**: Dark theme interface designed with DAW reference, providing intuitive operation experience.
 - **Audio editing features**:
-  - **Audio slicing**: Split selected audio clips at playhead position (shortcut: S)
-  - **Fade in/out**: Add fade effects to clips, supports custom fade durations
-  - **Time stretching**: Adjust clip playback rate (0.1x - 10x) for time stretching/shortening
-  - **Audio trimming**: Precise control over clip start and end positions
+    - **Audio slicing**: Split selected audio clips at playhead position (shortcut: S)
+    - **Fade in/out**: Add fade effects to clips, supports custom fade durations
+    - **Time stretching**: Adjust clip playback rate (0.1x - 10x) for time stretching/shortening
+    - **Audio trimming**: Precise control over clip start and end positions
 
 ## Installation
 
@@ -89,11 +89,12 @@ To switch pitch editing algorithm to **NSF-HiFiGAN ONNX inference** (experimenta
 - Method A (recommended): Select `NSF-HiFiGAN (ONNX)` in the `Algo` dropdown in bottom parameter panel (Pitch).
 - Method B (debug/force override): Set `HIFISHIFTER_PITCH_EDIT_ALGO=nsf_hifigan_onnx`
 - Provide model path (choose one):
-  - `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\pc_nsf_hifigan.onnx`
-  - or `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
+    - `HIFISHIFTER_NSF_HIFIGAN_ONNX=...\pc_nsf_hifigan.onnx`
+    - or `HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR=...\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02`
 - (Optional) `HIFISHIFTER_NSF_HIFIGAN_CONFIG=...\config.json` (default uses `config.json` in model directory)
 
 Example (PowerShell):
+
 ```powershell
 $env:HIFISHIFTER_PITCH_EDIT_ALGO = "nsf_hifigan_onnx"
 $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.1k_hop512_128bin_2025.02"
@@ -103,20 +104,20 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 
 - Default: `v2` (pitch shift per clip then mix back with fade, avoids boundary artifacts from global pitch shift on entire mixdown)
 - Fallback to old implementation (global mixdown pitch shift):
-  - `HIFISHIFTER_PITCH_EDIT_APPLY=v1`
-  - or `HIFISHIFTER_PER_CLIP_PITCH_EDIT=0`
+    - `HIFISHIFTER_PITCH_EDIT_APPLY=v1`
+    - or `HIFISHIFTER_PER_CLIP_PITCH_EDIT=0`
 - Force use v2:
-  - `HIFISHIFTER_PITCH_EDIT_APPLY=v2`
-  - or `HIFISHIFTER_PER_CLIP_PITCH_EDIT=1`
+    - `HIFISHIFTER_PITCH_EDIT_APPLY=v2`
+    - or `HIFISHIFTER_PER_CLIP_PITCH_EDIT=1`
 
 ### Playback Instructions
 
 - Uses Rust-side low-latency real-time audio engine (`cpal` output stream callback mixing), playback startup doesn't depend on "full offline rendering".
-  - To avoid stuttering during timeline changes, audio decoding/resampling prepares asynchronously in background; during initial loading of audio segments, clips may output silence briefly then automatically resume when ready.
+    - To avoid stuttering during timeline changes, audio decoding/resampling prepares asynchronously in background; during initial loading of audio segments, clips may output silence briefly then automatically resume when ready.
 - When Pitch Edit algorithm switches to **NSF-HiFiGAN ONNX**, playback briefly waits for pre-buffering; bottom-left status bar shows "Rendering..." prompt.
-  - Optional parameters (environment variables): `HIFISHIFTER_ONNX_STREAM_PRIME_SEC` (default 0.25), `HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS` (default 4000).
-  - To disable waiting: `HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`.
-  - ONNX real-time pitch shifting performs inference on entire voiced segments (unvoiced segments pass through directly) to reduce boundary noise from fixed-time window segmentation.
+    - Optional parameters (environment variables): `HIFISHIFTER_ONNX_STREAM_PRIME_SEC` (default 0.25), `HIFISHIFTER_ONNX_STREAM_PRIME_TIMEOUT_MS` (default 4000).
+    - To disable waiting: `HIFISHIFTER_ONNX_PITCH_STREAM_HARD_START=0`.
+    - ONNX real-time pitch shifting performs inference on entire voiced segments (unvoiced segments pass through directly) to reduce boundary noise from fixed-time window segmentation.
 - **Audio source formats**: Real-time playback side attempts to decode common audio formats via `symphonia`; offline export/mixdown format support may differ from real-time playback.
 - **Waveform/duration preview**: After importing audio, backend extracts duration and waveform preview for timeline display. Waveform prioritizes "on-demand peaks (min/max) + caching" drawing method: zooming in requests more columns for clearer details; WAV prioritizes `hound` (supports 16/24/32-bit int + 32-bit float), other formats use `symphonia` generic decoding as fallback.
 - **Waveform caching (performance)**: Backend writes base peaks for each audio file to disk cache to reduce repeated calculations; can manually clear via menu `View` → `Clear Waveform Cache`.
@@ -136,19 +137,21 @@ $env:HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR = "E:\Code\HifiShifter\pc_nsf_hifigan_44.
 - **Draw curves**: Left-click to draw edit curves (solid lines); right-click to restore original curves (dashed lines).
 - **Selection copy/paste**: Switch to Select mode, left-click drag to create vertical time selection; `Ctrl+C` copies edit curves in selection, `Ctrl+V` pastes to selection start point.
 - **Zoom/scroll (parameter panel independent)**:
-  - Mouse wheel: Horizontal timeline zoom (centered on cursor).
-  - Ctrl + mouse wheel: Vertical parameter axis zoom (centered on cursor).
-  - Middle mouse button drag: Pan view (timeline).
-  - Horizontal scrollbar: Horizontal scrolling.
+    - Mouse wheel: Horizontal timeline zoom (centered on cursor).
+    - Ctrl + mouse wheel: Vertical parameter axis zoom (centered on cursor).
+    - Middle mouse button drag: Pan view (timeline).
+    - Horizontal scrollbar: Horizontal scrolling.
 - Click `Play` → `Synthesize and Play` to hear results (when root track `C` is on, applies pitch panel edit curves to synthesis output).
 
 ## Edit Mode and Selection Mode
 
 ### Edit Mode
+
 - **Left-click**: Edit current parameter curve (follows parameter panel selection).
 - **Right-click**: Restore current parameter to "original curve" (effective for Pitch/Tension).
 
 ### Selection Mode
+
 - **Left-click drag**: Create vertical time selection (covers entire height).
 - **Copy/paste**: `Ctrl+C` copies "edit curves" within selection range, `Ctrl+V` writes from selection start point.
 
@@ -161,31 +164,32 @@ This mechanism is abstracted: when adding new parameters, only need to implement
 
 ## Common Shortcuts
 
-| Operation | Shortcut / Mouse |
-| :--------------------------- | :------------------------------ |
-| Pan view (timeline) | Middle mouse button drag |
-| Horizontal zoom (timeline) | Mouse wheel (centered on cursor) |
-| Vertical zoom (track height, timeline) | Ctrl + mouse wheel |
-| Vertical zoom (parameter axis, parameter panel) | Ctrl + mouse wheel (inside parameter panel) |
-| Play/pause | Space |
-| Play/stop | Enter |
-| Undo / Redo | Ctrl + Z / Ctrl + Y |
-| New project | Ctrl + N |
-| Open project | Ctrl + Shift + O |
-| Save | Ctrl + S |
-| Save As | Ctrl + Shift + S |
-| Export audio | Ctrl + E |
-| Mode Toggle (Select/Draw) | Tab |
-| Delete selected clips | Delete |
-| Copy selected clips (internal clipboard) | Ctrl + C |
-| Paste at playhead position | Ctrl + V |
-| Parameter panel copy selection curves | Ctrl + C (Select mode) |
-| Parameter panel paste to selection start | Ctrl + V (Select mode) |
-| Split clip | S (split selected clip at playhead position) |
-| Add track | Ctrl + T |
-| Quick search | Ctrl + F |
+| Operation                                       | Shortcut / Mouse                             |
+| :---------------------------------------------- | :------------------------------------------- |
+| Pan view (timeline)                             | Middle mouse button drag                     |
+| Horizontal zoom (timeline)                      | Mouse wheel (centered on cursor)             |
+| Vertical zoom (track height, timeline)          | Ctrl + mouse wheel                           |
+| Vertical zoom (parameter axis, parameter panel) | Ctrl + mouse wheel (inside parameter panel)  |
+| Play/pause                                      | Space                                        |
+| Play/stop                                       | Enter                                        |
+| Undo / Redo                                     | Ctrl + Z / Ctrl + Y                          |
+| New project                                     | Ctrl + N                                     |
+| Open project                                    | Ctrl + Shift + O                             |
+| Save                                            | Ctrl + S                                     |
+| Save As                                         | Ctrl + Shift + S                             |
+| Export audio                                    | Ctrl + E                                     |
+| Mode Toggle (Select/Draw)                       | Tab                                          |
+| Delete selected clips                           | Delete                                       |
+| Copy selected clips (internal clipboard)        | Ctrl + C                                     |
+| Paste at playhead position                      | Ctrl + V                                     |
+| Parameter panel copy selection curves           | Ctrl + C (Select mode)                       |
+| Parameter panel paste to selection start        | Ctrl + V (Select mode)                       |
+| Split clip                                      | S (split selected clip at playhead position) |
+| Add track                                       | Ctrl + T                                     |
+| Quick search                                    | Ctrl + F                                     |
 
 Additional notes:
+
 - Supports dragging audio files directly to timeline track area for import.
 - When dropping outside any track (e.g., blank row/outside track area), automatically creates new track and places clip.
 - Left track list supports dragging: up/down drag reorders tracks; drag to another track with right offset sets it as subtrack (nesting).
@@ -203,7 +207,7 @@ Also supports direct editing on timeline (closer to DAW interaction):
 - **Snap to grid**: Clip move/trim defaults to grid snapping; hold `Shift` to temporarily disable snapping.
 - **Trim/extend range**: Drag clip left/right boundaries to trim or extend; when clip length exceeds source audio available range, excess becomes "blank/silence" (waveform preview shows blank), doesn't loop repeat.
 - **Time Stretch**: Hold `Alt` + left-click drag clip left/right boundaries to stretch audio (changes playback rate and clip length simultaneously).
-  - High-quality "pitch-preserving" real-time stretching uses Signalsmith Stretch (MIT), statically compiled via cc crate.
+    - High-quality "pitch-preserving" real-time stretching uses Signalsmith Stretch (MIT), statically compiled via cc crate.
 - **Internal offset (Slip-Edit)**: Hold `Alt` + left-click drag clip body to slide internal content left/right (equivalent to modifying Trim In), doesn't change clip timeline position (no snapping); offset limited to "±1x source audio duration", allows leading/trailing silence.
 - **Fade in/out**: Drag top-left/top-right corner handles to adjust fade durations.
 - **Fade effect on waveform**: Waveform preview updates amplitude in real-time with fades for intuitive audio-visual alignment.
@@ -218,12 +222,14 @@ Also supports direct editing on timeline (closer to DAW interaction):
 - **Split**: Select clip, press `S` to split at playhead position.
 
 Copy/paste rules:
+
 - `Ctrl + C` copies selected clips to internal clipboard.
 - Also attempts to write to system clipboard (failure ignored, doesn't affect internal copy).
 - `Ctrl + V` aligns "leftmost start point among selected clips" to playhead position, other clips maintain relative spacing; ensures start point ≥ 0.
 - After paste/copy drag completion, automatically selects newly created copies.
 
 Property panel parameters:
+
 - **Length (Len)**: Adjust clip length
 - **Gain**: Adjust clip volume (0-2x)
 - **Playback Rate (Rate)**: Adjust playback speed for time stretching (0.1x-10x)
@@ -240,34 +246,34 @@ Clips display fade in/out visual effects for intuitive audio processing status v
 
 Pitch analysis performance significantly optimized via **parallel processing, intelligent caching, incremental refresh**, typical project speedup **3-9x**:
 
-| Scenario | Old Duration | Current Target | Optimization Method |
-| --------------------------- | ------------ | ---------- | ---------------------------- |
-| **Initial analysis** (10 clips) | 22-45s | 3-7s | Multi-core parallel (rayon) |
-| **Repeat analysis** (cached) | 22-45s | <100ms | LRU memory cache |
-| **Incremental refresh** (edit single clip) | 22-45s | 1-4s | Snapshot comparison (only reanalyze changed items) |
-| **Position change** (drag clip) | 22-45s | <100ms | Position-independent cache keys |
+| Scenario                                   | Old Duration | Current Target | Optimization Method                                |
+| ------------------------------------------ | ------------ | -------------- | -------------------------------------------------- |
+| **Initial analysis** (10 clips)            | 22-45s       | 3-7s           | Multi-core parallel (rayon)                        |
+| **Repeat analysis** (cached)               | 22-45s       | <100ms         | LRU memory cache                                   |
+| **Incremental refresh** (edit single clip) | 22-45s       | 1-4s           | Snapshot comparison (only reanalyze changed items) |
+| **Position change** (drag clip)            | 22-45s       | <100ms         | Position-independent cache keys                    |
 
 **Key Features**:
 
 1. **Intelligent caching**:
-   - Generate cache keys (Blake3 hash) based on audio content, parameters, BPM, etc.
-   - Position changes (dragging clips) don't trigger reanalysis
-   - LRU strategy automatically manages 100 clips capacity (~300-500MB)
+    - Generate cache keys (Blake3 hash) based on audio content, parameters, BPM, etc.
+    - Position changes (dragging clips) don't trigger reanalysis
+    - LRU strategy automatically manages 100 clips capacity (~300-500MB)
 
 2. **Incremental refresh**:
-   - Record previous timeline snapshot, compare to detect changes
-   - Only reanalyze added/modified clips
-   - Unchanged clips read from cache in milliseconds
+    - Record previous timeline snapshot, compare to detect changes
+    - Only reanalyze added/modified clips
+    - Unchanged clips read from cache in milliseconds
 
 3. **Parallel processing**:
-   - Use Rayon thread pool to parallel analyze multiple clips
-   - Sort by workload (duration × cache miss coefficient) for optimal load balancing
-   - Progress bar weighted by duration, shows real-time analysis progress
+    - Use Rayon thread pool to parallel analyze multiple clips
+    - Sort by workload (duration × cache miss coefficient) for optimal load balancing
+    - Progress bar weighted by duration, shows real-time analysis progress
 
 4. **Cache management**:
-   - Cache hit rate: >95% in typical workflows (repeat refresh scenarios)
-   - Cache statistics: Query via Tauri commands (cached_clips, capacity, hit_rate)
-   - Clear cache: Supports manual clearing or automatic LRU eviction
+    - Cache hit rate: >95% in typical workflows (repeat refresh scenarios)
+    - Cache statistics: Query via Tauri commands (cached_clips, capacity, hit_rate)
+    - Clear cache: Supports manual clearing or automatic LRU eviction
 
 **Usage Recommendations**:
 
@@ -287,6 +293,7 @@ Detailed implementation see [DEVELOPMENT.md - Pitch analysis performance optimiz
 ## Acknowledgments
 
 This project uses code or model architectures from the following open-source libraries:
+
 - [WORLD](https://github.com/mmorise/World) — High-quality speech analysis and synthesis system
 - [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — High-quality audio time stretching library (MIT)
 - [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — Audio analysis and synthesis library

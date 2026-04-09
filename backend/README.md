@@ -3,6 +3,7 @@
 本目录用于承载 HiFiShifter 的 Rust 后端与桌面壳，基于 **Tauri 2.0**。
 
 当前阶段目标：
+
 - 先跑通 Tauri 2.0 桌面壳（Rust commands + 事件），逐步替换原 Python/pywebview 的运行体系。
 - 前端 UI 复用仓库根目录的 `frontend/`（Vite + React），本目录不维护独立的 Web UI。
 

@@ -26,11 +26,7 @@
     },
     "bundle": {
         "active": true,
-        "targets": [
-            "nsis",
-            "dmg",
-            "appimage"
-        ],
+        "targets": ["nsis", "dmg", "appimage"],
         "windows": {
             "nsis": {
                 "installMode": "both"
