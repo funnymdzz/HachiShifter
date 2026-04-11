@@ -118,8 +118,13 @@ import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
 import { applySelectWheelChange } from "../../utils/selectWheel";
 import { parseCustomScaleToken } from "../../utils/scaleSelection";
+import {
+    centerFromVerticalScrollTop,
+    verticalScrollTopFromCenter,
+} from "./pianoRoll/verticalScrollMapping";
 
 const NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+const PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX = 1600;
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -195,6 +200,18 @@ export const PianoRollPanel: React.FC = () => {
     );
     const vibratoFrequencyAdjustKb = useAppSelector((state) =>
         selectKeybinding(state, "modifier.vibratoFrequencyAdjust"),
+    );
+    const vibratoDragAmplitudeIncreaseKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.vibratoDragAmplitudeIncrease"),
+    );
+    const vibratoDragAmplitudeDecreaseKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.vibratoDragAmplitudeDecrease"),
+    );
+    const vibratoDragFrequencyIncreaseKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.vibratoDragFrequencyIncrease"),
+    );
+    const vibratoDragFrequencyDecreaseKb = useAppSelector((state) =>
+        selectKeybinding(state, "pianoRoll.vibratoDragFrequencyDecrease"),
     );
     const mergedKeybindings = useAppSelector(selectMergedKeybindings);
     // 是否按住切换吸附的修饰键（临时切换吸附时用于高亮显示）
@@ -483,8 +500,10 @@ export const PianoRollPanel: React.FC = () => {
     const setPitchView = useCallback(
         (next: ValueViewport) => {
             pitchViewRef.current = next;
+            syncVerticalScrollbarForViewport("pitch", next);
             invalidate(); // 绕过 React 渲染，直接命令 Canvas 重绘
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [invalidate],
     );
 
@@ -492,8 +511,10 @@ export const PianoRollPanel: React.FC = () => {
     const setParamViewport = useCallback(
         (param: string, next: ValueViewport) => {
             paramViewsRef.current = { ...paramViewsRef.current, [param]: next };
+            syncVerticalScrollbarForViewport(param as ParamName, next);
             invalidate(); // 绕过 React 渲染，直接命令 Canvas 重绘
         },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [invalidate],
     );
 
@@ -1117,6 +1138,93 @@ export const PianoRollPanel: React.FC = () => {
         return { center, span };
     }
 
+    function getParamValueBoundsForScrollbar(param: ParamName): { min: number; max: number } {
+        if (param === "pitch") {
+            return { min: PITCH_MIN_MIDI, max: PITCH_MAX_MIDI };
+        }
+        if (isChildPitchOffsetCentsParam(param)) {
+            return {
+                min: CHILD_PITCH_OFFSET_CENTS_RANGE.min,
+                max: CHILD_PITCH_OFFSET_CENTS_RANGE.max,
+            };
+        }
+        if (isChildPitchOffsetDegreesParam(param)) {
+            return {
+                min: CHILD_PITCH_OFFSET_DEGREES_RANGE.min,
+                max: CHILD_PITCH_OFFSET_DEGREES_RANGE.max,
+            };
+        }
+
+        const desc = processorParamsRef.current.find((d) => d.id === param);
+        if (desc?.kind.type === "automation_curve") {
+            return {
+                min: desc.kind.min_value,
+                max: desc.kind.max_value,
+            };
+        }
+        return { min: 0, max: 1 };
+    }
+
+    function getCurrentViewportForScrollbar(param: ParamName): ValueViewport {
+        if (param === "pitch") {
+            return pitchViewRef.current;
+        }
+
+        const bounds = getParamValueBoundsForScrollbar(param);
+        return (
+            paramViewsRef.current[param] ?? {
+                center: (bounds.min + bounds.max) / 2,
+                span: Math.max(1e-6, bounds.max - bounds.min),
+            }
+        );
+    }
+
+    function syncVerticalScrollbarForViewport(param: ParamName, view: ValueViewport): void {
+        const scroller = scrollerRef.current;
+        if (!scroller) return;
+
+        const clampedView = clampViewport(param, view);
+        const bounds = getParamValueBoundsForScrollbar(param);
+        const nextTop = verticalScrollTopFromCenter({
+            min: bounds.min,
+            max: bounds.max,
+            span: clampedView.span,
+            center: clampedView.center,
+            scrollRangePx: PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX,
+        });
+
+        if (Math.abs(scroller.scrollTop - nextTop) > 0.75) {
+            scroller.scrollTop = nextTop;
+        }
+    }
+
+    function applyViewportFromVerticalScrollbar(scrollTop: number): void {
+        const param = editParam;
+        const currentView = clampViewport(param, getCurrentViewportForScrollbar(param));
+        const bounds = getParamValueBoundsForScrollbar(param);
+        const nextCenter = centerFromVerticalScrollTop({
+            min: bounds.min,
+            max: bounds.max,
+            span: currentView.span,
+            scrollTop,
+            scrollRangePx: PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX,
+        });
+        const nextView = clampViewport(param, {
+            span: currentView.span,
+            center: nextCenter,
+        });
+
+        if (Math.abs(nextView.center - currentView.center) <= 1e-6) {
+            return;
+        }
+
+        if (param === "pitch") {
+            setPitchView(nextView);
+        } else {
+            setParamViewport(param, nextView);
+        }
+    }
+
     const selectionRef = useRef<{ aBeat: number; bBeat: number } | null>(null);
     const [selectionUi, setSelectionUi] = useState<{
         aBeat: number;
@@ -1422,6 +1530,10 @@ export const PianoRollPanel: React.FC = () => {
         paramStretchKb: stretchKb,
         vibratoAmplitudeAdjustKb,
         vibratoFrequencyAdjustKb,
+        vibratoDragAmplitudeIncreaseKb,
+        vibratoDragAmplitudeDecreaseKb,
+        vibratoDragFrequencyIncreaseKb,
+        vibratoDragFrequencyDecreaseKb,
         paramFineAdjustKb,
         onContextMenu: useCallback((x: number, y: number) => {
             setCtxMenu({ x, y });
@@ -1466,6 +1578,31 @@ export const PianoRollPanel: React.FC = () => {
     });
 
     const onScrollerWheelNative = interactions.onScrollerWheelNative;
+    const onScrollerScroll = useCallback(
+        (e: React.UIEvent<HTMLDivElement>) => {
+            interactions.onScrollerScroll(e);
+
+            const scroller = e.currentTarget;
+            const currentView = clampViewport(editParam, getCurrentViewportForScrollbar(editParam));
+            const bounds = getParamValueBoundsForScrollbar(editParam);
+            const expectedTop = verticalScrollTopFromCenter({
+                min: bounds.min,
+                max: bounds.max,
+                span: currentView.span,
+                center: currentView.center,
+                scrollRangePx: PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX,
+            });
+
+            // 与当前视口计算出的滚动位置几乎一致时，说明是横向滚动或程序同步，不需要反向回写。
+            if (Math.abs(scroller.scrollTop - expectedTop) <= 0.75) {
+                return;
+            }
+
+            applyViewportFromVerticalScrollbar(scroller.scrollTop);
+        },
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [editParam, interactions],
+    );
     const scrollerWheelHandlerRef = useRef(onScrollerWheelNative);
 
     useLayoutEffect(() => {
@@ -1487,6 +1624,12 @@ export const PianoRollPanel: React.FC = () => {
             el.removeEventListener("wheel", handler);
         };
     }, []); // 空依赖
+
+    // 参数切换或参数描述符变化后，刷新竖向滚动条位置，保证滚动条与当前视口保持一致。
+    useLayoutEffect(() => {
+        syncVerticalScrollbarForViewport(editParam, getCurrentViewportForScrollbar(editParam));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editParam, processorParams]);
 
     // Auto-scroll: keep playhead visible in parameter editor during playback
     useEffect(() => {
@@ -1536,18 +1679,8 @@ export const PianoRollPanel: React.FC = () => {
                 horizontalZoomRequested,
             });
 
-            if (wheelAction === "horizontal-scroll") {
-                e.preventDefault();
-                const scroller = scrollerRef.current;
-                if (!scroller) return;
-                scroller.scrollLeft += horizontalScrollRequested ? e.deltaY : e.deltaX;
-                syncScrollLeft(scroller);
-                return;
-            }
-
-            if (wheelAction === "vertical-pan") {
-                e.preventDefault();
-                const delta = (-e.deltaY / h) * 0.5;
+            const applyVerticalPanDelta = (deltaY: number) => {
+                const delta = (-deltaY / h) * 0.5;
                 if (editParam === "pitch") {
                     const cur = pitchViewRef.current;
                     const next = clampViewport("pitch", {
@@ -1567,6 +1700,33 @@ export const PianoRollPanel: React.FC = () => {
                     setParamViewport(editParam, next);
                 }
                 invalidate();
+            };
+
+            const horizontalDelta = Math.abs(e.deltaX) > 0.5 ? e.deltaX : e.deltaY;
+
+            if (wheelAction === "free-scroll") {
+                e.preventDefault();
+                const scroller = scrollerRef.current;
+                if (scroller) {
+                    scroller.scrollLeft += e.deltaX;
+                    syncScrollLeft(scroller);
+                }
+                applyVerticalPanDelta(e.deltaY);
+                return;
+            }
+
+            if (wheelAction === "horizontal-scroll") {
+                e.preventDefault();
+                const scroller = scrollerRef.current;
+                if (!scroller) return;
+                scroller.scrollLeft += horizontalDelta;
+                syncScrollLeft(scroller);
+                return;
+            }
+
+            if (wheelAction === "vertical-pan") {
+                e.preventDefault();
+                applyVerticalPanDelta(e.deltaY);
                 return;
             }
 
@@ -3372,7 +3532,7 @@ export const PianoRollPanel: React.FC = () => {
 
                     <div
                         ref={scrollerRef}
-                        className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-hidden relative custom-scrollbar outline-none focus:outline-none focus-visible:outline-none"
+                        className="flex-1 bg-qt-graph-bg overflow-x-scroll overflow-y-scroll relative custom-scrollbar outline-none focus:outline-none focus-visible:outline-none"
                         data-piano-roll-scroller
                         tabIndex={0}
                         onFocus={() => {
@@ -3383,21 +3543,14 @@ export const PianoRollPanel: React.FC = () => {
                             interactions.onScrollerMouseDownCapture(e);
                         }}
                         onAuxClick={interactions.onScrollerAuxClick}
-                        onScroll={interactions.onScrollerScroll}
+                        onScroll={onScrollerScroll}
                         onContextMenu={interactions.onScrollerContextMenu}
                         onKeyDown={interactions.onScrollerKeyDown}
                     >
-                        {/* Spacer to provide scrollable width (must not consume full height) */}
-                        <div
-                            className="relative"
-                            style={{ width: contentWidth, height: 1 }}
-                            aria-hidden
-                        />
-
                         {/* Sticky viewport overlay: grid + canvas do not physically scroll */}
                         <div
                             className="sticky left-0 top-0 h-full"
-                            style={{ width: viewSize.w, overflow: "hidden" }}
+                            style={{ width: viewSize.w, overflow: "hidden", zIndex: 1 }}
                         >
                             <div className="relative h-full" style={{ width: viewSize.w }}>
                                 <BackgroundGrid
@@ -3444,6 +3597,17 @@ export const PianoRollPanel: React.FC = () => {
                                     })()}
                             </div>
                         </div>
+
+                        {/* Spacer：提供横向内容宽度与竖向滚动范围，实际绘制仍固定在 sticky 视口层。 */}
+                        <div
+                            className="relative"
+                            style={{
+                                width: contentWidth,
+                                height: PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX,
+                                pointerEvents: "none",
+                            }}
+                            aria-hidden
+                        />
                     </div>
                 </Flex>
             </Flex>

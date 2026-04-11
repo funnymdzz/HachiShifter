@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { batch } from "react-redux";
 import type { AppDispatch } from "../../../../app/store";
 import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
@@ -19,6 +20,12 @@ import { isModifierActive } from "../../../../features/keybindings/keybindingsSl
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { paramsApi } from "../../../../services/api";
 import { webApi } from "../../../../services/webviewApi";
+import {
+    buildStretchGroupState,
+    computeStretchGroupUpdate,
+    scaleClipFadesForStretch,
+    type StretchGroupState,
+} from "./stretchGroup";
 
 export function resolveStretchParamTypes(
     pitchEditUserModified: boolean | null | undefined,
@@ -153,12 +160,15 @@ export type EditDragState = {
     baseDurationFrames: number | null;
     baseSourceSampleRate: number | null;
     baseDurationSec: number | null;
+    stretchGroup: StretchGroupState | null;
 };
 
 export function useEditDrag(deps: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     sessionRef: React.RefObject<SessionState>;
     dispatch: AppDispatch;
+    multiSelectedClipIds: string[];
+    multiSelectedSet: Set<string>;
     snapBeat: (beat: number) => number;
     beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
     /** modifier.clipNoSnap 绑定 */
@@ -170,6 +180,8 @@ export function useEditDrag(deps: {
         scrollRef,
         sessionRef,
         dispatch,
+        multiSelectedClipIds,
+        multiSelectedSet,
         snapBeat,
         beatFromClientX,
         noSnapKb,
@@ -187,6 +199,20 @@ export function useEditDrag(deps: {
         const scroller = scrollRef.current;
         if (!scroller) return;
         const rightEdgeBeat = clip.startSec + clip.lengthSec;
+
+        const selectedClipIds =
+            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
+                ? [...multiSelectedClipIds]
+                : [clipId];
+        const stretchGroup =
+            type === "stretch_left" || type === "stretch_right"
+                ? buildStretchGroupState({
+                      clips: sessionRef.current.clips,
+                      selectedClipIds,
+                      anchorClipId: clipId,
+                      edge: type,
+                  })
+                : null;
 
         // 对于 gain 类型的拖动，使用 beginUndoGroup 将整个拖动操作包装为一个原子 undo entry
         if (type === "gain") {
@@ -214,6 +240,7 @@ export function useEditDrag(deps: {
             baseDurationFrames: clip.durationFrames ?? null,
             baseSourceSampleRate: clip.sourceSampleRate ?? null,
             baseDurationSec: clip.durationSec ?? null,
+            stretchGroup,
         };
 
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -303,6 +330,50 @@ export function useEditDrag(deps: {
                     return;
                 }
 
+                if (
+                    drag.stretchGroup &&
+                    (drag.type === "stretch_left" || drag.type === "stretch_right")
+                ) {
+                    const stretchGroup = drag.stretchGroup;
+                    const update = computeStretchGroupUpdate({
+                        group: stretchGroup,
+                        edge: drag.type,
+                        pointerSec: beat,
+                    });
+                    batch(() => {
+                        for (const clipId of stretchGroup.clipIds) {
+                            const next = update.byId[clipId];
+                            if (!next) continue;
+                            dispatch(
+                                moveClipStart({
+                                    clipId,
+                                    startSec: next.startSec,
+                                }),
+                            );
+                            dispatch(
+                                setClipLength({
+                                    clipId,
+                                    lengthSec: next.lengthSec,
+                                }),
+                            );
+                            dispatch(
+                                setClipPlaybackRate({
+                                    clipId,
+                                    playbackRate: next.playbackRate,
+                                }),
+                            );
+                            dispatch(
+                                setClipFades({
+                                    clipId,
+                                    fadeInSec: next.fadeInSec,
+                                    fadeOutSec: next.fadeOutSec,
+                                }),
+                            );
+                        }
+                    });
+                    return;
+                }
+
                 if (drag.type === "trim_left") {
                     const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
                     const desiredDelta = desiredStart - drag.basestartSec;
@@ -364,9 +435,22 @@ export function useEditDrag(deps: {
                     const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
                     const correctedLen = (baseRate * baseLen) / nextRate;
                     const nextStart = drag.rightEdgeBeat - correctedLen;
+                    const scaledFades = scaleClipFadesForStretch({
+                        baseFadeInSec: drag.basefadeInSec,
+                        baseFadeOutSec: drag.basefadeOutSec,
+                        baseLengthSec: drag.baselengthSec,
+                        nextLengthSec: correctedLen,
+                    });
                     dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
                     dispatch(setClipLength({ clipId: drag.clipId, lengthSec: correctedLen }));
                     dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
+                    dispatch(
+                        setClipFades({
+                            clipId: drag.clipId,
+                            fadeInSec: scaledFades.fadeInSec,
+                            fadeOutSec: scaledFades.fadeOutSec,
+                        }),
+                    );
                     return;
                 }
 
@@ -430,8 +514,21 @@ export function useEditDrag(deps: {
                             : 1;
                     const nextRate = clamp((baseRate * baseLen) / Math.max(1e-6, rawLen), 0.1, 10);
                     const correctedLen = (baseRate * baseLen) / nextRate;
+                    const scaledFades = scaleClipFadesForStretch({
+                        baseFadeInSec: drag.basefadeInSec,
+                        baseFadeOutSec: drag.basefadeOutSec,
+                        baseLengthSec: drag.baselengthSec,
+                        nextLengthSec: correctedLen,
+                    });
                     dispatch(setClipLength({ clipId: drag.clipId, lengthSec: correctedLen }));
                     dispatch(setClipPlaybackRate({ clipId: drag.clipId, playbackRate: nextRate }));
+                    dispatch(
+                        setClipFades({
+                            clipId: drag.clipId,
+                            fadeInSec: scaledFades.fadeInSec,
+                            fadeOutSec: scaledFades.fadeOutSec,
+                        }),
+                    );
                 }
             });
         }
@@ -444,8 +541,12 @@ export function useEditDrag(deps: {
             // 如果是 gain 类型的拖动，确保 undo group 被正确结束
             const wasGainType = drag.type === "gain";
 
+            const isGroupStretch =
+                drag.stretchGroup != null &&
+                (drag.type === "stretch_left" || drag.type === "stretch_right");
+
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
-            if (!clipNow) {
+            if (!isGroupStretch && !clipNow) {
                 // 即使 clip 不存在也要结束 undo group
                 if (wasGainType) {
                     void webApi.endUndoGroup();
@@ -453,72 +554,220 @@ export function useEditDrag(deps: {
                 dispatch(endInteraction());
                 return;
             }
+            const singleClipNow = clipNow ?? null;
+
+            const autoCrossfadeClipIds =
+                isGroupStretch && drag.stretchGroup ? drag.stretchGroup.clipIds : [drag.clipId];
+            const shouldApplyAutoCrossfade =
+                sessionRef.current.autoCrossfadeEnabled &&
+                (drag.type === "trim_left" ||
+                    drag.type === "trim_right" ||
+                    drag.type === "stretch_left" ||
+                    drag.type === "stretch_right");
+
+            const runInsideUndoGroup = async (task: () => Promise<void>): Promise<void> => {
+                await webApi.beginUndoGroup();
+                try {
+                    await task();
+                } finally {
+                    await webApi.endUndoGroup();
+                }
+            };
+
+            const runWithOptionalAutoCrossfade = async (
+                task: () => Promise<void>,
+            ): Promise<void> => {
+                if (!shouldApplyAutoCrossfade) {
+                    await task();
+                    return;
+                }
+
+                await runInsideUndoGroup(async () => {
+                    await task();
+                    await applyAutoCrossfade(sessionRef.current, autoCrossfadeClipIds, dispatch);
+                });
+            };
 
             // 交互锁在最终持久化请求完成后才释放，
             // 避免 endInteraction() 到 fulfilled 之间的窗口内，
             // 其他 in-flight thunk 的旧快照覆盖前端乐观更新导致闪烁。
 
             let persistPromise: Promise<unknown> | null = null;
-            if (drag.type === "trim_left") {
-                const sourceRangePatch = clipNow.reversed
-                    ? { sourceEndSec: clipNow.sourceEndSec }
-                    : { sourceStartSec: clipNow.sourceStartSec };
-                persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        startSec: clipNow.startSec,
-                        lengthSec: clipNow.lengthSec,
-                        ...sourceRangePatch,
-                    }),
-                ).unwrap();
-            } else if (drag.type === "trim_right") {
-                const sourceRangePatch = clipNow.reversed
-                    ? { sourceStartSec: clipNow.sourceStartSec }
-                    : { sourceEndSec: clipNow.sourceEndSec };
-                persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        lengthSec: clipNow.lengthSec,
-                        ...sourceRangePatch,
-                    }),
-                ).unwrap();
-            } else if (drag.type === "stretch_left") {
-                persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        startSec: clipNow.startSec,
-                        lengthSec: clipNow.lengthSec,
-                        playbackRate: clipNow.playbackRate,
-                    }),
-                ).unwrap();
-            } else if (drag.type === "stretch_right") {
-                persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        lengthSec: clipNow.lengthSec,
-                        playbackRate: clipNow.playbackRate,
-                    }),
-                ).unwrap();
-            } else if (drag.type === "fade_in") {
+            if (isGroupStretch && drag.stretchGroup) {
+                const stretchPatches = drag.stretchGroup.clipIds
+                    .map((id) => {
+                        const now = sessionRef.current.clips.find((c) => c.id === id);
+                        if (!now) return null;
+                        return {
+                            clipId: id,
+                            startSec: now.startSec,
+                            lengthSec: now.lengthSec,
+                            playbackRate: now.playbackRate,
+                            fadeInSec: now.fadeInSec,
+                            fadeOutSec: now.fadeOutSec,
+                        };
+                    })
+                    .filter(
+                        (
+                            patch,
+                        ): patch is {
+                            clipId: string;
+                            startSec: number;
+                            lengthSec: number;
+                            playbackRate: number;
+                            fadeInSec: number;
+                            fadeOutSec: number;
+                        } => patch != null,
+                    );
+
+                if (stretchPatches.length > 0) {
+                    persistPromise = runInsideUndoGroup(async () => {
+                        const stretchPersistPromises = stretchPatches.map((patch) =>
+                            dispatch(
+                                setClipStateRemote({
+                                    clipId: patch.clipId,
+                                    startSec: patch.startSec,
+                                    lengthSec: patch.lengthSec,
+                                    playbackRate: patch.playbackRate,
+                                    fadeInSec: patch.fadeInSec,
+                                    fadeOutSec: patch.fadeOutSec,
+                                    checkpoint: false,
+                                }),
+                            ).unwrap(),
+                        );
+                        await Promise.allSettled(stretchPersistPromises);
+
+                        if (shouldApplyAutoCrossfade) {
+                            await applyAutoCrossfade(
+                                sessionRef.current,
+                                autoCrossfadeClipIds,
+                                dispatch,
+                            );
+                        }
+                    });
+                }
+            } else if (drag.type === "trim_left" && singleClipNow) {
+                const sourceRangePatch = singleClipNow.reversed
+                    ? { sourceEndSec: singleClipNow.sourceEndSec }
+                    : { sourceStartSec: singleClipNow.sourceStartSec };
+                if (shouldApplyAutoCrossfade) {
+                    persistPromise = runWithOptionalAutoCrossfade(async () => {
+                        await dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                startSec: singleClipNow.startSec,
+                                lengthSec: singleClipNow.lengthSec,
+                                ...sourceRangePatch,
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
+                    });
+                } else {
+                    persistPromise = dispatch(
+                        setClipStateRemote({
+                            clipId: drag.clipId,
+                            startSec: singleClipNow.startSec,
+                            lengthSec: singleClipNow.lengthSec,
+                            ...sourceRangePatch,
+                        }),
+                    ).unwrap();
+                }
+            } else if (drag.type === "trim_right" && singleClipNow) {
+                const sourceRangePatch = singleClipNow.reversed
+                    ? { sourceStartSec: singleClipNow.sourceStartSec }
+                    : { sourceEndSec: singleClipNow.sourceEndSec };
+                if (shouldApplyAutoCrossfade) {
+                    persistPromise = runWithOptionalAutoCrossfade(async () => {
+                        await dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                lengthSec: singleClipNow.lengthSec,
+                                ...sourceRangePatch,
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
+                    });
+                } else {
+                    persistPromise = dispatch(
+                        setClipStateRemote({
+                            clipId: drag.clipId,
+                            lengthSec: singleClipNow.lengthSec,
+                            ...sourceRangePatch,
+                        }),
+                    ).unwrap();
+                }
+            } else if (drag.type === "stretch_left" && singleClipNow) {
+                if (shouldApplyAutoCrossfade) {
+                    persistPromise = runWithOptionalAutoCrossfade(async () => {
+                        await dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                startSec: singleClipNow.startSec,
+                                lengthSec: singleClipNow.lengthSec,
+                                playbackRate: singleClipNow.playbackRate,
+                                fadeInSec: singleClipNow.fadeInSec,
+                                fadeOutSec: singleClipNow.fadeOutSec,
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
+                    });
+                } else {
+                    persistPromise = dispatch(
+                        setClipStateRemote({
+                            clipId: drag.clipId,
+                            startSec: singleClipNow.startSec,
+                            lengthSec: singleClipNow.lengthSec,
+                            playbackRate: singleClipNow.playbackRate,
+                            fadeInSec: singleClipNow.fadeInSec,
+                            fadeOutSec: singleClipNow.fadeOutSec,
+                        }),
+                    ).unwrap();
+                }
+            } else if (drag.type === "stretch_right" && singleClipNow) {
+                if (shouldApplyAutoCrossfade) {
+                    persistPromise = runWithOptionalAutoCrossfade(async () => {
+                        await dispatch(
+                            setClipStateRemote({
+                                clipId: drag.clipId,
+                                lengthSec: singleClipNow.lengthSec,
+                                playbackRate: singleClipNow.playbackRate,
+                                fadeInSec: singleClipNow.fadeInSec,
+                                fadeOutSec: singleClipNow.fadeOutSec,
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
+                    });
+                } else {
+                    persistPromise = dispatch(
+                        setClipStateRemote({
+                            clipId: drag.clipId,
+                            lengthSec: singleClipNow.lengthSec,
+                            playbackRate: singleClipNow.playbackRate,
+                            fadeInSec: singleClipNow.fadeInSec,
+                            fadeOutSec: singleClipNow.fadeOutSec,
+                        }),
+                    ).unwrap();
+                }
+            } else if (drag.type === "fade_in" && singleClipNow) {
                 // 确保结束时把最终值持久化到后端
                 persistPromise = dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,
-                        fadeInSec: clipNow.fadeInSec,
+                        fadeInSec: singleClipNow.fadeInSec,
                     }),
                 ).unwrap();
-            } else if (drag.type === "fade_out") {
+            } else if (drag.type === "fade_out" && singleClipNow) {
                 persistPromise = dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,
-                        fadeOutSec: clipNow.fadeOutSec,
+                        fadeOutSec: singleClipNow.fadeOutSec,
                     }),
                 ).unwrap();
-            } else if (drag.type === "gain") {
+            } else if (drag.type === "gain" && singleClipNow) {
                 persistPromise = dispatch(
                     setClipStateRemote({
                         clipId: drag.clipId,
-                        gain: clipNow.gain,
+                        gain: singleClipNow.gain,
                     }),
                 ).unwrap();
                 // 结束 gain 拖动时调用 endUndoGroup，结束 undo group
@@ -527,26 +776,34 @@ export function useEditDrag(deps: {
                 });
             }
 
-            const shouldApplyAutoCrossfade =
-                sessionRef.current.autoCrossfadeEnabled &&
-                (drag.type === "trim_left" ||
-                    drag.type === "trim_right" ||
-                    drag.type === "stretch_left" ||
-                    drag.type === "stretch_right");
-            if (shouldApplyAutoCrossfade) {
-                void Promise.resolve(persistPromise).finally(() => {
-                    void applyAutoCrossfade(sessionRef.current, [drag.clipId], dispatch);
-                });
-            }
-
             // 拉伸后同步参数线：当"锁定参数线"启用时，将旧范围内的参数值时域映射到新范围
             const isStretch = drag.type === "stretch_left" || drag.type === "stretch_right";
-            if (isStretch && sessionRef.current.lockParamLinesEnabled && clipNow.trackId) {
-                const stretchTrackId = clipNow.trackId;
+            if (isStretch && sessionRef.current.lockParamLinesEnabled && drag.stretchGroup) {
+                const stretchTasks = drag.stretchGroup.clipIds.map((id) => {
+                    const initial = drag.stretchGroup?.initialById[id];
+                    const now = sessionRef.current.clips.find((c) => c.id === id);
+                    if (!initial || !now?.trackId) {
+                        return Promise.resolve();
+                    }
+                    return stretchLinkedParams(
+                        now.trackId,
+                        initial.startSec,
+                        initial.lengthSec,
+                        now.startSec,
+                        now.lengthSec,
+                    );
+                });
+                void Promise.resolve(persistPromise).then(() => Promise.allSettled(stretchTasks));
+            } else if (
+                isStretch &&
+                sessionRef.current.lockParamLinesEnabled &&
+                singleClipNow?.trackId
+            ) {
+                const stretchTrackId = singleClipNow.trackId;
                 const oldStartSec = drag.basestartSec;
                 const oldLengthSec = drag.baselengthSec;
-                const newStartSec = clipNow.startSec;
-                const newLengthSec = clipNow.lengthSec;
+                const newStartSec = singleClipNow.startSec;
+                const newLengthSec = singleClipNow.lengthSec;
                 void Promise.resolve(persistPromise).then(() =>
                     stretchLinkedParams(
                         stretchTrackId,
