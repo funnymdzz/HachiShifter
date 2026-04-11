@@ -494,6 +494,7 @@ export function useTimelineClipActions(
                                     clipId: u.clipId,
                                     fadeInSec: u.fadeInSec,
                                     fadeOutSec: u.fadeOutSec,
+                                    checkpoint: false,
                                 }),
                             ).unwrap(),
                         );

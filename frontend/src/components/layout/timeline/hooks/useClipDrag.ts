@@ -590,6 +590,7 @@ export function useClipDrag(deps: {
                                                 clipId: u.clipId,
                                                 fadeInSec: u.fadeInSec,
                                                 fadeOutSec: u.fadeOutSec,
+                                                checkpoint: false,
                                             }),
                                         ).unwrap(),
                                     );
@@ -687,9 +688,8 @@ export function useClipDrag(deps: {
                                 }
                             }
                             if (autoCrossfadeEnabled) {
-                                await new Promise((r) => setTimeout(r, 0));
                                 const latestSession = sessionRef.current;
-                                applyAutoCrossfade(latestSession, drag.clipIds, dispatch);
+                                await applyAutoCrossfade(latestSession, drag.clipIds, dispatch);
                             }
                         } catch {
                             batch(() => {
@@ -767,20 +767,26 @@ export function useClipDrag(deps: {
                                       moveLinkedParams: sessionRef.current.lockParamLinesEnabled,
                                   }),
                               ).unwrap();
-                    void Promise.resolve(movePromise).finally(() => {
-                        if (autoCrossfadeEnabled) {
-                            const latestSession = sessionRef.current;
-                            applyAutoCrossfade(latestSession, movedIds, dispatch);
+                    void (async () => {
+                        try {
+                            await movePromise;
+                        } finally {
+                            if (autoCrossfadeEnabled) {
+                                const latestSession = sessionRef.current;
+                                await applyAutoCrossfade(latestSession, movedIds, dispatch);
+                            }
+                            await webApi.endUndoGroup();
+                            dispatch(endInteraction());
                         }
-                        void webApi.endUndoGroup();
-                        dispatch(endInteraction());
-                    });
+                    })().catch(() => undefined);
                 } else {
-                    if (autoCrossfadeEnabled) {
-                        applyAutoCrossfade(session, drag.clipIds, dispatch);
-                    }
-                    void webApi.endUndoGroup();
-                    dispatch(endInteraction());
+                    void (async () => {
+                        if (autoCrossfadeEnabled) {
+                            await applyAutoCrossfade(session, drag.clipIds, dispatch);
+                        }
+                        await webApi.endUndoGroup();
+                        dispatch(endInteraction());
+                    })().catch(() => undefined);
                 }
             }
             window.removeEventListener("pointermove", onMove);

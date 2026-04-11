@@ -270,6 +270,8 @@ export const TimelinePanel: React.FC = () => {
         scrollRef,
         sessionRef,
         dispatch,
+        multiSelectedClipIds,
+        multiSelectedSet,
         snapBeat,
         beatFromClientX,
         noSnapKb,

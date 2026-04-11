@@ -39,6 +39,7 @@ async function syncAutoCrossfadeFromLatestTimeline(args: {
                     clipId: u.clipId,
                     fadeInSec: u.fadeInSec,
                     fadeOutSec: u.fadeOutSec,
+                    checkpoint: false,
                 }),
             ).unwrap(),
         );

@@ -19,7 +19,12 @@ export function applyAutoCrossfade(
     session: SessionState,
     movedIds: string[],
     dispatch: AppDispatch,
+    opts?: {
+        checkpoint?: boolean;
+    },
 ): Promise<void> {
+    const checkpoint = Boolean(opts?.checkpoint);
+
     // 收集每个 clip 的 fadeIn/fadeOut 由重叠产生的值
     const fadeInOverlaps = new Map<string, number>();
     const fadeOutOverlaps = new Map<string, number>();
@@ -95,6 +100,7 @@ export function applyAutoCrossfade(
             clipId: u.clipId,
             fadeInSec: u.fadeInSec,
             fadeOutSec: u.fadeOutSec,
+            checkpoint,
         }),
     );
     return Promise.allSettled(remotePromises).then(() => undefined);
