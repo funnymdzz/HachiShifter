@@ -52,6 +52,10 @@ export type ActionId =
     | "pianoRoll.shiftParamDown" // 选中 clip 参数线整体下移
     | "pianoRoll.shiftParamUpSelection" // 参数编辑器选择范围内参数线上移
     | "pianoRoll.shiftParamDownSelection" // 参数编辑器选择范围内参数线下移
+    | "pianoRoll.vibratoDragAmplitudeIncrease" // 直线/颤音拖拽时增大振幅
+    | "pianoRoll.vibratoDragAmplitudeDecrease" // 直线/颤音拖拽时减小振幅
+    | "pianoRoll.vibratoDragFrequencyIncrease" // 直线/颤音拖拽时增大频率
+    | "pianoRoll.vibratoDragFrequencyDecrease" // 直线/颤音拖拽时减小频率
     // 模式切换
     | "mode.toggle" // 模式切换（正向）
     | "mode.selectTool" // 切换到选择工具

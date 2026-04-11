@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Dialog, Flex, Text, Button, ScrollArea, Separator } from "@radix-ui/themes";
-import { ResetIcon, Cross2Icon } from "@radix-ui/react-icons";
+import { Dialog, Flex, Text, Button, ScrollArea, Separator, Select } from "@radix-ui/themes";
+import { Cross2Icon } from "@radix-ui/react-icons";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import {
@@ -19,6 +19,12 @@ import {
     GROUP_LABEL_KEYS,
 } from "../../features/keybindings/defaultKeybindings";
 import type { ActionId, Keybinding } from "../../features/keybindings/types";
+import {
+    KEYBINDING_PRESET_SELECTION_IDS,
+    KEYBINDING_PRESETS,
+    isKeybindingPresetId,
+    type KeybindingPresetSelectionId,
+} from "../../features/keybindings/keybindingPresets";
 
 /** "无" 绑定常量 */
 const NONE_BINDING: Keybinding = { key: "__none__" };
@@ -58,6 +64,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
         newBinding: Keybinding;
         conflictWith: ActionId[];
     } | null>(null);
+    const [selectedPreset, setSelectedPreset] = useState<KeybindingPresetSelectionId>("custom");
 
     const recordingRef = useRef(recordingId);
     useEffect(() => {
@@ -106,6 +113,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                     return;
                 }
                 dispatch(setKeybinding({ actionId: currentId, binding: newBinding }));
+                setSelectedPreset("custom");
                 setRecordingId(null);
                 return;
             }
@@ -139,6 +147,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
             }
 
             dispatch(setKeybinding({ actionId: currentId, binding: newBinding }));
+            setSelectedPreset("custom");
             setRecordingId(null);
         }
 
@@ -159,6 +168,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                 binding: conflict.newBinding,
             }),
         );
+        setSelectedPreset("custom");
         setConflict(null);
         setRecordingId(null);
     }, [conflict, dispatch]);
@@ -167,9 +177,42 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
         setConflict(null);
     }, []);
 
-    const handleResetAll = useCallback(() => {
-        dispatch(resetAllKeybindings());
-    }, [dispatch]);
+    const handleApplyPreset = useCallback(
+        (value: string) => {
+            if (value === "custom") {
+                setSelectedPreset("custom");
+                return;
+            }
+
+            if (value === "default") {
+                dispatch(resetAllKeybindings());
+                setSelectedPreset("default");
+                setConflict(null);
+                setRecordingId(null);
+                return;
+            }
+
+            if (!isKeybindingPresetId(value)) {
+                setSelectedPreset("custom");
+                return;
+            }
+
+            const preset = KEYBINDING_PRESETS[value];
+            for (const [actionId, binding] of Object.entries(preset)) {
+                dispatch(
+                    setKeybinding({
+                        actionId: actionId as ActionId,
+                        binding,
+                    }),
+                );
+            }
+
+            setSelectedPreset(value);
+            setConflict(null);
+            setRecordingId(null);
+        },
+        [dispatch],
+    );
 
     // 按分组组织操作
     const groups = React.useMemo(() => {
@@ -211,10 +254,14 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
             )}
             <Dialog.Content
                 style={{
+                    width: "min(560px, 92vw)",
                     maxWidth: 560,
                     maxHeight: "80vh",
                     zIndex: 9999,
-                    overflowY: "hidden",
+                    overflow: "hidden",
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
                 }}
                 onPointerDownOutside={(e) => {
                     // 如果正在录入，阻止点击外部关闭
@@ -233,7 +280,23 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                     {tAny("kb_dialog_hint_click")}
                 </Text>
 
-                <ScrollArea style={{ maxHeight: "calc(80vh - 160px)" }} scrollbars="vertical">
+                <Flex align="center" gap="2" mt="2" mb="2">
+                    <Text size="2" color="gray" style={{ whiteSpace: "nowrap" }}>
+                        {tAny("kb_preset_label")}
+                    </Text>
+                    <Select.Root value={selectedPreset} onValueChange={handleApplyPreset}>
+                        <Select.Trigger style={{ minWidth: 220 }} />
+                        <Select.Content>
+                            {KEYBINDING_PRESET_SELECTION_IDS.map((presetId) => (
+                                <Select.Item key={presetId} value={presetId}>
+                                    {tAny(`kb_preset_${presetId}`)}
+                                </Select.Item>
+                            ))}
+                        </Select.Content>
+                    </Select.Root>
+                </Flex>
+
+                <ScrollArea style={{ flex: 1, minHeight: 0, marginTop: 8 }} scrollbars="vertical">
                     <Flex direction="column" gap="3" py="3">
                         {groups.map(({ group, actions }) => (
                             <Flex direction="column" gap="1" key={group}>
@@ -304,6 +367,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                                                                     binding: NONE_BINDING,
                                                                 }),
                                                             );
+                                                            setSelectedPreset("custom");
                                                             setRecordingId(null);
                                                             setConflict(null);
                                                         } else {
@@ -315,6 +379,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                                                         e.preventDefault();
                                                         // 右键点击 → 直接重置为默认
                                                         dispatch(resetKeybinding(actionId));
+                                                        setSelectedPreset("custom");
                                                         setRecordingId(null);
                                                         setConflict(null);
                                                     }}
@@ -370,11 +435,7 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
                 )}
 
                 {/* 底部按钮 */}
-                <Flex justify="between" align="center" pt="3">
-                    <Button variant="soft" color="gray" size="2" onClick={handleResetAll}>
-                        <ResetIcon />
-                        {tAny("kb_reset_all")}
-                    </Button>
+                <Flex justify="end" align="center" pt="3">
                     <Dialog.Close>
                         <Button variant="soft" color="gray" size="2">
                             <Cross2Icon />

@@ -165,9 +165,19 @@ export const TimelineScrollArea: React.FC<
                 horizontalZoomRequested,
             });
 
+            const horizontalDelta = Math.abs(e.deltaX) > 0.5 ? e.deltaX : e.deltaY;
+
+            if (wheelAction === "free-scroll") {
+                e.preventDefault();
+                scroller.scrollLeft += e.deltaX;
+                scroller.scrollTop += e.deltaY;
+                syncScrollLeft(scroller);
+                return;
+            }
+
             if (wheelAction === "horizontal-scroll") {
                 e.preventDefault();
-                scroller.scrollLeft += horizontalScrollRequested ? e.deltaY : e.deltaX;
+                scroller.scrollLeft += horizontalDelta;
                 syncScrollLeft(scroller);
                 return;
             }

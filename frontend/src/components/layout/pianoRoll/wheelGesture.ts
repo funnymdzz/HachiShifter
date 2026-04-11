@@ -1,2 +1,6 @@
-export { getParamEditorWheelAction, getWheelGestureAxis } from "../wheelGesture.js";
-export type { ParamEditorWheelAction } from "../wheelGesture.js";
+export {
+    getParamEditorWheelAction,
+    getVibratoDragWheelTarget,
+    getWheelGestureAxis,
+} from "../wheelGesture.js";
+export type { ParamEditorWheelAction, VibratoDragWheelTarget } from "../wheelGesture.js";

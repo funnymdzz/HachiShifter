@@ -15,7 +15,7 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     // 播放控制
     "playback.toggle": { key: "space" },
     "playback.stop": { key: "enter" }, // 停止并回到本次播放起点
-    "playback.focusCursor": { key: "\\" }, // 聚焦播放光标
+    "playback.focusCursor": { key: "'" }, // 聚焦播放光标
     "playback.seekLeft": { key: "arrowleft" },
     "playback.seekRight": { key: "arrowright" },
     "timeline.zoomIn": { key: "__none__" },
@@ -65,6 +65,10 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
     "pianoRoll.shiftParamDown": { key: "-" },
     "pianoRoll.shiftParamUpSelection": { key: "]" },
     "pianoRoll.shiftParamDownSelection": { key: "[" },
+    "pianoRoll.vibratoDragAmplitudeIncrease": { key: "arrowup" },
+    "pianoRoll.vibratoDragAmplitudeDecrease": { key: "arrowdown" },
+    "pianoRoll.vibratoDragFrequencyIncrease": { key: "arrowleft" },
+    "pianoRoll.vibratoDragFrequencyDecrease": { key: "arrowright" },
 
     // 修饰键行为
     "modifier.clipSlipEdit": { key: "alt", modifierOnly: true, alt: true },
@@ -83,12 +87,8 @@ export const DEFAULT_KEYBINDINGS: KeybindingMap = {
         shift: true,
     },
     "modifier.scrollVertical": { key: "alt", modifierOnly: true, alt: true },
-    "modifier.pianoKeysVerticalScroll": {
-        key: "alt",
-        modifierOnly: true,
-        alt: true,
-    },
-    "modifier.pianoKeysVerticalZoom": { key: "__none__", modifierOnly: true },
+    "modifier.pianoKeysVerticalScroll": { key: "__none__", modifierOnly: true },
+    "modifier.pianoKeysVerticalZoom": { key: "alt", modifierOnly: true, alt: true },
     "modifier.paramMorph": { key: "alt", modifierOnly: true, alt: true },
     "modifier.paramFineAdjust": { key: "control", modifierOnly: true, ctrl: true },
     "modifier.vibratoAmplitudeAdjust": { key: "__none__", modifierOnly: true },
@@ -226,6 +226,26 @@ export const ACTION_META: Record<ActionId, ActionMeta> = {
     "pianoRoll.shiftParamDownSelection": {
         labelKey: "kb_pianoroll_shift_param_down_selection",
         group: "pianoRoll",
+    },
+    "pianoRoll.vibratoDragAmplitudeIncrease": {
+        labelKey: "kb_pianoroll_vibrato_drag_amp_increase",
+        group: "pianoRoll",
+        scopedContext: "pianoRollVibratoDrag",
+    },
+    "pianoRoll.vibratoDragAmplitudeDecrease": {
+        labelKey: "kb_pianoroll_vibrato_drag_amp_decrease",
+        group: "pianoRoll",
+        scopedContext: "pianoRollVibratoDrag",
+    },
+    "pianoRoll.vibratoDragFrequencyIncrease": {
+        labelKey: "kb_pianoroll_vibrato_drag_freq_increase",
+        group: "pianoRoll",
+        scopedContext: "pianoRollVibratoDrag",
+    },
+    "pianoRoll.vibratoDragFrequencyDecrease": {
+        labelKey: "kb_pianoroll_vibrato_drag_freq_decrease",
+        group: "pianoRoll",
+        scopedContext: "pianoRollVibratoDrag",
     },
 
     "modifier.clipSlipEdit": {
