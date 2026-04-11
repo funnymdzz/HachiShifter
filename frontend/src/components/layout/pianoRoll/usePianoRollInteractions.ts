@@ -57,6 +57,7 @@ import {
     readSystemClipboardObject,
     writeSystemClipboardObject,
 } from "../../../utils/systemClipboard";
+import { secFromViewportClientX } from "./seekPlayheadMapping";
 
 type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing" | "ew-resize";
 
@@ -71,6 +72,7 @@ export function usePianoRollInteractions(args: {
     secPerBeat: number;
     scrollLeftRef: MutableRefObject<number>;
     pxPerBeatRef: MutableRefObject<number>;
+    pxPerSecRef: MutableRefObject<number>;
     setPxPerBeat: (next: number) => void;
     /** 当前 BPM，用于动态计算 pxPerBeat 的合法范围 */
     bpm: number;
@@ -226,6 +228,7 @@ export function usePianoRollInteractions(args: {
         secPerBeat,
         scrollLeftRef,
         pxPerBeatRef,
+        pxPerSecRef,
         setPxPerBeat,
         bpm,
         dynamicProjectSec,
@@ -1116,11 +1119,26 @@ export function usePianoRollInteractions(args: {
             if (!canvas) return 0;
             const rect = canvas.getBoundingClientRect();
             const x = clientX - rect.left;
-            const sl = scrollLeftRef.current;
+            const sl = scrollerRef.current?.scrollLeft ?? scrollLeftRef.current;
             const ppb = pxPerBeatRef.current;
             return (sl + x) / Math.max(1e-9, ppb);
         },
-        [canvasRef, scrollLeftRef, pxPerBeatRef],
+        [canvasRef, scrollerRef, scrollLeftRef, pxPerBeatRef],
+    );
+
+    const pointerSec = useCallback(
+        (clientX: number): number => {
+            const canvas = canvasRef.current;
+            if (!canvas) return 0;
+            const rect = canvas.getBoundingClientRect();
+            return secFromViewportClientX({
+                clientX,
+                viewportLeft: rect.left,
+                scrollLeft: scrollerRef.current?.scrollLeft ?? scrollLeftRef.current,
+                pxPerSec: pxPerSecRef.current,
+            });
+        },
+        [canvasRef, scrollerRef, scrollLeftRef, pxPerSecRef],
     );
 
     const pointerValue = useCallback(
@@ -1141,15 +1159,21 @@ export function usePianoRollInteractions(args: {
         (e: ReactMouseEvent<HTMLDivElement>) => {
             if (e.button !== 0) return;
             const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const sl = scrollLeftRef.current;
-            const ppb = pxPerBeatRef.current;
-            const beat = clamp((e.clientX - bounds.left + sl) / Math.max(1e-9, ppb), 0, 1e12);
-            // beat → sec：playheadSec 存储的是秒，必须转换后再 dispatch
-            const sec = beat * secPerBeat;
+            const sl = scrollerRef.current?.scrollLeft ?? scrollLeftRef.current;
+            const sec = clamp(
+                secFromViewportClientX({
+                    clientX: e.clientX,
+                    viewportLeft: bounds.left,
+                    scrollLeft: sl,
+                    pxPerSec: pxPerSecRef.current,
+                }),
+                0,
+                1e12,
+            );
             dispatch(setplayheadSec(sec));
             void dispatch(seekPlayhead(sec));
         },
-        [dispatch, scrollLeftRef, pxPerBeatRef, secPerBeat],
+        [dispatch, scrollerRef, scrollLeftRef, pxPerSecRef],
     );
 
     const onScrollerMouseDownCapture = useCallback((e: ReactMouseEvent) => {
@@ -1652,12 +1676,16 @@ export function usePianoRollInteractions(args: {
         const onKeyDown = (e: globalThis.KeyboardEvent) => {
             if (!vibratoStateRef.current) return;
 
-            const adjustment = resolveVibratoDragKeyboardAdjustment(e, {
-                amplitudeIncrease: vibratoDragAmplitudeIncreaseKb,
-                amplitudeDecrease: vibratoDragAmplitudeDecreaseKb,
-                frequencyIncrease: vibratoDragFrequencyIncreaseKb,
-                frequencyDecrease: vibratoDragFrequencyDecreaseKb,
-            }, paramFineAdjustKb);
+            const adjustment = resolveVibratoDragKeyboardAdjustment(
+                e,
+                {
+                    amplitudeIncrease: vibratoDragAmplitudeIncreaseKb,
+                    amplitudeDecrease: vibratoDragAmplitudeDecreaseKb,
+                    frequencyIncrease: vibratoDragFrequencyIncreaseKb,
+                    frequencyDecrease: vibratoDragFrequencyDecreaseKb,
+                },
+                paramFineAdjustKb,
+            );
             if (!adjustment) return;
 
             e.preventDefault();
@@ -1828,8 +1856,7 @@ export function usePianoRollInteractions(args: {
             }
 
             if (e.button === 0 && paramEditorSeekPlayheadEnabled !== false) {
-                const beat = pointerBeat(e.clientX);
-                const sec = Math.max(0, beat * secPerBeat);
+                const sec = pointerSec(e.clientX);
                 dispatch(setplayheadSec(sec));
                 void dispatch(seekPlayhead(sec));
             }
@@ -3673,6 +3700,7 @@ export function usePianoRollInteractions(args: {
             setParamViewport,
             invalidate,
             pointerBeat,
+            pointerSec,
             selectionRef,
             updateSelectionUi,
             paramViewRef,

@@ -335,7 +335,6 @@ jobs:
         with:
           projectPath: backend/src-tauri
           args: ${{ matrix.tauri_args }}
-          uploadWorkflowArtifacts: false
           workflowArtifactNamePattern: "[name]_v[version]_[platform]-[arch]-[bundle][setup]"
 
       - name: Build Linux AppImage via tauri-action (primary)
@@ -351,7 +350,6 @@ jobs:
         with:
           projectPath: backend/src-tauri
           args: --target ${{ matrix.cargo_target }} --bundles appimage -- --no-default-features --features ${{ matrix.cargo_features }}
-          uploadWorkflowArtifacts: false
           workflowArtifactNamePattern: "[name]_v[version]_[platform]-[arch]-[bundle][setup]"
 
       - name: Dump linuxdeploy diagnostics on failure (Linux)

@@ -75,10 +75,7 @@ export function getVibratoDragWheelTarget(input: {
 
     // Touchpad gestures do not require modifiers while dragging with line/vibrato tool.
     if (isLikelyTouchpadWheelGesture(input)) {
-        if (
-            absX > WHEEL_AXIS_EPSILON &&
-            absX >= absY * VIBRATO_TOUCHPAD_FREQUENCY_AXIS_RATIO
-        ) {
+        if (absX > WHEEL_AXIS_EPSILON && absX >= absY * VIBRATO_TOUCHPAD_FREQUENCY_AXIS_RATIO) {
             return "frequency";
         }
         return "amplitude";

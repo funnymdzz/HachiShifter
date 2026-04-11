@@ -23,10 +23,7 @@ export type VibratoDragKeyboardAdjustment = {
     direction: VibratoAdjustDirection;
 };
 
-function clearFineModifierState(
-    event: KeyboardEvent,
-    fineAdjustKb: Keybinding,
-): KeyboardEvent {
+function clearFineModifierState(event: KeyboardEvent, fineAdjustKb: Keybinding): KeyboardEvent {
     return {
         key: event.key,
         code: event.code,

@@ -394,6 +394,12 @@ export const PianoRollPanel: React.FC = () => {
         if (Math.abs(prevBpm - s.bpm) < 1e-9) return;
         const ratio = prevBpm / Math.max(1e-6, s.bpm);
         const newScrollLeft = scrollLeftRef.current * ratio;
+        const scroller = scrollerRef.current;
+        if (scroller) {
+            scroller.scrollLeft = newScrollLeft;
+            syncScrollLeft(scroller);
+            return;
+        }
         scrollLeftRef.current = newScrollLeft;
         setScrollLeft(newScrollLeft);
     }, [s.bpm]);
@@ -1490,6 +1496,7 @@ export const PianoRollPanel: React.FC = () => {
         dynamicProjectSec,
         scrollLeftRef,
         pxPerBeatRef,
+        pxPerSecRef,
         setPxPerBeat: setPxPerBeatImmediate,
         setPitchView,
         setParamViewport,
