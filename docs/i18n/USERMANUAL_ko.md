@@ -16,6 +16,12 @@ HiFiShifter는 그래픽 보컬 편집 및 합성 도구입니다. 멀티트랙 
 
 - Linux 버전은 AppImage 패키지를 제공합니다. AppImage 패키지는 파일의 `속성 -> 권한`에서 `파일을 프로그램으로 실행 허용`을 체크한 후 직접 실행할 수 있습니다.
 
+**WebView 정보**: HiFiShifter 는 Rust + Tauri 프레임워크로 구축되었으며, 인터페이스를 표시하려면 WebView 구성 요소가 필요합니다.
+
+- **Windows**: Edge WebView2 가 필요합니다. Windows 10 (버전 1803 이상) 및 Windows 11 에는 사전 설치되어 있으므로 추가 작업이 필요하지 않습니다. 이전 버전의 Windows를 사용하거나 구성 요소가 없는 경우 설치 프로그램이 자동으로 다운로드하라는 메시지를 표시합니다. 자세한 내용은 [Tauri 공식 문서](https://tauri.app/ko/start/prerequisites/#webview2)를 참조하세요. 일반 사용자는 설치 프로그램을 실행하기만 하면 됩니다.
+- **macOS**: 시스템에 WebKit이 포함되어 있으므로 추가 설치가 필요하지 않습니다.
+- **Linux**: WebKitGTK 가 필요합니다. 대부분의 주요 배포판(Ubuntu, Fedora, Arch Linux 등)에는 기본적으로 포함되어 있습니다. 누락된 경우 패키지 관리자를 사용하여 `webkit2gtk` 를 설치하세요(예: `sudo apt install webkit2gtk`). 자세한 내용은 해당 배포판의 문서를 참조하세요.
+
 ## 2. 기능 소개
 
 소프트웨어의 대략적인 작동 로직과 단축키는 Reaper, VocalShifter, VEGAS Pro 등의 DAW 소프트웨어를 참고할 수 있습니다. `보기 -> 키보드 단축키`에서 자신의 단축키 선호도를 조정할 수 있습니다. 아래 설명은 모두 기본 단축키를 기준으로 합니다.

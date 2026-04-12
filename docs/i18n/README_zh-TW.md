@@ -1,12 +1,12 @@
 # HiFiShifter
 
-[简体中文](README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
+[简体中文](../../README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
 HiFiShifter 是一個圖形化人聲編輯與合成工具。它支援多軌道音訊片段處理，並以軌道組為單位，使用多種聲碼器完成人聲修音、人力調參功能，實現人力 VOCALOID 製作的拼調一體化。
 
 **當前專案仍在開發迭代中，未對全鏈路進行測試，可能存在諸多 BUG 或不穩定問題。**
 
-![預覽圖](docs/preview.png)
+![預覽圖](../preview.png)
 
 ## 安裝
 
@@ -164,12 +164,31 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+前端啟動模式可透過環境變數 `TAURI_UI_MODE` 切換：
+
+- `dev`：開發模式（預設，使用 Vite dev server，支援熱更新）
+- `build`：建置模式（先建置前端靜態資源，再啟動）
+
+Linux/macOS（bash/zsh）：
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell：
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **注意：** 首次編譯需要很長的時間，請耐心等待。
 
 ## 文件
 
 - [使用手冊](USERMANUAL_zh-TW.md)
-- [更新計畫](todo.md)
+- [更新計畫](../../todo.md)
 
 ## 致謝
 
@@ -183,4 +202,4 @@ cargo tauri dev
 
 ## 授權條款
 
-本專案基於 [MIT 授權條款](LICENSE) 發布。
+本專案基於 [MIT 授權條款](../../LICENSE) 發布。

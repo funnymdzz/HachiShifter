@@ -1,13 +1,13 @@
 import { useEffect, useRef } from "react";
 import { useAppSelector } from "../../app/hooks";
-import { selectMergedKeybindings } from "./keybindingsSlice";
+import { isModifierActive, selectMergedKeybindings } from "./keybindingsSlice";
 import { ACTION_META } from "./defaultKeybindings";
 import type { ActionId, Keybinding, KeybindingMap } from "./types";
 import type { RootState } from "../../app/store";
 const IS_MAC =
     typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
-const EXCLUDE_QUICK_SEARCH = new Set(["quickSearch"]);
-const EXCLUDE_BOTH = new Set(["paramEditorSelect", "quickSearch"]);
+const EXCLUDE_QUICK_SEARCH = new Set(["quickSearch", "pianoRollVibratoDrag"]);
+const EXCLUDE_BOTH = new Set(["paramEditorSelect", "quickSearch", "pianoRollVibratoDrag"]);
 const REPEATABLE_ACTIONS = new Set<ActionId>([
     "playback.seekLeft",
     "playback.seekRight",
@@ -16,6 +16,12 @@ const REPEATABLE_ACTIONS = new Set<ActionId>([
     "track.selectUp",
     "track.selectDown",
 ]);
+const VIBRATO_DRAG_KEYBOARD_ACTIONS: ActionId[] = [
+    "pianoRoll.vibratoDragAmplitudeIncrease",
+    "pianoRoll.vibratoDragAmplitudeDecrease",
+    "pianoRoll.vibratoDragFrequencyIncrease",
+    "pianoRoll.vibratoDragFrequencyDecrease",
+];
 /**
  * 判断当前焦点是否在可编辑元素上（输入框等），此时不拦截快捷键
  */
@@ -56,6 +62,31 @@ export function matchesKeybinding(e: KeyboardEvent, kb: Keybinding): boolean {
     if (e.shiftKey !== wantShift) return false;
     if (e.altKey !== wantAlt) return false;
     return true;
+}
+
+function clearFineModifierState(e: KeyboardEvent, fineAdjustKb: Keybinding): KeyboardEvent {
+    return {
+        key: e.key,
+        code: e.code,
+        ctrlKey: fineAdjustKb.ctrl ? false : e.ctrlKey,
+        metaKey: fineAdjustKb.ctrl ? false : e.metaKey,
+        shiftKey: fineAdjustKb.shift ? false : e.shiftKey,
+        altKey: fineAdjustKb.alt ? false : e.altKey,
+    } as KeyboardEvent;
+}
+
+function matchesKeybindingAllowingFineModifier(
+    e: KeyboardEvent,
+    kb: Keybinding,
+    fineAdjustKb?: Keybinding,
+): boolean {
+    if (matchesKeybinding(e, kb)) {
+        return true;
+    }
+    if (!fineAdjustKb || !isModifierActive(fineAdjustKb, e as any)) {
+        return false;
+    }
+    return matchesKeybinding(clearFineModifierState(e, fineAdjustKb), kb);
 }
 
 /**
@@ -134,6 +165,18 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
             // Quick Search 打开时，交给弹窗自身输入框处理（避免 ↑/↓ 与时间轴缩放冲突）
             if (document.body.hasAttribute("data-quick-search-open")) return;
 
+            // 直线/颤音拖拽期间，命中振幅/频率方向键时，交给参数编辑器本地监听处理。
+            if (document.body.hasAttribute("data-piano-roll-vibrato-drag-active")) {
+                const fineAdjustKb = keybindingsRef.current["modifier.paramFineAdjust"];
+                for (const actionId of VIBRATO_DRAG_KEYBOARD_ACTIONS) {
+                    const kb = keybindingsRef.current[actionId];
+                    if (!kb || kb.modifierOnly) continue;
+                    if (matchesKeybindingAllowingFineModifier(e, kb, fineAdjustKb)) {
+                        return;
+                    }
+                }
+            }
+
             const active = document.activeElement as HTMLElement | null;
             const focusWindow = document.body.getAttribute("data-hs-focus-window");
             const inPianoRoll =
@@ -162,6 +205,12 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
             if (inPianoRoll) {
                 // 查找匹配的 actionId，如果属于 pianoRoll.* 则放行给 PianoRoll 自己处理
                 const matchedAction = findMatchingAction(e, keybindingsRef.current);
+                if (
+                    matchedAction &&
+                    ACTION_META[matchedAction]?.scopedContext === "pianoRollVibratoDrag"
+                ) {
+                    return;
+                }
                 if (
                     matchedAction?.startsWith("pianoRoll.") &&
                     matchedAction !== "pianoRoll.shiftParamUp" &&

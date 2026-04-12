@@ -1,27 +1,27 @@
 {
-	"version": "2.0.0",
-	"tasks": [
-		{
-			"label": "cargo-check-backend-lib",
-			"type": "shell",
-			"command": "cargo",
-			"args": ["check", "--lib", "-q"],
-			"options": {
-				"cwd": "${workspaceFolder}"
-			},
-			"isBackground": false,
-			"group": "build"
-		},
-		{
-			"label": "cargo-check-backend-lib-tauri",
-			"type": "shell",
-			"command": "cargo",
-			"args": ["check", "--lib", "-q"],
-			"options": {
-				"cwd": "${workspaceFolder}/backend/src-tauri"
-			},
-			"isBackground": false,
-			"group": "build"
-		}
-	]
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "cargo-check-backend-lib",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["check", "--lib", "-q"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "isBackground": false,
+            "group": "build"
+        },
+        {
+            "label": "cargo-check-backend-lib-tauri",
+            "type": "shell",
+            "command": "cargo",
+            "args": ["check", "--lib", "-q"],
+            "options": {
+                "cwd": "${workspaceFolder}/backend/src-tauri"
+            },
+            "isBackground": false,
+            "group": "build"
+        }
+    ]
 }

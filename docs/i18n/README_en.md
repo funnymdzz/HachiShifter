@@ -1,12 +1,12 @@
 # HiFiShifter
 
-[简体中文](README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
+[简体中文](../../README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
 HiFiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for vocal, integrating splicing and tuning for Jinriki VOCALOID production.
 
 **The project is still under active development. Full-chain testing has not been completed, so there may be many bugs or instability issues.**
 
-![Preview](docs/preview.png)
+![Preview](../preview.png)
 
 ## Installation
 
@@ -164,12 +164,31 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+You can switch frontend startup mode via `TAURI_UI_MODE`:
+
+- `dev`: development mode (default, uses Vite dev server with hot reload)
+- `build`: build mode (build frontend static assets first, then start)
+
+Linux/macOS (bash/zsh):
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell:
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **Note:** The first compilation will take a long time. Please be patient.
 
 ## Documentation
 
 - [User Manual](USERMANUAL_en.md)
-- [Todo List](todo.md)
+- [Todo List](../../todo.md)
 
 ## Acknowledgements
 
@@ -183,4 +202,4 @@ This project uses code or model architectures from the following open-source lib
 
 ## License
 
-This project is released under the [MIT License](LICENSE).
+This project is released under the [MIT License](../../LICENSE).

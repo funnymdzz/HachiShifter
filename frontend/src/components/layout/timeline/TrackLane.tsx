@@ -11,6 +11,44 @@ import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
+function compareClipRenderOrder(a: ClipInfo, b: ClipInfo): number {
+    const d = (a.startSec ?? 0) - (b.startSec ?? 0);
+    if (Math.abs(d) > 1e-9) return d;
+    return String(a.id).localeCompare(String(b.id));
+}
+
+/**
+ * 计算每个 clip 在“自身左侧前导区”的重叠时长（秒）。
+ *
+ * 该前导重叠区对应“该 clip 在当前渲染顺序中位于上层”的区域，
+ * 用于在重叠区做等权可视化混合，避免后绘制 clip 完全盖住前一个 clip。
+ */
+export function computeLeadingOverlapSecByClipId(clips: ClipInfo[]): Record<string, number> {
+    const sorted = [...clips].sort(compareClipRenderOrder);
+    const leadingOverlapSecByClipId: Record<string, number> = {};
+
+    for (let i = 0; i < sorted.length; i += 1) {
+        const clip = sorted[i];
+        const clipStart = clip.startSec;
+        const clipEnd = clip.startSec + clip.lengthSec;
+        let leadingOverlapEnd = clipStart;
+
+        for (let j = 0; j < i; j += 1) {
+            const other = sorted[j];
+            const otherEnd = other.startSec + other.lengthSec;
+            const overlapEnd = Math.min(clipEnd, otherEnd);
+            if (overlapEnd <= clipStart + 1e-9) continue;
+            if (overlapEnd > leadingOverlapEnd) {
+                leadingOverlapEnd = overlapEnd;
+            }
+        }
+
+        leadingOverlapSecByClipId[clip.id] = Math.max(0, leadingOverlapEnd - clipStart);
+    }
+
+    return leadingOverlapSecByClipId;
+}
+
 export const TrackLane = React.memo(function TrackLane(props: {
     track: TrackInfo;
     allTracks: TrackInfo[];
@@ -179,6 +217,11 @@ export const TrackLane = React.memo(function TrackLane(props: {
         });
     }, [trackClips, viewportStartSec, viewportEndSec]);
 
+    const leadingOverlapSecByClipId = React.useMemo(
+        () => computeLeadingOverlapSecByClipId(visibleTrackClips),
+        [visibleTrackClips],
+    );
+
     return (
         <div
             key={track.id}
@@ -188,6 +231,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
             {/* 轨道级波形 Canvas：一个 Canvas 绘制该轨道所有可见 clip 的波形 */}
             <WaveformTrackCanvas
                 clips={visibleTrackClips}
+                leadingOverlapSecByClipId={leadingOverlapSecByClipId}
                 trackHeight={rowHeight}
                 waveformTop={CLIP_HEADER_HEIGHT}
                 waveformHeight={waveformHeight}
@@ -212,6 +256,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         pxPerSec={pxPerSec}
                         altPressed={altPressed}
                         selected={selected}
+                        leadingOverlapSec={leadingOverlapSecByClipId[clip.id] ?? 0}
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
                         multiSelectedCount={multiSelectedClipIds.length}
                         trackColor={trackColor}

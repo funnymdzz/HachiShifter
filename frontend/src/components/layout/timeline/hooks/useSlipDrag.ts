@@ -8,6 +8,7 @@ import {
     beginInteraction,
     endInteraction,
 } from "../../../../features/session/sessionSlice";
+import { webApi } from "../../../../services/webviewApi";
 
 export type SlipDragState = {
     pointerId: number;
@@ -144,22 +145,60 @@ export function useSlipDrag(deps: {
             // 其他 in-flight thunk 的旧快照覆盖前端乐观更新导致闪烁。
 
             const session = sessionRef.current;
-            const persistPromises: Promise<unknown>[] = [];
-            for (const id of drag.clipIds) {
-                const now = session.clips.find((c) => c.id === id);
-                if (!now) continue;
-                persistPromises.push(
-                    dispatch(
-                        setClipStateRemote({
-                            clipId: id,
-                            sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
-                            sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
-                        }),
-                    ).unwrap(),
+            const patches = drag.clipIds
+                .map((id) => {
+                    const now = session.clips.find((c) => c.id === id);
+                    if (!now) return null;
+                    return {
+                        clipId: id,
+                        sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
+                        sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
+                    };
+                })
+                .filter(
+                    (
+                        patch,
+                    ): patch is {
+                        clipId: string;
+                        sourceStartSec: number;
+                        sourceEndSec: number;
+                    } => patch != null,
                 );
+
+            let persistPromise: Promise<unknown>;
+            if (patches.length <= 1) {
+                const patch = patches[0];
+                persistPromise = patch
+                    ? dispatch(
+                          setClipStateRemote({
+                              clipId: patch.clipId,
+                              sourceStartSec: patch.sourceStartSec,
+                              sourceEndSec: patch.sourceEndSec,
+                          }),
+                      ).unwrap()
+                    : Promise.resolve();
+            } else {
+                persistPromise = (async () => {
+                    await webApi.beginUndoGroup();
+                    try {
+                        const persistPromises = patches.map((patch) =>
+                            dispatch(
+                                setClipStateRemote({
+                                    clipId: patch.clipId,
+                                    sourceStartSec: patch.sourceStartSec,
+                                    sourceEndSec: patch.sourceEndSec,
+                                    checkpoint: false,
+                                }),
+                            ).unwrap(),
+                        );
+                        await Promise.allSettled(persistPromises);
+                    } finally {
+                        await webApi.endUndoGroup();
+                    }
+                })();
             }
 
-            void Promise.allSettled(persistPromises).finally(() => {
+            void Promise.resolve(persistPromise).finally(() => {
                 dispatch(endInteraction());
             });
 

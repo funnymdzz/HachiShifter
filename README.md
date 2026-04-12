@@ -1,6 +1,6 @@
 # HiFiShifter
 
-[简体中文](README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
+[简体中文](README.md) | [繁體中文](docs/i18n/README_zh-TW.md) | [English](docs/i18n/README_en.md) | [日本語](docs/i18n/README_ja.md) | [한국어](docs/i18n/README_ko.md)
 
 HiFiShifter 是一个图形化人声编辑与合成工具。它支持多轨道音频切片处理，并以轨道组为单位，使用多种声码器完成人声修音、人力调参功能，实现人力VOCALOID制作的拼调一体化。
 
@@ -164,11 +164,30 @@ cd backend/src-tauri
 cargo tauri dev
 ```
 
+前端启动模式可通过环境变量 `TAURI_UI_MODE` 切换：
+
+- `dev`：开发模式（默认，使用 Vite dev server，支持热更新）
+- `build`：构建模式（先构建前端静态资源，再启动）
+
+Linux/macOS（bash/zsh）：
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev
+```
+
+Windows PowerShell：
+
+```powershell
+cd backend/src-tauri
+$env:TAURI_UI_MODE='build'; cargo tauri dev
+```
+
 **注意：** 首次编译需要很长的时间，请耐心等待
 
 ## 文档
 
-- [使用手册](USERMANUAL.md)
+- [使用手册](docs/i18n/USERMANUAL.md)
 - [更新计划](todo.md)
 
 ## 致谢

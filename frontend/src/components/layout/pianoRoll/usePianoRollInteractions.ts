@@ -42,8 +42,12 @@ import {
 } from "./childPitchOffsetParams";
 import { buildChildOffsetPasteValues as buildChildOffsetPasteValuesHelper } from "./childPitchOffsetPaste";
 import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
-import { getParamEditorWheelAction } from "./wheelGesture";
+import { getParamEditorWheelAction, getVibratoDragWheelTarget } from "./wheelGesture";
 import { transformSelectionByRightDrag } from "./selectionTransforms";
+import {
+    computeVibratoDragAdjustment,
+    resolveVibratoDragKeyboardAdjustment,
+} from "./vibratoDragAdjust";
 import {
     formatRightDragMorphPercent,
     getDrawPreviewValue,
@@ -53,6 +57,7 @@ import {
     readSystemClipboardObject,
     writeSystemClipboardObject,
 } from "../../../utils/systemClipboard";
+import { secFromViewportClientX } from "./seekPlayheadMapping";
 
 type CanvasCursor = "default" | "crosshair" | "grab" | "grabbing" | "ew-resize";
 
@@ -67,6 +72,7 @@ export function usePianoRollInteractions(args: {
     secPerBeat: number;
     scrollLeftRef: MutableRefObject<number>;
     pxPerBeatRef: MutableRefObject<number>;
+    pxPerSecRef: MutableRefObject<number>;
     setPxPerBeat: (next: number) => void;
     /** 当前 BPM，用于动态计算 pxPerBeat 的合法范围 */
     bpm: number;
@@ -159,6 +165,14 @@ export function usePianoRollInteractions(args: {
     vibratoAmplitudeAdjustKb: Keybinding;
     /** modifier.vibratoFrequencyAdjust 绑定 */
     vibratoFrequencyAdjustKb: Keybinding;
+    /** 直线/颤音拖拽时增大振幅 */
+    vibratoDragAmplitudeIncreaseKb: Keybinding;
+    /** 直线/颤音拖拽时减小振幅 */
+    vibratoDragAmplitudeDecreaseKb: Keybinding;
+    /** 直线/颤音拖拽时增大频率 */
+    vibratoDragFrequencyIncreaseKb: Keybinding;
+    /** 直线/颤音拖拽时减小频率 */
+    vibratoDragFrequencyDecreaseKb: Keybinding;
     /** 右键菜单回调 */
     onContextMenu?: (x: number, y: number) => void;
     /** 播放头位置（秒）用于以播放头为中心缩放 */
@@ -214,6 +228,7 @@ export function usePianoRollInteractions(args: {
         secPerBeat,
         scrollLeftRef,
         pxPerBeatRef,
+        pxPerSecRef,
         setPxPerBeat,
         bpm,
         dynamicProjectSec,
@@ -257,6 +272,10 @@ export function usePianoRollInteractions(args: {
         paramStretchKb,
         vibratoAmplitudeAdjustKb,
         vibratoFrequencyAdjustKb,
+        vibratoDragAmplitudeIncreaseKb,
+        vibratoDragAmplitudeDecreaseKb,
+        vibratoDragFrequencyIncreaseKb,
+        vibratoDragFrequencyDecreaseKb,
         playheadSec,
         playheadZoomEnabled,
         paramEditorSeekPlayheadEnabled,
@@ -493,6 +512,56 @@ export function usePianoRollInteractions(args: {
         pointerId: 0,
         buttons: 0,
     });
+    const activePointerGestureEndRef = useRef<(() => void) | null>(null);
+    const VIBRATO_DRAG_CAPTURE_ATTR = "data-piano-roll-vibrato-drag-active";
+
+    const setVibratoDragCaptureActive = useCallback(
+        (active: boolean) => {
+            if (active) {
+                document.body.setAttribute(VIBRATO_DRAG_CAPTURE_ATTR, "true");
+            } else {
+                document.body.removeAttribute(VIBRATO_DRAG_CAPTURE_ATTR);
+            }
+        },
+        [VIBRATO_DRAG_CAPTURE_ATTR],
+    );
+
+    useEffect(() => {
+        return () => {
+            setVibratoDragCaptureActive(false);
+        };
+    }, [setVibratoDragCaptureActive]);
+
+    const setActivePointerGestureEnd = useCallback((endGesture: () => void) => {
+        activePointerGestureEndRef.current = endGesture;
+    }, []);
+
+    const clearActivePointerGestureEnd = useCallback((endGesture?: () => void) => {
+        if (!endGesture || activePointerGestureEndRef.current === endGesture) {
+            activePointerGestureEndRef.current = null;
+        }
+    }, []);
+
+    useEffect(() => {
+        const endActiveGesture = () => {
+            activePointerGestureEndRef.current?.();
+        };
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState !== "visible") {
+                endActiveGesture();
+            }
+        };
+
+        window.addEventListener("blur", endActiveGesture);
+        document.addEventListener("visibilitychange", onVisibilityChange);
+
+        return () => {
+            window.removeEventListener("blur", endActiveGesture);
+            document.removeEventListener("visibilitychange", onVisibilityChange);
+            endActiveGesture();
+        };
+    }, []);
 
     const setMorphOverlay = useCallback(
         (next: ParamMorphOverlay | null) => {
@@ -834,6 +903,82 @@ export function usePianoRollInteractions(args: {
         [snapDrawValue],
     );
 
+    const applyVibratoDragAdjustment = useCallback(
+        (input: {
+            target: "amplitude" | "frequency";
+            direction: 1 | -1;
+            steps: number;
+            shiftHeld: boolean;
+            fineEvent: {
+                ctrlKey: boolean;
+                shiftKey: boolean;
+                altKey: boolean;
+                metaKey?: boolean;
+            };
+        }): boolean => {
+            const vib = vibratoStateRef.current;
+            if (!vib) return false;
+
+            const fineScale = pointerFineWheelScale(input.fineEvent);
+            const next = computeVibratoDragAdjustment({
+                editParam,
+                currentParamRange,
+                amplitude: vib.amplitude,
+                frequency: vib.frequency,
+                target: input.target,
+                direction: input.direction,
+                steps: input.steps,
+                fineScale,
+            });
+            vib.amplitude = next.amplitude;
+            vib.frequency = next.frequency;
+
+            const st = strokeRef.current;
+            const pvNow = paramViewRef.current;
+            if (st && pvNow && st.pointerId === vib.pointerId) {
+                liveEditOverrideRef.current = null;
+                ensureLiveEditBase(pvNow);
+                const built = buildVibratoDense(
+                    vib.startFrame,
+                    vib.startValue,
+                    vib.currentFrame,
+                    vib.currentValue,
+                    vib.amplitude,
+                    vib.frequency,
+                    input.shiftHeld,
+                );
+                vib.shiftHeld = input.shiftHeld;
+                st.points = [
+                    { frame: vib.startFrame, value: vib.startValue },
+                    { frame: vib.currentFrame, value: vib.currentValue },
+                ];
+                applyDenseToLiveEdit(
+                    pvNow,
+                    built.minF,
+                    st.mode === "restore" ? null : built.dense,
+                    built.minF,
+                    built.maxF,
+                    st.mode,
+                );
+                invalidate();
+            }
+
+            return true;
+        },
+        [
+            pointerFineWheelScale,
+            editParam,
+            currentParamRange,
+            strokeRef,
+            paramViewRef,
+            liveEditOverrideRef,
+            ensureLiveEditBase,
+            buildVibratoDense,
+            applyDenseToLiveEdit,
+            invalidate,
+        ],
+    );
+
     useEffect(() => {
         if (toolMode !== "select") {
             morphModifierDownRef.current = false;
@@ -974,11 +1119,26 @@ export function usePianoRollInteractions(args: {
             if (!canvas) return 0;
             const rect = canvas.getBoundingClientRect();
             const x = clientX - rect.left;
-            const sl = scrollLeftRef.current;
+            const sl = scrollerRef.current?.scrollLeft ?? scrollLeftRef.current;
             const ppb = pxPerBeatRef.current;
             return (sl + x) / Math.max(1e-9, ppb);
         },
-        [canvasRef, scrollLeftRef, pxPerBeatRef],
+        [canvasRef, scrollerRef, scrollLeftRef, pxPerBeatRef],
+    );
+
+    const pointerSec = useCallback(
+        (clientX: number): number => {
+            const canvas = canvasRef.current;
+            if (!canvas) return 0;
+            const rect = canvas.getBoundingClientRect();
+            return secFromViewportClientX({
+                clientX,
+                viewportLeft: rect.left,
+                scrollLeft: scrollerRef.current?.scrollLeft ?? scrollLeftRef.current,
+                pxPerSec: pxPerSecRef.current,
+            });
+        },
+        [canvasRef, scrollerRef, scrollLeftRef, pxPerSecRef],
     );
 
     const pointerValue = useCallback(
@@ -999,15 +1159,21 @@ export function usePianoRollInteractions(args: {
         (e: ReactMouseEvent<HTMLDivElement>) => {
             if (e.button !== 0) return;
             const bounds = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-            const sl = scrollLeftRef.current;
-            const ppb = pxPerBeatRef.current;
-            const beat = clamp((e.clientX - bounds.left + sl) / Math.max(1e-9, ppb), 0, 1e12);
-            // beat → sec：playheadSec 存储的是秒，必须转换后再 dispatch
-            const sec = beat * secPerBeat;
+            const sl = scrollerRef.current?.scrollLeft ?? scrollLeftRef.current;
+            const sec = clamp(
+                secFromViewportClientX({
+                    clientX: e.clientX,
+                    viewportLeft: bounds.left,
+                    scrollLeft: sl,
+                    pxPerSec: pxPerSecRef.current,
+                }),
+                0,
+                1e12,
+            );
             dispatch(setplayheadSec(sec));
             void dispatch(seekPlayhead(sec));
         },
-        [dispatch, scrollLeftRef, pxPerBeatRef, secPerBeat],
+        [dispatch, scrollerRef, scrollLeftRef, pxPerSecRef],
     );
 
     const onScrollerMouseDownCapture = useCallback((e: ReactMouseEvent) => {
@@ -1269,65 +1435,36 @@ export function usePianoRollInteractions(args: {
                 const freqRequested =
                     isNoneBinding(vibratoFrequencyAdjustKb) ||
                     isModifierActive(vibratoFrequencyAdjustKb, e);
-                // 频率调整优先级更高：当两者同时命中时，只调整频率。
-                const freqActive = freqRequested;
-                const ampActive = ampRequested && !freqActive;
+                const wheelTarget = getVibratoDragWheelTarget({
+                    deltaX: e.deltaX,
+                    deltaY: e.deltaY,
+                    deltaMode: e.deltaMode,
+                    amplitudeRequested: ampRequested,
+                    frequencyRequested: freqRequested,
+                });
 
-                if (ampActive || freqActive) {
+                if (wheelTarget !== "none") {
                     e.preventDefault();
-                    const steps = Math.max(1, Math.round(Math.abs(e.deltaY) / 100));
-                    const fineScale = pointerFineWheelScale(e);
-                    if (ampActive) {
-                        const rangeSpan =
-                            editParam === "pitch"
-                                ? 48
-                                : Math.max(
-                                      1e-6,
-                                      Number(currentParamRange?.max ?? 1) -
-                                          Number(currentParamRange?.min ?? 0),
-                                  );
-                        const baseAmpStep = Math.max(rangeSpan / 200, 0.01);
-                        // 上滚增大振幅，下滚减小；允许 0 和负值。
-                        const dir = e.deltaY < 0 ? 1 : -1;
-                        vib.amplitude += dir * baseAmpStep * steps * fineScale;
-                    }
-                    if (freqActive) {
-                        // 上滚减小频率，下滚增大频率；按倍率缩放且始终为正。
-                        const ratio = Math.pow(1 + 0.1 * fineScale, steps);
-                        vib.frequency =
-                            e.deltaY < 0 ? vib.frequency / ratio : vib.frequency * ratio;
-                        vib.frequency = Math.max(1e-4, vib.frequency);
-                    }
-
-                    const st = strokeRef.current;
-                    const pvNow = paramViewRef.current;
-                    if (st && pvNow && st.pointerId === vib.pointerId) {
-                        liveEditOverrideRef.current = null;
-                        ensureLiveEditBase(pvNow);
-                        const built = buildVibratoDense(
-                            vib.startFrame,
-                            vib.startValue,
-                            vib.currentFrame,
-                            vib.currentValue,
-                            vib.amplitude,
-                            vib.frequency,
-                            e.shiftKey,
-                        );
-                        vib.shiftHeld = e.shiftKey;
-                        st.points = [
-                            { frame: vib.startFrame, value: vib.startValue },
-                            { frame: vib.currentFrame, value: vib.currentValue },
-                        ];
-                        applyDenseToLiveEdit(
-                            pvNow,
-                            built.minF,
-                            st.mode === "restore" ? null : built.dense,
-                            built.minF,
-                            built.maxF,
-                            st.mode,
-                        );
-                        invalidate();
-                    }
+                    const controlDelta =
+                        wheelTarget === "frequency" && Math.abs(e.deltaX) > Math.abs(e.deltaY)
+                            ? e.deltaX
+                            : e.deltaY;
+                    const steps = Math.max(1, Math.round(Math.abs(controlDelta) / 100));
+                    const direction =
+                        wheelTarget === "amplitude"
+                            ? controlDelta < 0
+                                ? 1
+                                : -1
+                            : controlDelta < 0
+                              ? -1
+                              : 1;
+                    applyVibratoDragAdjustment({
+                        target: wheelTarget,
+                        direction,
+                        steps,
+                        shiftHeld: e.shiftKey,
+                        fineEvent: e,
+                    });
                     return;
                 }
 
@@ -1351,20 +1488,9 @@ export function usePianoRollInteractions(args: {
                 horizontalZoomRequested: isWheelBindingRequested(horizontalZoomKb),
             });
 
-            // Scroll modifier: convert wheel to horizontal scroll
-            if (wheelAction === "horizontal-scroll") {
-                e.preventDefault();
-                el.scrollLeft += horizontalScrollModifierActive ? e.deltaY : e.deltaX;
-                syncScrollLeft(el);
-                return;
-            }
-
-            // Scroll modifier: convert wheel to vertical scroll
-            if (wheelAction === "vertical-pan") {
-                e.preventDefault();
-                // 实现参数值轴的平移（center 上下移动）
+            const applyVerticalPanDelta = (deltaY: number) => {
                 const h = Math.max(1, el.clientHeight);
-                const delta = (-e.deltaY / h) * 0.5;
+                const delta = (-deltaY / h) * 0.5;
                 if (editParam === "pitch") {
                     const cur = pitchViewRef.current;
                     const next = clampViewport("pitch", {
@@ -1385,6 +1511,30 @@ export function usePianoRollInteractions(args: {
                     setParamViewport(editParam, next);
                 }
                 invalidate();
+            };
+
+            const horizontalDelta = Math.abs(e.deltaX) > 0.5 ? e.deltaX : e.deltaY;
+
+            if (wheelAction === "free-scroll") {
+                e.preventDefault();
+                el.scrollLeft += e.deltaX;
+                syncScrollLeft(el);
+                applyVerticalPanDelta(e.deltaY);
+                return;
+            }
+
+            // Scroll modifier: convert wheel to horizontal scroll
+            if (wheelAction === "horizontal-scroll") {
+                e.preventDefault();
+                el.scrollLeft += horizontalDelta;
+                syncScrollLeft(el);
+                return;
+            }
+
+            // Scroll modifier: convert wheel to vertical scroll
+            if (wheelAction === "vertical-pan") {
+                e.preventDefault();
+                applyVerticalPanDelta(e.deltaY);
                 return;
             }
 
@@ -1508,16 +1658,11 @@ export function usePianoRollInteractions(args: {
             horizontalZoomKb,
             vibratoAmplitudeAdjustKb,
             vibratoFrequencyAdjustKb,
-            pointerFineWheelScale,
+            applyVibratoDragAdjustment,
             bpm,
             dynamicProjectSec,
             playheadSec,
             playheadZoomEnabled,
-            strokeRef,
-            paramViewRef,
-            liveEditOverrideRef,
-            ensureLiveEditBase,
-            buildVibratoDense,
         ],
     );
 
@@ -1526,6 +1671,47 @@ export function usePianoRollInteractions(args: {
     const onScrollerWheel = useCallback((_e: WheelEvent<HTMLDivElement>) => {
         // no-op; wheel is handled via native listener with passive:false
     }, []);
+
+    useEffect(() => {
+        const onKeyDown = (e: globalThis.KeyboardEvent) => {
+            if (!vibratoStateRef.current) return;
+
+            const adjustment = resolveVibratoDragKeyboardAdjustment(
+                e,
+                {
+                    amplitudeIncrease: vibratoDragAmplitudeIncreaseKb,
+                    amplitudeDecrease: vibratoDragAmplitudeDecreaseKb,
+                    frequencyIncrease: vibratoDragFrequencyIncreaseKb,
+                    frequencyDecrease: vibratoDragFrequencyDecreaseKb,
+                },
+                paramFineAdjustKb,
+            );
+            if (!adjustment) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            applyVibratoDragAdjustment({
+                target: adjustment.target,
+                direction: adjustment.direction,
+                steps: 1,
+                shiftHeld: e.shiftKey,
+                fineEvent: e,
+            });
+        };
+
+        window.addEventListener("keydown", onKeyDown, true);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown, true);
+        };
+    }, [
+        applyVibratoDragAdjustment,
+        vibratoDragAmplitudeIncreaseKb,
+        vibratoDragAmplitudeDecreaseKb,
+        vibratoDragFrequencyIncreaseKb,
+        vibratoDragFrequencyDecreaseKb,
+        paramFineAdjustKb,
+    ]);
 
     const getDefaultCanvasCursor = useCallback((): CanvasCursor => {
         return toolMode === "select" ? "default" : "crosshair";
@@ -1665,9 +1851,12 @@ export function usePianoRollInteractions(args: {
 
     const onCanvasPointerDown = useCallback(
         (e: ReactPointerEvent<HTMLCanvasElement>) => {
+            if (activePointerGestureEndRef.current) {
+                activePointerGestureEndRef.current();
+            }
+
             if (e.button === 0 && paramEditorSeekPlayheadEnabled !== false) {
-                const beat = pointerBeat(e.clientX);
-                const sec = Math.max(0, beat * secPerBeat);
+                const sec = pointerSec(e.clientX);
                 dispatch(setplayheadSec(sec));
                 void dispatch(seekPlayhead(sec));
             }
@@ -1724,6 +1913,10 @@ export function usePianoRollInteractions(args: {
                 };
                 (e.currentTarget as HTMLCanvasElement).setPointerCapture(pid);
                 const onMove = (ev: globalThis.PointerEvent) => {
+                    if ((ev.buttons & 4) !== 4) {
+                        onUp();
+                        return;
+                    }
                     const pan = panRef.current;
                     if (!pan || pan.pointerId !== pid) return;
                     const dx = ev.clientX - pan.startClientX;
@@ -1757,10 +1950,12 @@ export function usePianoRollInteractions(args: {
                     window.removeEventListener("pointermove", onMove);
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
+                    clearActivePointerGestureEnd(onUp);
                 };
                 window.addEventListener("pointermove", onMove);
                 window.addEventListener("pointerup", onUp);
                 window.addEventListener("pointercancel", onUp);
+                setActivePointerGestureEnd(onUp);
                 return;
             }
 
@@ -1811,6 +2006,10 @@ export function usePianoRollInteractions(args: {
                         }
 
                         const onMove = (ev: globalThis.PointerEvent) => {
+                            if ((ev.buttons & 1) !== 1) {
+                                onUp();
+                                return;
+                            }
                             const drag = morphDragRef.current;
                             const overlayNow = morphOverlayRef.current;
                             const pvNow = paramViewRef.current;
@@ -1871,6 +2070,7 @@ export function usePianoRollInteractions(args: {
                             window.removeEventListener("pointerup", onUp);
                             window.removeEventListener("pointercancel", onUp);
                             disposeFineAdjustedPointerState(finePointerState);
+                            clearActivePointerGestureEnd(onUp);
 
                             if (!drag || !overlayNow || !pvNow || !rootTrackId) {
                                 setCanvasCursor("default");
@@ -1915,6 +2115,7 @@ export function usePianoRollInteractions(args: {
                         window.addEventListener("pointermove", onMove);
                         window.addEventListener("pointerup", onUp);
                         window.addEventListener("pointercancel", onUp);
+                        setActivePointerGestureEnd(onUp);
                         return;
                     }
                 }
@@ -2168,6 +2369,10 @@ export function usePianoRollInteractions(args: {
                                 );
 
                                 const onMove = (ev: globalThis.PointerEvent) => {
+                                    if ((ev.buttons & 1) !== 1) {
+                                        onUp();
+                                        return;
+                                    }
                                     const pvNow = paramViewRef.current;
                                     if (!pvNow) return;
                                     const adjusted = getFineAdjustedPointerPosition(
@@ -2206,6 +2411,7 @@ export function usePianoRollInteractions(args: {
                                     window.removeEventListener("pointerup", onUp);
                                     window.removeEventListener("pointercancel", onUp);
                                     disposeFineAdjustedPointerState(finePointerState);
+                                    clearActivePointerGestureEnd(onUp);
 
                                     const pvNow = paramViewRef.current;
                                     const selNow = selectionRef.current;
@@ -2250,6 +2456,7 @@ export function usePianoRollInteractions(args: {
                                 window.addEventListener("pointermove", onMove);
                                 window.addEventListener("pointerup", onUp);
                                 window.addEventListener("pointercancel", onUp);
+                                setActivePointerGestureEnd(onUp);
                                 return;
                             }
                         }
@@ -2425,6 +2632,10 @@ export function usePianoRollInteractions(args: {
                                     };
 
                                     const onMove = (ev: globalThis.PointerEvent) => {
+                                        if ((ev.buttons & 2) !== 2) {
+                                            onUp(ev);
+                                            return;
+                                        }
                                         const adjusted = getFineAdjustedPointerPosition(
                                             finePointerState,
                                             ev,
@@ -2464,7 +2675,7 @@ export function usePianoRollInteractions(args: {
                                         invalidate();
                                     };
 
-                                    const onUp = (ev: globalThis.PointerEvent) => {
+                                    const onUp = (ev?: globalThis.PointerEvent) => {
                                         window.removeEventListener("pointermove", onMove);
                                         window.removeEventListener("pointerup", onUp);
                                         window.removeEventListener("pointercancel", onUp);
@@ -2474,6 +2685,7 @@ export function usePianoRollInteractions(args: {
                                             true,
                                         );
                                         disposeFineAdjustedPointerState(finePointerState);
+                                        clearActivePointerGestureEnd(onUp);
 
                                         if (!didDrag) {
                                             liveEditOverrideRef.current = null;
@@ -2481,7 +2693,7 @@ export function usePianoRollInteractions(args: {
                                                 liveEditActiveRef.current = false;
                                             }
                                             setCanvasCursor("grab");
-                                            if (args.onContextMenu && document.hasFocus()) {
+                                            if (args.onContextMenu && document.hasFocus() && ev) {
                                                 args.onContextMenu(ev.clientX, ev.clientY);
                                             }
                                             invalidate();
@@ -2555,6 +2767,7 @@ export function usePianoRollInteractions(args: {
                                     window.addEventListener("pointermove", onMove);
                                     window.addEventListener("pointerup", onUp);
                                     window.addEventListener("pointercancel", onUp);
+                                    setActivePointerGestureEnd(onUp);
                                     return;
                                 }
 
@@ -2606,6 +2819,10 @@ export function usePianoRollInteractions(args: {
                                 let currentDragDir = dragDirection ?? "y-only";
 
                                 const onMove = (ev: globalThis.PointerEvent) => {
+                                    if ((ev.buttons & 1) !== 1) {
+                                        onUp();
+                                        return;
+                                    }
                                     const adjusted = getFineAdjustedPointerPosition(
                                         finePointerState,
                                         ev,
@@ -2808,6 +3025,7 @@ export function usePianoRollInteractions(args: {
                                     window.removeEventListener("pointerup", onUp);
                                     window.removeEventListener("pointercancel", onUp);
                                     disposeFineAdjustedPointerState(finePointerState);
+                                    clearActivePointerGestureEnd(onUp);
 
                                     // 提交拖拽结果到后端
                                     const pvNow = paramViewRef.current;
@@ -3008,6 +3226,7 @@ export function usePianoRollInteractions(args: {
                                     true,
                                 );
                                 window.addEventListener("mousedown", onMouseDownDuringDrag, true);
+                                setActivePointerGestureEnd(onUp);
                                 return;
                             }
                         }
@@ -3080,6 +3299,10 @@ export function usePianoRollInteractions(args: {
                         e.currentTarget as HTMLCanvasElement,
                     );
                     const onMove = (ev: globalThis.PointerEvent) => {
+                        if ((ev.buttons & 1) !== 1) {
+                            onUp();
+                            return;
+                        }
                         if (selectionRef.current == null) return;
                         const adjusted = getFineAdjustedPointerPosition(finePointerState, ev);
                         const bb = selectionBeatFromClientX(adjusted.clientX, true);
@@ -3095,11 +3318,13 @@ export function usePianoRollInteractions(args: {
                         window.removeEventListener("pointerup", onUp);
                         window.removeEventListener("pointercancel", onUp);
                         disposeFineAdjustedPointerState(finePointerState);
+                        clearActivePointerGestureEnd(onUp);
                         invalidate();
                     };
                     window.addEventListener("pointermove", onMove);
                     window.addEventListener("pointerup", onUp);
                     window.addEventListener("pointercancel", onUp);
+                    setActivePointerGestureEnd(onUp);
                     return;
                 }
                 // 右键：不在 pointerdown 时清除或重建选区，交由 contextmenu 或右键拖拽逻辑处理
@@ -3140,6 +3365,7 @@ export function usePianoRollInteractions(args: {
             };
             if (!isVibratoTool) {
                 vibratoStateRef.current = null;
+                setVibratoDragCaptureActive(false);
             }
             // 标记 live 编辑开始，阻止 pitch_orig_updated 事件立即刷新曲线
             if (liveEditActiveRef) liveEditActiveRef.current = true;
@@ -3163,6 +3389,7 @@ export function usePianoRollInteractions(args: {
                 // Line tool: draw a straight line from start to current pointer
                 const startFrame = frame;
                 const startValue = value;
+                const requiredButtonMask = mode === "restore" ? 2 : 1;
                 let currentDragDir: "free" | "x-only" =
                     dragDirection === "x-only" ? "x-only" : "free";
                 const canCycleDragDirection = e.button === 0;
@@ -3179,6 +3406,7 @@ export function usePianoRollInteractions(args: {
                         frequency: 3,
                         shiftHeld: snapToggleHeld,
                     };
+                    setVibratoDragCaptureActive(true);
                 }
                 const finePointerState = createFineAdjustedPointerState(
                     e.nativeEvent,
@@ -3186,6 +3414,10 @@ export function usePianoRollInteractions(args: {
                 );
 
                 const onMove = (ev: globalThis.PointerEvent) => {
+                    if ((ev.buttons & requiredButtonMask) !== requiredButtonMask) {
+                        onUp();
+                        return;
+                    }
                     const st = strokeRef.current;
                     if (!st || st.pointerId !== e.pointerId) return;
                     const adjusted = getFineAdjustedPointerPosition(finePointerState, ev);
@@ -3257,16 +3489,20 @@ export function usePianoRollInteractions(args: {
 
                 const onUp = () => {
                     const st = strokeRef.current;
-                    if (!st || st.pointerId !== e.pointerId) return;
-                    const vib = vibratoStateRef.current;
-                    strokeRef.current = null;
+                    const isOwnStroke = Boolean(st && st.pointerId === e.pointerId);
+                    const vib = isOwnStroke ? vibratoStateRef.current : null;
+                    if (isOwnStroke) {
+                        strokeRef.current = null;
+                    }
                     disposeFineAdjustedPointerState(finePointerState);
                     window.removeEventListener("pointermove", onMove);
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
                     window.removeEventListener("contextmenu", onContextMenuDuringDraw, true);
                     window.removeEventListener("mousedown", onMouseDownDuringDraw, true);
+                    clearActivePointerGestureEnd(onUp);
                     invalidate();
+                    if (!isOwnStroke || !st) return;
                     if (
                         editParam === "pitch" ||
                         isChildPitchOffsetCentsParam(editParam) ||
@@ -3297,6 +3533,7 @@ export function usePianoRollInteractions(args: {
                         }
                     })();
                     vibratoStateRef.current = null;
+                    setVibratoDragCaptureActive(false);
                 };
 
                 const onContextMenuDuringDraw = (ev: Event) => {
@@ -3321,8 +3558,10 @@ export function usePianoRollInteractions(args: {
                 window.addEventListener("pointercancel", onUp);
                 window.addEventListener("contextmenu", onContextMenuDuringDraw, true);
                 window.addEventListener("mousedown", onMouseDownDuringDraw, true);
+                setActivePointerGestureEnd(onUp);
             } else {
                 // Draw tool: freehand drawing with interpolation between points
+                const requiredButtonMask = mode === "restore" ? 2 : 1;
                 let currentDragDir: "free" | "x-only" =
                     dragDirection === "x-only" ? "x-only" : "free";
                 const canCycleDragDirection = e.button === 0;
@@ -3331,6 +3570,10 @@ export function usePianoRollInteractions(args: {
                     e.currentTarget as HTMLCanvasElement,
                 );
                 const onMove = (ev: globalThis.PointerEvent) => {
+                    if ((ev.buttons & requiredButtonMask) !== requiredButtonMask) {
+                        onUp();
+                        return;
+                    }
                     const st = strokeRef.current;
                     if (!st || st.pointerId !== e.pointerId) return;
                     const adjusted = getFineAdjustedPointerPosition(finePointerState, ev);
@@ -3388,16 +3631,21 @@ export function usePianoRollInteractions(args: {
 
                 const onUp = () => {
                     const st = strokeRef.current;
-                    if (!st || st.pointerId !== e.pointerId) return;
-                    strokeRef.current = null;
-                    vibratoStateRef.current = null;
+                    const isOwnStroke = Boolean(st && st.pointerId === e.pointerId);
+                    if (isOwnStroke) {
+                        strokeRef.current = null;
+                        vibratoStateRef.current = null;
+                        setVibratoDragCaptureActive(false);
+                    }
                     disposeFineAdjustedPointerState(finePointerState);
                     window.removeEventListener("pointermove", onMove);
                     window.removeEventListener("pointerup", onUp);
                     window.removeEventListener("pointercancel", onUp);
                     window.removeEventListener("contextmenu", onContextMenuDuringDraw, true);
                     window.removeEventListener("mousedown", onMouseDownDuringDraw, true);
+                    clearActivePointerGestureEnd(onUp);
                     invalidate();
+                    if (!isOwnStroke || !st) return;
                     if (
                         editParam === "pitch" ||
                         isChildPitchOffsetCentsParam(editParam) ||
@@ -3433,6 +3681,7 @@ export function usePianoRollInteractions(args: {
                 window.addEventListener("pointercancel", onUp);
                 window.addEventListener("contextmenu", onContextMenuDuringDraw, true);
                 window.addEventListener("mousedown", onMouseDownDuringDraw, true);
+                setActivePointerGestureEnd(onUp);
             }
         },
         [
@@ -3451,6 +3700,7 @@ export function usePianoRollInteractions(args: {
             setParamViewport,
             invalidate,
             pointerBeat,
+            pointerSec,
             selectionRef,
             updateSelectionUi,
             paramViewRef,
@@ -3489,6 +3739,9 @@ export function usePianoRollInteractions(args: {
             paramEditorSeekPlayheadEnabled,
             paramValuePopupEnabled,
             onParamValuePreviewChange,
+            setActivePointerGestureEnd,
+            clearActivePointerGestureEnd,
+            setVibratoDragCaptureActive,
         ],
     );
 
