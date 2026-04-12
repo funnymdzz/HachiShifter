@@ -39,6 +39,7 @@ import {
 // ========================================
 const _downsamplePool: Float32Array[] = [];
 const POOL_MAX = 8;
+const LEADING_OVERLAP_ALPHA = 0.5;
 
 function acquireDownsampleBuffer(minLen: number): Float32Array {
     for (let i = 0; i < _downsamplePool.length; i++) {
@@ -60,6 +61,8 @@ function releaseDownsampleBuffer(buf: Float32Array): void {
 export interface WaveformTrackCanvasProps {
     /** 当前轨道上的完整 clip 列表，由组件内部按视口自行过滤以保持引用稳定 */
     clips: ClipInfo[];
+    /** 每个 clip 左侧前导重叠时长（秒），用于重叠区等权可视化混合 */
+    leadingOverlapSecByClipId?: Readonly<Record<string, number>>;
     /** 轨道高度（像素），包含 header 和 padding */
     trackHeight: number;
     /** 波形区域的 top 偏移（跳过 clip header 部分） */
@@ -103,6 +106,7 @@ export const WaveformTrackCanvas = React.memo(
         const viewportStartSecRef = React.useRef(props.viewportStartSec);
         const viewportEndSecRef = React.useRef(props.viewportEndSec);
         const clipsRef = React.useRef(clips);
+        const leadingOverlapSecByClipIdRef = React.useRef(props.leadingOverlapSecByClipId ?? {});
         const waveformHeightRef = React.useRef(waveformHeight);
         const strokeColorRef = React.useRef(strokeColor);
         const strokeWidthRef = React.useRef(strokeWidth);
@@ -113,6 +117,7 @@ export const WaveformTrackCanvas = React.memo(
         viewportStartSecRef.current = props.viewportStartSec;
         viewportEndSecRef.current = props.viewportEndSec;
         clipsRef.current = clips;
+        leadingOverlapSecByClipIdRef.current = props.leadingOverlapSecByClipId ?? {};
         waveformHeightRef.current = waveformHeight;
         strokeColorRef.current = strokeColor;
         strokeWidthRef.current = strokeWidth;
@@ -165,6 +170,7 @@ export const WaveformTrackCanvas = React.memo(
             const currentViewportStartSec = viewportStartSecRef.current;
             const currentViewportEndSec = viewportEndSecRef.current;
             const currentClips = clipsRef.current;
+            const currentLeadingOverlapSecByClipId = leadingOverlapSecByClipIdRef.current;
             const currentWaveformHeight = waveformHeightRef.current;
             const currentStrokeColor = strokeColorRef.current;
             const currentStrokeWidth = strokeWidthRef.current;
@@ -357,25 +363,54 @@ export const WaveformTrackCanvas = React.memo(
                 // ========================================
                 const __tRender0 = __perfDebug ? performance.now() : 0;
 
-                ctx.save();
-                ctx.beginPath();
-                // 严格裁剪在 clip 实际可见范围内，防止越界绘制到其他片段上
-                ctx.rect(visLeftPx, 0, visRightPx - visLeftPx, displayH);
-                ctx.clip();
-
-                // 处理静音片段半透明
-                ctx.globalAlpha = clip.muted ? 0.4 : 1.0;
-
-                renderWaveform(
-                    ctx,
-                    withGains,
-                    params,
-                    currentStrokeColor,
-                    currentStrokeWidth,
-                    "line",
+                const baseAlpha = clip.muted ? 0.4 : 1.0;
+                const leadingOverlapSec = Math.max(
+                    0,
+                    Math.min(
+                        clip.lengthSec,
+                        Number(currentLeadingOverlapSecByClipId[clip.id] ?? 0) || 0,
+                    ),
                 );
+                const leadingOverlapRightPx =
+                    (clipStartSec + leadingOverlapSec) * currentPxPerSec - viewportStartPx;
+                const leadingOverlapVisibleRight =
+                    leadingOverlapSec > 1e-9
+                        ? Math.min(visRightPx, Math.max(visLeftPx, leadingOverlapRightPx))
+                        : visLeftPx;
 
-                ctx.restore();
+                const drawSegment = (
+                    segmentLeftPx: number,
+                    segmentRightPx: number,
+                    alpha: number,
+                ) => {
+                    if (segmentRightPx - segmentLeftPx <= 1e-6) return;
+                    ctx.save();
+                    ctx.beginPath();
+                    // 严格裁剪在片段实际可见范围内，防止越界绘制到其他片段上
+                    ctx.rect(segmentLeftPx, 0, segmentRightPx - segmentLeftPx, displayH);
+                    ctx.clip();
+                    ctx.globalAlpha = alpha;
+                    renderWaveform(
+                        ctx,
+                        withGains,
+                        params,
+                        currentStrokeColor,
+                        currentStrokeWidth,
+                        "line",
+                    );
+                    ctx.restore();
+                };
+
+                if (leadingOverlapVisibleRight > visLeftPx + 1e-6) {
+                    drawSegment(
+                        visLeftPx,
+                        leadingOverlapVisibleRight,
+                        baseAlpha * LEADING_OVERLAP_ALPHA,
+                    );
+                    drawSegment(leadingOverlapVisibleRight, visRightPx, baseAlpha);
+                } else {
+                    drawSegment(visLeftPx, visRightPx, baseAlpha);
+                }
 
                 const __tRender1 = __perfDebug ? performance.now() : 0;
                 const __tDraw0 = 0; // 已废弃 drawImage
@@ -527,6 +562,7 @@ export const WaveformTrackCanvas = React.memo(
     (prev, next) => {
         return (
             prev.clips === next.clips &&
+            prev.leadingOverlapSecByClipId === next.leadingOverlapSecByClipId &&
             prev.trackHeight === next.trackHeight &&
             prev.waveformTop === next.waveformTop &&
             prev.waveformHeight === next.waveformHeight &&

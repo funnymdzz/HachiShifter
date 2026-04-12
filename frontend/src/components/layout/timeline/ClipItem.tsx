@@ -18,12 +18,15 @@ import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 
+const LEADING_OVERLAP_ALPHA = 0.5;
+
 export const ClipItem = React.memo(function ClipItem({
     clip,
     rowHeight,
     pxPerSec,
     altPressed = false,
     selected,
+    leadingOverlapSec = 0,
     isInMultiSelectedSet,
     multiSelectedCount,
     viewportStartSec,
@@ -51,6 +54,8 @@ export const ClipItem = React.memo(function ClipItem({
     pxPerSec: number;
     altPressed?: boolean;
     selected: boolean;
+    /** 该 clip 左侧前导重叠时长（秒），只用于重叠区可视化混合 */
+    leadingOverlapSec?: number;
     isInMultiSelectedSet: boolean;
     multiSelectedCount: number;
     /** 可视区开始时间（秒） */
@@ -106,6 +111,14 @@ export const ClipItem = React.memo(function ClipItem({
     const left = Math.max(0, Math.round(clip.startSec * pxPerSec));
     const width = Math.max(1, Math.round(clip.lengthSec * pxPerSec));
     const bodyHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
+    const leadingOverlapPx = Math.max(
+        0,
+        Math.min(width, Math.round(Math.max(0, leadingOverlapSec) * pxPerSec)),
+    );
+    const leadingOverlapMaskImage =
+        leadingOverlapPx > 0
+            ? `linear-gradient(to right, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) 0px, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) ${leadingOverlapPx}px, rgba(0,0,0,1) ${leadingOverlapPx}px, rgba(0,0,0,1) 100%)`
+            : undefined;
 
     const showRepeatMarker = false;
     const repeatMarkerX = 0;
@@ -219,6 +232,12 @@ export const ClipItem = React.memo(function ClipItem({
                 height: rowHeight - CLIP_BODY_PADDING_Y,
                 transform: "translateZ(0)",
                 backfaceVisibility: "hidden",
+                WebkitMaskImage: leadingOverlapMaskImage,
+                maskImage: leadingOverlapMaskImage,
+                WebkitMaskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
+                maskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
+                WebkitMaskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
+                maskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
             }}
             onContextMenu={(e) => {
                 e.preventDefault();
