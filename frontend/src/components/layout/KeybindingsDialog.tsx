@@ -10,6 +10,7 @@ import {
     resetAllKeybindings,
     formatKeybinding,
     findConflicts,
+    createModifierOnlyBinding,
     // isNoneBinding, // 已删除未使用变量
 } from "../../features/keybindings/keybindingsSlice";
 import {
@@ -28,6 +29,30 @@ import {
 
 /** "无" 绑定常量 */
 const NONE_BINDING: Keybinding = { key: "__none__" };
+
+type ModifierToken = "control" | "shift" | "alt";
+
+function isPhysicalModifierKey(key: string): boolean {
+    const lower = key.toLowerCase();
+    return lower === "control" || lower === "shift" || lower === "alt" || lower === "meta";
+}
+
+function modifierTokenFromKey(key: string, isMac: boolean): ModifierToken | null {
+    const lower = key.toLowerCase();
+    if (lower === "shift") return "shift";
+    if (lower === "alt") return "alt";
+    if (lower === "control") return isMac ? null : "control";
+    if (lower === "meta") return isMac ? "control" : null;
+    return null;
+}
+
+function modifierTokensFromEvent(e: KeyboardEvent, isMac: boolean): Set<ModifierToken> {
+    const tokens = new Set<ModifierToken>();
+    if (isMac ? e.metaKey : e.ctrlKey) tokens.add("control");
+    if (e.shiftKey) tokens.add("shift");
+    if (e.altKey) tokens.add("alt");
+    return tokens;
+}
 
 interface KeybindingsDialogProps {
     open: boolean;
@@ -76,6 +101,34 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
         if (!recordingId) return;
 
         const currentIsModifierOnly = Boolean(DEFAULT_KEYBINDINGS[recordingId]?.modifierOnly);
+        const isMac = navigator.platform?.toLowerCase().includes("mac");
+        const pressedModifierTokens = new Set<ModifierToken>();
+
+        function applyModifierTokens(tokens: Set<ModifierToken>) {
+            const currentId = recordingRef.current;
+            if (!currentId || tokens.size === 0) return;
+
+            const newBinding: Keybinding = createModifierOnlyBinding({
+                ctrl: tokens.has("control"),
+                shift: tokens.has("shift"),
+                alt: tokens.has("alt"),
+            });
+
+            const conflicts = findConflicts(overrides, currentId, newBinding);
+            if (conflicts.length > 0) {
+                setConflict({
+                    actionId: currentId,
+                    newBinding,
+                    conflictWith: conflicts,
+                });
+                return;
+            }
+
+            dispatch(setKeybinding({ actionId: currentId, binding: newBinding }));
+            setSelectedPreset("custom");
+            recordingRef.current = null;
+            setRecordingId(null);
+        }
 
         function onKeyDown(e: KeyboardEvent) {
             e.preventDefault();
@@ -83,46 +136,28 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
 
             // Escape 取消录入
             if (e.key === "Escape") {
+                recordingRef.current = null;
                 setRecordingId(null);
                 setConflict(null);
                 return;
             }
 
-            const modKeys = ["Control", "Shift", "Alt", "Meta"];
-
             if (currentIsModifierOnly) {
-                // modifierOnly 模式：只接受修饰键
-                if (!modKeys.includes(e.key)) return;
-                const key = e.key.toLowerCase();
-                const newBinding: Keybinding = {
-                    key,
-                    modifierOnly: true,
-                    ...(e.key === "Control" ? { ctrl: true } : {}),
-                    ...(e.key === "Shift" ? { shift: true } : {}),
-                    ...(e.key === "Alt" ? { alt: true } : {}),
-                };
-                const currentId = recordingRef.current;
-                if (!currentId) return;
-                const conflicts = findConflicts(overrides, currentId, newBinding);
-                if (conflicts.length > 0) {
-                    setConflict({
-                        actionId: currentId,
-                        newBinding,
-                        conflictWith: conflicts,
-                    });
-                    return;
-                }
-                dispatch(setKeybinding({ actionId: currentId, binding: newBinding }));
-                setSelectedPreset("custom");
-                setRecordingId(null);
+                const tokenFromKey = modifierTokenFromKey(e.key, isMac);
+                if (!tokenFromKey) return;
+
+                const snapshotTokens = modifierTokensFromEvent(e, isMac);
+                if (snapshotTokens.size === 0) snapshotTokens.add(tokenFromKey);
+
+                pressedModifierTokens.clear();
+                snapshotTokens.forEach((token) => pressedModifierTokens.add(token));
                 return;
             }
 
             // 普通模式：忽略单独按下修饰键
-            if (modKeys.includes(e.key)) return;
+            if (isPhysicalModifierKey(e.key)) return;
 
             const key = e.key === " " ? "space" : e.key.toLowerCase();
-            const isMac = navigator.platform?.toLowerCase().includes("mac");
             const ctrl = isMac ? e.metaKey : e.ctrlKey;
 
             const newBinding: Keybinding = {
@@ -148,11 +183,34 @@ export const KeybindingsDialog: React.FC<KeybindingsDialogProps> = ({ open, onOp
 
             dispatch(setKeybinding({ actionId: currentId, binding: newBinding }));
             setSelectedPreset("custom");
+            recordingRef.current = null;
             setRecordingId(null);
         }
 
+        function onKeyUp(e: KeyboardEvent) {
+            if (!currentIsModifierOnly) return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            const tokenFromKey = modifierTokenFromKey(e.key, isMac);
+            if (!tokenFromKey) return;
+
+            const snapshotTokens = modifierTokensFromEvent(e, isMac);
+            snapshotTokens.add(tokenFromKey);
+            if (pressedModifierTokens.size > 0) {
+                pressedModifierTokens.forEach((token) => snapshotTokens.add(token));
+            }
+
+            applyModifierTokens(snapshotTokens);
+            pressedModifierTokens.clear();
+        }
+
         window.addEventListener("keydown", onKeyDown, true);
-        return () => window.removeEventListener("keydown", onKeyDown, true);
+        window.addEventListener("keyup", onKeyUp, true);
+        return () => {
+            window.removeEventListener("keydown", onKeyDown, true);
+            window.removeEventListener("keyup", onKeyUp, true);
+        };
     }, [recordingId, dispatch, overrides]);
 
     const handleConfirmConflict = useCallback(() => {

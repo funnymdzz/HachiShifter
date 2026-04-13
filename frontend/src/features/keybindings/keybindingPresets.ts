@@ -4,6 +4,7 @@
  */
 
 import type { ActionId, Keybinding } from "./types";
+import { createModifierOnlyBinding } from "./keybindingsSlice";
 
 export type KeybindingPresetId =
     | "spaceReturnPlayhead"
@@ -16,14 +17,15 @@ export type KeybindingPresetSelectionId = "custom" | "default" | KeybindingPrese
 
 const NONE_MODIFIER_BINDING: Keybinding = { key: "__none__", modifierOnly: true };
 
-function modifierBinding(modifier: "control" | "shift" | "alt"): Keybinding {
-    return {
-        key: modifier,
-        modifierOnly: true,
-        ...(modifier === "control" ? { ctrl: true } : {}),
-        ...(modifier === "shift" ? { shift: true } : {}),
-        ...(modifier === "alt" ? { alt: true } : {}),
-    };
+type ModifierToken = "control" | "shift" | "alt";
+
+function modifierBinding(modifier: ModifierToken | ModifierToken[]): Keybinding {
+    const modifiers = Array.isArray(modifier) ? modifier : [modifier];
+    return createModifierOnlyBinding({
+        ctrl: modifiers.includes("control"),
+        shift: modifiers.includes("shift"),
+        alt: modifiers.includes("alt"),
+    });
 }
 
 export const KEYBINDING_PRESET_IDS: KeybindingPresetId[] = [
