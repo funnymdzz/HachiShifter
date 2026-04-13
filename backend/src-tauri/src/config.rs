@@ -101,7 +101,7 @@ fn default_timed_backup_interval_sec() -> u32 {
 }
 
 fn default_timed_backup_path_template() -> String {
-    "<ProjectFolder>\\HiFiShifter Backup\\<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp".to_string()
+    "<ProjectFolder>/HiFiShifter Backup/<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp".to_string()
 }
 
 impl Default for AutoBackupSettings {

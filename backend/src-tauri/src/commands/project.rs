@@ -299,21 +299,57 @@ fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -
         }
     };
 
+    let old_path = {
+        let ext = output_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if ext.is_empty() {
+            output_path.with_extension("old")
+        } else {
+            output_path.with_extension(format!("{}.old", ext))
+        }
+    };
+
     fs::write(&tmp_path, &bytes)
         .map_err(|e| format!("Failed to write temporary backup {:?}: {}", tmp_path, e))?;
 
-    if output_path.exists() {
-        fs::remove_file(output_path)
-            .map_err(|e| format!("Failed to replace existing backup {:?}: {}", output_path, e))?;
+    let had_existing_output = output_path.exists();
+    if had_existing_output {
+        if old_path.exists() {
+            fs::remove_file(&old_path).map_err(|e| {
+                format!(
+                    "Failed to remove stale rollback backup {:?}: {}",
+                    old_path, e
+                )
+            })?;
+        }
+
+        fs::rename(output_path, &old_path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!(
+                "Failed to move existing backup {:?} to rollback path {:?}: {}",
+                output_path, old_path, e
+            )
+        })?;
     }
 
-    fs::rename(&tmp_path, output_path).map_err(|e| {
+    if let Err(e) = fs::rename(&tmp_path, output_path) {
         let _ = fs::remove_file(&tmp_path);
-        format!(
+
+        if had_existing_output {
+            let _ = fs::rename(&old_path, output_path);
+        }
+
+        return Err(format!(
             "Failed to move temporary backup {:?} to {:?}: {}",
             tmp_path, output_path, e
-        )
-    })?;
+        ));
+    }
+
+    if had_existing_output && old_path.exists() {
+        let _ = fs::remove_file(&old_path);
+    }
 
     Ok(())
 }

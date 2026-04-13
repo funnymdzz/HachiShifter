@@ -98,7 +98,7 @@ const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
     timedBackupEnabled: false,
     timedBackupIntervalSec: 300,
     timedBackupPathTemplate:
-        "<ProjectFolder>\\HiFiShifter Backup\\<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp",
+        "<ProjectFolder>/HiFiShifter Backup/<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp",
 };
 
 function detectExternalActionKindFromPath(path: string): ExternalFileActionKind | null {

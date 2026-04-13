@@ -45,8 +45,37 @@ export function AutoBackupDialog({
         setErrorText("");
     }, [open, settings]);
 
+    function getPathInputElement(): HTMLInputElement | null {
+        if (pathInputRef.current) return pathInputRef.current;
+
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLInputElement) {
+            pathInputRef.current = activeElement;
+            return activeElement;
+        }
+
+        const dialogContent = document.querySelector("[role='dialog']");
+        if (!dialogContent) return null;
+
+        const inputs = Array.from(dialogContent.querySelectorAll("input"));
+        const matchedInput =
+            inputs.find(
+                (input): input is HTMLInputElement =>
+                    input instanceof HTMLInputElement &&
+                    input.value === draft.timedBackupPathTemplate,
+            ) ??
+            inputs.find((input): input is HTMLInputElement => input instanceof HTMLInputElement) ??
+            null;
+
+        if (matchedInput) {
+            pathInputRef.current = matchedInput;
+        }
+
+        return matchedInput;
+    }
+
     function insertPathToken(token: string) {
-        const input = pathInputRef.current;
+        const input = getPathInputElement();
         if (!input) return;
 
         const start = input.selectionStart ?? input.value.length;

@@ -274,6 +274,8 @@ export function findConflicts(
  * 检测事件中某个 modifierOnly 绑定的修饰键是否按下。
  * 适用于 PointerEvent / MouseEvent / KeyboardEvent 等任何带修饰键状态的事件。
  * 如果绑定为"无"，始终返回 false。
+ * 采用子集匹配：绑定中要求为 true 的修饰键必须被按下，
+ * 未要求的修饰键允许同时按下，避免组合修饰键时误判失效。
  */
 export function isModifierActive(
     kb: Keybinding,
@@ -293,8 +295,8 @@ export function isModifierActive(
     const pressedAlt = Boolean(event.altKey);
 
     return (
-        pressedCtrl === required.ctrl &&
-        pressedShift === required.shift &&
-        pressedAlt === required.alt
+        (!required.ctrl || pressedCtrl) &&
+        (!required.shift || pressedShift) &&
+        (!required.alt || pressedAlt)
     );
 }
