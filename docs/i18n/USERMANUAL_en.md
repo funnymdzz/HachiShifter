@@ -34,7 +34,7 @@ HiFiShifter project files have the extensions `*.hshp` or `*.hsp`. Additionally,
 
 The automatic backup feature allows you to configure backups for your project files, with two modes: `Backup on save` and `Timed backups`.
 
-- `Backup on save`: When you overwrite the project file via save, the previous project file will automatically be renamed to a `.hshp-bak` file. Enabled by default.
+- `Backup on save`: When you overwrite the project file via save, the previous project file will automatically be renamed to a backup file with `-bak` appended to the original filename (for example, `*.hshp-bak` or `*.hsp-bak`). Enabled by default.
 - `Timed backups`: Automatically create backup project files at the interval and path you set while you edit the project. Disabled by default.
 
 The `Edit` menu allows various editing operations. Besides regular track and parameter editing, there are two special items: `Paste Reaper Clipboard Data` and `Paste VocalShifter Clipboard Data`.

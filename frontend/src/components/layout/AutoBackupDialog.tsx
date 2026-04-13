@@ -39,39 +39,23 @@ export function AutoBackupDialog({
     const pathInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
-        if (!open) return;
+        if (!open) {
+            pathInputRef.current = null;
+            return;
+        }
         setDraft(settings);
         setSubmitting(false);
         setErrorText("");
     }, [open, settings]);
 
     function getPathInputElement(): HTMLInputElement | null {
-        if (pathInputRef.current) return pathInputRef.current;
-
-        const activeElement = document.activeElement;
-        if (activeElement instanceof HTMLInputElement) {
-            pathInputRef.current = activeElement;
-            return activeElement;
+        const input = pathInputRef.current;
+        if (!input?.isConnected) {
+            pathInputRef.current = null;
+            return null;
         }
 
-        const dialogContent = document.querySelector("[role='dialog']");
-        if (!dialogContent) return null;
-
-        const inputs = Array.from(dialogContent.querySelectorAll("input"));
-        const matchedInput =
-            inputs.find(
-                (input): input is HTMLInputElement =>
-                    input instanceof HTMLInputElement &&
-                    input.value === draft.timedBackupPathTemplate,
-            ) ??
-            inputs.find((input): input is HTMLInputElement => input instanceof HTMLInputElement) ??
-            null;
-
-        if (matchedInput) {
-            pathInputRef.current = matchedInput;
-        }
-
-        return matchedInput;
+        return input;
     }
 
     function insertPathToken(token: string) {
