@@ -77,6 +77,65 @@ pub struct ExportSettings {
     pub bit_depth: u32,
 }
 
+/// 自动备份设置（持久化到 app_config.json）
+///
+/// - `save_on_save_enabled`: 手动保存/另存为时，保存前先轮换目标文件为备份副本。
+/// - `timed_backup_enabled`: 是否启用定时备份。
+/// - `timed_backup_interval_sec`: 定时备份判定间隔（秒）。
+/// - `timed_backup_path_template`: 备份目标路径模板，支持占位符与时间格式。
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoBackupSettings {
+    #[serde(default = "default_true")]
+    pub save_on_save_enabled: bool,
+    #[serde(default)]
+    pub timed_backup_enabled: bool,
+    #[serde(default = "default_timed_backup_interval_sec")]
+    pub timed_backup_interval_sec: u32,
+    #[serde(default = "default_timed_backup_path_template")]
+    pub timed_backup_path_template: String,
+}
+
+fn default_timed_backup_interval_sec() -> u32 {
+    300
+}
+
+fn default_timed_backup_path_template() -> String {
+    "<ProjectFolder>/HiFiShifter Backup/<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp".to_string()
+}
+
+impl Default for AutoBackupSettings {
+    fn default() -> Self {
+        Self {
+            save_on_save_enabled: true,
+            timed_backup_enabled: false,
+            timed_backup_interval_sec: default_timed_backup_interval_sec(),
+            timed_backup_path_template: default_timed_backup_path_template(),
+        }
+    }
+}
+
+impl AutoBackupSettings {
+    pub fn normalized(&self) -> Self {
+        let interval = self.timed_backup_interval_sec.clamp(1, 86_400);
+        let template = {
+            let trimmed = self.timed_backup_path_template.trim();
+            if trimmed.is_empty() {
+                default_timed_backup_path_template()
+            } else {
+                trimmed.to_string()
+            }
+        };
+
+        Self {
+            save_on_save_enabled: self.save_on_save_enabled,
+            timed_backup_enabled: self.timed_backup_enabled,
+            timed_backup_interval_sec: interval,
+            timed_backup_path_template: template,
+        }
+    }
+}
+
 fn default_export_sample_rate() -> u32 {
     48_000
 }
@@ -153,6 +212,8 @@ struct AppConfig {
     ui: UiSettings,
     #[serde(default)]
     export: ExportSettings,
+    #[serde(default)]
+    auto_backup: AutoBackupSettings,
     /// 持久化的窗口状态（可选）。
     #[serde(default)]
     window: WindowState,
@@ -268,3 +329,16 @@ pub fn save_export_settings(config_dir: &Path, export: &ExportSettings) {
     cfg.export = export.clone();
     save_config(config_dir, &cfg);
 }
+
+/// 从 config dir 读取自动备份设置。
+pub fn load_auto_backup_settings(config_dir: &Path) -> AutoBackupSettings {
+    load_config(config_dir).auto_backup.normalized()
+}
+
+/// 将自动备份设置写入 config dir；保留现有配置中的其他字段。
+pub fn save_auto_backup_settings(config_dir: &Path, settings: &AutoBackupSettings) {
+    let mut cfg = load_config(config_dir);
+    cfg.auto_backup = settings.normalized();
+    save_config(config_dir, &cfg);
+}
+

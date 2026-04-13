@@ -281,6 +281,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "open_project":
             return { projectPath: args[0] };
 
+        case "run_timed_auto_backup":
+            return { pathTemplate: args[0] };
+
         case "set_project_base_scale":
             return { baseScale: args[0] };
 
@@ -402,6 +405,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "save_ui_settings":
             return args[0] as Record<string, unknown>;
+
+        case "save_auto_backup_settings":
+            return { settings: args[0] };
 
         case "begin_undo_group":
             return undefined;

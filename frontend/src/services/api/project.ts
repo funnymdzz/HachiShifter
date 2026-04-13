@@ -2,6 +2,13 @@ import type { TimelineResult } from "../../types/api";
 
 import { invoke } from "../invoke";
 
+export interface AutoBackupSettings {
+    saveOnSaveEnabled: boolean;
+    timedBackupEnabled: boolean;
+    timedBackupIntervalSec: number;
+    timedBackupPathTemplate: string;
+}
+
 export const projectApi = {
     consumeStartupProjectPath: () =>
         invoke<{ ok: boolean; path?: string | null }>("consume_startup_project_path"),
@@ -60,6 +67,20 @@ export const projectApi = {
     saveProject: () => invoke<any>("save_project"),
 
     saveProjectAs: () => invoke<any>("save_project_as"),
+
+    getAutoBackupSettings: () => invoke<AutoBackupSettings>("get_auto_backup_settings"),
+
+    saveAutoBackupSettings: (settings: AutoBackupSettings) =>
+        invoke<{ ok: boolean; settings?: AutoBackupSettings }>(
+            "save_auto_backup_settings",
+            settings,
+        ),
+
+    runTimedAutoBackup: (pathTemplate: string) =>
+        invoke<{ ok: boolean; path?: string; formatFallbackApplied?: boolean; error?: string }>(
+            "run_timed_auto_backup",
+            pathTemplate,
+        ),
 
     openVocalShifterDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string }>("open_vocalshifter_dialog"),

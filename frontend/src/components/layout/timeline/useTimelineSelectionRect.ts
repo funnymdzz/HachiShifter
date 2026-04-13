@@ -32,6 +32,22 @@ export function isTimelineSelectionDrag(
     return dx * dx + dy * dy >= thresholdPx * thresholdPx;
 }
 
+export function computeTimelineRectSelection(params: {
+    selectionBeforeDrag: string[];
+    selectedInRect: string[];
+    ctrlOrMetaPressedAtStart: boolean;
+}): string[] {
+    const { selectionBeforeDrag, selectedInRect, ctrlOrMetaPressedAtStart } = params;
+    if (!ctrlOrMetaPressedAtStart) {
+        return selectedInRect;
+    }
+    const beforeSet = new Set(selectionBeforeDrag);
+    const inRectSet = new Set(selectedInRect);
+    const kept = selectionBeforeDrag.filter((id) => !inRectSet.has(id));
+    const appended = selectedInRect.filter((id) => !beforeSet.has(id));
+    return [...kept, ...appended];
+}
+
 export function useTimelineSelectionRect(params: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     sessionRef: React.RefObject<SessionState>;
@@ -59,6 +75,8 @@ export function useTimelineSelectionRect(params: {
         curX: number;
         curY: number;
         hasSelectionDrag: boolean;
+        ctrlOrMetaPressedAtStart: boolean;
+        selectionBeforeDrag: string[];
     } | null>(null);
 
     const [selectionRect, setSelectionRect] = useState<{
@@ -74,6 +92,13 @@ export function useTimelineSelectionRect(params: {
         const bounds = el.getBoundingClientRect();
         const x = e.clientX - bounds.left + el.scrollLeft;
         const y = e.clientY - bounds.top + el.scrollTop;
+        const session = sessionRef.current;
+        const currentSelectionIds =
+            session.multiSelectedClipIds.length > 0
+                ? [...session.multiSelectedClipIds]
+                : session.selectedClipId
+                  ? [session.selectedClipId]
+                  : [];
         selectionDragRef.current = {
             pointerId: e.pointerId,
             startX: x,
@@ -81,6 +106,8 @@ export function useTimelineSelectionRect(params: {
             curX: x,
             curY: y,
             hasSelectionDrag: false,
+            ctrlOrMetaPressedAtStart: e.ctrlKey || e.metaKey,
+            selectionBeforeDrag: currentSelectionIds,
         };
 
         function onMove(ev: PointerEvent) {
@@ -134,7 +161,7 @@ export function useTimelineSelectionRect(params: {
             }
 
             const session = sessionRef.current;
-            const selected: string[] = [];
+            const selectedInRect: string[] = [];
             for (const clip of session.clips) {
                 const trackIdx = session.tracks.findIndex((t) => t.id === clip.trackId);
                 if (trackIdx < 0) continue;
@@ -143,8 +170,15 @@ export function useTimelineSelectionRect(params: {
                 const cy1 = trackIdx * rowHeight;
                 const cy2 = cy1 + rowHeight;
                 const hit = cx2 >= rect.x1 && cx1 <= rect.x2 && cy2 >= rect.y1 && cy1 <= rect.y2;
-                if (hit) selected.push(clip.id);
+                if (hit) selectedInRect.push(clip.id);
             }
+
+            const selected = computeTimelineRectSelection({
+                selectionBeforeDrag: drag.selectionBeforeDrag,
+                selectedInRect,
+                ctrlOrMetaPressedAtStart: drag.ctrlOrMetaPressedAtStart,
+            });
+
             setMultiSelectedClipIds(selected);
             if (selected.length === 1) {
                 onSingleSelect(selected[0]);
