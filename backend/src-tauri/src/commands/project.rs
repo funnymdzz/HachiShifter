@@ -8,7 +8,7 @@ use chrono::Local;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tauri::{State, Window};
+use tauri::{Manager, State, Window};
 use zip::write::FileOptions;
 
 fn normalize_scale_key(raw: &str) -> String {
@@ -103,6 +103,219 @@ fn save_recent_projects(state: &AppState) {
     if let Some(dir) = state.config_dir.get() {
         crate::config::save_recent(dir, &p.recent);
     }
+}
+
+fn load_auto_backup_settings(state: &AppState) -> crate::config::AutoBackupSettings {
+    if let Some(config_dir) = state.config_dir.get() {
+        return crate::config::load_auto_backup_settings(config_dir);
+    }
+    crate::config::AutoBackupSettings::default()
+}
+
+fn is_hifishifter_project_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "hshp" | "hsp"))
+        .unwrap_or(false)
+}
+
+fn save_on_save_backup_path(path: &Path) -> PathBuf {
+    // 保留原文件名与扩展名，在其后追加 "-bak"，例如：
+    // "project.hshp" -> "project.hshp-bak"
+    // "project.hsp"  -> "project.hsp-bak"
+    if let Some(file_name) = path.file_name().and_then(|s| s.to_str()) {
+        let backup_name = format!("{}-bak", file_name);
+        if let Some(parent) = path.parent() {
+            return parent.join(backup_name);
+        } else {
+            return PathBuf::from(backup_name);
+        }
+    }
+    // fallback: 保持兼容旧实现
+    path.with_extension("hshp-bak")
+}
+
+fn rotate_existing_project_file_for_backup(path: &Path) -> Result<Option<PathBuf>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let backup_path = save_on_save_backup_path(path);
+    if backup_path.exists() {
+        fs::remove_file(&backup_path)
+            .map_err(|e| format!("Failed to remove stale save backup {:?}: {}", backup_path, e))?;
+    }
+
+    fs::rename(path, &backup_path).map_err(|e| {
+        format!(
+            "Failed to rotate existing project file {:?} to backup {:?}: {}",
+            path, backup_path, e
+        )
+    })?;
+
+    Ok(Some(backup_path))
+}
+
+fn restore_rotated_project_backup(backup_path: Option<&PathBuf>, project_path: &Path) {
+    let Some(backup_path) = backup_path else {
+        return;
+    };
+
+    if backup_path.exists() && !project_path.exists() {
+        let _ = fs::rename(backup_path, project_path);
+    }
+}
+
+fn sanitize_file_name_segment(raw: &str) -> String {
+    raw.chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => ch,
+        })
+        .collect::<String>()
+        .trim()
+        .to_string()
+}
+
+fn resolve_documents_dir(state: &AppState) -> Option<PathBuf> {
+    if let Some(handle) = state.app_handle.get() {
+        if let Ok(dir) = handle.path().document_dir() {
+            return Some(dir);
+        }
+    }
+
+    if cfg!(target_os = "windows") {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            return Some(PathBuf::from(profile).join("Documents"));
+        }
+    }
+
+    std::env::var_os("HOME").map(PathBuf::from)
+}
+
+fn resolve_project_folder_for_backup(state: &AppState) -> PathBuf {
+    let project = state.project.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(path) = project.path.as_deref() {
+        let p = PathBuf::from(path);
+        if let Some(parent) = p.parent() {
+            return parent.to_path_buf();
+        }
+    }
+    resolve_documents_dir(state).unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn resolve_project_name_for_backup(state: &AppState) -> String {
+    let project = state.project.lock().unwrap_or_else(|e| e.into_inner());
+
+    if let Some(path) = project.path.as_deref() {
+        let stem = Path::new(path)
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Untitled");
+        return sanitize_file_name_segment(stem);
+    }
+
+    let name = project.name.trim();
+    if name.is_empty() {
+        "Untitled".to_string()
+    } else {
+        sanitize_file_name_segment(name)
+    }
+}
+
+fn try_apply_time_format_with_fallback(
+    template: &str,
+    time: chrono::DateTime<Local>,
+) -> Result<(String, bool), String> {
+    let direct = std::panic::catch_unwind(|| time.format(template).to_string());
+    if let Ok(value) = direct {
+        return Ok((value, false));
+    }
+
+    let escaped = template.replace('%', "%%");
+    let escaped_try = std::panic::catch_unwind(|| time.format(&escaped).to_string());
+    if let Ok(value) = escaped_try {
+        return Ok((value, true));
+    }
+
+    Err("auto_backup_invalid_time_format".to_string())
+}
+
+fn resolve_timed_backup_output_path(
+    state: &AppState,
+    template: &str,
+    now: chrono::DateTime<Local>,
+) -> Result<(PathBuf, bool), String> {
+    let normalized_template = if template.trim().is_empty() {
+        crate::config::AutoBackupSettings::default().timed_backup_path_template
+    } else {
+        template.trim().to_string()
+    };
+
+    let project_folder = resolve_project_folder_for_backup(state).display().to_string();
+    let project_name = resolve_project_name_for_backup(state);
+
+    let replaced = normalized_template
+        .replace("<ProjectFolder>", &project_folder)
+        .replace("<ProjectName>", &project_name);
+
+    let (formatted, fallback_used) = try_apply_time_format_with_fallback(&replaced, now)?;
+    let trimmed = formatted.trim();
+    if trimmed.is_empty() {
+        return Err("timed_backup_path_resolves_to_empty".to_string());
+    }
+
+    let mut output_path = PathBuf::from(trimmed);
+    if output_path.is_relative() {
+        output_path = resolve_project_folder_for_backup(state).join(output_path);
+    }
+
+    Ok((output_path, fallback_used))
+}
+
+fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -> Result<(), String> {
+    let output_name = project_name_from_path(output_path);
+    let project_file = build_project_file_snapshot(state, output_path, &output_name);
+    let bytes = serialize_project_file_for_path(&project_file, output_path)?;
+
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create backup directory {:?}: {}", parent, e))?;
+        }
+    }
+
+    let tmp_path = {
+        let ext = output_path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if ext.is_empty() {
+            output_path.with_extension("tmp_save")
+        } else {
+            output_path.with_extension(format!("{}.tmp_save", ext))
+        }
+    };
+
+    fs::write(&tmp_path, &bytes)
+        .map_err(|e| format!("Failed to write temporary backup {:?}: {}", tmp_path, e))?;
+
+    if output_path.exists() {
+        fs::remove_file(output_path)
+            .map_err(|e| format!("Failed to replace existing backup {:?}: {}", output_path, e))?;
+    }
+
+    fs::rename(&tmp_path, output_path).map_err(|e| {
+        let _ = fs::remove_file(&tmp_path);
+        format!(
+            "Failed to move temporary backup {:?} to {:?}: {}",
+            tmp_path, output_path, e
+        )
+    })?;
+
+    Ok(())
 }
 
 fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_name: &str) -> ProjectFile {
@@ -402,14 +615,29 @@ pub(crate) fn save_project_to_path_inner(
     let name = project_name_from_path(&path);
     let pf = build_project_file_snapshot(state, &path, &name);
     let bytes = serialize_project_file_for_path(&pf, &path)?;
+
+    let auto_backup_settings = load_auto_backup_settings(state);
+    let rotated_backup = if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
+        rotate_existing_project_file_for_backup(&path)?
+    } else {
+        None
+    };
+
     // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
     let tmp_path = path.with_extension("tmp_save");
-    fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
-    // fs::rename 在主流操作系统下会原子性地替换目标文件
-    fs::rename(&tmp_path, &path).map_err(|e| {
-        let _ = fs::remove_file(&tmp_path); // 如果 rename 失败，顺手清理临时文件
-        e.to_string()
-    })?;
+    let write_result: Result<(), String> = (|| {
+        fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
+        fs::rename(&tmp_path, &path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            e.to_string()
+        })?;
+        Ok(())
+    })();
+
+    if let Err(err) = write_result {
+        restore_rotated_project_backup(rotated_backup.as_ref(), &path);
+        return Err(err);
+    }
 
     {
         let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
@@ -432,6 +660,47 @@ pub(crate) fn save_project_to_path_inner(
 
 pub(super) fn get_project_meta(state: State<'_, AppState>) -> crate::models::ProjectMetaPayload {
     state.project_meta_payload()
+}
+
+pub(super) fn get_auto_backup_settings(state: State<'_, AppState>) -> crate::config::AutoBackupSettings {
+    load_auto_backup_settings(state.inner())
+}
+
+pub(super) fn save_auto_backup_settings(
+    state: State<'_, AppState>,
+    settings: crate::config::AutoBackupSettings,
+) -> serde_json::Value {
+    let normalized = settings.normalized();
+    if let Some(config_dir) = state.config_dir.get() {
+        crate::config::save_auto_backup_settings(config_dir, &normalized);
+    }
+    serde_json::json!({ "ok": true, "settings": normalized })
+}
+
+pub(super) fn run_timed_auto_backup(
+    state: State<'_, AppState>,
+    path_template: String,
+) -> serde_json::Value {
+    let now = Local::now();
+    let (mut output_path, fallback_used) = match resolve_timed_backup_output_path(state.inner(), &path_template, now) {
+        Ok(value) => value,
+        Err(error) => {
+            return serde_json::json!({ "ok": false, "error": error });
+        }
+    };
+
+    if output_path.extension().is_none() {
+        output_path.set_extension("hshp");
+    }
+
+    match atomic_write_project_snapshot_to_path(state.inner(), &output_path) {
+        Ok(()) => serde_json::json!({
+            "ok": true,
+            "path": output_path.display().to_string(),
+            "formatFallbackApplied": fallback_used,
+        }),
+        Err(error) => serde_json::json!({ "ok": false, "error": error }),
+    }
 }
 
 pub(super) fn new_project(

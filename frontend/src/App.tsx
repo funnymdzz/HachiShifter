@@ -43,7 +43,7 @@ import { getParamShiftStep } from "./components/layout/pianoRoll/paramShiftStep"
 import { runConfirmedExitClose } from "./confirmedExitClose";
 import { paramsApi } from "./services/api";
 import { coreApi } from "./services/api/core";
-import { projectApi } from "./services/api/project";
+import { projectApi, type AutoBackupSettings } from "./services/api/project";
 import type { ParamFramesPayload, ProcessorParamDescriptor } from "./types/api";
 import { MISSING_FILE_CONFIRM_EVENT } from "./features/session/thunks/missingFilePrompt";
 import {
@@ -53,6 +53,7 @@ import {
 } from "./features/session/projectOpenEvents";
 import type { MessageKey } from "./i18n/messages";
 import type { CloseRequestedEvent } from "@tauri-apps/api/window";
+import { useAutoBackupScheduler } from "./hooks/useAutoBackupScheduler";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -92,6 +93,14 @@ const errorCodeKey: Record<string, string> = {
     import_parse_failed: "vs_import_parse_failed",
 };
 
+const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
+    saveOnSaveEnabled: true,
+    timedBackupEnabled: false,
+    timedBackupIntervalSec: 300,
+    timedBackupPathTemplate:
+        "<ProjectFolder>\\HiFiShifter Backup\\<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp",
+};
+
 function detectExternalActionKindFromPath(path: string): ExternalFileActionKind | null {
     const normalized = String(path ?? "").trim();
     if (!normalized) return null;
@@ -119,6 +128,7 @@ function AppInner() {
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
+    const paramsEpoch = useAppSelector((state) => state.session.paramsEpoch);
     // 使用 ref 桥接最新的工程修改状态
     const projectDirtyRef = useRef(projectDirty);
     useEffect(() => {
@@ -141,6 +151,9 @@ function AppInner() {
     const splitRatioRef = useRef(splitRatio);
     const [isDragging, setIsDragging] = useState(false);
     const [quickSearchOpen, setQuickSearchOpen] = useState(false);
+    const [autoBackupSettings, setAutoBackupSettings] = useState<AutoBackupSettings>(
+        DEFAULT_AUTO_BACKUP_SETTINGS,
+    );
     const [unsavedDialog, setUnsavedDialog] = useState<{
         open: boolean;
         mode: "switch" | "exit";
@@ -712,11 +725,51 @@ function AppInner() {
         runOrPromptUnsavedAction("exit", closeWindowNow);
     }, [closeWindowNow, runOrPromptUnsavedAction]);
 
+    const handleAutoBackupSettingsSaved = useCallback((settings: AutoBackupSettings) => {
+        const interval = Number(settings.timedBackupIntervalSec);
+        setAutoBackupSettings({
+            ...DEFAULT_AUTO_BACKUP_SETTINGS,
+            ...settings,
+            timedBackupIntervalSec: Number.isFinite(interval)
+                ? Math.max(1, Math.floor(interval))
+                : DEFAULT_AUTO_BACKUP_SETTINGS.timedBackupIntervalSec,
+            timedBackupPathTemplate:
+                String(settings.timedBackupPathTemplate ?? "").trim() ||
+                DEFAULT_AUTO_BACKUP_SETTINGS.timedBackupPathTemplate,
+        });
+    }, []);
+
+    useAutoBackupScheduler({
+        settings: autoBackupSettings,
+        paramsEpoch,
+        projectDirty,
+        status,
+    });
+
     useEffect(() => {
         void dispatch(fetchTimeline());
         void dispatch(refreshRuntime());
         void dispatch(loadUiSettings());
     }, [dispatch]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function loadAutoBackupSettings() {
+            try {
+                const settings = await projectApi.getAutoBackupSettings();
+                if (cancelled || !settings) return;
+                handleAutoBackupSettingsSaved(settings);
+            } catch {
+                // 保持默认配置。
+            }
+        }
+
+        void loadAutoBackupSettings();
+        return () => {
+            cancelled = true;
+        };
+    }, [handleAutoBackupSettingsSaved]);
 
     useEffect(() => {
         let canceled = false;
@@ -1366,6 +1419,8 @@ function AppInner() {
                 onOpenProject={handleOpenProject}
                 onOpenRecentProject={handleOpenRecentProject}
                 onExit={handleExitApp}
+                autoBackupSettings={autoBackupSettings}
+                onAutoBackupSettingsSaved={handleAutoBackupSettingsSaved}
             />
             <ActionBar />
 

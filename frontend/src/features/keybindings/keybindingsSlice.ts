@@ -15,6 +15,12 @@ const initialState: KeybindingsState = {
     overrides: loadKeybindingOverrides(),
 };
 
+interface ModifierFlags {
+    ctrl: boolean;
+    shift: boolean;
+    alt: boolean;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────
 
 /** 合并默认映射与用户覆盖，返回完整映射表 */
@@ -24,18 +30,96 @@ export function mergeKeybindings(overrides: KeybindingOverrides): KeybindingMap 
 
 /** 判断两个 Keybinding 是否相等 */
 function keybindingEqual(a: Keybinding, b: Keybinding): boolean {
+    if (isNoneBinding(a) && isNoneBinding(b)) {
+        return true;
+    }
+
+    if (Boolean(a.modifierOnly) || Boolean(b.modifierOnly)) {
+        if (Boolean(a.modifierOnly) !== Boolean(b.modifierOnly)) {
+            return false;
+        }
+        const aFlags = getModifierFlags(a);
+        const bFlags = getModifierFlags(b);
+        return (
+            aFlags.ctrl === bFlags.ctrl &&
+            aFlags.shift === bFlags.shift &&
+            aFlags.alt === bFlags.alt
+        );
+    }
+
     return (
         a.key === b.key &&
         Boolean(a.ctrl) === Boolean(b.ctrl) &&
         Boolean(a.shift) === Boolean(b.shift) &&
-        Boolean(a.alt) === Boolean(b.alt) &&
-        Boolean(a.modifierOnly) === Boolean(b.modifierOnly)
+        Boolean(a.alt) === Boolean(b.alt)
     );
 }
 
 /** 判断绑定是否为"无" */
 export function isNoneBinding(kb: Keybinding): boolean {
     return kb.key === "__none__";
+}
+
+function hasAnyModifierFlags(flags: ModifierFlags): boolean {
+    return flags.ctrl || flags.shift || flags.alt;
+}
+
+function inferModifierFlagsFromLegacyKey(key: string): ModifierFlags {
+    const lower = key.toLowerCase();
+    if (
+        lower === "control" ||
+        lower === "ctrl" ||
+        lower === "meta" ||
+        lower === "command" ||
+        lower === "cmd"
+    ) {
+        return { ctrl: true, shift: false, alt: false };
+    }
+    if (lower === "shift") {
+        return { ctrl: false, shift: true, alt: false };
+    }
+    if (lower === "alt" || lower === "option") {
+        return { ctrl: false, shift: false, alt: true };
+    }
+    return { ctrl: false, shift: false, alt: false };
+}
+
+function canonicalModifierKey(flags: ModifierFlags): string {
+    if (flags.ctrl) return "control";
+    if (flags.alt) return "alt";
+    if (flags.shift) return "shift";
+    return "__none__";
+}
+
+export function getModifierFlags(kb: Keybinding): ModifierFlags {
+    const explicitFlags: ModifierFlags = {
+        ctrl: Boolean(kb.ctrl),
+        shift: Boolean(kb.shift),
+        alt: Boolean(kb.alt),
+    };
+
+    if (!kb.modifierOnly) {
+        return explicitFlags;
+    }
+
+    if (hasAnyModifierFlags(explicitFlags)) {
+        return explicitFlags;
+    }
+
+    return inferModifierFlagsFromLegacyKey(kb.key);
+}
+
+export function createModifierOnlyBinding(flags: ModifierFlags): Keybinding {
+    if (!hasAnyModifierFlags(flags)) {
+        return { key: "__none__", modifierOnly: true };
+    }
+    return {
+        key: canonicalModifierKey(flags),
+        modifierOnly: true,
+        ...(flags.ctrl ? { ctrl: true } : {}),
+        ...(flags.shift ? { shift: true } : {}),
+        ...(flags.alt ? { alt: true } : {}),
+    };
 }
 
 const VIBRATO_WHEEL_MODIFIERS = new Set<ActionId>([
@@ -50,9 +134,10 @@ const VIBRATO_WHEEL_MODIFIERS = new Set<ActionId>([
 export function formatKeybinding(kb: Keybinding, noneLabel?: string): string {
     if (isNoneBinding(kb)) return noneLabel ?? "—";
     const parts: string[] = [];
-    if (kb.ctrl) parts.push("Ctrl");
-    if (kb.alt) parts.push("Alt");
-    if (kb.shift) parts.push("Shift");
+    const modifierFlags = getModifierFlags(kb);
+    if (modifierFlags.ctrl) parts.push("Ctrl");
+    if (modifierFlags.alt) parts.push("Alt");
+    if (modifierFlags.shift) parts.push("Shift");
 
     // modifierOnly 类型无主键，直接返回修饰键名称
     if (kb.modifierOnly) {
@@ -200,8 +285,16 @@ export function isModifierActive(
     },
 ): boolean {
     if (isNoneBinding(kb)) return false;
-    if (kb.ctrl) return IS_MAC ? Boolean(event.metaKey) : event.ctrlKey;
-    if (kb.alt) return event.altKey;
-    if (kb.shift) return event.shiftKey;
-    return false;
+    const required = getModifierFlags(kb);
+    if (!hasAnyModifierFlags(required)) return false;
+
+    const pressedCtrl = IS_MAC ? Boolean(event.metaKey) : Boolean(event.ctrlKey);
+    const pressedShift = Boolean(event.shiftKey);
+    const pressedAlt = Boolean(event.altKey);
+
+    return (
+        pressedCtrl === required.ctrl &&
+        pressedShift === required.shift &&
+        pressedAlt === required.alt
+    );
 }

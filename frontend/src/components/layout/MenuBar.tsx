@@ -41,10 +41,12 @@ import {
 } from "../editDialogs/EditDialogs";
 import { SCALE_LABELS } from "../../utils/musicalScales";
 import { ExportAudioDialog } from "./ExportAudioDialog";
+import { AutoBackupDialog } from "./AutoBackupDialog";
 import {
     isChildPitchOffsetCentsParam,
     isChildPitchOffsetDegreesParam,
 } from "./pianoRoll/childPitchOffsetParams";
+import type { AutoBackupSettings } from "../../services/api/project";
 // import type { VibratoParams } from "../editDialogs/EditDialogs"; // 已移除无效导入
 
 interface MenuBarProps {
@@ -52,6 +54,8 @@ interface MenuBarProps {
     onOpenProject: () => void;
     onOpenRecentProject: (projectPath: string) => void;
     onExit: () => void;
+    autoBackupSettings: AutoBackupSettings;
+    onAutoBackupSettingsSaved: (settings: AutoBackupSettings) => void;
 }
 
 export const MenuBar: React.FC<MenuBarProps> = ({
@@ -59,6 +63,8 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     onOpenProject,
     onOpenRecentProject,
     onExit,
+    autoBackupSettings,
+    onAutoBackupSettingsSaved,
 }) => {
     const { t, setLocale } = useI18n();
     const tAny = t as (key: string) => string;
@@ -69,6 +75,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [kbDialogOpen, setKbDialogOpen] = useState(false);
     const [appearanceDialogOpen, setAppearanceDialogOpen] = useState(false);
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
+    const [autoBackupDialogOpen, setAutoBackupDialogOpen] = useState(false);
 
     // Edit dialog states
     const [transposeCentsOpen, setTransposeCentsOpen] = useState(false);
@@ -289,6 +296,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         <div className="ml-auto pl-4 text-xs text-qt-text-muted">
                             {shortcutLabel("project.export")}
                         </div>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item onSelect={() => setAutoBackupDialogOpen(true)}>
+                        {tAny("menu_auto_backup")}
                     </DropdownMenu.Item>
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item onSelect={onExit} color="red">
@@ -544,6 +555,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
             />
 
             <ExportAudioDialog open={exportDialogOpen} onOpenChange={setExportDialogOpen} />
+
+            <AutoBackupDialog
+                open={autoBackupDialogOpen}
+                settings={autoBackupSettings}
+                onOpenChange={setAutoBackupDialogOpen}
+                onSettingsSaved={onAutoBackupSettingsSaved}
+            />
 
             {/* 菜单导入模式选择（多文件） */}
             {menuImportMode && (

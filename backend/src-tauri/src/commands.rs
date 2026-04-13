@@ -159,6 +159,27 @@ pub fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn get_auto_backup_settings(state: State<'_, AppState>) -> crate::config::AutoBackupSettings {
+    project::get_auto_backup_settings(state)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_auto_backup_settings(
+    state: State<'_, AppState>,
+    settings: crate::config::AutoBackupSettings,
+) -> serde_json::Value {
+    project::save_auto_backup_settings(state, settings)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn run_timed_auto_backup(
+    state: State<'_, AppState>,
+    path_template: String,
+) -> serde_json::Value {
+    project::run_timed_auto_backup(state, path_template)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn set_project_base_scale(state: State<'_, AppState>, base_scale: String) -> serde_json::Value {
     project::set_project_base_scale(state, base_scale)
 }
