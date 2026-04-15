@@ -281,7 +281,7 @@ impl Default for TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
-                color: String::new(),
+                color: track_palette_color(0),
             }],
             clips: vec![],
             selected_track_id: Some(track_id),
@@ -1205,6 +1205,21 @@ fn new_id(prefix: &str) -> String {
     format!("{}_{}", prefix, Uuid::new_v4().simple())
 }
 
+const TRACK_COLOR_PALETTE: &[&str] = &[
+    "#4f8ef7", // 蓝
+    "#a78bfa", // 紫
+    "#34d399", // 绿
+    "#fb923c", // 橙
+    "#f472b6", // 粉
+    "#38bdf8", // 天蓝
+    "#facc15", // 黄
+    "#f87171", // 红
+];
+
+fn track_palette_color(index: usize) -> String {
+    TRACK_COLOR_PALETTE[index % TRACK_COLOR_PALETTE.len()].to_string()
+}
+
 fn default_clip_color() -> String {
     "emerald".to_string()
 }
@@ -1282,19 +1297,7 @@ impl TimelineState {
         let order = self.next_track_order;
         self.next_track_order += 1;
 
-        // 预设轨道颜色调色板，循环分配
-        const TRACK_COLORS: &[&str] = &[
-            "#4f8ef7", // 蓝
-            "#a78bfa", // 紫
-            "#34d399", // 绿
-            "#fb923c", // 橙
-            "#f472b6", // 粉
-            "#38bdf8", // 天蓝
-            "#facc15", // 黄
-            "#f87171", // 红
-        ];
-        let color_index = self.tracks.len() % TRACK_COLORS.len();
-        let color = TRACK_COLORS[color_index].to_string();
+        let color = track_palette_color(self.tracks.len());
 
         let track = Track {
             id: id.clone(),
@@ -1610,7 +1613,7 @@ impl TimelineState {
 
                 compose_enabled: false,
                 pitch_analysis_algo: PitchAnalysisAlgo::default(),
-                color: String::new(),
+                color: track_palette_color(self.tracks.len()),
             });
             self.next_track_order += 1;
         }
