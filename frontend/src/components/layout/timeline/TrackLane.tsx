@@ -168,6 +168,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         const trackIndexById = Object.fromEntries(
             orderedTrackIds.map((id, idx) => [id, idx]),
         ) as Record<string, number>;
+        const clipById = new Map((allClips ?? []).map((clip) => [clip.id, clip] as const));
         for (const clipId of ghostDrag.clipIds) {
             const initial = ghostDrag.initialById[clipId];
             if (!initial) continue;
@@ -183,11 +184,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 }
             }
             if (ghostTrackId !== track.id) continue;
-            // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
-            const clip =
-                trackClips.find((c) => c.id === clipId) ??
-                allClips?.find((c) => c.id === clipId) ??
-                undefined;
+            const clip = clipById.get(clipId);
             if (!clip) continue;
             result.push({
                 clip,
