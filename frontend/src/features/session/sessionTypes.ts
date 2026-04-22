@@ -91,6 +91,7 @@ export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
     name: string;
     startSec: number;
     lengthSec: number;
+    sourceClipId?: string;
     waveformPreview?: WaveformPreview;
     linkedParams?: LinkedParamCurves;
 };

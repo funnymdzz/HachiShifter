@@ -116,6 +116,39 @@ pub struct MoveClipPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BulkClipStatePatch {
+    pub clip_id: String,
+    #[serde(flatten)]
+    pub patch: ClipStatePatch,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DuplicateClipsTrackMode {
+    SameTrack,
+    OffsetTracks { offset: i32 },
+    ExplicitMapping { mapping: HashMap<String, String> },
+    NewTracks,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DuplicateClipsBulkPayload {
+    pub source_clip_ids: Vec<String>,
+    pub delta_sec: f64,
+    pub track_mode: DuplicateClipsTrackMode,
+    #[serde(default)]
+    pub copy_linked_params: bool,
+    #[serde(default)]
+    pub select_created_clips: bool,
+    #[serde(default)]
+    pub apply_auto_crossfade: bool,
+    #[serde(default)]
+    pub place_on_selected_track: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Track {
     pub id: String,
     pub name: String,
@@ -181,7 +214,8 @@ pub struct Clip {
     pub extra_params: Option<HashMap<String, f64>>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct ClipStatePatch {
     pub name: Option<String>,
     pub start_sec: Option<f64>,
@@ -1201,6 +1235,132 @@ impl AppState {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patch_clips_state_updates_multiple_clips_in_one_pass() {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.add_track(Some("Track".to_string()), None, None);
+        timeline.add_clip(Some(track_id.clone()), Some("A".into()), Some(0.0), Some(1.0), None);
+        timeline.add_clip(Some(track_id), Some("B".into()), Some(1.0), Some(1.0), None);
+
+        let ids: Vec<String> = timeline.clips.iter().map(|clip| clip.id.clone()).collect();
+        timeline.patch_clips_state(&[
+            BulkClipStatePatch {
+                clip_id: ids[0].clone(),
+                patch: ClipStatePatch {
+                    gain: Some(1.5),
+                    ..Default::default()
+                },
+            },
+            BulkClipStatePatch {
+                clip_id: ids[1].clone(),
+                patch: ClipStatePatch {
+                    muted: Some(true),
+                    fade_in_sec: Some(0.25),
+                    ..Default::default()
+                },
+            },
+        ]);
+
+        assert_eq!(timeline.clips[0].gain, 1.5);
+        assert!(timeline.clips[1].muted);
+        assert_eq!(timeline.clips[1].fade_in_sec, 0.25);
+    }
+
+    #[test]
+    fn duplicate_clips_bulk_duplicates_multiple_clips_with_delta() {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.add_track(Some("Track".to_string()), None, None);
+        timeline.add_clip(Some(track_id.clone()), Some("A".into()), Some(0.0), Some(1.0), None);
+        timeline.add_clip(Some(track_id), Some("B".into()), Some(2.0), Some(1.5), None);
+
+        let source_ids: Vec<String> = timeline.clips.iter().map(|clip| clip.id.clone()).collect();
+        let created = timeline.duplicate_clips_bulk(
+            &DuplicateClipsBulkPayload {
+                source_clip_ids: source_ids,
+                delta_sec: 1.25,
+                track_mode: DuplicateClipsTrackMode::SameTrack,
+                copy_linked_params: false,
+                select_created_clips: true,
+                apply_auto_crossfade: false,
+                place_on_selected_track: false,
+            },
+        );
+
+        assert_eq!(created.len(), 2);
+        assert_eq!(timeline.clips.len(), 4);
+        assert!(timeline.clips.iter().any(|clip| (clip.start_sec - 1.25).abs() < 1e-6));
+        assert!(timeline.clips.iter().any(|clip| (clip.start_sec - 3.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn duplicate_clips_bulk_new_tracks_follow_source_track_order() {
+        let mut timeline = TimelineState::default();
+        let low_track_id = timeline.add_track(Some("Low".to_string()), None, None);
+        let high_track_id = timeline.add_track(Some("High".to_string()), None, None);
+        timeline.add_clip(
+            Some(low_track_id.clone()),
+            Some("Low Clip".into()),
+            Some(0.0),
+            Some(1.0),
+            None,
+        );
+        timeline.add_clip(
+            Some(high_track_id.clone()),
+            Some("High Clip".into()),
+            Some(0.5),
+            Some(1.0),
+            None,
+        );
+
+        let low_clip_id = timeline
+            .clips
+            .iter()
+            .find(|clip| clip.track_id == low_track_id)
+            .map(|clip| clip.id.clone())
+            .expect("low clip");
+        let high_clip_id = timeline
+            .clips
+            .iter()
+            .find(|clip| clip.track_id == high_track_id)
+            .map(|clip| clip.id.clone())
+            .expect("high clip");
+
+        let created = timeline.duplicate_clips_bulk(&DuplicateClipsBulkPayload {
+            source_clip_ids: vec![high_clip_id, low_clip_id],
+            delta_sec: 2.0,
+            track_mode: DuplicateClipsTrackMode::NewTracks,
+            copy_linked_params: false,
+            select_created_clips: false,
+            apply_auto_crossfade: false,
+            place_on_selected_track: false,
+        });
+
+        assert_eq!(created.len(), 2);
+
+        let original_track_count = 3usize;
+        let new_tracks = &timeline.tracks[original_track_count..];
+        assert_eq!(new_tracks.len(), 2);
+
+        let low_duplicate = timeline
+            .clips
+            .iter()
+            .find(|clip| created.contains(&clip.id) && clip.name == "Low Clip Copy")
+            .expect("low duplicate");
+        let high_duplicate = timeline
+            .clips
+            .iter()
+            .find(|clip| created.contains(&clip.id) && clip.name == "High Clip Copy")
+            .expect("high duplicate");
+
+        assert_eq!(low_duplicate.track_id, new_tracks[0].id);
+        assert_eq!(high_duplicate.track_id, new_tracks[1].id);
+    }
+}
+
 fn new_id(prefix: &str) -> String {
     format!("{}_{}", prefix, Uuid::new_v4().simple())
 }
@@ -1277,6 +1437,7 @@ impl TimelineState {
             ok: true,
             tracks: tracks_payload,
             clips: clips_payload,
+            created_clip_ids: None,
             selected_track_id: self.selected_track_id.clone(),
             selected_clip_id: self.selected_clip_id.clone(),
             bpm: self.bpm,
@@ -1952,6 +2113,163 @@ impl TimelineState {
         if let Some(v) = end_sec {
             self.ensure_project_end_sec(v);
         }
+    }
+
+    pub fn patch_clips_state(&mut self, updates: &[BulkClipStatePatch]) {
+        for update in updates {
+            self.patch_clip_state(&update.clip_id, update.patch.clone());
+        }
+    }
+
+    pub fn duplicate_clips_bulk(&mut self, payload: &DuplicateClipsBulkPayload) -> Vec<String> {
+        let unique_source_ids: Vec<String> = {
+            let mut seen = HashSet::new();
+            payload
+                .source_clip_ids
+                .iter()
+                .filter(|id| seen.insert((*id).clone()))
+                .cloned()
+                .collect()
+        };
+        let source_clips: Vec<Clip> = unique_source_ids
+            .iter()
+            .filter_map(|id| self.clips.iter().find(|clip| clip.id == *id).cloned())
+            .collect();
+        if source_clips.is_empty() {
+            return Vec::new();
+        }
+
+        let source_track_order = self.tracks.iter().map(|track| track.id.clone()).collect::<Vec<_>>();
+        let source_track_index_by_id = source_track_order
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id.clone(), index))
+            .collect::<HashMap<_, _>>();
+        let ordered_source_track_ids = {
+            let mut seen = HashSet::new();
+            let mut track_ids = source_clips
+                .iter()
+                .filter_map(|clip| {
+                    if seen.insert(clip.track_id.clone()) {
+                        Some(clip.track_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            track_ids.sort_by_key(|track_id| {
+                source_track_index_by_id
+                    .get(track_id)
+                    .copied()
+                    .unwrap_or(usize::MAX)
+            });
+            track_ids
+        };
+
+        let mut explicit_mapping = HashMap::new();
+        if payload.place_on_selected_track {
+            if let Some(selected_track_id) = self.selected_track_id.clone() {
+                let track_order = self.tracks.iter().map(|track| track.id.clone()).collect::<Vec<_>>();
+                if let Some(selected_index) = track_order.iter().position(|id| *id == selected_track_id)
+                {
+                    let needed_last_index =
+                        selected_index + ordered_source_track_ids.len().saturating_sub(1);
+                    while self.tracks.len() <= needed_last_index {
+                        self.add_track(Some("Track".to_string()), None, None);
+                    }
+
+                    for (offset, source_track_id) in ordered_source_track_ids.iter().enumerate() {
+                        if let Some(target_track) = self.tracks.get(selected_index + offset) {
+                            explicit_mapping.insert(source_track_id.clone(), target_track.id.clone());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut new_track_mapping = HashMap::new();
+        if matches!(payload.track_mode, DuplicateClipsTrackMode::NewTracks) {
+            for source_track_id in &ordered_source_track_ids {
+                let new_track_id = self.add_track(Some("Track".to_string()), None, None);
+                new_track_mapping.insert(source_track_id.clone(), new_track_id);
+            }
+        }
+
+        let mut created_clip_ids = Vec::new();
+        for source in source_clips {
+            let target_track_id = if let Some(mapped) = explicit_mapping.get(&source.track_id) {
+                mapped.clone()
+            } else {
+                match &payload.track_mode {
+                    DuplicateClipsTrackMode::SameTrack => source.track_id.clone(),
+                    DuplicateClipsTrackMode::OffsetTracks { offset } => {
+                        let source_index = source_track_index_by_id
+                            .get(&source.track_id)
+                            .copied()
+                            .unwrap_or(0) as i32;
+                        let target_index = (source_index + *offset)
+                            .clamp(0, self.tracks.len().saturating_sub(1) as i32)
+                            as usize;
+                        self.tracks
+                            .get(target_index)
+                            .map(|track| track.id.clone())
+                            .unwrap_or_else(|| source.track_id.clone())
+                    }
+                    DuplicateClipsTrackMode::ExplicitMapping { mapping } => mapping
+                        .get(&source.track_id)
+                        .cloned()
+                        .unwrap_or_else(|| source.track_id.clone()),
+                    DuplicateClipsTrackMode::NewTracks => new_track_mapping
+                        .get(&source.track_id)
+                        .cloned()
+                        .unwrap_or_else(|| source.track_id.clone()),
+                }
+            };
+
+            let old_root_track_id = self.resolve_root_track_id(&source.track_id);
+            let new_root_track_id = self.resolve_root_track_id(&target_track_id);
+            let linked_params = if payload.copy_linked_params && source.length_sec > 0.0 {
+                old_root_track_id.as_ref().and_then(|root_track_id| {
+                    self.extract_linked_params_from_root_range(
+                        root_track_id,
+                        source.start_sec,
+                        source.length_sec,
+                    )
+                })
+            } else {
+                None
+            };
+
+            let mut duplicated = source.clone();
+            duplicated.id = new_id("clip");
+            duplicated.track_id = target_track_id;
+            duplicated.start_sec = (duplicated.start_sec + payload.delta_sec).max(0.0);
+            duplicated.name = format!("{} Copy", duplicated.name);
+            self.ensure_project_end_sec(duplicated.start_sec + duplicated.length_sec);
+            created_clip_ids.push(duplicated.id.clone());
+            self.clips.push(duplicated.clone());
+
+            if let (Some(linked_params), Some(new_root_track_id)) = (linked_params, new_root_track_id) {
+                self.apply_linked_params_to_root_range(
+                    &new_root_track_id,
+                    duplicated.start_sec,
+                    &linked_params,
+                );
+            }
+        }
+
+        if payload.select_created_clips {
+            self.selected_clip_id = created_clip_ids.first().cloned();
+            if let Some(first_created_clip) = created_clip_ids
+                .first()
+                .and_then(|id| self.clips.iter().find(|clip| clip.id == *id))
+            {
+                self.selected_track_id = Some(first_created_clip.track_id.clone());
+                self.playhead_sec = first_created_clip.start_sec;
+            }
+        }
+
+        created_clip_ids
     }
 
     pub fn split_clip(&mut self, clip_id: &str, split_sec: f64) {

@@ -174,6 +174,27 @@ export const timelineApi = {
             payload.checkpoint,
         ),
 
+    setClipsStateBulk: (payload: {
+        updates: Array<{
+            clipId: string;
+            gain?: number;
+            muted?: boolean;
+            fadeInSec?: number;
+            fadeOutSec?: number;
+        }>;
+        checkpoint?: boolean;
+    }) => invoke<TimelineResult>("set_clips_state_bulk", payload.updates, payload.checkpoint),
+
+    duplicateClipsBulk: (payload: {
+        sourceClipIds: string[];
+        deltaSec: number;
+        trackMode: Record<string, unknown>;
+        copyLinkedParams?: boolean;
+        selectCreatedClips?: boolean;
+        applyAutoCrossfade?: boolean;
+        placeOnSelectedTrack?: boolean;
+    }) => invoke<TimelineResult>("duplicate_clips_bulk", payload),
+
     replaceClipSource: (payload: {
         clipIds: string[];
         newSourcePath: string;

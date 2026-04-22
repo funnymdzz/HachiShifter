@@ -339,6 +339,50 @@ export const setClipStateRemote = createAsyncThunk(
     },
 );
 
+export const setClipsStateBulkRemote = createAsyncThunk(
+    "session/setClipsStateBulkRemote",
+    async (payload: {
+        updates: Array<{
+            clipId: string;
+            gain?: number;
+            muted?: boolean;
+            fadeInSec?: number;
+            fadeOutSec?: number;
+        }>;
+        checkpoint?: boolean;
+    }) => {
+        return webApi.setClipsStateBulk(payload);
+    },
+);
+
+export const duplicateClipsBulkRemote = createAsyncThunk<
+    TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] },
+    {
+        sourceClipIds: string[];
+        deltaSec: number;
+        trackMode: Record<string, unknown>;
+        copyLinkedParams?: boolean;
+        selectCreatedClips?: boolean;
+        applyAutoCrossfade?: boolean;
+        placeOnSelectedTrack?: boolean;
+    }
+>(
+    "session/duplicateClipsBulkRemote",
+    async (payload) => {
+        const result = await webApi.duplicateClipsBulk(payload);
+        if (result && typeof result === "object" && "clips" in result) {
+            const typed = result as TimelineState & { created_clip_ids?: string[] };
+            return {
+                ...typed,
+                createdClipIds: Array.isArray(typed.created_clip_ids)
+                    ? typed.created_clip_ids
+                    : undefined,
+            };
+        }
+        return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
+    },
+);
+
 export const replaceClipSourceRemote = createAsyncThunk(
     "session/replaceClipSourceRemote",
     async (payload: { clipIds: string[]; newSourcePath: string; replaceSameSource?: boolean }) => {

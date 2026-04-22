@@ -286,6 +286,8 @@ pub fn run() {
             commands::get_clip_linked_params,
             commands::apply_clip_linked_params,
             commands::set_clip_state,
+            commands::set_clips_state_bulk,
+            commands::duplicate_clips_bulk,
             commands::replace_clip_source,
             commands::split_clip,
             commands::glue_clips,

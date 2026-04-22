@@ -21,6 +21,7 @@ import {
     addClipOnTrack,
     addTrackRemote,
     createClipsRemote,
+    duplicateClipsBulkRemote,
     duplicateTrackRemote,
     fetchSelectedTrackSummary,
     glueClipsRemote,
@@ -34,6 +35,7 @@ import {
     selectClipRemote,
     selectTrackRemote,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     setProjectLengthRemote,
     splitClipRemote,
 } from "./thunks/timelineThunks";
@@ -817,8 +819,10 @@ export {
     removeClipsRemote,
     moveClipRemote,
     moveClipsRemote,
+    duplicateClipsBulkRemote,
     duplicateTrackRemote,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     replaceClipSourceRemote,
     splitClipRemote,
     glueClipsRemote,
@@ -2312,6 +2316,17 @@ const sessionSlice = createSlice({
                 state.status = "Clips created";
             })
 
+            .addCase(duplicateClipsBulkRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+                state.status = "Clips duplicated";
+            })
+
             .addCase(removeClipRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2384,6 +2399,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload);
+            })
+
+            .addCase(setClipsStateBulkRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

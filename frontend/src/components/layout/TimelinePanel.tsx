@@ -35,6 +35,7 @@ import {
 import { NEW_TRACK_SENTINEL, useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
+import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement";
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 
@@ -311,6 +312,11 @@ export const TimelinePanel: React.FC = () => {
         onCtrlClick: toggleTrackLaneCtrlSelection,
     });
 
+    const clipById = useMemo(
+        () => new Map(s.clips.map((clip) => [clip.id, clip] as const)),
+        [s.clips],
+    );
+
     const newTrackGhostClips = useMemo(() => {
         if (clipDropNewTrack) {
             const moved = s.clips.filter((clip) => clip.trackId === NEW_TRACK_SENTINEL);
@@ -322,7 +328,7 @@ export const TimelinePanel: React.FC = () => {
         return ghostDrag.clipIds
             .map((clipId) => {
                 const initial = ghostDrag.initialById[clipId];
-                const clip = s.clips.find((item) => item.id === clipId);
+                const clip = clipById.get(clipId);
                 if (!initial || !clip) return null;
                 return {
                     ...clip,
@@ -330,7 +336,7 @@ export const TimelinePanel: React.FC = () => {
                 };
             })
             .filter((clip): clip is (typeof s.clips)[number] => clip != null);
-    }, [clipDropNewTrack, ghostDrag, s.clips]);
+    }, [clipById, clipDropNewTrack, ghostDrag, s.clips]);
 
     const startClipDrag = React.useCallback(
         (
@@ -458,6 +464,31 @@ export const TimelinePanel: React.FC = () => {
                 }}
                 onDuplicateTrack={(trackId) => {
                     dispatch(duplicateTrackRemote(trackId));
+                }}
+                onCreateTrackBelow={(trackId) => {
+                    void (async () => {
+                        const existingTracks = [...sessionRef.current.tracks];
+                        const beforeIds = new Set(existingTracks.map((track) => track.id));
+                        const added = (await dispatch(
+                            addTrackRemote({ name: undefined, parentTrackId: null }),
+                        ).unwrap()) as {
+                            tracks?: Array<{ id?: string }>;
+                            selected_track_id?: string | null;
+                        };
+                        const nextTracks = Array.isArray(added.tracks) ? added.tracks : [];
+                        const createdTrackId =
+                            nextTracks.find((track) => !beforeIds.has(String(track?.id)))?.id ??
+                            added.selected_track_id ??
+                            null;
+                        if (!createdTrackId) return;
+                        await dispatch(
+                            moveTrackRemote({
+                                trackId: String(createdTrackId),
+                                targetIndex: getInsertBelowTargetIndex(existingTracks, trackId),
+                                parentTrackId: null,
+                            }),
+                        );
+                    })();
                 }}
                 onScrollTopChange={(scrollTop) => {
                     const timelineScroller = scrollRef.current;

@@ -499,6 +499,23 @@ pub fn set_clip_state(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn set_clips_state_bulk(
+    state: State<'_, AppState>,
+    updates: Vec<crate::state::BulkClipStatePatch>,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::set_clips_state_bulk(state, updates, checkpoint)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn duplicate_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::DuplicateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::duplicate_clips_bulk(state, payload)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn replace_clip_source(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,

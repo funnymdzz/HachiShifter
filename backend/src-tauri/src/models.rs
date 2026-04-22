@@ -79,6 +79,8 @@ pub struct TimelineStatePayload {
     pub ok: bool,
     pub tracks: Vec<TimelineTrack>,
     pub clips: Vec<TimelineClip>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_clip_ids: Option<Vec<String>>,
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,

@@ -132,6 +132,7 @@ export const TrackList: React.FC<{
     onVolumeUiChange: (trackId: string, nextVolume: number) => void;
     onVolumeCommit: (trackId: string, nextVolume: number) => void;
     onAddTrack: () => void;
+    onCreateTrackBelow?: (trackId: string) => void;
     onTrackColorChange?: (trackId: string, color: string) => void;
     onAlgoChange?: (trackId: string, algo: string) => void;
     onTrackNameChange?: (trackId: string, name: string) => void;
@@ -158,6 +159,7 @@ export const TrackList: React.FC<{
     onVolumeUiChange,
     onVolumeCommit,
     onAddTrack,
+    onCreateTrackBelow,
     onTrackColorChange,
     onAlgoChange,
     onTrackNameChange,
@@ -1414,6 +1416,15 @@ export const TrackList: React.FC<{
                     style={{ left: trackCtxMenu.x, top: trackCtxMenu.y }}
                     onPointerDown={(e) => e.stopPropagation()}
                 >
+                    <button
+                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-qt-button-hover transition-colors"
+                        onClick={() => {
+                            onCreateTrackBelow?.(trackCtxMenu.trackId);
+                            setTrackCtxMenu(null);
+                        }}
+                    >
+                        {t("track_add")}
+                    </button>
                     <button
                         className="w-full text-left px-3 py-1.5 text-sm hover:bg-qt-button-hover transition-colors"
                         onClick={() => {
