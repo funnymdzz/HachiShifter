@@ -6,6 +6,7 @@ import { isNoneBinding, isModifierActive } from "../../../features/keybindings/k
 import type { Keybinding } from "../../../features/keybindings/types";
 import type { MessageKey } from "../../../i18n/messages";
 import { MAX_ROW_HEIGHT, MIN_ROW_HEIGHT, TRACK_ADD_ROW_HEIGHT } from "./constants";
+import { computeVisibleTrackWindow } from "./runtime/timelineWindowing";
 
 /** Color palette options shown when creating a new track. */
 const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
@@ -109,7 +110,7 @@ function meterFillClass(peakLinear: number, clipped: boolean): string {
     return "bg-emerald-400";
 }
 
-export const TrackList: React.FC<{
+type TrackListProps = {
     t: (key: MessageKey) => string;
     tracks: TrackInfo[];
     trackMeters: Record<string, TrackMeterInfo>;
@@ -140,7 +141,9 @@ export const TrackList: React.FC<{
     onScrollTopChange?: (scrollTop: number) => void;
     /** 外部持有该滚动容器的 ref，用于同步右侧轨道区的竖向滚�?*/
     listScrollRef?: React.MutableRefObject<HTMLDivElement | null>;
-}> = ({
+};
+
+const TrackListInner: React.FC<TrackListProps> = ({
     t,
     tracks,
     trackMeters,
@@ -211,6 +214,8 @@ export const TrackList: React.FC<{
         trackId: string;
     } | null>(null);
     const trackCtxMenuRef = useRef<HTMLDivElement | null>(null);
+    const [listScrollTop, setListScrollTop] = useState(0);
+    const [listViewportHeight, setListViewportHeight] = useState(0);
 
     // 自动修正菜单溢出屏幕
     useLayoutEffect(() => {
@@ -424,6 +429,32 @@ export const TrackList: React.FC<{
     useEffect(() => {
         rowHeightRef.current = rowHeight;
     }, [rowHeight]);
+
+    useEffect(() => {
+        const el = listRef.current;
+        if (!el) return;
+
+        const updateViewportHeight = () => {
+            setListViewportHeight(el.clientHeight || 0);
+        };
+
+        updateViewportHeight();
+
+        if (typeof ResizeObserver !== "undefined") {
+            const observer = new ResizeObserver(() => {
+                updateViewportHeight();
+            });
+            observer.observe(el);
+            return () => {
+                observer.disconnect();
+            };
+        }
+
+        window.addEventListener("resize", updateViewportHeight);
+        return () => {
+            window.removeEventListener("resize", updateViewportHeight);
+        };
+    }, []);
 
     useLayoutEffect(() => {
         const el = listRef.current;
@@ -776,6 +807,22 @@ export const TrackList: React.FC<{
         return { parentTrackId, targetIndex, mode: "reorder" };
     }
 
+    const visibleTrackWindow = useMemo(
+        () =>
+            computeVisibleTrackWindow({
+                totalTracks: tracks.length,
+                rowHeight,
+                scrollTopPx: listScrollTop,
+                viewportHeightPx: listViewportHeight,
+                overscanRows: 2,
+            }),
+        [listScrollTop, listViewportHeight, rowHeight, tracks.length],
+    );
+    const visibleTracks = useMemo(
+        () => tracks.slice(visibleTrackWindow.startIndex, visibleTrackWindow.endIndex + 1),
+        [tracks, visibleTrackWindow.endIndex, visibleTrackWindow.startIndex],
+    );
+
     return (
         <Flex direction="column" className="w-64 border-r border-qt-border bg-qt-window shrink-0">
             <Box className="h-6 border-b border-qt-border px-2 flex items-center bg-qt-window shadow-sm z-10">
@@ -819,7 +866,9 @@ export const TrackList: React.FC<{
                 }}
                 className="flex-1 relative overflow-y-auto custom-scrollbar hide-v-scrollbar"
                 onScroll={(e) => {
-                    onScrollTopChange?.((e.currentTarget as HTMLDivElement).scrollTop);
+                    const nextScrollTop = (e.currentTarget as HTMLDivElement).scrollTop;
+                    setListScrollTop(nextScrollTop);
+                    onScrollTopChange?.(nextScrollTop);
                 }}
             >
                 {dragUi?.mode === "reorder" && typeof dragUi.indicatorY === "number" ? (
@@ -830,7 +879,14 @@ export const TrackList: React.FC<{
                         <div className="h-px bg-qt-highlight" />
                     </div>
                 ) : null}
-                {tracks.map((track) => {
+                <div
+                    style={{
+                        position: "relative",
+                        minHeight: tracks.length * rowHeight,
+                    }}
+                >
+                    <div style={{ transform: `translateY(${visibleTrackWindow.startIndex * rowHeight}px)` }}>
+                {visibleTracks.map((track) => {
                     const selected = selectedTrackId === track.id;
                     const depth = Math.max(0, Number(track.depth ?? 0) || 0);
                     const indent = depth * 16;
@@ -1394,6 +1450,8 @@ export const TrackList: React.FC<{
                         </div>
                     );
                 })}
+                    </div>
+                </div>
 
                 <Flex
                     align="center"
@@ -1449,3 +1507,5 @@ export const TrackList: React.FC<{
         </Flex>
     );
 };
+
+export const TrackList = React.memo(TrackListInner);

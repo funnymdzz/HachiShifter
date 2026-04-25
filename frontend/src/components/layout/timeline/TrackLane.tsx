@@ -6,6 +6,7 @@ import React from "react";
 import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
+import { ClipHotspot } from "./ClipHotspot";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
 import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
@@ -15,6 +16,16 @@ function compareClipRenderOrder(a: ClipInfo, b: ClipInfo): number {
     const d = (a.startSec ?? 0) - (b.startSec ?? 0);
     if (Math.abs(d) > 1e-9) return d;
     return String(a.id).localeCompare(String(b.id));
+}
+
+function sameStringArray(a: string[] | undefined, b: string[] | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return !a && !b;
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) {
+        if (a[index] !== b[index]) return false;
+    }
+    return true;
 }
 
 /**
@@ -49,7 +60,7 @@ export function computeLeadingOverlapSecByClipId(clips: ClipInfo[]): Record<stri
     return leadingOverlapSecByClipId;
 }
 
-export const TrackLane = React.memo(function TrackLane(props: {
+type TrackLaneProps = {
     track: TrackInfo;
     allTracks: TrackInfo[];
     trackClips: ClipInfo[];
@@ -60,6 +71,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     viewportWidthPx: number;
     viewportStartSec: number;
     viewportEndSec: number;
+    overlayClipIds?: string[];
 
     altPressed: boolean;
 
@@ -115,7 +127,9 @@ export const TrackLane = React.memo(function TrackLane(props: {
     ghostDrag?: GhostDragInfo | null;
     /** 所有 clip 数据（用于跨轨道 ghost 查找） */
     allClips?: ClipInfo[];
-}) {
+};
+
+export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
     const {
         track,
         allTracks,
@@ -125,6 +139,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         viewportWidthPx,
         viewportStartSec,
         viewportEndSec,
+        overlayClipIds = [],
         altPressed,
         selectedClipId,
         multiSelectedClipIds,
@@ -159,6 +174,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
 
     // 波形区域高度计算（与 ClipItem 一致）
     const waveformHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
+    const [hoveredClipId, setHoveredClipId] = React.useState<string | null>(null);
 
     // 计算当前轨道上需要渲染的 ghost clip 列表
     const ghostClips = React.useMemo(() => {
@@ -194,29 +210,24 @@ export const TrackLane = React.memo(function TrackLane(props: {
         return result;
     }, [ghostDrag, track.id, trackClips, allClips, allTracks]);
 
-    const visibleTrackClips = React.useMemo(() => {
-        const start = Number(viewportStartSec);
-        const end = Number(viewportEndSec);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-            return trackClips;
-        }
-
-        // Render a neighbor window to avoid pop-in/thrashing while zooming.
-        const viewportSec = end - start;
-        const bufferSec = Math.max(2.0, viewportSec * 0.5);
-        const minSec = start - bufferSec;
-        const maxSec = end + bufferSec;
-
-        return trackClips.filter((clip) => {
-            const clipStart = clip.startSec;
-            const clipEnd = clip.startSec + clip.lengthSec;
-            return clipEnd >= minSec && clipStart <= maxSec;
-        });
-    }, [trackClips, viewportStartSec, viewportEndSec]);
-
     const leadingOverlapSecByClipId = React.useMemo(
-        () => computeLeadingOverlapSecByClipId(visibleTrackClips),
-        [visibleTrackClips],
+        () => computeLeadingOverlapSecByClipId(trackClips),
+        [trackClips],
+    );
+    const overlayClipIdSet = React.useMemo(() => {
+        const next = new Set(overlayClipIds);
+        if (hoveredClipId) {
+            next.add(hoveredClipId);
+        }
+        return next;
+    }, [hoveredClipId, overlayClipIds]);
+    const overlayTrackClips = React.useMemo(
+        () => trackClips.filter((clip) => overlayClipIdSet.has(clip.id)),
+        [overlayClipIdSet, trackClips],
+    );
+    const hotspotTrackClips = React.useMemo(
+        () => trackClips.filter((clip) => !overlayClipIdSet.has(clip.id)),
+        [overlayClipIdSet, trackClips],
     );
 
     return (
@@ -224,10 +235,13 @@ export const TrackLane = React.memo(function TrackLane(props: {
             key={track.id}
             className="border-b border-qt-border relative"
             style={{ height: rowHeight }}
+            onPointerLeave={() => {
+                setHoveredClipId(null);
+            }}
         >
             {/* 轨道级波形 Canvas：一个 Canvas 绘制该轨道所有可见 clip 的波形 */}
             <WaveformTrackCanvas
-                clips={visibleTrackClips}
+                clips={trackClips}
                 leadingOverlapSecByClipId={leadingOverlapSecByClipId}
                 trackHeight={rowHeight}
                 waveformTop={CLIP_HEADER_HEIGHT}
@@ -239,7 +253,29 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 strokeColor={waveformColors.stroke}
                 strokeWidth={1}
             />
-            {visibleTrackClips.map((clip) => {
+            {hotspotTrackClips.map((clip) => (
+                <ClipHotspot
+                    key={`hotspot-${clip.id}`}
+                    clip={clip}
+                    rowHeight={rowHeight}
+                    pxPerSec={pxPerSec}
+                    altPressed={altPressed}
+                    multiSelectedCount={multiSelectedClipIds.length}
+                    isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
+                    ensureSelected={ensureSelected}
+                    selectClipRemote={selectClipRemote}
+                    openContextMenu={openContextMenu}
+                    seekFromClientX={seekFromClientX}
+                    startClipDrag={startClipDrag}
+                    startEditDrag={startEditDrag}
+                    onCtrlToggleSelect={onCtrlToggleSelect}
+                    onShiftRangeSelect={onShiftRangeSelect}
+                    rangeSelectAnchorClipId={rangeSelectAnchorClipId}
+                    clearContextMenu={clearContextMenu}
+                    onHoverChange={setHoveredClipId}
+                />
+            ))}
+            {overlayTrackClips.map((clip) => {
                 const selected =
                     multiSelectedClipIds.length > 0
                         ? multiSelectedSet.has(clip.id)
@@ -257,8 +293,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
                         multiSelectedCount={multiSelectedClipIds.length}
                         trackColor={trackColor}
-                        viewportStartSec={viewportStartSec}
-                        viewportEndSec={viewportEndSec}
                         ensureSelected={ensureSelected}
                         selectClipRemote={selectClipRemote}
                         openContextMenu={openContextMenu}
@@ -317,5 +351,41 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 );
             })}
         </div>
+    );
+}, (prev, next) => {
+    return (
+        prev.track === next.track &&
+        prev.allTracks === next.allTracks &&
+        prev.trackClips === next.trackClips &&
+        prev.rowHeight === next.rowHeight &&
+        prev.pxPerSec === next.pxPerSec &&
+        prev.bpm === next.bpm &&
+        prev.viewportWidthPx === next.viewportWidthPx &&
+        prev.altPressed === next.altPressed &&
+        prev.selectedClipId === next.selectedClipId &&
+        prev.multiSelectedClipIds === next.multiSelectedClipIds &&
+        prev.multiSelectedSet === next.multiSelectedSet &&
+        prev.trackColor === next.trackColor &&
+        prev.ensureSelected === next.ensureSelected &&
+        prev.selectClipRemote === next.selectClipRemote &&
+        prev.openContextMenu === next.openContextMenu &&
+        prev.seekFromClientX === next.seekFromClientX &&
+        prev.startClipDrag === next.startClipDrag &&
+        prev.startEditDrag === next.startEditDrag &&
+        prev.toggleClipMuted === next.toggleClipMuted &&
+        prev.onCtrlToggleSelect === next.onCtrlToggleSelect &&
+        prev.toggleMultiSelect === next.toggleMultiSelect &&
+        prev.onShiftRangeSelect === next.onShiftRangeSelect &&
+        prev.rangeSelectAnchorClipId === next.rangeSelectAnchorClipId &&
+        prev.clearContextMenu === next.clearContextMenu &&
+        prev.renamingClipId === next.renamingClipId &&
+        prev.onRenameCommit === next.onRenameCommit &&
+        prev.onRenameDone === next.onRenameDone &&
+        prev.onGainCommit === next.onGainCommit &&
+        prev.ghostDrag === next.ghostDrag &&
+        prev.allClips === next.allClips &&
+        sameStringArray(prev.overlayClipIds, next.overlayClipIds)
+        // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus
+        // after mount, so pure horizontal scroll should not force a TrackLane rerender.
     );
 });

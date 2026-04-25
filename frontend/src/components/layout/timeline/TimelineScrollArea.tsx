@@ -5,7 +5,8 @@ import { clamp } from "./math";
 import { isNoneBinding, isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 import { getTimelineWheelAction } from "../wheelGesture";
-import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
+import { resolveWheelZoom } from "./runtime/timelineInteractionController";
+import { screenXToWorldSec } from "./runtime/timelineWorld";
 
 export const TimelineScrollArea: React.FC<
     Omit<React.HTMLAttributes<HTMLDivElement>, "ref"> & {
@@ -239,24 +240,29 @@ export const TimelineScrollArea: React.FC<
                 anchorSec = clamp(playheadSec, 0, totalSec);
             } else {
                 const anchorX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
-                anchorSec = (anchorX + baseScrollLeft) / Math.max(1e-9, basePxPerSec);
+                anchorSec = screenXToWorldSec(anchorX, {
+                    pxPerSec: basePxPerSec,
+                    rowHeight: rowHeightRef.current,
+                    scrollLeftPx: baseScrollLeft,
+                    scrollTopPx: scroller.scrollTop,
+                });
             }
 
-            const zoom = computeAnchoredHorizontalZoom({
-                currentScale: basePxPerSec,
-                factor,
-                minScale: MIN_PX_PER_SEC,
-                maxScale: MAX_PX_PER_SEC,
-                scrollLeft: baseScrollLeft,
-                viewportWidth: Math.max(1, bounds.width),
+            const nextPxPerSec = clamp(basePxPerSec * factor, MIN_PX_PER_SEC, MAX_PX_PER_SEC);
+            if (Math.abs(nextPxPerSec - basePxPerSec) < 1e-9) return;
+
+            const anchorScreenX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
+            const zoom = resolveWheelZoom({
+                anchorScreenX,
                 anchorSec,
-                contentSec: totalSec,
+                nextPxPerSec,
             });
-            if (!zoom) return;
+            const maxScrollLeft = Math.max(0, totalSec * nextPxPerSec - Math.max(1, bounds.width));
+            const nextScrollLeft = clamp(zoom.nextScrollLeftPx, 0, maxScrollLeft);
 
             zoomPendingRef.current = {
-                nextPxPerSec: zoom.nextScale,
-                nextScrollLeft: zoom.nextScrollLeft,
+                nextPxPerSec,
+                nextScrollLeft,
             };
 
             if (zoomRafRef.current == null) {

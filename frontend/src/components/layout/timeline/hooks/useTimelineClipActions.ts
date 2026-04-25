@@ -195,10 +195,10 @@ export function useTimelineClipActions(
     );
 
     // 切换工具时清除多选
-    const s = useAppSelector((state: RootState) => state.session);
+    const toolMode = useAppSelector((state: RootState) => state.session.toolMode);
     useEffect(() => {
         dispatch(setMultiSelectedClipIdsAction([]));
-    }, [s.toolMode, dispatch]);
+    }, [toolMode, dispatch]);
 
     const multiSelectedSet = useMemo(() => new Set(multiSelectedClipIds), [multiSelectedClipIds]);
     const multiSelectedSetRef = useRef(multiSelectedSet);
