@@ -6,6 +6,8 @@ import { isNoneBinding, isModifierActive } from "../../../features/keybindings/k
 import type { Keybinding } from "../../../features/keybindings/types";
 import { getTimelineWheelAction } from "../wheelGesture";
 import { resolveWheelZoom } from "./runtime/timelineInteractionController";
+import { shouldDispatchTimelineViewport } from "./runtime/timelineViewportDispatch";
+import { resolveTimelineMinPxPerSec } from "./runtime/timelineZoomBounds";
 import { screenXToWorldSec } from "./runtime/timelineWorld";
 
 export const TimelineScrollArea: React.FC<
@@ -45,6 +47,11 @@ export const TimelineScrollArea: React.FC<
     ...divProps
 }) => {
     const lastScrollLeftRef = useRef<number | null>(null);
+    const lastViewportDispatchRef = useRef<{
+        scrollLeft: number;
+        pxPerSec: number;
+        viewportWidth: number;
+    } | null>(null);
     const pxPerSecRef = useRef(pxPerSec);
     const zoomRafRef = useRef<number | null>(null);
     const zoomPendingRef = useRef<{
@@ -76,9 +83,20 @@ export const TimelineScrollArea: React.FC<
 
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
-        if (lastScrollLeftRef.current != null && lastScrollLeftRef.current === next) {
+        const nextSnapshot = {
+            scrollLeft: next,
+            pxPerSec: pxPerSecRef.current,
+            viewportWidth: scroller.clientWidth,
+        };
+        if (
+            !shouldDispatchTimelineViewport({
+                previous: lastViewportDispatchRef.current,
+                next: nextSnapshot,
+            })
+        ) {
             return;
         }
+        lastViewportDispatchRef.current = nextSnapshot;
         lastScrollLeftRef.current = next;
         setScrollLeft(next);
     }
@@ -248,7 +266,12 @@ export const TimelineScrollArea: React.FC<
                 });
             }
 
-            const nextPxPerSec = clamp(basePxPerSec * factor, MIN_PX_PER_SEC, MAX_PX_PER_SEC);
+            const minPxPerSec = resolveTimelineMinPxPerSec({
+                baseMinPxPerSec: MIN_PX_PER_SEC,
+                projectSec: totalSec,
+                viewportWidthPx: bounds.width,
+            });
+            const nextPxPerSec = clamp(basePxPerSec * factor, minPxPerSec, MAX_PX_PER_SEC);
             if (Math.abs(nextPxPerSec - basePxPerSec) < 1e-9) return;
 
             const anchorScreenX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));

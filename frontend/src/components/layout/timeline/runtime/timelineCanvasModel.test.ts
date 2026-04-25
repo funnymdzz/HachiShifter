@@ -9,7 +9,10 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 }
 
 const model = buildSparseClipRenderModel({
-    visibleTracks: [{ id: "track-a" }, { id: "track-b" }],
+    visibleTracks: [
+        { id: "track-a", color: "#ff7a00" },
+        { id: "track-b", color: "#00a3ff" },
+    ],
     visibleTrackClipsById: {
         "track-a": [
             {
@@ -22,6 +25,8 @@ const model = buildSparseClipRenderModel({
                 muted: false,
                 fadeInSec: 0.25,
                 fadeOutSec: 0.5,
+                fadeInCurve: "sine",
+                fadeOutCurve: "sine",
             },
             {
                 id: "clip-b",
@@ -33,6 +38,8 @@ const model = buildSparseClipRenderModel({
                 muted: true,
                 fadeInSec: 0,
                 fadeOutSec: 0,
+                fadeInCurve: "linear",
+                fadeOutCurve: "linear",
             },
         ],
         "track-b": [
@@ -46,6 +53,8 @@ const model = buildSparseClipRenderModel({
                 muted: false,
                 fadeInSec: 0,
                 fadeOutSec: 0,
+                fadeInCurve: "scurve",
+                fadeOutCurve: "exponential",
             },
         ],
     },
@@ -65,6 +74,7 @@ assertEqual(
         widthPx: clip.widthPx,
         fadeInPx: clip.fadeInPx,
         fadeOutPx: clip.fadeOutPx,
+        trackColor: clip.trackColor,
         selected: clip.selected,
         muted: clip.muted,
     })),
@@ -76,6 +86,7 @@ assertEqual(
             widthPx: 300,
             fadeInPx: 25,
             fadeOutPx: 50,
+            trackColor: "#ff7a00",
             selected: false,
             muted: false,
         },
@@ -86,6 +97,7 @@ assertEqual(
             widthPx: 100,
             fadeInPx: 0,
             fadeOutPx: 0,
+            trackColor: "#ff7a00",
             selected: true,
             muted: true,
         },
@@ -96,11 +108,12 @@ assertEqual(
             widthPx: 200,
             fadeInPx: 0,
             fadeOutPx: 0,
+            trackColor: "#00a3ff",
             selected: true,
             muted: false,
         },
     ],
-    "canvas clip geometry",
+    "canvas keeps drawing overlay clips so visuals stay unified",
 );
 
 assertEqual(

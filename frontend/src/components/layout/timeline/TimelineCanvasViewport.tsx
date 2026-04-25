@@ -8,15 +8,8 @@ export const TimelineCanvasViewport: React.FC<{
     height: number;
     model: {
         drawClips: TimelineCanvasClipModel[];
-        playheadX: number;
     };
-    onPointerDown?: (payload: {
-        screenX: number;
-        screenY: number;
-        clientX: number;
-        clientY: number;
-    }) => void;
-}> = ({ width, height, model, onPointerDown }) => {
+}> = ({ width, height, model }) => {
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
 
     React.useLayoutEffect(() => {
@@ -33,28 +26,10 @@ export const TimelineCanvasViewport: React.FC<{
             width,
             height,
             clips: model.drawClips,
-            playheadX: model.playheadX,
         });
     }, [height, model, width]);
 
-    const handlePointerDown = React.useCallback(
-        (event: React.PointerEvent<HTMLCanvasElement>) => {
-            const bounds = event.currentTarget.getBoundingClientRect();
-            onPointerDown?.({
-                screenX: event.clientX - bounds.left,
-                screenY: event.clientY - bounds.top,
-                clientX: event.clientX,
-                clientY: event.clientY,
-            });
-        },
-        [onPointerDown],
-    );
-
     return (
-        <canvas
-            ref={canvasRef}
-            className="absolute inset-0 pointer-events-none"
-            onPointerDown={handlePointerDown}
-        />
+        <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
     );
 };

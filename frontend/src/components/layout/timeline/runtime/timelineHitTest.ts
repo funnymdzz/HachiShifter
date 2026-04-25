@@ -10,6 +10,14 @@ type VisibleClip = {
     lengthSec: number;
 };
 
+function compareVisibleClipRenderOrder(a: VisibleClip, b: VisibleClip): number {
+    const delta = a.startSec - b.startSec;
+    if (Math.abs(delta) > 1e-9) {
+        return delta;
+    }
+    return String(a.id).localeCompare(String(b.id));
+}
+
 export function buildTimelineHitTestIndex(args: {
     rowHeight: number;
     pxPerSec: number;
@@ -25,12 +33,26 @@ export function buildTimelineHitTestIndex(args: {
         rowHeight: args.rowHeight,
         pxPerSec: args.pxPerSec,
         tracksById: new Map(args.visibleTracks.map((track) => [track.id, track] as const)),
-        clipsByTrackId: new Map(
-            args.visibleTracks.map((track) => [
-                track.id,
-                args.visibleClips.filter((clip) => clip.trackId === track.id),
-            ]),
-        ),
+        clipsByTrackId: (() => {
+            const grouped = new Map<string, VisibleClip[]>();
+
+            for (const clip of args.visibleClips) {
+                const next = grouped.get(clip.trackId);
+                if (next) {
+                    next.push(clip);
+                } else {
+                    grouped.set(clip.trackId, [clip]);
+                }
+            }
+
+            for (const clips of grouped.values()) {
+                clips.sort(compareVisibleClipRenderOrder);
+            }
+
+            return new Map(
+                args.visibleTracks.map((track) => [track.id, grouped.get(track.id) ?? []]),
+            );
+        })(),
     };
 }
 
@@ -45,7 +67,7 @@ export function hitTestTimeline(
 ): {
     trackId: string | null;
     clipId: string | null;
-    zone: "empty" | "body" | "trim_left";
+    zone: "empty" | "body" | "trim_left" | "trim_right";
 } {
     const track = [...index.tracksById.values()].find((candidate) => {
         const topPx = candidate.topPx - point.scrollTopPx;
@@ -61,10 +83,13 @@ export function hitTestTimeline(
     }
 
     const worldSec = (point.scrollLeftPx + point.screenX) / Math.max(1e-9, index.pxPerSec);
-    const clip = (index.clipsByTrackId.get(track.id) ?? []).find(
-        (candidate) =>
-            worldSec >= candidate.startSec && worldSec <= candidate.startSec + candidate.lengthSec,
-    );
+    const clip = [...(index.clipsByTrackId.get(track.id) ?? [])]
+        .reverse()
+        .find(
+            (candidate) =>
+                worldSec >= candidate.startSec &&
+                worldSec <= candidate.startSec + candidate.lengthSec,
+        );
 
     if (!clip) {
         return {
@@ -77,6 +102,11 @@ export function hitTestTimeline(
     return {
         trackId: track.id,
         clipId: clip.id,
-        zone: worldSec - clip.startSec <= 0.08 ? "trim_left" : "body",
+        zone:
+            worldSec - clip.startSec <= 0.08
+                ? "trim_left"
+                : clip.startSec + clip.lengthSec - worldSec <= 0.08
+                  ? "trim_right"
+                  : "body",
     };
 }

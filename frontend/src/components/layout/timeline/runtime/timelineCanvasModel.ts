@@ -10,7 +10,8 @@ type SparseRenderClip = {
     muted: boolean;
     fadeInSec: number;
     fadeOutSec: number;
-    color?: string;
+    fadeInCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
+    fadeOutCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
 };
 
 export type TimelineCanvasClipModel = {
@@ -24,6 +25,8 @@ export type TimelineCanvasClipModel = {
     headerHeightPx: number;
     fadeInPx: number;
     fadeOutPx: number;
+    fadeInCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
+    fadeOutCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
     selected: boolean;
     muted: boolean;
     gain: number;
@@ -31,7 +34,7 @@ export type TimelineCanvasClipModel = {
 };
 
 export function buildSparseClipRenderModel(args: {
-    visibleTracks: Array<{ id: string }>;
+    visibleTracks: Array<{ id: string; color?: string }>;
     visibleTrackClipsById: Record<string, SparseRenderClip[]>;
     pxPerSec: number;
     rowHeight: number;
@@ -63,25 +66,28 @@ export function buildSparseClipRenderModel(args: {
         args.multiSelectedClipIds.length > 0 ? new Set(args.multiSelectedClipIds) : null;
 
     const drawClips = args.visibleTracks.flatMap((track, visibleIndex) =>
-        (args.visibleTrackClipsById[track.id] ?? []).map((clip) => ({
-            id: clip.id,
-            trackId: clip.trackId,
-            name: clip.name,
-            leftPx: clip.startSec * args.pxPerSec - args.scrollLeft,
-            topPx: visibleIndex * args.rowHeight,
-            widthPx: Math.max(1, clip.lengthSec * args.pxPerSec),
-            heightPx: Math.max(1, args.rowHeight - CLIP_BODY_PADDING_Y),
-            headerHeightPx: CLIP_HEADER_HEIGHT,
-            fadeInPx: Math.max(0, clip.fadeInSec * args.pxPerSec),
-            fadeOutPx: Math.max(0, clip.fadeOutSec * args.pxPerSec),
-            selected:
-                multiSelectedSet != null
-                    ? multiSelectedSet.has(clip.id)
-                    : args.selectedClipId === clip.id,
-            muted: clip.muted,
-            gain: clip.gain,
-            trackColor: clip.color,
-        })),
+        (args.visibleTrackClipsById[track.id] ?? [])
+            .map((clip) => ({
+                id: clip.id,
+                trackId: clip.trackId,
+                name: clip.name,
+                leftPx: clip.startSec * args.pxPerSec - args.scrollLeft,
+                topPx: visibleIndex * args.rowHeight,
+                widthPx: Math.max(1, clip.lengthSec * args.pxPerSec),
+                heightPx: Math.max(1, args.rowHeight - CLIP_BODY_PADDING_Y),
+                headerHeightPx: CLIP_HEADER_HEIGHT,
+                fadeInPx: Math.max(0, clip.fadeInSec * args.pxPerSec),
+                fadeOutPx: Math.max(0, clip.fadeOutSec * args.pxPerSec),
+                fadeInCurve: clip.fadeInCurve,
+                fadeOutCurve: clip.fadeOutCurve,
+                selected:
+                    multiSelectedSet != null
+                        ? multiSelectedSet.has(clip.id)
+                        : args.selectedClipId === clip.id,
+                muted: clip.muted,
+                gain: clip.gain,
+                trackColor: track.color,
+            })),
     );
 
     const overlayClipIdsByTrackId = Object.fromEntries(

@@ -30,6 +30,16 @@ export function buildTimelineRenderModel(args: {
     const visibleTrackIds = args.tracks
         .slice(visibleTrackWindow.startIndex, visibleTrackWindow.endIndex + 1)
         .map((track) => track.id);
+    const clipsByTrackId = new Map<string, typeof args.clips>();
+
+    for (const clip of args.clips) {
+        const next = clipsByTrackId.get(clip.trackId);
+        if (next) {
+            next.push(clip);
+        } else {
+            clipsByTrackId.set(clip.trackId, [clip]);
+        }
+    }
 
     const visibleClipIdsByTrackId = Object.fromEntries(
         visibleTrackIds.map((trackId) => [
@@ -38,7 +48,7 @@ export function buildTimelineRenderModel(args: {
                 viewportStartSec: args.viewportStartSec,
                 viewportEndSec: args.viewportEndSec,
                 bufferSec: 1.5,
-                clips: args.clips.filter((clip) => clip.trackId === trackId),
+                clips: clipsByTrackId.get(trackId) ?? [],
             }),
         ]),
     ) as Record<string, string[]>;

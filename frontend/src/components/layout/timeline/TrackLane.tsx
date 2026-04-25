@@ -6,8 +6,8 @@ import React from "react";
 import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
-import { ClipHotspot } from "./ClipHotspot";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
+import { buildTimelineHitTestIndex, hitTestTimeline } from "./runtime/timelineHitTest";
 import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
@@ -214,6 +214,21 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         () => computeLeadingOverlapSecByClipId(trackClips),
         [trackClips],
     );
+    const laneHitTestIndex = React.useMemo(
+        () =>
+            buildTimelineHitTestIndex({
+                rowHeight,
+                pxPerSec,
+                visibleTracks: [{ id: track.id, topPx: 0 }],
+                visibleClips: trackClips.map((clip) => ({
+                    id: clip.id,
+                    trackId: clip.trackId,
+                    startSec: clip.startSec,
+                    lengthSec: clip.lengthSec,
+                })),
+            }),
+        [pxPerSec, rowHeight, track.id, trackClips],
+    );
     const overlayClipIdSet = React.useMemo(() => {
         const next = new Set(overlayClipIds);
         if (hoveredClipId) {
@@ -225,9 +240,166 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         () => trackClips.filter((clip) => overlayClipIdSet.has(clip.id)),
         [overlayClipIdSet, trackClips],
     );
-    const hotspotTrackClips = React.useMemo(
-        () => trackClips.filter((clip) => !overlayClipIdSet.has(clip.id)),
-        [overlayClipIdSet, trackClips],
+    const hitTestLane = React.useCallback(
+        (clientX: number, clientY: number, currentTarget: HTMLDivElement) => {
+            const bounds = currentTarget.getBoundingClientRect();
+            return hitTestTimeline(
+                {
+                    screenX: clientX - bounds.left,
+                    screenY: clientY - bounds.top,
+                    scrollLeftPx: 0,
+                    scrollTopPx: 0,
+                },
+                laneHitTestIndex,
+            );
+        },
+        [laneHitTestIndex],
+    );
+    const isClipItemTarget = React.useCallback((target: EventTarget | null) => {
+        return (target as HTMLElement | null)?.closest?.("[data-hs-clip-item='1']") != null;
+    }, []);
+    const primeSelection = React.useCallback(
+        (clipId: string, shouldPrimeSelection: boolean) => {
+            if (!shouldPrimeSelection) {
+                return;
+            }
+            if (multiSelectedClipIds.length === 0 || !multiSelectedSet.has(clipId)) {
+                ensureSelected(clipId);
+            }
+            selectClipRemote(clipId);
+        },
+        [ensureSelected, multiSelectedClipIds.length, multiSelectedSet, selectClipRemote],
+    );
+    const beginBodyInteraction = React.useCallback(
+        (event: React.PointerEvent<HTMLDivElement>, clip: ClipInfo) => {
+            const alt = Boolean(
+                altPressed || event.altKey || event.nativeEvent.getModifierState?.("Alt"),
+            );
+            const ctrlOrMeta = event.ctrlKey || event.metaKey;
+            const doShiftRangeSelect = event.shiftKey && !alt && !ctrlOrMeta;
+            const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+            const doCtrlToggleOnly = ctrlOrMeta && !event.shiftKey && !alt;
+            const allowSeek = !alt && !ctrlOrMeta && !event.shiftKey;
+            const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+            const startX = event.clientX;
+            const startY = event.clientY;
+            let moved = false;
+
+            event.preventDefault();
+            event.stopPropagation();
+            clearContextMenu();
+
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== event.pointerId) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy >= 9) moved = true;
+            };
+
+            const onUp = (ev: PointerEvent) => {
+                if (ev.pointerId !== event.pointerId) return;
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onUp, true);
+                window.removeEventListener("pointercancel", onUp, true);
+                if (doShiftRangeSelect && !moved) {
+                    onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
+                } else if (!moved && allowSeek) {
+                    seekFromClientX(ev.clientX, true);
+                }
+            };
+
+            window.addEventListener("pointermove", onMove, true);
+            window.addEventListener("pointerup", onUp, true);
+            window.addEventListener("pointercancel", onUp, true);
+
+            primeSelection(clip.id, shouldPrimeSelection);
+            startClipDrag(event, clip.id, clip.startSec, alt);
+        },
+        [
+            altPressed,
+            clearContextMenu,
+            onShiftRangeSelect,
+            primeSelection,
+            rangeSelectAnchorClipId,
+            seekFromClientX,
+            startClipDrag,
+        ],
+    );
+    const beginEdgeInteraction = React.useCallback(
+        (
+            event: React.PointerEvent<HTMLDivElement>,
+            clipId: string,
+            edge: "trim_left" | "trim_right",
+        ) => {
+            if (event.button !== 0) return;
+
+            const alt = Boolean(
+                altPressed || event.altKey || event.nativeEvent.getModifierState?.("Alt"),
+            );
+            const ctrlOrMeta = event.ctrlKey || event.metaKey;
+            const doShiftRangeSelect = event.shiftKey && !alt && !ctrlOrMeta;
+            const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+            const doCtrlToggleOnly = ctrlOrMeta && !event.shiftKey && !alt;
+            const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+            const mode =
+                edge === "trim_left"
+                    ? alt
+                        ? "stretch_left"
+                        : "trim_left"
+                    : alt
+                      ? "stretch_right"
+                      : "trim_right";
+            const startX = event.clientX;
+            const startY = event.clientY;
+            const pointerId = event.pointerId;
+            let dragStarted = false;
+
+            event.preventDefault();
+            event.stopPropagation();
+            clearContextMenu();
+            primeSelection(clipId, shouldPrimeSelection);
+
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId || dragStarted) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy < 9) return;
+                dragStarted = true;
+                startEditDrag(event, clipId, mode);
+            };
+
+            const onEnd = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId) return;
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onEnd, true);
+                window.removeEventListener("pointercancel", onEnd, true);
+                if (!dragStarted) {
+                    if (doCtrlToggleOnly) {
+                        onCtrlToggleSelect(clipId);
+                        return;
+                    }
+                    if (doShiftRangeSelect) {
+                        onShiftRangeSelect(clipId, shiftRangeAnchorClipId);
+                        return;
+                    }
+                    seekFromClientX(ev.clientX, true);
+                }
+            };
+
+            window.addEventListener("pointermove", onMove, true);
+            window.addEventListener("pointerup", onEnd, true);
+            window.addEventListener("pointercancel", onEnd, true);
+        },
+        [
+            altPressed,
+            clearContextMenu,
+            onCtrlToggleSelect,
+            onShiftRangeSelect,
+            primeSelection,
+            rangeSelectAnchorClipId,
+            seekFromClientX,
+            startEditDrag,
+        ],
     );
 
     return (
@@ -235,6 +407,47 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
             key={track.id}
             className="border-b border-qt-border relative"
             style={{ height: rowHeight }}
+            onPointerMoveCapture={(event) => {
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                setHoveredClipId((previous) => (previous === hit.clipId ? previous : hit.clipId));
+            }}
+            onContextMenuCapture={(event) => {
+                if (isClipItemTarget(event.target)) {
+                    return;
+                }
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                if (!hit.clipId) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                if (multiSelectedClipIds.length <= 1) {
+                    ensureSelected(hit.clipId);
+                    selectClipRemote(hit.clipId);
+                }
+                openContextMenu(hit.clipId, event.clientX, event.clientY);
+            }}
+            onPointerDownCapture={(event) => {
+                if (isClipItemTarget(event.target)) {
+                    return;
+                }
+                if (event.button !== 0) {
+                    return;
+                }
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                if (!hit.clipId) {
+                    return;
+                }
+                const clip = trackClips.find((candidate) => candidate.id === hit.clipId);
+                if (!clip) {
+                    return;
+                }
+                if (hit.zone === "trim_left" || hit.zone === "trim_right") {
+                    beginEdgeInteraction(event, clip.id, hit.zone);
+                    return;
+                }
+                beginBodyInteraction(event, clip);
+            }}
             onPointerLeave={() => {
                 setHoveredClipId(null);
             }}
@@ -253,28 +466,6 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
                 strokeColor={waveformColors.stroke}
                 strokeWidth={1}
             />
-            {hotspotTrackClips.map((clip) => (
-                <ClipHotspot
-                    key={`hotspot-${clip.id}`}
-                    clip={clip}
-                    rowHeight={rowHeight}
-                    pxPerSec={pxPerSec}
-                    altPressed={altPressed}
-                    multiSelectedCount={multiSelectedClipIds.length}
-                    isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
-                    ensureSelected={ensureSelected}
-                    selectClipRemote={selectClipRemote}
-                    openContextMenu={openContextMenu}
-                    seekFromClientX={seekFromClientX}
-                    startClipDrag={startClipDrag}
-                    startEditDrag={startEditDrag}
-                    onCtrlToggleSelect={onCtrlToggleSelect}
-                    onShiftRangeSelect={onShiftRangeSelect}
-                    rangeSelectAnchorClipId={rangeSelectAnchorClipId}
-                    clearContextMenu={clearContextMenu}
-                    onHoverChange={setHoveredClipId}
-                />
-            ))}
             {overlayTrackClips.map((clip) => {
                 const selected =
                     multiSelectedClipIds.length > 0
@@ -309,6 +500,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
                         onRenameCommit={onRenameCommit}
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
+                        hovered={hoveredClipId === clip.id}
                     />
                 );
             })}

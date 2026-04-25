@@ -24,6 +24,7 @@ import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { gridStepBeats, MIN_PX_PER_SEC, MAX_PX_PER_SEC } from "../";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { computeAutoFollowScrollLeft } from "../../../../utils/autoFollowScroll";
+import { resolveTimelineMinPxPerSec } from "../runtime/timelineZoomBounds";
 
 // ── Args 类型 ─────────────────────────────────────────────────
 export interface UseTimelineEventHandlersArgs {
@@ -92,6 +93,7 @@ export interface UseTimelineEventHandlersArgs {
     autoScrollEnabled: boolean;
     isPlaying: boolean;
     playheadSec: number;
+    dynamicProjectSec: number;
 }
 
 // ── Hook 实现 ─────────────────────────────────────────────────
@@ -122,6 +124,7 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         autoScrollEnabled,
         isPlaying,
         playheadSec,
+        dynamicProjectSec,
     } = args;
 
     // ── useKeyboardShortcuts 桥接 ────────────────────────────
@@ -299,12 +302,16 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
             const zoom = computeAnchoredHorizontalZoom({
                 currentScale: pxPerSecRef.current,
                 factor,
-                minScale: MIN_PX_PER_SEC,
+                minScale: resolveTimelineMinPxPerSec({
+                    baseMinPxPerSec: MIN_PX_PER_SEC,
+                    projectSec: dynamicProjectSec,
+                    viewportWidthPx: scroller.clientWidth,
+                }),
                 maxScale: MAX_PX_PER_SEC,
                 scrollLeft: scroller.scrollLeft,
                 viewportWidth: scroller.clientWidth,
                 anchorSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
-                contentSec: sessionRef.current.projectSec,
+                contentSec: dynamicProjectSec,
             });
             if (!zoom) return;
 

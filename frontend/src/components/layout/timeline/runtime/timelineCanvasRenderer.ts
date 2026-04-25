@@ -1,23 +1,39 @@
-import { gainToDb } from "../math.js";
+import {
+    buildTimelineClipVisualStyle,
+    computeTimelineFadeShadeRange,
+} from "./timelineCanvasStyle.js";
+import { fadeCurveGain } from "../paths.js";
 
-function toRgba(color: string, alpha: number): string {
-    if (color.startsWith("#")) {
-        const hex = color.slice(1);
-        const normalized =
-            hex.length === 3
-                ? hex
-                      .split("")
-                      .map((part) => part + part)
-                      .join("")
-                : hex;
-        if (normalized.length === 6) {
-            const r = Number.parseInt(normalized.slice(0, 2), 16);
-            const g = Number.parseInt(normalized.slice(2, 4), 16);
-            const b = Number.parseInt(normalized.slice(4, 6), 16);
-            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function drawFadeCurveStroke(
+    ctx: CanvasRenderingContext2D,
+    args: {
+        leftPx: number;
+        topPx: number;
+        widthPx: number;
+        heightPx: number;
+        curve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
+        mode: "in" | "out";
+    },
+): void {
+    const widthPx = Math.max(1, args.widthPx);
+    const heightPx = Math.max(1, args.heightPx);
+    const steps = Math.max(12, Math.min(48, Math.round(widthPx / 8)));
+    ctx.beginPath();
+    for (let index = 0; index < steps; index += 1) {
+        const t = index / Math.max(1, steps - 1);
+        const x = args.leftPx + t * widthPx;
+        const gain =
+            args.mode === "in"
+                ? fadeCurveGain(t, args.curve)
+                : fadeCurveGain(1 - t, args.curve);
+        const y = args.topPx + heightPx * (1 - gain);
+        if (index === 0) {
+            ctx.moveTo(x, y);
+        } else {
+            ctx.lineTo(x, y);
         }
     }
-    return color;
+    ctx.stroke();
 }
 
 export function drawTimelineCanvas(
@@ -34,13 +50,14 @@ export function drawTimelineCanvas(
             headerHeightPx: number;
             fadeInPx: number;
             fadeOutPx: number;
+            fadeInCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
+            fadeOutCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
             selected: boolean;
             muted: boolean;
             gain: number;
             name: string;
             trackColor?: string;
         }>;
-        playheadX: number;
     },
 ): void {
     ctx.clearRect(0, 0, args.width, args.height);
@@ -53,90 +70,156 @@ export function drawTimelineCanvas(
         const headerHeight = Math.max(1, Math.min(clip.heightPx, clip.headerHeightPx));
         const bodyTop = clipTop + headerHeight;
         const bodyHeight = Math.max(1, clipHeight - headerHeight);
-        const accent = clip.trackColor ?? (clip.selected ? "#5ea1ff" : "#68839d");
-        const headerColor = clip.selected ? accent : toRgba(accent, 0.9);
-        const bodyColor = clip.selected ? "rgba(94, 161, 255, 0.34)" : "rgba(84, 112, 141, 0.48)";
-        const borderColor = clip.selected ? "#9cc4ff" : "rgba(197, 212, 228, 0.42)";
-        const textColor = clip.selected ? "#f6fbff" : "rgba(233, 241, 249, 0.90)";
-        const mutedAlpha = clip.muted ? 0.45 : 1;
+        const visualStyle = buildTimelineClipVisualStyle({
+            widthPx: clipWidth,
+            trackColor: clip.trackColor,
+            selected: clip.selected,
+            muted: clip.muted,
+            gain: clip.gain,
+            name: clip.name,
+        });
+        const fadeShadeRange = computeTimelineFadeShadeRange({
+            widthPx: clipWidth,
+            fadeInPx: clip.fadeInPx,
+            fadeOutPx: clip.fadeOutPx,
+        });
 
         ctx.save();
-        ctx.globalAlpha = mutedAlpha;
+        ctx.globalAlpha = visualStyle.mutedAlpha;
 
-        ctx.fillStyle = headerColor;
+        ctx.fillStyle = visualStyle.headerFill;
         ctx.fillRect(clipLeft, clipTop, clipWidth, headerHeight);
 
-        ctx.fillStyle = bodyColor;
+        ctx.fillStyle = visualStyle.bodyFill;
         ctx.fillRect(clipLeft, bodyTop, clipWidth, bodyHeight);
 
-        if (clip.fadeInPx > 0) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-            ctx.beginPath();
-            ctx.moveTo(clipLeft, clipTop + clipHeight);
-            ctx.lineTo(clipLeft, clipTop);
-            ctx.lineTo(clipLeft + Math.min(clipWidth, clip.fadeInPx), clipTop + clipHeight);
-            ctx.closePath();
-            ctx.fill();
-        }
-        if (clip.fadeOutPx > 0) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
-            ctx.beginPath();
-            ctx.moveTo(clipLeft + clipWidth, clipTop + clipHeight);
-            ctx.lineTo(clipLeft + clipWidth, clipTop);
-            ctx.lineTo(
-                clipLeft + clipWidth - Math.min(clipWidth, clip.fadeOutPx),
-                clipTop + clipHeight,
+        if (fadeShadeRange) {
+            ctx.fillStyle = "rgba(0, 0, 0, 0.14)";
+            ctx.fillRect(
+                clipLeft + fadeShadeRange.startPx,
+                bodyTop,
+                Math.max(1, fadeShadeRange.endPx - fadeShadeRange.startPx),
+                bodyHeight,
             );
-            ctx.closePath();
-            ctx.fill();
         }
 
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = clip.selected ? 2 : 1;
+        ctx.strokeStyle = visualStyle.borderStroke;
+        ctx.lineWidth = 1;
         ctx.strokeRect(clipLeft + 0.5, bodyTop + 0.5, Math.max(0, clipWidth - 1), Math.max(0, bodyHeight - 1));
 
         ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
         ctx.fillRect(clipLeft, clipTop + headerHeight, clipWidth, 1);
 
-        if (clipWidth >= 32 && clip.muted) {
-            ctx.fillStyle = "rgba(120, 16, 16, 0.86)";
-            ctx.fillRect(clipLeft + 6, clipTop + 3, 14, 11);
-            ctx.fillStyle = "#ffe7e7";
+        if (visualStyle.showMuteBadge) {
+            const buttonX = clipLeft + 6;
+            const buttonY = clipTop + 3;
+            const buttonWidth = visualStyle.muteBadgeWidth;
+            const buttonHeight = visualStyle.muteBadgeHeight;
+            const buttonRadius = visualStyle.muteBadgeRadius;
+            ctx.beginPath();
+            ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, buttonRadius);
+            ctx.fillStyle = visualStyle.muteBadgeFill;
+            ctx.fill();
+            ctx.strokeStyle = visualStyle.muteBadgeStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = visualStyle.muteBadgeTextFill;
             ctx.font = "bold 9px sans-serif";
             ctx.textBaseline = "middle";
-            ctx.fillText("M", clipLeft + 10, clipTop + 8.5);
+            ctx.textAlign = "center";
+            ctx.fillText(
+                visualStyle.muteBadgeLabel,
+                buttonX + buttonWidth / 2,
+                buttonY + buttonHeight / 2 + 0.5,
+            );
+            ctx.textAlign = "start";
         }
 
-        if (clipWidth >= 80) {
-            const gainDb = gainToDb(clip.gain);
-            const gainLabel = `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`;
-            ctx.fillStyle = textColor;
+        if (visualStyle.showGainKnob) {
+            const knobCenterX = clipLeft + visualStyle.gainKnobCenterOffsetX;
+            const knobCenterY = clipTop + visualStyle.gainKnobCenterOffsetY;
+            ctx.fillStyle = visualStyle.gainKnobFill;
+            ctx.strokeStyle = visualStyle.gainKnobStroke;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(knobCenterX, knobCenterY, visualStyle.gainKnobRadius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.fillStyle = visualStyle.gainKnobCoreFill;
+            ctx.arc(knobCenterX, knobCenterY, 1.7, 0, Math.PI * 2);
+            ctx.fill();
+            const angle = ((visualStyle.gainKnobAngleDeg - 90) * Math.PI) / 180;
+            const indicatorOuterX =
+                knobCenterX + Math.cos(angle) * (visualStyle.gainKnobRadius - 1.1);
+            const indicatorOuterY =
+                knobCenterY + Math.sin(angle) * (visualStyle.gainKnobRadius - 1.1);
+            const indicatorInnerX = knobCenterX + Math.cos(angle) * 1.6;
+            const indicatorInnerY = knobCenterY + Math.sin(angle) * 1.6;
+            ctx.beginPath();
+            ctx.strokeStyle = visualStyle.gainKnobIndicator;
+            ctx.lineWidth = 1.2;
+            ctx.moveTo(indicatorInnerX, indicatorInnerY);
+            ctx.lineTo(indicatorOuterX, indicatorOuterY);
+            ctx.stroke();
+        }
+
+        if (visualStyle.showGainLabel) {
+            ctx.fillStyle = visualStyle.textFill;
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
-            const metrics = ctx.measureText(gainLabel);
-            ctx.fillText(gainLabel, clipLeft + clipWidth - metrics.width - 6, clipTop + 9);
+            const metrics = ctx.measureText(visualStyle.gainLabel);
+            ctx.fillText(
+                visualStyle.gainLabel,
+                clipLeft + clipWidth - metrics.width - 6,
+                clipTop + 9,
+            );
         }
 
-        if (clipWidth >= 120) {
-            const textStartX = clipLeft + (clip.muted ? 26 : 8);
-            const textEndX = clipWidth >= 80 ? clipLeft + clipWidth - 56 : clipLeft + clipWidth - 8;
+        if (visualStyle.showName && visualStyle.displayName.length > 0) {
+            const textStartX = clipLeft + visualStyle.leadingControlsWidth;
+            const textEndX = visualStyle.showGainLabel
+                ? clipLeft + clipWidth - 60
+                : clipLeft + clipWidth - 8;
             const availableWidth = Math.max(0, textEndX - textStartX);
             if (availableWidth > 12) {
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(textStartX, clipTop, availableWidth, headerHeight);
                 ctx.clip();
-                ctx.fillStyle = textColor;
+                ctx.fillStyle = visualStyle.textFill;
                 ctx.font = "12px sans-serif";
                 ctx.textBaseline = "middle";
-                ctx.fillText(clip.name, textStartX, clipTop + 9);
+                ctx.fillText(visualStyle.displayName, textStartX, clipTop + 9);
                 ctx.restore();
             }
         }
 
+        if (clip.fadeInPx > 0) {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
+            ctx.lineWidth = 1;
+            drawFadeCurveStroke(ctx, {
+                leftPx: clipLeft,
+                topPx: bodyTop + 1,
+                widthPx: Math.min(clipWidth, clip.fadeInPx),
+                heightPx: Math.max(1, bodyHeight - 2),
+                curve: clip.fadeInCurve,
+                mode: "in",
+            });
+        }
+        if (clip.fadeOutPx > 0) {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
+            ctx.lineWidth = 1;
+            drawFadeCurveStroke(ctx, {
+                leftPx: clipLeft + clipWidth - Math.min(clipWidth, clip.fadeOutPx),
+                topPx: bodyTop + 1,
+                widthPx: Math.min(clipWidth, clip.fadeOutPx),
+                heightPx: Math.max(1, bodyHeight - 2),
+                curve: clip.fadeOutCurve,
+                mode: "out",
+            });
+        }
+
         ctx.restore();
     }
-
-    ctx.fillStyle = "#ff5d5d";
-    ctx.fillRect(args.playheadX, 0, 1, args.height);
 }

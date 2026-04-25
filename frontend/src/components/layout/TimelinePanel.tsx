@@ -233,6 +233,7 @@ export const TimelinePanel: React.FC = () => {
         autoScrollEnabled: s.autoScrollEnabled,
         isPlaying: s.runtime.isPlaying,
         playheadSec: s.playheadSec,
+        dynamicProjectSec,
     });
 
     const isTransportAdvancing = s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
@@ -608,14 +609,8 @@ export const TimelinePanel: React.FC = () => {
     const timelineCanvasModel = useMemo(
         () => ({
             drawClips: sparseClipRenderModel.drawClips,
-            playheadX: s.playheadSec * pxPerSec - scrollLeft,
         }),
-        [
-            pxPerSec,
-            s.playheadSec,
-            scrollLeft,
-            sparseClipRenderModel.drawClips,
-        ],
+        [sparseClipRenderModel.drawClips],
     );
 
     // ═════════════════════════════════════════════════════════

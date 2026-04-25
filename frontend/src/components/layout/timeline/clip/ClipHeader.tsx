@@ -4,12 +4,14 @@ import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
 import { useI18n } from "../../../../i18n/I18nProvider";
 import { useAppTheme } from "../../../../theme/AppThemeProvider";
+import { resolveTimelineClipHeaderVisibility } from "../runtime/timelineClipHeaderVisibility";
 
 const CLIP_GAIN_WHEEL_STEP_DB = 0.5;
 
 export const ClipHeader: React.FC<{
     clip: ClipInfo;
     clipWidthPx: number;
+    transparentVisuals?: boolean;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
@@ -25,6 +27,7 @@ export const ClipHeader: React.FC<{
 }> = ({
     clip,
     clipWidthPx,
+    transparentVisuals = false,
     ensureSelected,
     selectClipRemote,
     startEditDrag,
@@ -63,11 +66,8 @@ export const ClipHeader: React.FC<{
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
-    const showAny = clipWidthPx >= 32;
-    const showMute = clipWidthPx >= 32;
-    const showGainKnob = clipWidthPx >= 52;
-    const showGainVal = clipWidthPx >= 80;
-    const showName = clipWidthPx >= 120;
+    const { showAny, showMute, showGainKnob, showGainLabel: showGainVal, showName } =
+        resolveTimelineClipHeaderVisibility(clipWidthPx);
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────
     const [gainEditing, setGainEditing] = useState(false);
@@ -118,6 +118,7 @@ export const ClipHeader: React.FC<{
     }
 
     if (!showAny) return null;
+    const hideVisuals = transparentVisuals && !nameEditing && !gainEditing;
 
     return (
         <div
@@ -141,6 +142,7 @@ export const ClipHeader: React.FC<{
                         toggleClipMuted(clip.id, !Boolean(clip.muted));
                     }}
                     title={clip.muted ? t("clip_unmute") : t("clip_mute")}
+                    style={{ opacity: hideVisuals ? 0 : 1 }}
                 >
                     M
                 </button>
@@ -206,6 +208,7 @@ export const ClipHeader: React.FC<{
                         style={{
                             borderColor: isDark ? "rgba(255,255,255,0.65)" : "rgba(0,0,0,0.45)",
                             backgroundColor: isDark ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.28)",
+                            opacity: hideVisuals ? 0 : 1,
                         }}
                     >
                         <span
@@ -252,6 +255,7 @@ export const ClipHeader: React.FC<{
                             className="text-xs font-medium drop-shadow-md truncate cursor-text"
                             style={{
                                 color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.86)",
+                                opacity: hideVisuals ? 0 : 1,
                             }}
                             onDoubleClick={(e) => {
                                 e.preventDefault();
@@ -290,7 +294,10 @@ export const ClipHeader: React.FC<{
             ) : showGainVal ? (
                 <div
                     className="text-xs drop-shadow-md cursor-ns-resize"
-                    style={{ color: isDark ? "rgba(255,255,255,0.82)" : "rgba(0,0,0,0.72)" }}
+                    style={{
+                        color: isDark ? "rgba(255,255,255,0.82)" : "rgba(0,0,0,0.72)",
+                        opacity: hideVisuals ? 0 : 1,
+                    }}
                     title={t("clip_gain_drag_hint")}
                     onDoubleClick={(e) => {
                         e.preventDefault();
