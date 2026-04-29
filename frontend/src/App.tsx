@@ -34,6 +34,7 @@ import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
 import { PitchAnalysisProvider, usePitchAnalysis } from "./contexts/PitchAnalysisContext";
 import { PianoRollStatusProvider, usePianoRollStatus } from "./contexts/PianoRollStatusContext";
 import { FileBrowserPanel } from "./components/layout/FileBrowserPanel";
+import { NotebookPanel } from "./components/layout/NotebookPanel";
 import { QuickSearchPopup } from "./components/layout/QuickSearchPopup";
 import { useKeybindings } from "./features/keybindings/useKeybindings";
 import type { ActionId } from "./features/keybindings/types";
@@ -125,6 +126,7 @@ function AppInner() {
     const runtimeIsPlaying = useAppSelector((state) => state.session.runtime.isPlaying);
     const runtimeHasSynthesized = useAppSelector((state) => state.session.runtime.hasSynthesized);
     const fileBrowserVisible = useAppSelector((state) => state.fileBrowser.visible);
+    const notebookVisible = useAppSelector((state) => state.notebook.visible);
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
@@ -1424,7 +1426,7 @@ function AppInner() {
             />
             <ActionBar />
 
-            {/* Main Content Area: Splitter + optional File Browser */}
+            {/* Main Content Area: Splitter + optional right-side panels */}
             <Flex className="flex-1 min-h-0">
                 {/* Left: Timeline / PianoRoll vertical splitter */}
                 <div ref={containerRef} className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -1454,11 +1456,19 @@ function AppInner() {
                     </Box>
                 </div>
 
-                {/* Right: File Browser Panel (可收起) */}
-                {fileBrowserVisible && (
-                    <div className="w-[280px] shrink-0 border-l border-qt-border bg-qt-window flex flex-col">
-                        <FileBrowserPanel />
-                    </div>
+                {(fileBrowserVisible || notebookVisible) && (
+                    <Flex className="shrink-0 min-h-0 border-l border-qt-border bg-qt-window">
+                        {fileBrowserVisible ? (
+                            <div className="w-[280px] shrink-0 border-r border-qt-border bg-qt-window flex flex-col">
+                                <FileBrowserPanel />
+                            </div>
+                        ) : null}
+                        {notebookVisible ? (
+                            <div className="w-[320px] shrink-0 bg-qt-window flex flex-col">
+                                <NotebookPanel />
+                            </div>
+                        ) : null}
+                    </Flex>
                 )}
             </Flex>
 

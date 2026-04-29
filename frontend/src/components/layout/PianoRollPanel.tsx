@@ -8,7 +8,7 @@ import React, {
     useRef,
     useState,
 } from "react";
-import { Flex, Text, Button, Select, Box, IconButton } from "@radix-ui/themes";
+import { Flex, Text, Button, Select, Box, IconButton, DropdownMenu } from "@radix-ui/themes";
 import {
     CursorArrowIcon,
     EyeOpenIcon,
@@ -33,6 +33,8 @@ import {
     cycleDragDirection,
     setToolMode,
     persistUiSettings,
+    setVisibleReferenceRootTrackIds,
+    toggleVisibleReferenceRootTrackId,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -67,7 +69,12 @@ import {
 
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./pianoRoll/constants";
 import { drawPianoRoll } from "./pianoRoll/render";
-import type { DetectedPitchCurve } from "./pianoRoll/render";
+import type { DetectedPitchCurve, ReferencePitchOverlay } from "./pianoRoll/render";
+import {
+    buildReferencePitchStrokeColor,
+    cleanupVisibleReferenceRootTrackIds,
+    listReferenceRootTracks,
+} from "./pianoRoll/referenceRootTracks";
 import { averageSelectionValues, smoothSelectionValues } from "./pianoRoll/selectionTransforms";
 import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
@@ -125,6 +132,11 @@ import {
 
 const NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX = 1600;
+
+function sameStringArray(a: string[], b: string[]) {
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => value === b[index]);
+}
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -218,6 +230,9 @@ export const PianoRollPanel: React.FC = () => {
     const [snapToggleHeld, setSnapToggleHeld] = useState(false);
     // 仅在参数编辑实际操作期间（选择拖拽/绘制）参与临时吸附视觉切换
     const [snapGestureActive, setSnapGestureActive] = useState(false);
+    const [hoveredReferenceRootTrackId, setHoveredReferenceRootTrackId] = useState<string | null>(
+        null,
+    );
 
     useEffect(() => {
         const kb = mergedKeybindings["modifier.clipNoSnap"];
@@ -805,6 +820,42 @@ export const PianoRollPanel: React.FC = () => {
         return ids;
     }, [rootTrackId, s.tracks]);
 
+    const referenceRootTrackOptions = useMemo(
+        () =>
+            listReferenceRootTracks({
+                tracks: s.tracks,
+                currentRootTrackId: rootTrackId,
+            }),
+        [rootTrackId, s.tracks],
+    );
+
+    const visibleReferenceRootTrackIds = useMemo(
+        () =>
+            cleanupVisibleReferenceRootTrackIds({
+                tracks: s.tracks,
+                currentRootTrackId: rootTrackId,
+                visibleReferenceRootTrackIds: s.visibleReferenceRootTrackIds,
+            }),
+        [rootTrackId, s.tracks, s.visibleReferenceRootTrackIds],
+    );
+
+    useEffect(() => {
+        if (sameStringArray(visibleReferenceRootTrackIds, s.visibleReferenceRootTrackIds)) {
+            return;
+        }
+        dispatch(setVisibleReferenceRootTrackIds(visibleReferenceRootTrackIds));
+        void dispatch(persistUiSettings());
+    }, [dispatch, s.visibleReferenceRootTrackIds, visibleReferenceRootTrackIds]);
+
+    useEffect(() => {
+        if (
+            hoveredReferenceRootTrackId &&
+            !visibleReferenceRootTrackIds.includes(hoveredReferenceRootTrackId)
+        ) {
+            setHoveredReferenceRootTrackId(null);
+        }
+    }, [hoveredReferenceRootTrackId, visibleReferenceRootTrackIds]);
+
     const pitchHardDisableReason = useMemo(() => {
         if (editParam !== "pitch") return null;
         if (!rootTrack) return null;
@@ -836,6 +887,14 @@ export const PianoRollPanel: React.FC = () => {
     }, [editParam, processorParams, secondaryParamVisible]);
 
     const dynamicProjectSec = useMemo(() => getDynamicProjectSec(s.clips), [s.clips]);
+
+    const updateVisibleReferenceRootTrackIds = useCallback(
+        (nextTrackIds: string[]) => {
+            dispatch(setVisibleReferenceRootTrackIds(nextTrackIds));
+            void dispatch(persistUiSettings());
+        },
+        [dispatch],
+    );
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec));
@@ -1274,6 +1333,7 @@ export const PianoRollPanel: React.FC = () => {
         paramView,
         setParamView,
         secondaryParamViews,
+        referencePitchViews,
         bumpRefreshToken,
         refreshNow,
         refreshSecondaryNow,
@@ -1282,6 +1342,7 @@ export const PianoRollPanel: React.FC = () => {
     } = usePianoRollData({
         editParam,
         secondaryParamIds: visibleSecondaryParamIds,
+        referenceRootTrackIds: visibleReferenceRootTrackIds,
         pitchEnabled,
         paramsEpoch: (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
         rootTrackId,
@@ -1307,12 +1368,12 @@ export const PianoRollPanel: React.FC = () => {
             invalidate();
             return;
         }
-        if (visibleSecondaryParamIds.length > 0) {
+        if (visibleSecondaryParamIds.length > 0 || visibleReferenceRootTrackIds.length > 0) {
             void refreshSecondaryNowRef.current();
             return;
         }
         invalidate();
-    }, [visibleSecondaryParamIds, invalidate, rootTrackId]);
+    }, [invalidate, rootTrackId, visibleReferenceRootTrackIds, visibleSecondaryParamIds]);
 
     const handleMidiImported = useCallback(
         (_result: { notes_imported: number; frames_touched: number }) => {
@@ -1415,10 +1476,45 @@ export const PianoRollPanel: React.FC = () => {
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
+    const referencePitchOverlays = useMemo((): ReferencePitchOverlay[] => {
+        if (editParam !== "pitch") return [];
+        return visibleReferenceRootTrackIds
+            .map((trackId) => {
+                const paramViewForTrack = referencePitchViews[trackId];
+                if (!paramViewForTrack) return null;
+                const totalPoints = Math.max(
+                    paramViewForTrack.orig.length,
+                    paramViewForTrack.edit.length,
+                );
+                if (totalPoints < 2) return null;
+                const track = s.tracks.find((item) => item.id === trackId);
+                return {
+                    rootTrackId: trackId,
+                    strokeColor: buildReferencePitchStrokeColor(
+                        track?.color ?? null,
+                        hoveredReferenceRootTrackId === trackId,
+                    ),
+                    highlighted: hoveredReferenceRootTrackId === trackId,
+                    paramView: paramViewForTrack,
+                };
+            })
+            .filter((item): item is ReferencePitchOverlay => item != null);
+    }, [
+        editParam,
+        hoveredReferenceRootTrackId,
+        referencePitchViews,
+        s.tracks,
+        visibleReferenceRootTrackIds,
+    ]);
+
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
         invalidate();
     }, [detectedPitchCurves, invalidate]);
+
+    useEffect(() => {
+        invalidate();
+    }, [invalidate, referencePitchOverlays]);
 
     // Ensure pitch-snap related changes immediately redraw
     useEffect(() => {
@@ -1464,6 +1560,7 @@ export const PianoRollPanel: React.FC = () => {
             secPerBeat,
             playheadSec: s.playheadSec,
             waveformColors,
+            referencePitchOverlays,
             detectedPitchCurves,
             isDark: themeMode === "dark",
             clipboardPreview: s.showClipboardPreview ? clipboardRef.current : null,
@@ -3436,6 +3533,76 @@ export const PianoRollPanel: React.FC = () => {
                                     </Flex>
                                 );
                             })}
+                            {editParam === "pitch" ? (
+                                <DropdownMenu.Root>
+                                    <DropdownMenu.Trigger className="shrink-0 rounded border border-qt-border bg-qt-panel px-2 py-1 text-xs text-qt-text hover:bg-qt-hover">
+                                        {`${t("reference_root_tracks")}${
+                                            visibleReferenceRootTrackIds.length > 0
+                                                ? ` (${visibleReferenceRootTrackIds.length})`
+                                                : ""
+                                        }`}
+                                    </DropdownMenu.Trigger>
+                                    <DropdownMenu.Content variant="soft" color="gray">
+                                        <DropdownMenu.Item
+                                            onSelect={() =>
+                                                updateVisibleReferenceRootTrackIds(
+                                                    referenceRootTrackOptions.map((track) => track.id),
+                                                )
+                                            }
+                                        >
+                                            {t("reference_root_tracks_all")}
+                                        </DropdownMenu.Item>
+                                        <DropdownMenu.Item
+                                            onSelect={() => updateVisibleReferenceRootTrackIds([])}
+                                        >
+                                            {t("reference_root_tracks_clear")}
+                                        </DropdownMenu.Item>
+                                        <DropdownMenu.Separator />
+                                        {referenceRootTrackOptions.length === 0 ? (
+                                            <DropdownMenu.Item disabled>
+                                                {t("reference_root_tracks_empty")}
+                                            </DropdownMenu.Item>
+                                        ) : (
+                                            referenceRootTrackOptions.map((track) => (
+                                                <DropdownMenu.CheckboxItem
+                                                    key={track.id}
+                                                    checked={visibleReferenceRootTrackIds.includes(
+                                                        track.id,
+                                                    )}
+                                                    onCheckedChange={() => {
+                                                        dispatch(
+                                                            toggleVisibleReferenceRootTrackId(
+                                                                track.id,
+                                                            ),
+                                                        );
+                                                        void dispatch(persistUiSettings());
+                                                    }}
+                                                    onPointerEnter={() =>
+                                                        setHoveredReferenceRootTrackId(track.id)
+                                                    }
+                                                    onPointerLeave={() =>
+                                                        setHoveredReferenceRootTrackId(null)
+                                                    }
+                                                >
+                                                    <Flex align="center" gap="2">
+                                                        <span
+                                                            className="inline-block h-2.5 w-2.5 rounded-full"
+                                                            style={{
+                                                                background:
+                                                                    buildReferencePitchStrokeColor(
+                                                                        track.color,
+                                                                        true,
+                                                                    ),
+                                                            }}
+                                                        />
+                                                        <span>{track.name}</span>
+                                                    </Flex>
+                                                </DropdownMenu.CheckboxItem>
+                                            ))
+                                        )}
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Root>
+                            ) : null}
                             {editParam === "pitch" ? (
                                 <Button
                                     size="1"

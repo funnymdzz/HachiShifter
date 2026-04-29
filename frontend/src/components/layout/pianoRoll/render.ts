@@ -278,6 +278,13 @@ export interface DetectedPitchCurve {
     framePeriodMs: number;
 }
 
+export interface ReferencePitchOverlay {
+    rootTrackId: string;
+    strokeColor: string;
+    highlighted: boolean;
+    paramView: ParamViewSegment;
+}
+
 export function drawPianoRoll(args: {
     axisCanvas: HTMLCanvasElement | null;
     canvas: HTMLCanvasElement | null;
@@ -301,6 +308,7 @@ export function drawPianoRoll(args: {
     playheadSec: number; // 播放头位置（秒）
     pitchAnalysisPending?: boolean;
     waveformColors?: { fill: string; stroke: string };
+    referencePitchOverlays?: ReferencePitchOverlay[];
     /** 检测音高曲线列表，在 pitch 模式下渲染为参考线 */
     detectedPitchCurves?: DetectedPitchCurve[];
     /** 是否为深色主题（默认 true） */
@@ -344,6 +352,7 @@ export function drawPianoRoll(args: {
             fill: "rgba(255,255,255,0.2)",
             stroke: "rgba(255,255,255,0.5)",
         },
+        referencePitchOverlays,
         detectedPitchCurves,
         isDark = true,
         clipboardPreview,
@@ -834,6 +843,34 @@ export function drawPianoRoll(args: {
     // 若音高分析进行中，跳过曲线绘制（进度条已显示状态）
     if (pitchAnalysisPending) {
         return;
+    }
+
+    if (editParam === "pitch" && referencePitchOverlays && referencePitchOverlays.length > 0) {
+        referencePitchOverlays.forEach((overlay) => {
+            const values = resolveSecondaryOverlayValues({
+                orig: overlay.paramView.orig,
+                edit: overlay.paramView.edit,
+            });
+            if (values.length < 2) return;
+            ctx.save();
+            ctx.strokeStyle = overlay.strokeColor;
+            ctx.lineWidth = overlay.highlighted ? 1.9 : 1.4;
+            ctx.setLineDash(getFixedDashPattern(4, 5));
+            drawCurveTimed({
+                ctx,
+                values,
+                param: "pitch",
+                w,
+                h,
+                startFrame: overlay.paramView.startFrame,
+                stride: overlay.paramView.stride,
+                framePeriodMs: overlay.paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
+        });
     }
 
     // 检测音高参考线：在 pitch 模式下，将后端推送的 per-clip 检测曲线渲染为半透明彩色参考线�?

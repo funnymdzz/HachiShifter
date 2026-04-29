@@ -149,13 +149,21 @@ pub fn open_project(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_project(state: State<'_, AppState>, window: Window) -> serde_json::Value {
-    project::save_project(state, window)
+pub fn save_project(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    project::save_project(state, window, notes_markdown)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json::Value {
-    project::save_project_as(state, window)
+pub fn save_project_as(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    project::save_project_as(state, window, notes_markdown)
 }
 
 #[tauri::command(rename_all = "camelCase")]

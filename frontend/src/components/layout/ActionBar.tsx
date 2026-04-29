@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Flex, Select, TextField, Button, IconButton, Separator, Text } from "@radix-ui/themes";
-import { PauseIcon, PlayIcon, StopIcon } from "@radix-ui/react-icons";
+import { PauseIcon, Pencil1Icon, PlayIcon, StopIcon } from "@radix-ui/react-icons";
 import { useAppDispatch, useAppSelector } from "../../app/hooks";
 import type { RootState } from "../../app/store";
 import { useI18n } from "../../i18n/I18nProvider";
@@ -26,11 +26,13 @@ import {
 import { SCALE_KEYS, SCALE_LABELS } from "../../utils/musicalScales";
 import { applySelectWheelChange } from "../../utils/selectWheel";
 import { toggleVisible } from "../../features/fileBrowser/fileBrowserSlice";
+import { toggleNotebookVisible } from "../../features/notebook/notebookSlice";
 
 export function ActionBar() {
     const dispatch = useAppDispatch();
     const s = useAppSelector((state: RootState) => state.session);
     const fileBrowserVisible = useAppSelector((state: RootState) => state.fileBrowser.visible);
+    const notebookVisible = useAppSelector((state: RootState) => state.notebook.visible);
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
 
@@ -362,6 +364,15 @@ export function ActionBar() {
                             fill="currentColor"
                         />
                     </svg>
+                </IconButton>
+                <IconButton
+                    size="1"
+                    variant={notebookVisible ? "solid" : "ghost"}
+                    color="gray"
+                    title={t("notebook")}
+                    onClick={() => dispatch(toggleNotebookVisible())}
+                >
+                    <Pencil1Icon />
                 </IconButton>
             </Flex>
 
