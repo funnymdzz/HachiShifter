@@ -479,7 +479,13 @@ fn decode_model_output_to_f0_hz(
     if dims.len() <= 2 {
         return data
             .iter()
-            .map(|&v| if v.is_finite() && v > 0.0 { v as f64 } else { 0.0 })
+            .map(|&v| {
+                if v.is_finite() && v > 0.0 {
+                    v as f64
+                } else {
+                    0.0
+                }
+            })
             .collect();
     }
 
@@ -541,18 +547,19 @@ fn decode_model_output_to_f0_hz(
         return out;
     }
 
-    data
-        .iter()
-        .map(|&v| if v.is_finite() && v > 0.0 { v as f64 } else { 0.0 })
+    data.iter()
+        .map(|&v| {
+            if v.is_finite() && v > 0.0 {
+                v as f64
+            } else {
+                0.0
+            }
+        })
         .collect()
 }
 
 fn tensor_rank_from_outlet(outlet: &ort::value::Outlet) -> usize {
-    outlet
-        .dtype()
-        .tensor_shape()
-        .map(|s| s.len())
-        .unwrap_or(0)
+    outlet.dtype().tensor_shape().map(|s| s.len()).unwrap_or(0)
 }
 
 fn build_waveform_tensor_for_rank(rank: usize, waveform: Vec<f32>) -> Result<Tensor<f32>, String> {
@@ -561,8 +568,11 @@ fn build_waveform_tensor_for_rank(rank: usize, waveform: Vec<f32>) -> Result<Ten
             .map_err(|e| format!("build FCPE input [T] failed: {e}")),
         2 => Tensor::from_array(([1usize, waveform.len()], waveform.into_boxed_slice()))
             .map_err(|e| format!("build FCPE input [1,T] failed: {e}")),
-        _ => Tensor::from_array(([1usize, 1usize, waveform.len()], waveform.into_boxed_slice()))
-            .map_err(|e| format!("build FCPE input [1,1,T] failed: {e}")),
+        _ => Tensor::from_array((
+            [1usize, 1usize, waveform.len()],
+            waveform.into_boxed_slice(),
+        ))
+        .map_err(|e| format!("build FCPE input [1,1,T] failed: {e}")),
     }
 }
 
@@ -641,10 +651,7 @@ fn run_with_named_inputs(
                 .map(|s| s.iter().copied().collect())
                 .unwrap_or_else(|| vec![-1, -1, 128]);
 
-            let mel_axis = mel_shape
-                .iter()
-                .position(|&d| d == 128)
-                .unwrap_or(2);
+            let mel_axis = mel_shape.iter().position(|&d| d == 128).unwrap_or(2);
             let n_mels = 128usize;
 
             let (mel, t) = build_mel_from_waveform(waveform, sample_rate, n_mels)
@@ -708,10 +715,7 @@ fn run_with_named_inputs(
                 .and_then(|o| o.dtype().tensor_shape())
                 .map(|s| s.iter().copied().collect())
                 .unwrap_or_else(|| vec![-1, -1, 128]);
-            let mel_axis = mel_shape
-                .iter()
-                .position(|&d| d == 128)
-                .unwrap_or(2);
+            let mel_axis = mel_shape.iter().position(|&d| d == 128).unwrap_or(2);
             let n_mels = 128usize;
 
             let (mel, t) = build_mel_from_waveform(waveform, sample_rate, n_mels)
@@ -879,13 +883,8 @@ pub fn infer_f0_hz(
         .lock()
         .map_err(|e| format!("FCPE session lock poisoned: {e}"))?;
 
-    let output_values = run_with_named_inputs(
-        &mut session,
-        &waveform,
-        sample_rate,
-        f0_floor,
-        f0_ceil,
-    )?;
+    let output_values =
+        run_with_named_inputs(&mut session, &waveform, sample_rate, f0_floor, f0_ceil)?;
 
     if output_values.is_empty() {
         return Ok(vec![0.0; target_frames]);

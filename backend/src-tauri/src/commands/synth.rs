@@ -558,12 +558,9 @@ pub(super) fn preview_export_audio_plan(
 
     match request.mode {
         ExportAudioMode::Project => {
-            let Ok((path, _, _)) = resolve_project_output_path(
-                &state,
-                &request,
-                &project_name,
-                export_start_time,
-            ) else {
+            let Ok((path, _, _)) =
+                resolve_project_output_path(&state, &request, &project_name, export_start_time)
+            else {
                 return ExportAudioPlanPayload {
                     ok: false,
                     mode: ExportAudioMode::Project,
@@ -735,17 +732,21 @@ pub(super) fn export_audio_advanced(
         ExportAudioMode::Project => {
             let project_name = resolve_project_name(&state);
             let export_start_time = Local::now();
-            let (out_path, output_dir_value, file_name_value) =
-                match resolve_project_output_path(&state, &request, &project_name, export_start_time) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        return serde_json::json!({
-                            "ok": false,
-                            "mode": "project",
-                            "error": error,
-                        });
-                    }
-                };
+            let (out_path, output_dir_value, file_name_value) = match resolve_project_output_path(
+                &state,
+                &request,
+                &project_name,
+                export_start_time,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return serde_json::json!({
+                        "ok": false,
+                        "mode": "project",
+                        "error": error,
+                    });
+                }
+            };
 
             if let Some(parent) = out_path.parent() {
                 if let Err(error) = fs::create_dir_all(parent) {
@@ -1124,8 +1125,11 @@ pub(super) fn export_audio_advanced(
                 sub_timeline
                     .tracks
                     .retain(|track| target.included_track_ids.contains(&track.id));
-                let active_track_ids: HashSet<&str> =
-                    sub_timeline.tracks.iter().map(|track| track.id.as_str()).collect();
+                let active_track_ids: HashSet<&str> = sub_timeline
+                    .tracks
+                    .iter()
+                    .map(|track| track.id.as_str())
+                    .collect();
                 sub_timeline
                     .clips
                     .retain(|clip| active_track_ids.contains(clip.track_id.as_str()));
@@ -1262,7 +1266,10 @@ fn normalize_export_range(
 fn build_display_track_order(tracks: &[crate::state::Track]) -> Vec<crate::state::Track> {
     let mut by_parent: HashMap<Option<String>, Vec<crate::state::Track>> = HashMap::new();
     for track in tracks.iter().cloned() {
-        by_parent.entry(track.parent_id.clone()).or_default().push(track);
+        by_parent
+            .entry(track.parent_id.clone())
+            .or_default()
+            .push(track);
     }
     for siblings in by_parent.values_mut() {
         siblings.sort_by_key(|track| track.order);
@@ -1479,8 +1486,8 @@ fn latest_clip_end_sec(timeline: &crate::state::TimelineState) -> f64 {
 
 fn normalize_export_sample_rate(sample_rate: u32) -> u32 {
     match sample_rate {
-        8_000 | 11_025 | 12_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000
-        | 88_200 | 96_000 | 176_400 | 192_000 => sample_rate,
+        8_000 | 11_025 | 12_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000 | 88_200
+        | 96_000 | 176_400 | 192_000 => sample_rate,
         _ => 44_100,
     }
 }
@@ -1720,7 +1727,12 @@ fn build_unique_export_file_name(
             sanitize_file_name_segment(track_name)
         ));
     }
-    if relative.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("wav")) != Some(true) {
+    if relative
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("wav"))
+        != Some(true)
+    {
         let stem = relative
             .file_name()
             .and_then(|name| name.to_str())
@@ -1728,7 +1740,11 @@ fn build_unique_export_file_name(
             .to_string();
         let mut new_file_name = sanitize_file_name_segment(&stem);
         if new_file_name.is_empty() {
-            new_file_name = format!("{}_{}.wav", export_index_token, sanitize_file_name_segment(track_name));
+            new_file_name = format!(
+                "{}_{}.wav",
+                export_index_token,
+                sanitize_file_name_segment(track_name)
+            );
         } else if !new_file_name.to_ascii_lowercase().ends_with(".wav") {
             new_file_name.push_str(".wav");
         }

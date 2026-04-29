@@ -353,6 +353,7 @@ export const zhTW = {
     kb_clip_paste: "貼上音訊片段",
     kb_clip_split: "分割音訊片段",
     kb_clip_normalize: "正規化音訊片段",
+    qs_auto_normalize: "放置時自動正規化",
     kb_group_pianoroll: "鋼琴捲簾",
     kb_group_modifier: "修飾鍵",
     kb_pianoroll_copy: "複製參數幀",

@@ -352,6 +352,7 @@ export const zhCN = {
     kb_clip_paste: "粘贴音频块",
     kb_clip_split: "分割音频块",
     kb_clip_normalize: "规格化音频块",
+    qs_auto_normalize: "放置时自动规格化",
     kb_group_pianoroll: "钢琴卷帘",
     kb_group_modifier: "修饰键",
     kb_pianoroll_copy: "复制参数帧",

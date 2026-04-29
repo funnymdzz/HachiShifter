@@ -28,6 +28,7 @@ import {
     computeTimelineTrackDragLockThresholdPx,
 } from "../runtime/timelineTrackDragLock";
 import { webApi } from "../../../../services/webviewApi";
+import { resolveClipDragCopyMode } from "./clipDragCopyMode";
 
 export const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
@@ -257,12 +258,25 @@ export function useClipDrag(deps: {
             const el = scrollRef.current;
             if (!drag || drag.pointerId !== e.pointerId || !el) return;
 
+            const copyMode = resolveClipDragCopyMode({
+                existingCopyMode: drag.copyMode,
+                ctrlKey: ev.ctrlKey,
+                metaKey: ev.metaKey,
+                modifierActive: isModifierActive(copyDragKb, ev),
+            });
+            if (copyMode !== drag.copyMode) {
+                drag.copyMode = copyMode;
+                if (copyMode) {
+                    drag.ctrlSelectionToggle = false;
+                }
+            }
+
             if (!drag.hasMoved) {
                 const dx = ev.clientX - drag.startClientX;
                 const dy = ev.clientY - drag.startClientY;
                 if (dx * dx + dy * dy < 9) return;
                 drag.hasMoved = true;
-                if (!drag.copyMode) {
+                if (!copyMode) {
                     dispatch(checkpointHistory());
                     dispatch(beginInteraction());
                     // Begin backend undo group so that move_clip + auto-crossfade
@@ -329,7 +343,7 @@ export function useClipDrag(deps: {
             }
 
             // copyMode 时不移动原 clip，只更新 ghost 预览位置
-            if (drag.copyMode) {
+            if (copyMode) {
                 setGhostDrag((prev) => {
                     if (
                         prev &&

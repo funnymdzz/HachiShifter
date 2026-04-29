@@ -1,4 +1,4 @@
-﻿// pitch_analysis::analysis — 核心分析流水线
+// pitch_analysis::analysis — 核心分析流水线
 // 包含：快照/diff、单 clip 分析、并行多 clip 分析、音高曲线合成。
 
 #![allow(dead_code)]
@@ -7,9 +7,7 @@ use crate::state::{AppState, Clip, PitchAnalysisAlgo, TimelineState};
 use std::collections::HashSet;
 use std::path::Path;
 
-use super::{
-    build_root_pitch_key, hz_to_midi, resample_curve_linear, PitchJob,
-};
+use super::{build_root_pitch_key, hz_to_midi, resample_curve_linear, PitchJob};
 
 fn build_root_mix_timeline(tl: &TimelineState, root_track_id: &str) -> TimelineState {
     // Collect root + descendants.
@@ -1356,12 +1354,8 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
         let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
 
         // Resample to analysis rate (44100) and convert to mono.
-        let mut segment = crate::mixdown::linear_resample_interleaved(
-            segment,
-            in_channels_usize,
-            in_rate,
-            44100,
-        );
+        let mut segment =
+            crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, 44100);
         if clip.reversed {
             crate::mixdown::reverse_interleaved_frames(&mut segment, in_channels_usize);
         }

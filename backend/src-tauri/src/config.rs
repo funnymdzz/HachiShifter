@@ -41,6 +41,8 @@ pub struct UiSettings {
     pub show_param_value_popup: bool,
     #[serde(default = "default_true")]
     pub lock_param_lines: bool,
+    #[serde(default)]
+    pub quick_search_auto_normalize: bool,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
     #[serde(default = "default_drag_direction")]
@@ -192,6 +194,7 @@ impl Default for UiSettings {
             show_clipboard_preview: true,
             show_param_value_popup: true,
             lock_param_lines: true,
+            quick_search_auto_normalize: false,
             drag_direction: default_drag_direction(),
             select_drag_direction: default_drag_direction(),
             draw_drag_direction: default_draw_drag_direction(),
@@ -341,4 +344,3 @@ pub fn save_auto_backup_settings(config_dir: &Path, settings: &AutoBackupSetting
     cfg.auto_backup = settings.normalized();
     save_config(config_dir, &cfg);
 }
-

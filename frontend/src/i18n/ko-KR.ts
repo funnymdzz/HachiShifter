@@ -436,6 +436,7 @@ export const koKR = {
     kb_clip_paste: "클립 붙여넣기",
     kb_clip_split: "클립 분할",
     kb_clip_normalize: "클립 노멀라이즈",
+    qs_auto_normalize: "배치 시 자동 노멀라이즈",
     kb_group_pianoroll: "피아노 롤",
     kb_group_modifier: "수정 키",
     kb_pianoroll_copy: "파라미터 프레임 복사",

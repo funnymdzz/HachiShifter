@@ -365,6 +365,7 @@ export const jaJP = {
     kb_clip_paste: "クリップをペースト",
     kb_clip_split: "クリップを分割",
     kb_clip_normalize: "クリップをノーマライズ",
+    qs_auto_normalize: "配置時に自動ノーマライズ",
     kb_group_pianoroll: "ピアノロール",
     kb_group_modifier: "修飾キー",
     kb_pianoroll_copy: "パラメータフレームをコピー",

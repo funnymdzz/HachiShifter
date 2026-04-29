@@ -93,19 +93,19 @@ struct VspPitchPoint {
     disabled: bool,
     #[allow(dead_code)]
     original_pitch: i16, // *PIT (offset 20)
-    pitch: i16,          // PIT (offset 22)
-    formant: i16,        // FRM (offset 24)
-    bre: i16,            // BRE (offset 26)
+    pitch: i16,   // PIT (offset 22)
+    formant: i16, // FRM (offset 24)
+    bre: i16,     // BRE (offset 26)
     #[allow(dead_code)]
-    eq1: i16,            // EQ1 (offset 28)
+    eq1: i16, // EQ1 (offset 28)
     #[allow(dead_code)]
-    eq2: i16,            // EQ2 (offset 30)
-    dyn_orig: f64,       // *DYN (offset 32)
-    dyn_edit: f64,       // DYN (offset 40)
-    vol: f64,            // VOL (offset 48)
-    pan: f64,            // PAN (offset 56)
+    eq2: i16, // EQ2 (offset 30)
+    dyn_orig: f64, // *DYN (offset 32)
+    dyn_edit: f64, // DYN (offset 40)
+    vol: f64,     // VOL (offset 48)
+    pan: f64,     // PAN (offset 56)
     #[allow(dead_code)]
-    heq_or_mrp: i16,     // HEQ/MRP (offset 82)
+    heq_or_mrp: i16, // HEQ/MRP (offset 82)
 }
 
 #[derive(Debug, Clone, Copy)]

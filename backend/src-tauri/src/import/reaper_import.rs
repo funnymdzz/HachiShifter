@@ -87,7 +87,10 @@ fn reaper_fade_curve(values: &[f64]) -> String {
     .to_string()
 }
 
-fn derive_fades_from_item_volume_envelope(item: &ReaperItem, item_length: f64) -> (Option<f64>, Option<f64>) {
+fn derive_fades_from_item_volume_envelope(
+    item: &ReaperItem,
+    item_length: f64,
+) -> (Option<f64>, Option<f64>) {
     let mut points: Vec<(f64, f64)> = item
         .envelopes
         .iter()
@@ -175,7 +178,8 @@ fn effective_item_fades(item: &ReaperItem, take: &ReaperTake, item_length: f64) 
     } else {
         reaper_fade_length_sec(&item.fade_out).clamp(0.0, max_len)
     };
-    let (env_fade_in, env_fade_out) = derive_fades_from_item_volume_envelope(item, item_length.max(0.0));
+    let (env_fade_in, env_fade_out) =
+        derive_fades_from_item_volume_envelope(item, item_length.max(0.0));
 
     // 仅在显式 fade 长度缺失时才从音量包络推导，避免覆盖 Reaper 的直接 FADEIN/FADEOUT。
     if fade_in_sec <= 1e-9 {
@@ -295,7 +299,10 @@ fn take_linear_gain(item: &ReaperItem, take: &ReaperTake) -> f64 {
 
     // 兼容部分 Reaper 多 Take 工程：非主 take 的 VOLPAN 可能写成 0，
     // 但实际可听音量继承自主 take。此处仅对“显式 take”做回退。
-    let explicit_take = item.takes.iter().any(|candidate| std::ptr::eq(candidate, take));
+    let explicit_take = item
+        .takes
+        .iter()
+        .any(|candidate| std::ptr::eq(candidate, take));
     if !explicit_take {
         return vol.max(0.0);
     }
@@ -324,7 +331,8 @@ fn compute_item_source_window_sec(
         compute_take_source_bounds_sec(take, source_duration_sec);
 
     let consumed = consumed_sec.max(0.0);
-    let anchor = compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, is_reversed);
+    let anchor =
+        compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, is_reversed);
 
     if is_reversed {
         let end = anchor;
@@ -854,7 +862,8 @@ fn process_item(
                 let start = (s_offs + cumulative_source_pos - actual_pre_src)
                     .max(source_min_bound)
                     .min(source_max_bound);
-                let raw_end = s_offs + cumulative_source_pos + seg_source_duration + actual_post_src;
+                let raw_end =
+                    s_offs + cumulative_source_pos + seg_source_duration + actual_post_src;
                 let end = raw_end.max(start).min(source_max_bound);
                 (start, end)
             };
@@ -970,8 +979,13 @@ fn process_item(
             let consumed = item_length * effective_rate;
             let (min_bound, max_bound, has_section) =
                 compute_take_source_bounds_sec(take, duration_sec);
-            let anchor =
-                compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, item_reversed);
+            let anchor = compute_take_source_anchor_sec(
+                take,
+                min_bound,
+                max_bound,
+                has_section,
+                item_reversed,
+            );
             let (fallback_start, fallback_end) = if item_reversed {
                 let end = anchor;
                 let start = (end - consumed).max(min_bound).min(end);

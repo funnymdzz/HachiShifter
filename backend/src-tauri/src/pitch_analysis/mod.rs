@@ -101,7 +101,11 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
             | PitchAnalysisAlgo::NsfHifiganOnnx
             | PitchAnalysisAlgo::Unknown
     ) {
-        hasher.update(&[if crate::fcpe_onnx::is_available() { 1 } else { 0 }]);
+        hasher.update(&[if crate::fcpe_onnx::is_available() {
+            1
+        } else {
+            0
+        }]);
     }
 
     // Include each clip mapped to this root track.

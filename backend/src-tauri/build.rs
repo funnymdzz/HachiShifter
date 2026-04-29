@@ -42,7 +42,9 @@ fn build_frontend() {
     // Set HIFISHIFTER_SKIP_FRONTEND_BUILD=1 to skip building frontend here.
     let skip_frontend = std::env::var("HIFISHIFTER_SKIP_FRONTEND_BUILD").unwrap_or_default();
     if skip_frontend == "1" {
-        println!("cargo:warning=[Frontend] HIFISHIFTER_SKIP_FRONTEND_BUILD=1 -> skipping frontend build");
+        println!(
+            "cargo:warning=[Frontend] HIFISHIFTER_SKIP_FRONTEND_BUILD=1 -> skipping frontend build"
+        );
         return;
     }
 

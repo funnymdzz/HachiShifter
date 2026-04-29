@@ -186,6 +186,8 @@ export interface SessionState {
 
     /** 在粘贴/创建时是否锁定参数线以应用 linked params */
     lockParamLinesEnabled: boolean;
+    /** 快速搜索放置音频时自动规格化 */
+    quickSearchAutoNormalizeEnabled: boolean;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -451,6 +453,14 @@ function mapTimelineTracks(tracks: TimelineState["tracks"]): TrackInfo[] {
 function applyTimelineTracksOnly(state: SessionState, timeline: TimelineState) {
     state.tracks = mapTimelineTracks(timeline.tracks);
     state.selectedTrackId = timeline.selected_track_id;
+}
+
+function applyTimelineStatePreservingPitchVisuals(state: SessionState, timeline: TimelineState) {
+    const currentParamsEpoch = state.paramsEpoch;
+    const currentClipPitchCurves = state.clipPitchCurves;
+    applyTimelineState(state, timeline, { force: true });
+    state.paramsEpoch = currentParamsEpoch;
+    state.clipPitchCurves = currentClipPitchCurves;
 }
 
 function applyOptimisticTrackState(
@@ -864,6 +874,7 @@ const initialState: SessionState = {
     lineVibratoDragDirection: "free" as DrawDragDirection,
     edgeSmoothnessPercent: 0,
     lockParamLinesEnabled: false,
+    quickSearchAutoNormalizeEnabled: false,
 
     paramsEpoch: 0,
 
@@ -1122,6 +1133,9 @@ const sessionSlice = createSlice({
         },
         toggleLockParamLines(state) {
             state.lockParamLinesEnabled = !state.lockParamLinesEnabled;
+        },
+        toggleQuickSearchAutoNormalize(state) {
+            state.quickSearchAutoNormalizeEnabled = !state.quickSearchAutoNormalizeEnabled;
         },
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
@@ -1594,6 +1608,10 @@ const sessionSlice = createSlice({
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
                 if (s.lockParamLines != null)
                     state.lockParamLinesEnabled = Boolean(s.lockParamLines);
+                if ((s as any).quickSearchAutoNormalize != null)
+                    state.quickSearchAutoNormalizeEnabled = Boolean(
+                        (s as any).quickSearchAutoNormalize,
+                    );
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
                     state.selectDragDirection = selectDir as DragDirection;
@@ -1730,7 +1748,7 @@ const sessionSlice = createSlice({
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
-                    applyTimelineState(state, payload.imported as any, { force: true });
+                    applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     // Apply auto-crossfade for newly imported clips
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
@@ -1753,7 +1771,7 @@ const sessionSlice = createSlice({
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
-                    applyTimelineState(state, payload.imported as any, { force: true });
+                    applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
                     }
@@ -1775,7 +1793,7 @@ const sessionSlice = createSlice({
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
-                    applyTimelineState(state, payload.imported as any, { force: true });
+                    applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
                     }
@@ -1797,7 +1815,7 @@ const sessionSlice = createSlice({
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
-                    applyTimelineState(state, payload.imported as any, { force: true });
+                    applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
                     }
@@ -2831,6 +2849,7 @@ export const {
     upsertCustomScalePreset,
     removeCustomScalePreset,
     toggleLockParamLines,
+    toggleQuickSearchAutoNormalize,
     setSelectedClip,
     setSelectedClipPreservingTrack,
     setMultiSelectedClipIds,

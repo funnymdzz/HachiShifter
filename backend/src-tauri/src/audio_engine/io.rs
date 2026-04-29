@@ -112,7 +112,6 @@ pub(crate) fn decode_audio_f32_interleaved(path: &Path) -> Result<(u32, usize, V
         }
     }
 
-    
     use symphonia::core::codecs::DecoderOptions;
     use symphonia::core::errors::Error;
     use symphonia::core::formats::FormatOptions;

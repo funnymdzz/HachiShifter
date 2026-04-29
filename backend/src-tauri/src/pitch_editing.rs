@@ -393,7 +393,10 @@ fn active_child_pitch_offset_config<'a>(
     timeline: &'a TimelineState,
     clip_track_id: &str,
 ) -> Option<ChildPitchOffsetConfig<'a>> {
-    let track = timeline.tracks.iter().find(|track| track.id == clip_track_id)?;
+    let track = timeline
+        .tracks
+        .iter()
+        .find(|track| track.id == clip_track_id)?;
     if track.parent_id.is_none() {
         return None;
     }
@@ -431,20 +434,16 @@ fn active_child_pitch_offset_config<'a>(
 
     for track_id in lineage_child_ids {
         let cents_curve = entry.and_then(|state| {
-            state
-                .extra_curves
-                .get(&child_pitch_offset_curve_key(
-                    ChildPitchOffsetParamMode::Cents,
-                    track_id,
-                ))
+            state.extra_curves.get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Cents,
+                track_id,
+            ))
         });
         let degree_steps_curve = entry.and_then(|state| {
-            state
-                .extra_curves
-                .get(&child_pitch_offset_curve_key(
-                    ChildPitchOffsetParamMode::Degrees,
-                    track_id,
-                ))
+            state.extra_curves.get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Degrees,
+                track_id,
+            ))
         });
 
         let static_cents = CHILD_PITCH_OFFSET_CENTS_DEFAULT;
@@ -919,12 +918,9 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     };
     // seg_end_sec 始终以时间轴坐标（输出帧）计，确保音高编辑范围检测与声码器上下文一致
     let seg_end_sec = seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
-    let has_pitch_user_edit = any_user_edit_in_range(
-        frame_period_ms,
-        pitch_edit,
-        seg_start_sec,
-        seg_end_sec,
-    ) || has_child_pitch_offset;
+    let has_pitch_user_edit =
+        any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec)
+            || has_child_pitch_offset;
     if !has_pitch_user_edit
         && !extra_processing
         && !tension_processing
@@ -977,7 +973,10 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             seg_end_sec,
         );
         if !has_effective_pitch_change
-            && !(extra_processing || tension_processing || formant_processing || needs_processor_stretch)
+            && !(extra_processing
+                || tension_processing
+                || formant_processing
+                || needs_processor_stretch)
         {
             return Ok(false);
         }
@@ -1187,7 +1186,8 @@ pub fn does_clip_need_processor_render(
     clip: &crate::state::Clip,
     clip_start_sec: f64,
 ) -> bool {
-    let has_child_pitch_offset = active_child_pitch_offset_config(timeline, &clip.track_id).is_some();
+    let has_child_pitch_offset =
+        active_child_pitch_offset_config(timeline, &clip.track_id).is_some();
     let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
         return false;
     };

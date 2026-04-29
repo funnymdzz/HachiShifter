@@ -7,6 +7,7 @@ import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
 import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
+import { shouldRouteClipPasteToParamEditor } from "../clipboardFocusRouting";
 
 const IS_MAC =
     typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
@@ -101,15 +102,23 @@ export function useKeyboardShortcuts(deps: {
                       : [];
 
             const active = document.activeElement as HTMLElement | null;
-            const inPianoRoll =
+            const inPianoRoll = Boolean(
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]");
-            const inTrackHeader =
+                active?.closest?.("[data-piano-roll-scroller]"),
+            );
+            const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+                    document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+            );
 
             // clip.paste 与 pianoRoll.paste 冲突时：参数编辑器 / 轨道头焦点优先参数粘贴
-            if (actionId === "clip.paste" && (inPianoRoll || inTrackHeader)) {
+            if (
+                actionId === "clip.paste" &&
+                shouldRouteClipPasteToParamEditor({
+                    inPianoRoll,
+                    inTrackHeader,
+                })
+            ) {
                 e.preventDefault();
                 e.stopPropagation();
                 window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op: "paste" } }));

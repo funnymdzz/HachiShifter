@@ -1469,7 +1469,6 @@ impl HfsPeaksCache {
 
         Ok((removed_files, removed_bytes))
     }
-
 }
 
 /// 获取文件元数据指纹

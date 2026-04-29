@@ -189,6 +189,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 sourcePath: args[4],
             };
 
+        case "create_clips_bulk":
+            return { payload: args[0] };
+
         case "remove_clip":
             return { clipId: args[0] };
 
@@ -237,6 +240,15 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 color: args[14],
                 checkpoint: args[15],
             };
+
+        case "set_clips_state_bulk":
+            return {
+                updates: args[0],
+                checkpoint: args[1],
+            };
+
+        case "duplicate_clips_bulk":
+            return { payload: args[0] };
 
         case "replace_clip_source":
             return {

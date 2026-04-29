@@ -172,10 +172,17 @@ pub fn run() {
                     let ws = crate::config::load_window_state(cfg_dir);
                     // 应用尺寸与位置（非最大化/全屏状态先应用尺寸/位置，再切换最大化）
                     if let (Some(w), Some(h)) = (ws.width, ws.height) {
-                        let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
+                        let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: w,
+                            height: h,
+                        }));
                     }
                     if let (Some(x), Some(y)) = (ws.x, ws.y) {
-                        let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: x as f64, y: y as f64 }));
+                        let _ =
+                            win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                                x: x as f64,
+                                y: y as f64,
+                            }));
                     }
                     if ws.fullscreen.unwrap_or(false) {
                         let _ = win.set_fullscreen(true);
@@ -215,7 +222,8 @@ pub fn run() {
                     h_opt = Some(size.height as f64);
                 }
 
-                if let Some(cfg_dir) = win.app_handle().state::<state::AppState>().config_dir.get() {
+                if let Some(cfg_dir) = win.app_handle().state::<state::AppState>().config_dir.get()
+                {
                     let ws = crate::config::WindowState {
                         x: x_opt,
                         y: y_opt,

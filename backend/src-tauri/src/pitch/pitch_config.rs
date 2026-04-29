@@ -134,9 +134,13 @@ pub fn split_into_chunks(range: Range<usize>, chunk_samples: usize) -> Vec<Range
     }
 
     let len = range.end.saturating_sub(range.start);
-    let capacity = if len == 0 { 1 } else { (len + chunk_samples - 1) / chunk_samples };
+    let capacity = if len == 0 {
+        1
+    } else {
+        (len + chunk_samples - 1) / chunk_samples
+    };
     let mut out = Vec::with_capacity(capacity);
-    
+
     let mut start = range.start;
     let end = range.end;
     while start < end {

@@ -25,6 +25,7 @@ import { gridStepBeats, MIN_PX_PER_SEC, MAX_PX_PER_SEC } from "../";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { computeAutoFollowScrollLeft } from "../../../../utils/autoFollowScroll";
 import { resolveTimelineMinPxPerSec } from "../runtime/timelineZoomBounds";
+import { shouldRouteClipPasteToParamEditor } from "../clipboardFocusRouting";
 
 // ── Args 类型 ─────────────────────────────────────────────────
 export interface UseTimelineEventHandlersArgs {
@@ -140,18 +141,26 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         function onEditOp(e: Event) {
             const op = (e as CustomEvent<{ op?: string }>).detail?.op;
             const active = document.activeElement as HTMLElement | null;
-            const inPianoRoll =
+            const inPianoRoll = Boolean(
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]");
-            const inTrackHeader =
+                active?.closest?.("[data-piano-roll-scroller]"),
+            );
+            const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+                    document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+            );
             const deferToPianoRollForSelection =
                 inPianoRoll &&
                 sessionRef.current.toolMode === "select" &&
                 (op === "selectAll" || op === "deselect");
             if (deferToPianoRollForSelection) return;
-            if (op === "paste" && (inPianoRoll || inTrackHeader)) {
+            if (
+                op === "paste" &&
+                shouldRouteClipPasteToParamEditor({
+                    inPianoRoll,
+                    inTrackHeader,
+                })
+            ) {
                 return;
             }
             if (inPianoRoll && op !== "selectAll" && op !== "deselect") {

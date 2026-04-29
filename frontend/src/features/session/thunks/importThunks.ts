@@ -4,6 +4,8 @@ import type { SessionState } from "../sessionSlice";
 
 import { addTrackRemote, setClipStateRemote } from "./timelineThunks";
 import { computeAutoCrossfadeFromPayload } from "../../../components/layout/timeline/hooks/autoCrossfade";
+import { computeClipNormalizationGain } from "../clipNormalization";
+import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 
 type RawTimelineClip = {
     id?: string;
@@ -135,6 +137,7 @@ export const importAudioAtPosition = createAsyncThunk(
             audioPath: string;
             trackId?: string | null;
             startSec?: number;
+            normalizeAfterImport?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -187,13 +190,60 @@ export const importAudioAtPosition = createAsyncThunk(
                 .map((c) => c.id)
                 .filter((id): id is string => !!id && !beforeClipIds.has(id));
 
-            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+            let latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
                 dispatch: dispatch as unknown as (
                     action: unknown,
                 ) => Promise<unknown> & { unwrap: () => Promise<unknown> },
                 getState,
                 newClipIds,
             });
+
+            if (payload.normalizeAfterImport && newClipIds.length > 0) {
+                const timelineForNormalization = (latestTimeline ?? imported) as {
+                    clips?: Array<{
+                        id?: string;
+                        source_path?: string;
+                        duration_sec?: number;
+                        length_sec?: number;
+                        source_start_sec?: number;
+                        source_end_sec?: number;
+                        playback_rate?: number;
+                    }>;
+                };
+                for (const clipId of newClipIds) {
+                    const clip = timelineForNormalization.clips?.find((entry) => entry.id === clipId);
+                    if (!clip) continue;
+                    const gain = computeClipNormalizationGain(
+                        {
+                            sourcePath: clip.source_path,
+                            durationSec: Number(clip.duration_sec ?? 0) || undefined,
+                            lengthSec: Math.max(0, Number(clip.length_sec ?? 0) || 0),
+                            sourceStartSec: Number(clip.source_start_sec ?? 0) || 0,
+                            sourceEndSec: Number(clip.source_end_sec ?? 0) || 0,
+                            playbackRate: Number(clip.playback_rate ?? 1) || 1,
+                        },
+                        {
+                            getInterleavedSlice: (sourcePath, _channel, sourceStartSec, sourceSpanSec) =>
+                                waveformMipmapStore.getInterleavedSlice(
+                                    sourcePath,
+                                    0,
+                                    sourceStartSec,
+                                    sourceSpanSec,
+                                ),
+                            releaseInterleaved: (data) =>
+                                waveformMipmapStore.releaseInterleaved(data as Float32Array),
+                        },
+                    );
+                    if (gain == null) continue;
+                    latestTimeline = (await dispatch(
+                        setClipStateRemote({
+                            clipId,
+                            gain,
+                            checkpoint: false,
+                        }),
+                    ).unwrap()) as typeof latestTimeline;
+                }
+            }
 
             // 导入后将光标定位到第一个音频块的起始位置
             const importedResult = latestTimeline ?? imported;

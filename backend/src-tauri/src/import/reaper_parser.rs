@@ -806,7 +806,11 @@ fn parse_item_block(block: &Block) -> ReaperItem {
     }
 
     if !take_envelopes.is_empty() {
-        let active_take_idx = item.takes.iter().position(|take| take.selected).unwrap_or(0);
+        let active_take_idx = item
+            .takes
+            .iter()
+            .position(|take| take.selected)
+            .unwrap_or(0);
         if let Some(envs) = take_envelopes.get(active_take_idx) {
             item.envelopes.extend(envs.iter().cloned());
         }

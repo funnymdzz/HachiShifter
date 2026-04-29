@@ -142,8 +142,12 @@ fn rotate_existing_project_file_for_backup(path: &Path) -> Result<Option<PathBuf
 
     let backup_path = save_on_save_backup_path(path);
     if backup_path.exists() {
-        fs::remove_file(&backup_path)
-            .map_err(|e| format!("Failed to remove stale save backup {:?}: {}", backup_path, e))?;
+        fs::remove_file(&backup_path).map_err(|e| {
+            format!(
+                "Failed to remove stale save backup {:?}: {}",
+                backup_path, e
+            )
+        })?;
     }
 
     fs::rename(path, &backup_path).map_err(|e| {
@@ -254,7 +258,9 @@ fn resolve_timed_backup_output_path(
         template.trim().to_string()
     };
 
-    let project_folder = resolve_project_folder_for_backup(state).display().to_string();
+    let project_folder = resolve_project_folder_for_backup(state)
+        .display()
+        .to_string();
     let project_name = resolve_project_name_for_backup(state);
 
     let replaced = normalized_template
@@ -275,7 +281,10 @@ fn resolve_timed_backup_output_path(
     Ok((output_path, fallback_used))
 }
 
-fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -> Result<(), String> {
+fn atomic_write_project_snapshot_to_path(
+    state: &AppState,
+    output_path: &Path,
+) -> Result<(), String> {
     let output_name = project_name_from_path(output_path);
     let project_file = build_project_file_snapshot(state, output_path, &output_name);
     let bytes = serialize_project_file_for_path(&project_file, output_path)?;
@@ -354,7 +363,11 @@ fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -
     Ok(())
 }
 
-fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_name: &str) -> ProjectFile {
+fn build_project_file_snapshot(
+    state: &AppState,
+    project_path: &Path,
+    project_name: &str,
+) -> ProjectFile {
     let mut tl = state
         .timeline
         .lock()
@@ -386,10 +399,7 @@ fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_na
     pf
 }
 
-fn unique_entry_path(
-    desired: &str,
-    used_paths: &mut std::collections::HashSet<String>,
-) -> String {
+fn unique_entry_path(desired: &str, used_paths: &mut std::collections::HashSet<String>) -> String {
     let path = Path::new(desired);
     let parent = path
         .parent()
@@ -522,10 +532,7 @@ fn save_project_archive_to_zip_inner(
 
     // 为了保证保存的原子性，先写入临时文件，成功后再重命名为最终路径。
     let tmp_path = {
-        let ext = zip_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let ext = zip_path.extension().and_then(|s| s.to_str()).unwrap_or("");
         if ext.is_empty() {
             // 没有扩展名的情况，直接追加后缀
             zip_path.with_extension("tmp_save")
@@ -539,8 +546,7 @@ fn save_project_archive_to_zip_inner(
     let write_result: Result<(), String> = (|| {
         let file = fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipWriter::new(file);
-        let options =
-            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         zip.start_file(project_entry_name.clone(), options)
             .map_err(|e| e.to_string())?;
@@ -553,7 +559,8 @@ fn save_project_archive_to_zip_inner(
             }
             // 使用流式写入，避免将整个文件读入内存。
             let mut src_file = fs::File::open(source_path).map_err(|e| e.to_string())?;
-            zip.start_file(zip_entry, options).map_err(|e| e.to_string())?;
+            zip.start_file(zip_entry, options)
+                .map_err(|e| e.to_string())?;
             std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
         }
 
@@ -596,7 +603,10 @@ fn save_project_archive_to_zip_inner(
             if destination_existed {
                 if backup_path.exists() {
                     fs::remove_file(&backup_path).map_err(|e| {
-                        format!("Failed to remove stale archive backup {:?}: {}", backup_path, e)
+                        format!(
+                            "Failed to remove stale archive backup {:?}: {}",
+                            backup_path, e
+                        )
                     })?;
                 }
 
@@ -653,11 +663,12 @@ pub(crate) fn save_project_to_path_inner(
     let bytes = serialize_project_file_for_path(&pf, &path)?;
 
     let auto_backup_settings = load_auto_backup_settings(state);
-    let rotated_backup = if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
-        rotate_existing_project_file_for_backup(&path)?
-    } else {
-        None
-    };
+    let rotated_backup =
+        if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
+            rotate_existing_project_file_for_backup(&path)?
+        } else {
+            None
+        };
 
     // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
     let tmp_path = path.with_extension("tmp_save");
@@ -698,7 +709,9 @@ pub(super) fn get_project_meta(state: State<'_, AppState>) -> crate::models::Pro
     state.project_meta_payload()
 }
 
-pub(super) fn get_auto_backup_settings(state: State<'_, AppState>) -> crate::config::AutoBackupSettings {
+pub(super) fn get_auto_backup_settings(
+    state: State<'_, AppState>,
+) -> crate::config::AutoBackupSettings {
     load_auto_backup_settings(state.inner())
 }
 
@@ -718,12 +731,13 @@ pub(super) fn run_timed_auto_backup(
     path_template: String,
 ) -> serde_json::Value {
     let now = Local::now();
-    let (mut output_path, fallback_used) = match resolve_timed_backup_output_path(state.inner(), &path_template, now) {
-        Ok(value) => value,
-        Err(error) => {
-            return serde_json::json!({ "ok": false, "error": error });
-        }
-    };
+    let (mut output_path, fallback_used) =
+        match resolve_timed_backup_output_path(state.inner(), &path_template, now) {
+            Ok(value) => value,
+            Err(error) => {
+                return serde_json::json!({ "ok": false, "error": error });
+            }
+        };
 
     if output_path.extension().is_none() {
         output_path.set_extension("hshp");
@@ -819,8 +833,7 @@ pub(super) fn open_project(
         *tl = pf.timeline.clone();
         let normalized_base_scale = normalize_scale_key(&pf.base_scale);
         let normalized_custom_scale = normalize_custom_scale(pf.custom_scale.clone());
-        let normalized_use_custom_scale =
-            pf.use_custom_scale && normalized_custom_scale.is_some();
+        let normalized_use_custom_scale = pf.use_custom_scale && normalized_custom_scale.is_some();
         tl.project_scale_notes = effective_scale_notes(
             &normalized_base_scale,
             normalized_use_custom_scale,

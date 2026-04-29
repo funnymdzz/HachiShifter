@@ -32,12 +32,12 @@ import {
 } from "../../../../features/session/sessionSlice";
 import { webApi } from "../../../../services/webviewApi";
 import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
-import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
 import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
 import { getBulkEditableClipIds } from "./bulkClipEdit";
 import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
+import { computeClipNormalizationGain } from "../../../../features/session/clipNormalization";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -273,35 +273,19 @@ export function useTimelineClipActions(
         (ids: string[]) => {
             for (const id of ids) {
                 const clip = sessionRef.current.clips.find((c) => c.id === id);
-                if (!clip?.sourcePath || !clip.durationSec || clip.durationSec <= 0) {
-                    continue;
-                }
-                const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
-                const sourceEndSec =
-                    Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
-                const playbackRate = Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1);
-                const clipSourceSpanSec = Math.max(
-                    0,
-                    Math.min(clip.lengthSec * playbackRate, sourceEndSec - sourceStartSec),
-                );
-                if (clipSourceSpanSec <= 0) continue;
-
-                const slice = waveformMipmapStore.getInterleavedSlice(
-                    clip.sourcePath,
-                    0,
-                    sourceStartSec,
-                    clipSourceSpanSec,
-                );
-                if (!slice || slice.interleaved.length < 2) continue;
-                const data = slice.interleaved;
-                let peak = 0;
-                for (let i = 0; i < data.length; i++) {
-                    const v = Math.abs(data[i]);
-                    if (v > peak) peak = v;
-                }
-                waveformMipmapStore.releaseInterleaved(data);
-                if (peak <= 0) continue;
-                const newGain = Math.min(Math.max(1.0 / peak, dbToGain(-12)), dbToGain(12));
+                if (!clip) continue;
+                const newGain = computeClipNormalizationGain(clip, {
+                    getInterleavedSlice: (sourcePath, _channel, sourceStartSec, sourceSpanSec) =>
+                        waveformMipmapStore.getInterleavedSlice(
+                            sourcePath,
+                            0,
+                            sourceStartSec,
+                            sourceSpanSec,
+                        ),
+                    releaseInterleaved: (data) =>
+                        waveformMipmapStore.releaseInterleaved(data as Float32Array),
+                });
+                if (newGain == null) continue;
                 dispatch(setClipGain({ clipId: id, gain: newGain }));
                 void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
             }

@@ -234,7 +234,10 @@ pub fn prepare_source_paths_for_save(mut tl: TimelineState, project_path: &Path)
     tl
 }
 
-pub fn resolve_source_paths_on_open(mut tl: TimelineState, project_path: &Path) -> (TimelineState, Vec<String>) {
+pub fn resolve_source_paths_on_open(
+    mut tl: TimelineState,
+    project_path: &Path,
+) -> (TimelineState, Vec<String>) {
     let dir = project_path.parent().unwrap_or_else(|| Path::new("."));
     let mut missing_files = std::collections::BTreeSet::new();
 

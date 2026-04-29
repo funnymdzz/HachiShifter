@@ -359,6 +359,7 @@ export const enUS = {
     kb_clip_paste: "Paste Clip",
     kb_clip_split: "Split Clip",
     kb_clip_normalize: "Normalize Clip",
+    qs_auto_normalize: "Auto-normalize on place",
     kb_group_pianoroll: "Piano Roll",
     kb_group_modifier: "Modifier Keys",
     kb_pianoroll_copy: "Copy Param Frames",

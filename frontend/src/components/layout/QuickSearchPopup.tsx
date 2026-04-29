@@ -13,6 +13,10 @@ import type { Keybinding } from "../../features/keybindings";
 import { searchFilesRecursive } from "../../features/fileBrowser/fileBrowserSlice";
 import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import { importAudioAtPosition } from "../../features/session/thunks/importThunks";
+import {
+    persistUiSettings,
+    toggleQuickSearchAutoNormalize,
+} from "../../features/session/sessionSlice";
 import type { FileEntry } from "../../services/api/fileBrowser";
 import {
     getQuickSearchInitialPosition,
@@ -50,6 +54,9 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
     const currentPath = useAppSelector((state: RootState) => state.fileBrowser.currentPath);
     const selectedTrackId = useAppSelector((state: RootState) => state.session.selectedTrackId);
     const playheadSec = useAppSelector((state: RootState) => state.session.playheadSec);
+    const quickSearchAutoNormalizeEnabled = useAppSelector(
+        (state: RootState) => state.session.quickSearchAutoNormalizeEnabled,
+    );
 
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<FileEntry[]>([]);
@@ -236,11 +243,12 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                     audioPath: entry.path,
                     trackId: selectedTrackId,
                     startSec: playheadSec ?? 0,
+                    normalizeAfterImport: quickSearchAutoNormalizeEnabled,
                 }),
             );
             onClose();
         },
-        [dispatch, selectedTrackId, playheadSec, onClose],
+        [dispatch, onClose, playheadSec, quickSearchAutoNormalizeEnabled, selectedTrackId],
     );
 
     const focusSearchInput = useCallback(() => {
@@ -525,8 +533,20 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                 </div>
 
                 {/* 底部提示栏 */}
-                {sortedResults.length > 0 && (
-                    <div className="px-2 py-1 border-t border-qt-border flex items-center gap-2">
+                <div className="px-2 py-1 border-t border-qt-border flex items-center gap-2 justify-between">
+                    <label className="flex items-center gap-1.5 text-[10px] text-qt-text-muted cursor-pointer select-none">
+                        <input
+                            type="checkbox"
+                            checked={quickSearchAutoNormalizeEnabled}
+                            onChange={() => {
+                                dispatch(toggleQuickSearchAutoNormalize());
+                                void dispatch(persistUiSettings());
+                                focusSearchInput();
+                            }}
+                        />
+                        <span>{tAny("qs_auto_normalize") || "放置时自动规格化"}</span>
+                    </label>
+                    {sortedResults.length > 0 && (
                         <Text size="1" color="gray" className="text-[10px]">
                             {formatKeybinding(keybindings["quickSearch.navigate.up"])}/
                             {formatKeybinding(keybindings["quickSearch.navigate.down"])}{" "}
@@ -541,8 +561,8 @@ export const QuickSearchPopup: React.FC<QuickSearchPopupProps> = ({ open, onClos
                             {formatKeybinding(keybindings["quickSearch.close"])}{" "}
                             {(t as (key: string) => string)("qs_hint_close") || "关闭"}
                         </Text>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
         </>
     );

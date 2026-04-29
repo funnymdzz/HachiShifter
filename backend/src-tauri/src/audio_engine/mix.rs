@@ -115,9 +115,7 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
         if clip.repeat {
             let src_off = src_frame % range;
             let looped = if clip.reversed {
-                clip.src_end_frame
-                    .saturating_sub(1)
-                    .saturating_sub(src_off)
+                clip.src_end_frame.saturating_sub(1).saturating_sub(src_off)
             } else {
                 clip.src_start_frame + src_off
             };
@@ -208,7 +206,8 @@ pub(crate) fn mix_snapshot_clips_into_scratch(
             scratch[oi] += mixed_l;
             scratch[oi + 1] += mixed_r;
             if let Some(ms) = meter_scratch.as_deref_mut() {
-                let first_use_this_block = !ms.active_track_ids.iter().any(|id| id == &clip.track_id);
+                let first_use_this_block =
+                    !ms.active_track_ids.iter().any(|id| id == &clip.track_id);
                 let track_buf = ms
                     .per_track_mix
                     .entry(clip.track_id.clone())
@@ -250,14 +249,7 @@ fn render_snapshot_window(
         return false;
     }
 
-    mix_snapshot_clips_into_scratch(
-        frames,
-        snap,
-        pos0,
-        pos1,
-        scratch.as_mut_slice(),
-        None,
-    );
+    mix_snapshot_clips_into_scratch(frames, snap, pos0, pos1, scratch.as_mut_slice(), None);
     true
 }
 
@@ -356,10 +348,7 @@ fn update_track_meter_state(
             let block_peak = meter_scratch
                 .per_track_mix
                 .get(track_id)
-                .map(|buf| {
-                    buf.iter()
-                        .fold(0.0f32, |acc, sample| acc.max(sample.abs()))
-                })
+                .map(|buf| buf.iter().fold(0.0f32, |acc, sample| acc.max(sample.abs())))
                 .unwrap_or(0.0);
             let prev = state.get(track_id).copied().unwrap_or_default();
             next.insert(

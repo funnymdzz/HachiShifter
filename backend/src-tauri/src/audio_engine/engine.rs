@@ -173,10 +173,7 @@ impl AudioEngine {
                         }
                     };
 
-                    let Some(app) = meter_app_handle
-                        .lock()
-                        .ok()
-                        .and_then(|guard| guard.clone())
+                    let Some(app) = meter_app_handle.lock().ok().and_then(|guard| guard.clone())
                     else {
                         continue;
                     };
