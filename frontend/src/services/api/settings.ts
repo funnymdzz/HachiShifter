@@ -16,6 +16,7 @@ export interface UiSettings {
     showParamValuePopup?: boolean;
     lockParamLines?: boolean;
     quickSearchAutoNormalize?: boolean;
+    visibleReferenceRootTrackIds?: string[];
     selectDragDirection?: string;
     drawDragDirection?: string;
     lineVibratoDragDirection?: string;

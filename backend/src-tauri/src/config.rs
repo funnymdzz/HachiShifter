@@ -43,6 +43,8 @@ pub struct UiSettings {
     pub lock_param_lines: bool,
     #[serde(default)]
     pub quick_search_auto_normalize: bool,
+    #[serde(default)]
+    pub visible_reference_root_track_ids: Vec<String>,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
     #[serde(default = "default_drag_direction")]
@@ -195,6 +197,7 @@ impl Default for UiSettings {
             show_param_value_popup: true,
             lock_param_lines: true,
             quick_search_auto_normalize: false,
+            visible_reference_root_track_ids: Vec::new(),
             drag_direction: default_drag_direction(),
             select_drag_direction: default_drag_direction(),
             draw_drag_direction: default_draw_drag_direction(),

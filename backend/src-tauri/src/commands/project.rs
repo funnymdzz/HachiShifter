@@ -375,7 +375,7 @@ fn build_project_file_snapshot(
         .clone();
     tl.project_sec = latest_clip_end_sec(&tl).max(4.0).ceil();
 
-    let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size) = {
+    let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size, notes_markdown) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
             normalize_scale_key(&p.base_scale),
@@ -383,6 +383,7 @@ fn build_project_file_snapshot(
             normalize_custom_scale(p.custom_scale.clone()),
             normalize_beats_per_bar(p.beats_per_bar),
             normalize_grid_size(&p.grid_size),
+            p.notes_markdown.clone(),
         )
     };
 
@@ -396,6 +397,7 @@ fn build_project_file_snapshot(
     );
     pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
     pf.custom_scale = custom_scale;
+    pf.notes_markdown = notes_markdown;
     pf
 }
 
@@ -768,6 +770,7 @@ pub(super) fn new_project(
         p.name = "Untitled".to_string();
         p.path = None;
         p.dirty = false;
+        p.notes_markdown = String::new();
         p.base_scale = "C".to_string();
         p.use_custom_scale = false;
         p.custom_scale = None;
@@ -847,6 +850,7 @@ pub(super) fn open_project(
         p.name = project_name_from_path(&path);
         p.path = Some(project_path.clone());
         p.dirty = false;
+        p.notes_markdown = pf.notes_markdown;
         p.base_scale = normalize_scale_key(&pf.base_scale);
         p.custom_scale = normalize_custom_scale(pf.custom_scale);
         p.use_custom_scale = pf.use_custom_scale && p.custom_scale.is_some();
@@ -871,7 +875,15 @@ pub(super) fn open_project(
     payload
 }
 
-pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_json::Value {
+pub(super) fn save_project(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    if let Some(notes_markdown) = notes_markdown {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        p.notes_markdown = notes_markdown;
+    }
     let existing_path = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         p.path.clone()
@@ -880,10 +892,18 @@ pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_
         return save_project_to_path(state, window, path);
     }
     // No path yet -> Save As
-    save_project_as(state, window)
+    save_project_as(state, window, None)
 }
 
-pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json::Value {
+pub(super) fn save_project_as(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    if let Some(notes_markdown) = notes_markdown {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        p.notes_markdown = notes_markdown;
+    }
     let default_name = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         if p.name.trim().is_empty() {

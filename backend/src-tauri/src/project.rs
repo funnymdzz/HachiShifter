@@ -69,6 +69,8 @@ pub struct SynthConfig {
 pub struct ProjectFile {
     pub version: u32,
     pub name: String,
+    #[serde(default)]
+    pub notes_markdown: String,
     pub timeline: TimelineState,
     #[serde(default = "default_base_scale")]
     pub base_scale: String,
@@ -99,6 +101,7 @@ impl ProjectFile {
         Self {
             version: 2,
             name,
+            notes_markdown: String::new(),
             timeline,
             base_scale,
             beats_per_bar,

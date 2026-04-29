@@ -15,6 +15,7 @@ pub struct ProjectMetaPayload {
     pub path: Option<String>,
     pub dirty: bool,
     pub recent: Vec<String>,
+    pub notes_markdown: String,
     pub base_scale: String,
     pub use_custom_scale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]

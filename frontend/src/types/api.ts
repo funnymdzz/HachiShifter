@@ -65,6 +65,7 @@ export interface ProjectMeta {
     path?: string | null;
     dirty: boolean;
     recent: string[];
+    notes_markdown?: string;
     base_scale?: string;
     use_custom_scale?: boolean;
     custom_scale?: {

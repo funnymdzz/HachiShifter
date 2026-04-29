@@ -75,8 +75,11 @@ export const saveProjectRemote = createAsyncThunk(
     async (_, { rejectWithValue, getState }) => {
         const state = getState() as any;
         const hasPath = Boolean(state?.session?.project?.path);
+        const notesMarkdown = String(state?.session?.project?.notesMarkdown ?? "");
 
-        const res = hasPath ? await webApi.saveProject() : await webApi.saveProjectAs();
+        const res = hasPath
+            ? await webApi.saveProject(notesMarkdown)
+            : await webApi.saveProjectAs(notesMarkdown);
         if (!res || res.ok === false) {
             return rejectWithValue(res?.error ?? "save_project_failed");
         }
@@ -86,8 +89,10 @@ export const saveProjectRemote = createAsyncThunk(
 
 export const saveProjectAsRemote = createAsyncThunk(
     "session/saveProjectAsRemote",
-    async (_, { rejectWithValue }) => {
-        const res = await webApi.saveProjectAs();
+    async (_, { rejectWithValue, getState }) => {
+        const state = getState() as any;
+        const notesMarkdown = String(state?.session?.project?.notesMarkdown ?? "");
+        const res = await webApi.saveProjectAs(notesMarkdown);
         if (!res || res.ok === false) {
             return rejectWithValue(res?.error ?? "save_project_as_failed");
         }

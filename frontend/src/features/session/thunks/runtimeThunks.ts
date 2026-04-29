@@ -46,6 +46,7 @@ export const persistUiSettings = createAsyncThunk(
             showParamValuePopup: s.showParamValuePopup,
             lockParamLines: s.lockParamLinesEnabled,
             quickSearchAutoNormalize: s.quickSearchAutoNormalizeEnabled,
+            visibleReferenceRootTrackIds: s.visibleReferenceRootTrackIds,
             selectDragDirection: s.selectDragDirection,
             drawDragDirection: s.drawDragDirection,
 

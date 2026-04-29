@@ -188,6 +188,8 @@ export interface SessionState {
     lockParamLinesEnabled: boolean;
     /** 快速搜索放置音频时自动规格化 */
     quickSearchAutoNormalizeEnabled: boolean;
+    /** PianoRoll 中显示的其他 root track 参考线 */
+    visibleReferenceRootTrackIds: string[];
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -254,6 +256,7 @@ export interface SessionState {
         path: string | null;
         dirty: boolean;
         recent: string[];
+        notesMarkdown: string;
         baseScale: import("../../utils/musicalScales").ScaleKey;
         useCustomScale: boolean;
         customScale: CustomScalePreset | null;
@@ -633,7 +636,7 @@ function parseSelectClipRemoteArg(
 function applyTimelineState(
     state: SessionState,
     timeline: TimelineState,
-    opts?: { force?: boolean },
+    opts?: { force?: boolean; preserveProjectNotes?: boolean },
 ) {
     // 交互锁守卫：拖动/滑动期间跳过非强制的全量覆写
     if (state._interactionLockCount > 0 && !opts?.force) {
@@ -691,6 +694,7 @@ function applyTimelineState(
               path?: string | null;
               dirty?: boolean;
               recent?: string[];
+              notes_markdown?: string;
               base_scale?: string;
               use_custom_scale?: boolean;
               custom_scale?: {
@@ -722,6 +726,10 @@ function applyTimelineState(
             path: project.path === undefined ? state.project.path : ((project.path as any) ?? null),
             dirty: Boolean(project.dirty),
             recent: Array.isArray(project.recent) ? project.recent : state.project.recent,
+            notesMarkdown:
+                opts?.preserveProjectNotes === false
+                    ? String(project.notes_markdown ?? "")
+                    : state.project.notesMarkdown,
             baseScale: nextBaseScale,
             useCustomScale: Boolean(project.use_custom_scale),
             customScale: project.custom_scale
@@ -875,6 +883,7 @@ const initialState: SessionState = {
     edgeSmoothnessPercent: 0,
     lockParamLinesEnabled: false,
     quickSearchAutoNormalizeEnabled: false,
+    visibleReferenceRootTrackIds: [],
 
     paramsEpoch: 0,
 
@@ -935,6 +944,7 @@ const initialState: SessionState = {
         path: null,
         dirty: false,
         recent: [],
+        notesMarkdown: "",
         baseScale: "C",
         useCustomScale: false,
         customScale: null,
@@ -1137,6 +1147,25 @@ const sessionSlice = createSlice({
         toggleQuickSearchAutoNormalize(state) {
             state.quickSearchAutoNormalizeEnabled = !state.quickSearchAutoNormalizeEnabled;
         },
+        setVisibleReferenceRootTrackIds(state, action: PayloadAction<string[]>) {
+            state.visibleReferenceRootTrackIds = Array.from(
+                new Set(
+                    action.payload.filter(
+                        (id): id is string => typeof id === "string" && id.trim().length > 0,
+                    ),
+                ),
+            );
+        },
+        toggleVisibleReferenceRootTrackId(state, action: PayloadAction<string>) {
+            const trackId = action.payload;
+            if (state.visibleReferenceRootTrackIds.includes(trackId)) {
+                state.visibleReferenceRootTrackIds = state.visibleReferenceRootTrackIds.filter(
+                    (id) => id !== trackId,
+                );
+                return;
+            }
+            state.visibleReferenceRootTrackIds = [...state.visibleReferenceRootTrackIds, trackId];
+        },
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
         },
@@ -1206,6 +1235,14 @@ const sessionSlice = createSlice({
         },
         setPitchShift(state, action: PayloadAction<number>) {
             state.pitchShift = action.payload;
+        },
+        setProjectNotesMarkdown(state, action: PayloadAction<string>) {
+            const next = action.payload;
+            if (state.project.notesMarkdown === next) {
+                return;
+            }
+            state.project.notesMarkdown = next;
+            state.project.dirty = true;
         },
         closeVocalShifterSkippedFilesDialog(state) {
             state.vocalShifterSkippedFilesDialog = null;
@@ -1612,6 +1649,12 @@ const sessionSlice = createSlice({
                     state.quickSearchAutoNormalizeEnabled = Boolean(
                         (s as any).quickSearchAutoNormalize,
                     );
+                if (Array.isArray((s as any).visibleReferenceRootTrackIds)) {
+                    state.visibleReferenceRootTrackIds = (s as any).visibleReferenceRootTrackIds
+                        .filter((id: unknown): id is string => typeof id === "string")
+                        .map((id: string) => id.trim())
+                        .filter((id: string) => id.length > 0);
+                }
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
                     state.selectDragDirection = selectDir as DragDirection;
@@ -2098,7 +2141,10 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
-                applyTimelineState(state, payload, { force: true });
+                applyTimelineState(state, payload, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
             })
 
             .addCase(undoRemote.pending, (state) => {
@@ -2112,7 +2158,10 @@ const sessionSlice = createSlice({
                 if (!payload.ok) return;
                 // 保留播放头位置，避免 UI 跳变
                 const currentPlayheadSec = state.playheadSec;
-                applyTimelineState(state, payload, { force: true });
+                applyTimelineState(state, payload, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 state.playheadSec = currentPlayheadSec;
             })
 
@@ -2144,7 +2193,10 @@ const sessionSlice = createSlice({
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) return;
-                applyTimelineState(state, payload, { force: true });
+                applyTimelineState(state, payload, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 state.status = "New project";
             })
 
@@ -2160,7 +2212,10 @@ const sessionSlice = createSlice({
                     state.status = "Open canceled";
                     return;
                 }
-                applyTimelineState(state, (payload as any).timeline, { force: true });
+                applyTimelineState(state, (payload as any).timeline, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 state.status = "Project opened";
             })
             .addCase(openProjectFromDialog.rejected, (state, action) => {
@@ -2178,7 +2233,10 @@ const sessionSlice = createSlice({
                     ok?: boolean;
                 } & TimelineState;
                 if (!payload.ok) return;
-                applyTimelineState(state, payload, { force: true });
+                applyTimelineState(state, payload, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 state.status = "Project opened";
             })
             .addCase(openProjectFromPath.rejected, (state, action) => {
@@ -2204,7 +2262,10 @@ const sessionSlice = createSlice({
                     state.status = "Import canceled";
                     return;
                 }
-                applyTimelineState(state, (payload as any).timeline, { force: true });
+                applyTimelineState(state, (payload as any).timeline, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2236,7 +2297,10 @@ const sessionSlice = createSlice({
                     state.status = "Import canceled";
                     return;
                 }
-                applyTimelineState(state, (payload as any).timeline, { force: true });
+                applyTimelineState(state, (payload as any).timeline, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2268,7 +2332,10 @@ const sessionSlice = createSlice({
                     state.status = "Import canceled";
                     return;
                 }
-                applyTimelineState(state, (payload as any).timeline, { force: true });
+                applyTimelineState(state, (payload as any).timeline, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2298,7 +2365,10 @@ const sessionSlice = createSlice({
                     state.status = "Import canceled";
                     return;
                 }
-                applyTimelineState(state, (payload as any).timeline, { force: true });
+                applyTimelineState(state, (payload as any).timeline, {
+                    force: true,
+                    preserveProjectNotes: false,
+                });
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2842,6 +2912,7 @@ export const {
     setAudioPath,
     setOutputPath,
     setPitchShift,
+    setProjectNotesMarkdown,
     closeVocalShifterSkippedFilesDialog,
     closeReaperSkippedFilesDialog,
     setPitchSnapToleranceCents,
@@ -2850,6 +2921,8 @@ export const {
     removeCustomScalePreset,
     toggleLockParamLines,
     toggleQuickSearchAutoNormalize,
+    setVisibleReferenceRootTrackIds,
+    toggleVisibleReferenceRootTrackId,
     setSelectedClip,
     setSelectedClipPreservingTrack,
     setMultiSelectedClipIds,

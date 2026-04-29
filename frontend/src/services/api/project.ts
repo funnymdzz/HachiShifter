@@ -20,6 +20,7 @@ export const projectApi = {
             path?: string | null;
             dirty: boolean;
             recent: string[];
+            notes_markdown?: string;
             base_scale?: string;
             use_custom_scale?: boolean;
             custom_scale?: {
@@ -64,9 +65,9 @@ export const projectApi = {
 
     openProject: (projectPath: string) => invoke<TimelineResult>("open_project", projectPath),
 
-    saveProject: () => invoke<any>("save_project"),
+    saveProject: (notesMarkdown?: string) => invoke<any>("save_project", notesMarkdown),
 
-    saveProjectAs: () => invoke<any>("save_project_as"),
+    saveProjectAs: (notesMarkdown?: string) => invoke<any>("save_project_as", notesMarkdown),
 
     getAutoBackupSettings: () => invoke<AutoBackupSettings>("get_auto_backup_settings"),
 
