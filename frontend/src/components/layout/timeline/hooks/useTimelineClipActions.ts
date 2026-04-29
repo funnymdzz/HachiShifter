@@ -22,6 +22,7 @@ import {
     setClipGain,
     setClipMuted,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setplayheadSec,
     setSelectedClip,
@@ -35,6 +36,8 @@ import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
 import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
+import { getBulkEditableClipIds } from "./bulkClipEdit";
+import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -191,10 +194,10 @@ export function useTimelineClipActions(
     );
 
     // 切换工具时清除多选
-    const s = useAppSelector((state: RootState) => state.session);
+    const toolMode = useAppSelector((state: RootState) => state.session.toolMode);
     useEffect(() => {
         dispatch(setMultiSelectedClipIdsAction([]));
-    }, [s.toolMode, dispatch]);
+    }, [toolMode, dispatch]);
 
     const multiSelectedSet = useMemo(() => new Set(multiSelectedClipIds), [multiSelectedClipIds]);
     const multiSelectedSetRef = useRef(multiSelectedSet);
@@ -255,6 +258,7 @@ export function useTimelineClipActions(
                 const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
                 return {
                     ...clip,
+                    sourceClipId: clip.id,
                     waveformPreview: sessionRef.current.clipWaveforms[clip.id],
                     linkedParams: linkedParamsResult.ok
                         ? linkedParamsResult.linkedParams
@@ -453,7 +457,6 @@ export function useTimelineClipActions(
                 ...c,
                 startSec: Math.max(0, c.startSec + delta),
             }));
-
             dispatch(checkpointHistory());
             await webApi.beginUndoGroup();
             try {
@@ -488,17 +491,24 @@ export function useTimelineClipActions(
                     }>;
                     const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, created);
                     if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) =>
-                            dispatch(
-                                setClipStateRemote({
-                                    clipId: u.clipId,
+                        const changesById = new Map(
+                            fadeUpdates.map((u) => [
+                                u.clipId,
+                                {
                                     fadeInSec: u.fadeInSec,
                                     fadeOutSec: u.fadeOutSec,
-                                    checkpoint: false,
-                                }),
-                            ).unwrap(),
+                                },
+                            ]),
                         );
-                        await Promise.allSettled(fadePromises);
+                        await dispatch(
+                            setClipsStateBulkRemote({
+                                updates: buildBulkClipStateUpdates({
+                                    clipIds: created,
+                                    changesById,
+                                }),
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
                     }
                 }
             } finally {
@@ -620,16 +630,28 @@ export function useTimelineClipActions(
 
     const toggleTrackLaneClipMuted = React.useCallback(
         (clipId: string, nextMuted: boolean) => {
-            dispatch(
-                setClipMuted({
-                    clipId,
-                    muted: nextMuted,
-                }),
+            const targetIds = getBulkEditableClipIds({
+                activeClipId: clipId,
+                multiSelectedClipIds: multiSelectedClipIdsRef.current,
+                multiSelectedSet: multiSelectedSetRef.current,
+            });
+            const changesById = new Map(
+                targetIds.map((targetId) => [targetId, { muted: nextMuted }] as const),
             );
+            for (const targetId of targetIds) {
+                dispatch(
+                    setClipMuted({
+                        clipId: targetId,
+                        muted: nextMuted,
+                    }),
+                );
+            }
             void dispatch(
-                setClipStateRemote({
-                    clipId,
-                    muted: nextMuted,
+                setClipsStateBulkRemote({
+                    updates: buildBulkClipStateUpdates({
+                        clipIds: targetIds,
+                        changesById,
+                    }),
                 }),
             );
         },
@@ -667,10 +689,21 @@ export function useTimelineClipActions(
     const commitTrackLaneGain = React.useCallback(
         (clipId: string, db: number) => {
             const gain = Math.pow(10, db / 20);
+            const targetIds = getBulkEditableClipIds({
+                activeClipId: clipId,
+                multiSelectedClipIds: multiSelectedClipIdsRef.current,
+                multiSelectedSet: multiSelectedSetRef.current,
+            });
+            const changesById = new Map(targetIds.map((targetId) => [targetId, { gain }] as const));
+            for (const targetId of targetIds) {
+                dispatch(setClipGain({ clipId: targetId, gain }));
+            }
             void dispatch(
-                setClipStateRemote({
-                    clipId,
-                    gain,
+                setClipsStateBulkRemote({
+                    updates: buildBulkClipStateUpdates({
+                        clipIds: targetIds,
+                        changesById,
+                    }),
                 }),
             );
         },

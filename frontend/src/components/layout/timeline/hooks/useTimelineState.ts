@@ -16,7 +16,8 @@
  */
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "../../../../app/hooks";
-import type { RootState } from "../../../../app/store";
+import { store, type RootState } from "../../../../app/store";
+import { shallowEqual } from "react-redux";
 import { timelineViewportBus } from "../../../../utils/timelineViewportBus";
 
 import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
@@ -36,10 +37,26 @@ import {
 } from "../";
 
 // ── 返回类型 ─────────────────────────────────────────────────────
+type TimelineSessionSlice = Pick<
+    RootState["session"],
+    | "autoCrossfadeEnabled"
+    | "autoScrollEnabled"
+    | "beats"
+    | "bpm"
+    | "clips"
+    | "grid"
+    | "gridSnapEnabled"
+    | "playheadZoomEnabled"
+    | "selectedClipId"
+    | "selectedTrackId"
+    | "trackMeters"
+    | "tracks"
+>;
+
 export interface TimelineStateResult {
     // Redux
     dispatch: ReturnType<typeof useAppDispatch>;
-    s: RootState["session"];
+    s: TimelineSessionSlice;
     sessionRef: React.MutableRefObject<RootState["session"]>;
 
     // DOM refs
@@ -164,11 +181,30 @@ export interface TimelineStateResult {
 // ── Hook 实现 ────────────────────────────────────────────────────
 export function useTimelineState(): TimelineStateResult {
     const dispatch = useAppDispatch();
-    const s = useAppSelector((state: RootState) => state.session);
-    const sessionRef = useRef(s);
+    const s = useAppSelector(
+        (state: RootState) => ({
+            autoCrossfadeEnabled: state.session.autoCrossfadeEnabled,
+            autoScrollEnabled: state.session.autoScrollEnabled,
+            beats: state.session.beats,
+            bpm: state.session.bpm,
+            clips: state.session.clips,
+            grid: state.session.grid,
+            gridSnapEnabled: state.session.gridSnapEnabled,
+            playheadZoomEnabled: state.session.playheadZoomEnabled,
+            selectedClipId: state.session.selectedClipId,
+            selectedTrackId: state.session.selectedTrackId,
+            trackMeters: state.session.trackMeters,
+            tracks: state.session.tracks,
+        }),
+        shallowEqual,
+    );
+    const sessionRef = useRef(store.getState().session);
     useEffect(() => {
-        sessionRef.current = s;
-    }, [s]);
+        sessionRef.current = store.getState().session;
+        return store.subscribe(() => {
+            sessionRef.current = store.getState().session;
+        });
+    }, []);
 
     // ── DOM refs ──────────────────────────────────────────────
     const scrollRef = useRef<HTMLDivElement | null>(null);

@@ -12,6 +12,7 @@
 import React, { useMemo } from "react";
 import { Flex, Dialog, Button, Text } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
+import { useAppSelector } from "../../app/hooks";
 import {
     addTrackRemote,
     duplicateTrackRemote,
@@ -35,6 +36,7 @@ import {
 import { NEW_TRACK_SENTINEL, useClipDrag } from "./timeline/hooks/useClipDrag";
 import { useEditDrag } from "./timeline/hooks/useEditDrag";
 import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
+import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement";
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 
@@ -43,6 +45,7 @@ import {
     ClipContextMenu,
     TRACK_ADD_ROW_HEIGHT,
     TrackAreaContextMenu,
+    TimelineCanvasViewport,
     TimelineScrollArea,
     TimeRuler,
     TrackLane,
@@ -60,11 +63,84 @@ import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandl
 import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 import { writeSystemClipboardObject } from "../../utils/systemClipboard";
+import { buildSparseClipRenderModel } from "./timeline/runtime/timelineCanvasModel";
+import { buildTimelineRenderModel } from "./timeline/runtime/timelineRenderModel";
+
+const TimelineTransportBridge = React.memo(function TimelineTransportBridge(props: {
+    pxPerSecRef: React.MutableRefObject<number>;
+    playheadRef: React.MutableRefObject<HTMLDivElement | null>;
+    rulerPlayheadLineRef: React.MutableRefObject<HTMLDivElement | null>;
+    rulerPlayheadHeadRef: React.MutableRefObject<HTMLDivElement | null>;
+    scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+    syncScrollLeft: (next: number) => void;
+    autoScrollEnabled: boolean;
+}) {
+    const {
+        pxPerSecRef,
+        playheadRef,
+        rulerPlayheadLineRef,
+        rulerPlayheadHeadRef,
+        scrollRef,
+        syncScrollLeft,
+        autoScrollEnabled,
+    } = props;
+    const transport = useAppSelector((state) => ({
+        playheadSec: state.session.playheadSec,
+        isPlaying: state.session.runtime.isPlaying,
+        playbackPositionSec: state.session.runtime.playbackPositionSec,
+    }));
+
+    const isTransportAdvancing = transport.isPlaying && transport.playbackPositionSec > 1e-4;
+
+    useVisualPlayhead({
+        syncedPlayheadSec: transport.playheadSec,
+        isTransportAdvancing,
+        onFrame: React.useCallback(
+            (visualPlayheadSec: number) => {
+                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
+                if (playheadRef.current) {
+                    playheadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadLineRef.current) {
+                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadHeadRef.current) {
+                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (!autoScrollEnabled || !transport.isPlaying) return;
+                const scroller = scrollRef.current;
+                if (!scroller) return;
+                const next = computeAutoFollowScrollLeft({
+                    playheadSec: visualPlayheadSec,
+                    pxPerSec: pxPerSecRef.current,
+                    viewportWidth: scroller.clientWidth,
+                    contentWidth: scroller.scrollWidth,
+                });
+                if (Math.abs(scroller.scrollLeft - next) <= 0.5) return;
+                scroller.scrollLeft = next;
+                syncScrollLeft(next);
+            },
+            [
+                autoScrollEnabled,
+                pxPerSecRef,
+                playheadRef,
+                rulerPlayheadHeadRef,
+                rulerPlayheadLineRef,
+                scrollRef,
+                syncScrollLeft,
+                transport.isPlaying,
+            ],
+        ),
+    });
+
+    return null;
+});
 
 export const TimelinePanel: React.FC = () => {
     const { t } = useI18n();
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
+    const [timelineScrollTop, setTimelineScrollTop] = React.useState(0);
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -100,7 +176,6 @@ export const TimelinePanel: React.FC = () => {
         contentHeight,
         dynamicProjectSec,
         bars,
-        clipsByTrackId,
         viewportStartSec,
         viewportEndSec,
         scrollHorizontalKb,
@@ -226,43 +301,7 @@ export const TimelinePanel: React.FC = () => {
         setContextMenu,
         setTrackAreaMenu,
         syncScrollLeft,
-        autoScrollEnabled: s.autoScrollEnabled,
-        isPlaying: s.runtime.isPlaying,
-        playheadSec: s.playheadSec,
-    });
-
-    const isTransportAdvancing = s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
-
-    useVisualPlayhead({
-        syncedPlayheadSec: s.playheadSec,
-        isTransportAdvancing,
-        onFrame: React.useCallback(
-            (visualPlayheadSec: number) => {
-                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
-                if (playheadRef.current) {
-                    playheadRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (rulerPlayheadLineRef.current) {
-                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (rulerPlayheadHeadRef.current) {
-                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
-                const scroller = scrollRef.current;
-                if (!scroller) return;
-                const next = computeAutoFollowScrollLeft({
-                    playheadSec: visualPlayheadSec,
-                    pxPerSec: pxPerSecRef.current,
-                    viewportWidth: scroller.clientWidth,
-                    contentWidth: scroller.scrollWidth,
-                });
-                if (Math.abs(scroller.scrollLeft - next) <= 0.5) return;
-                scroller.scrollLeft = next;
-                syncScrollLeft(next);
-            },
-            [pxPerSecRef, s.autoScrollEnabled, s.runtime.isPlaying, scrollRef, syncScrollLeft],
-        ),
+        dynamicProjectSec,
     });
 
     // ── 5. 拖拽 hooks 桥接 ──────────────────────────────────
@@ -291,10 +330,12 @@ export const TimelinePanel: React.FC = () => {
         clipDragRef: _clipDragRef,
         startClipDrag: _startClipDragInner,
         ghostDrag,
+        verticalTrackLockTrackId,
     } = useClipDrag({
         scrollRef,
         sessionRef,
         rowHeight,
+        pxPerSec,
         multiSelectedClipIds,
         multiSelectedSet,
         dispatch,
@@ -311,6 +352,11 @@ export const TimelinePanel: React.FC = () => {
         onCtrlClick: toggleTrackLaneCtrlSelection,
     });
 
+    const clipById = useMemo(
+        () => new Map(s.clips.map((clip) => [clip.id, clip] as const)),
+        [s.clips],
+    );
+
     const newTrackGhostClips = useMemo(() => {
         if (clipDropNewTrack) {
             const moved = s.clips.filter((clip) => clip.trackId === NEW_TRACK_SENTINEL);
@@ -322,7 +368,7 @@ export const TimelinePanel: React.FC = () => {
         return ghostDrag.clipIds
             .map((clipId) => {
                 const initial = ghostDrag.initialById[clipId];
-                const clip = s.clips.find((item) => item.id === clipId);
+                const clip = clipById.get(clipId);
                 if (!initial || !clip) return null;
                 return {
                     ...clip,
@@ -330,7 +376,7 @@ export const TimelinePanel: React.FC = () => {
                 };
             })
             .filter((clip): clip is (typeof s.clips)[number] => clip != null);
-    }, [clipDropNewTrack, ghostDrag, s.clips]);
+    }, [clipById, clipDropNewTrack, ghostDrag, s.clips]);
 
     const startClipDrag = React.useCallback(
         (
@@ -343,8 +389,265 @@ export const TimelinePanel: React.FC = () => {
         },
         [_startClipDragInner, startSlipDrag],
     );
+    const handleSelectTrack = React.useCallback(
+        (trackId: string) => {
+            if (sessionRef.current.selectedTrackId === trackId) {
+                return;
+            }
+            void dispatch(selectTrackRemote(trackId));
+        },
+        [dispatch, sessionRef],
+    );
+    const handleRemoveTrack = React.useCallback(
+        (trackId: string) => {
+            dispatch(removeTrackRemote(trackId));
+        },
+        [dispatch],
+    );
+    const handleMoveTrack = React.useCallback(
+        (payload: {
+            trackId: string;
+            targetIndex: number;
+            parentTrackId: string | null;
+        }) => {
+            dispatch(
+                moveTrackRemote({
+                    trackId: payload.trackId,
+                    targetIndex: payload.targetIndex,
+                    parentTrackId: payload.parentTrackId,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleToggleTrackMute = React.useCallback(
+        (trackId: string, nextMuted: boolean) => {
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    muted: nextMuted,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleToggleTrackSolo = React.useCallback(
+        (trackId: string, nextSolo: boolean) => {
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    solo: nextSolo,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleToggleTrackCompose = React.useCallback(
+        (trackId: string, nextComposeEnabled: boolean) => {
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    composeEnabled: nextComposeEnabled,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleTrackVolumeUiChange = React.useCallback((trackId: string, nextVolume: number) => {
+        setTrackVolumeUi((prev) => ({
+            ...prev,
+            [trackId]: nextVolume,
+        }));
+    }, []);
+    const handleTrackVolumeCommit = React.useCallback(
+        (trackId: string, nextVolume: number) => {
+            dispatch(setTrackVolume({ trackId, volume: nextVolume }));
+            setTrackVolumeUi((prev) => {
+                const copy = { ...prev };
+                delete copy[trackId];
+                return copy;
+            });
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    volume: nextVolume,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleAddTrack = React.useCallback(() => {
+        dispatch(addTrackRemote({}));
+    }, [dispatch]);
+    const handleTrackColorChange = React.useCallback(
+        (trackId: string, color: string) => {
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    color,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleTrackAlgoChange = React.useCallback(
+        (trackId: string, algo: string) => {
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    pitchAnalysisAlgo: algo,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleTrackNameChange = React.useCallback(
+        (trackId: string, name: string) => {
+            dispatch(setTrackName({ trackId, name }));
+            dispatch(
+                setTrackStateRemote({
+                    trackId,
+                    name,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const handleDuplicateTrack = React.useCallback(
+        (trackId: string) => {
+            dispatch(duplicateTrackRemote(trackId));
+        },
+        [dispatch],
+    );
+    const handleCreateTrackBelow = React.useCallback(
+        (trackId: string) => {
+            void (async () => {
+                const existingTracks = [...sessionRef.current.tracks];
+                const beforeIds = new Set(existingTracks.map((track) => track.id));
+                const added = (await dispatch(
+                    addTrackRemote({ name: undefined, parentTrackId: null }),
+                ).unwrap()) as {
+                    tracks?: Array<{ id?: string }>;
+                    selected_track_id?: string | null;
+                };
+                const nextTracks = Array.isArray(added.tracks) ? added.tracks : [];
+                const createdTrackId =
+                    nextTracks.find((track) => !beforeIds.has(String(track?.id)))?.id ??
+                    added.selected_track_id ??
+                    null;
+                if (!createdTrackId) return;
+                await dispatch(
+                    moveTrackRemote({
+                        trackId: String(createdTrackId),
+                        targetIndex: getInsertBelowTargetIndex(existingTracks, trackId),
+                        parentTrackId: null,
+                    }),
+                );
+            })();
+        },
+        [dispatch, sessionRef],
+    );
+    const handleTrackListScrollTopChange = React.useCallback((scrollTop: number) => {
+        const timelineScroller = scrollRef.current;
+        if (!timelineScroller) return;
+        if (Math.abs(timelineScroller.scrollTop - scrollTop) < 0.5) return;
+        timelineScroller.scrollTop = scrollTop;
+    }, []);
 
     const trackGridHeight = Math.max(0, contentHeight - TRACK_ADD_ROW_HEIGHT);
+    const timelineRenderModel = useMemo(
+        () =>
+            buildTimelineRenderModel({
+                tracks: s.tracks,
+                clips: s.clips,
+                viewportStartSec,
+                viewportEndSec,
+                rowHeight,
+                scrollTopPx: timelineScrollTop,
+                viewportHeightPx: scrollRef.current?.clientHeight ?? 0,
+            }),
+        [rowHeight, s.clips, s.tracks, timelineScrollTop, viewportEndSec, viewportStartSec],
+    );
+    const visibleTracks = s.tracks.slice(
+        timelineRenderModel.startIndex,
+        timelineRenderModel.endIndex + 1,
+    );
+    const visibleTrackClipCacheRef = React.useRef<
+        Record<
+            string,
+            {
+                clipIds: string[];
+                clips: typeof s.clips;
+            }
+        >
+    >({});
+    const visibleTrackClipsById = useMemo(
+        () => {
+            const nextCache: typeof visibleTrackClipCacheRef.current = {};
+            const nextByTrackId = {} as Record<string, typeof s.clips>;
+
+            for (const track of visibleTracks) {
+                const clipIds = timelineRenderModel.visibleClipIdsByTrackId[track.id] ?? [];
+                const prev = visibleTrackClipCacheRef.current[track.id];
+                const canReusePrev =
+                    prev != null &&
+                    prev.clipIds.length === clipIds.length &&
+                    clipIds.every(
+                        (clipId, index) =>
+                            prev.clipIds[index] === clipId && prev.clips[index] === clipById.get(clipId),
+                    );
+
+                const clips = canReusePrev
+                    ? prev.clips
+                    : (clipIds
+                          .map((clipId) => clipById.get(clipId) ?? null)
+                          .filter((clip): clip is (typeof s.clips)[number] => clip != null) as typeof s.clips);
+
+                nextCache[track.id] = {
+                    clipIds,
+                    clips,
+                };
+                nextByTrackId[track.id] = clips;
+            }
+
+            visibleTrackClipCacheRef.current = nextCache;
+            return nextByTrackId;
+        },
+        [clipById, timelineRenderModel.visibleClipIdsByTrackId, visibleTracks],
+    );
+    const selectedClipTrackId = s.selectedClipId
+        ? (clipById.get(s.selectedClipId)?.trackId ?? null)
+        : null;
+    const visibleTrackCanvasHeight = Math.max(1, visibleTracks.length * rowHeight);
+    const sparseClipRenderModel = useMemo(
+        () =>
+            buildSparseClipRenderModel({
+                visibleTracks,
+                visibleTrackClipsById,
+                pxPerSec,
+                rowHeight,
+                scrollLeft,
+                selectedClipId: s.selectedClipId,
+                multiSelectedClipIds,
+                renamingClipId,
+            }),
+        [
+            multiSelectedClipIds,
+            pxPerSec,
+            renamingClipId,
+            rowHeight,
+            s.selectedClipId,
+            scrollLeft,
+            visibleTrackClipsById,
+            visibleTracks,
+        ],
+    );
+    const timelineCanvasModel = useMemo(
+        () => ({
+            drawClips: sparseClipRenderModel.drawClips,
+        }),
+        [sparseClipRenderModel.drawClips],
+    );
 
     // ═════════════════════════════════════════════════════════
     // JSX 渲染
@@ -363,108 +666,21 @@ export const TimelinePanel: React.FC = () => {
                 paramFineAdjustKb={paramFineAdjustKb}
                 trackVolumeUi={trackVolumeUi}
                 listScrollRef={trackListScrollRef}
-                onSelectTrack={(trackId) => {
-                    if (sessionRef.current.selectedTrackId === trackId) {
-                        return;
-                    }
-                    void dispatch(selectTrackRemote(trackId));
-                }}
-                onRemoveTrack={(trackId) => {
-                    dispatch(removeTrackRemote(trackId));
-                }}
-                onMoveTrack={(payload) => {
-                    dispatch(
-                        moveTrackRemote({
-                            trackId: payload.trackId,
-                            targetIndex: payload.targetIndex,
-                            parentTrackId: payload.parentTrackId,
-                        }),
-                    );
-                }}
-                onToggleMute={(trackId, nextMuted) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            muted: nextMuted,
-                        }),
-                    );
-                }}
-                onToggleSolo={(trackId, nextSolo) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            solo: nextSolo,
-                        }),
-                    );
-                }}
-                onToggleCompose={(trackId, nextComposeEnabled) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            composeEnabled: nextComposeEnabled,
-                        }),
-                    );
-                }}
-                onVolumeUiChange={(trackId, nextVolume) => {
-                    setTrackVolumeUi((prev) => ({
-                        ...prev,
-                        [trackId]: nextVolume,
-                    }));
-                }}
-                onVolumeCommit={(trackId, nextVolume) => {
-                    // 先同步更新 Redux 中的 track.volume 为新值，
-                    // 再清除 trackVolumeUi 覆盖，这样即使 setTrackStateRemote
-                    // 尚未完成，TrackList 也能从 backendVolume 读到正确的值，避免回弹。
-                    dispatch(setTrackVolume({ trackId, volume: nextVolume }));
-                    setTrackVolumeUi((prev) => {
-                        const copy = { ...prev };
-                        delete copy[trackId];
-                        return copy;
-                    });
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            volume: nextVolume,
-                        }),
-                    );
-                }}
-                onAddTrack={() => {
-                    dispatch(addTrackRemote({}));
-                }}
-                onTrackColorChange={(trackId, color) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            color,
-                        }),
-                    );
-                }}
-                onAlgoChange={(trackId, algo) => {
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            pitchAnalysisAlgo: algo,
-                        }),
-                    );
-                }}
-                onTrackNameChange={(trackId, name) => {
-                    dispatch(setTrackName({ trackId, name }));
-                    dispatch(
-                        setTrackStateRemote({
-                            trackId,
-                            name,
-                        }),
-                    );
-                }}
-                onDuplicateTrack={(trackId) => {
-                    dispatch(duplicateTrackRemote(trackId));
-                }}
-                onScrollTopChange={(scrollTop) => {
-                    const timelineScroller = scrollRef.current;
-                    if (!timelineScroller) return;
-                    if (Math.abs(timelineScroller.scrollTop - scrollTop) < 0.5) return;
-                    timelineScroller.scrollTop = scrollTop;
-                }}
+                onSelectTrack={handleSelectTrack}
+                onRemoveTrack={handleRemoveTrack}
+                onMoveTrack={handleMoveTrack}
+                onToggleMute={handleToggleTrackMute}
+                onToggleSolo={handleToggleTrackSolo}
+                onToggleCompose={handleToggleTrackCompose}
+                onVolumeUiChange={handleTrackVolumeUiChange}
+                onVolumeCommit={handleTrackVolumeCommit}
+                onAddTrack={handleAddTrack}
+                onTrackColorChange={handleTrackColorChange}
+                onAlgoChange={handleTrackAlgoChange}
+                onTrackNameChange={handleTrackNameChange}
+                onDuplicateTrack={handleDuplicateTrack}
+                onCreateTrackBelow={handleCreateTrackBelow}
+                onScrollTopChange={handleTrackListScrollTopChange}
             />
 
             {/* Timeline View (Right) */}
@@ -477,7 +693,7 @@ export const TimelinePanel: React.FC = () => {
                     pxPerSec={pxPerSec}
                     secPerBeat={secPerBeat}
                     viewportWidth={viewportWidth}
-                    playheadSec={s.playheadSec}
+                    playheadSec={Number(sessionRef.current.playheadSec ?? 0) || 0}
                     playheadLineRef={rulerPlayheadLineRef}
                     playheadHeadRef={rulerPlayheadHeadRef}
                     contentRef={rulerContentRef}
@@ -510,12 +726,13 @@ export const TimelinePanel: React.FC = () => {
                     scrollVerticalKb={scrollVerticalKb}
                     horizontalZoomKb={horizontalZoomKb}
                     verticalZoomKb={verticalZoomKb}
-                    playheadSec={s.playheadSec}
+                    getPlayheadSec={() => Number(sessionRef.current.playheadSec ?? 0) || 0}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
                     data-timeline-scroller
                     onScroll={(e) => {
                         const el = e.currentTarget as HTMLDivElement;
+                        setTimelineScrollTop(el.scrollTop);
                         if (trackListScrollRef.current) {
                             if (
                                 Math.abs(trackListScrollRef.current.scrollTop - el.scrollTop) >= 0.5
@@ -779,6 +996,25 @@ export const TimelinePanel: React.FC = () => {
                             beatsPerBar={Math.max(1, Math.round(s.beats || 4))}
                         />
 
+                        {viewportWidth > 0 ? (
+                            <div
+                                className="absolute pointer-events-none"
+                                style={{
+                                    top: timelineRenderModel.startIndex * rowHeight,
+                                    left: scrollLeft,
+                                    width: viewportWidth,
+                                    height: visibleTrackCanvasHeight,
+                                    zIndex: 1,
+                                }}
+                            >
+                                <TimelineCanvasViewport
+                                    width={Math.max(1, Math.ceil(viewportWidth))}
+                                    height={visibleTrackCanvasHeight}
+                                    model={timelineCanvasModel}
+                                />
+                            </div>
+                        ) : null}
+
                         {clipDropNewTrack ? (
                             <div
                                 className="absolute left-0 right-0 pointer-events-none z-20"
@@ -828,48 +1064,65 @@ export const TimelinePanel: React.FC = () => {
                             </div>
                         ) : null}
 
-                        {s.tracks.map((track) => {
-                            const trackClips =
-                                clipsByTrackId.get(track.id) ?? ([] as typeof s.clips);
+                        <div
+                            className="absolute left-0 right-0"
+                            style={{
+                                top: timelineRenderModel.startIndex * rowHeight,
+                            }}
+                        >
+                            {visibleTracks.map((track) => {
+                                const trackClips =
+                                    visibleTrackClipsById[track.id] ?? ([] as typeof s.clips);
 
-                            return (
-                                <TrackLane
-                                    key={track.id}
-                                    track={track}
-                                    allTracks={s.tracks}
-                                    trackClips={trackClips}
-                                    rowHeight={rowHeight}
-                                    pxPerSec={pxPerSec}
-                                    bpm={s.bpm}
-                                    viewportWidthPx={viewportWidth}
-                                    viewportStartSec={viewportStartSec}
-                                    viewportEndSec={viewportEndSec}
-                                    altPressed={altPressed}
-                                    selectedClipId={s.selectedClipId}
-                                    multiSelectedClipIds={multiSelectedClipIds}
-                                    multiSelectedSet={multiSelectedSet}
-                                    trackColor={track.color || undefined}
-                                    ensureSelected={ensureTrackLaneSelected}
-                                    selectClipRemote={selectTrackLaneClipRemote}
-                                    onShiftRangeSelect={selectClipRangeByRect}
-                                    rangeSelectAnchorClipId={rangeSelectAnchorClipId}
-                                    openContextMenu={openTrackLaneContextMenu}
-                                    seekFromClientX={seekFromTrackLaneClientX}
-                                    ghostDrag={ghostDrag}
-                                    allClips={s.clips}
-                                    startClipDrag={startClipDrag}
-                                    startEditDrag={startEditDrag}
-                                    toggleClipMuted={toggleTrackLaneClipMuted}
-                                    onCtrlToggleSelect={toggleTrackLaneCtrlSelection}
-                                    clearContextMenu={clearContextMenu}
-                                    toggleMultiSelect={toggleTrackLaneMultiSelect}
-                                    renamingClipId={renamingClipId}
-                                    onRenameCommit={commitTrackLaneRename}
-                                    onRenameDone={handleTrackLaneRenameDone}
-                                    onGainCommit={commitTrackLaneGain}
-                                />
-                            );
-                        })}
+                                return (
+                                    <TrackLane
+                                        key={track.id}
+                                        track={track}
+                                        allTracks={s.tracks}
+                                        trackClips={trackClips}
+                                        rowHeight={rowHeight}
+                                        pxPerSec={pxPerSec}
+                                        bpm={s.bpm}
+                                        viewportWidthPx={viewportWidth}
+                                        viewportStartSec={viewportStartSec}
+                                        viewportEndSec={viewportEndSec}
+                                        overlayClipIds={
+                                            sparseClipRenderModel.overlayClipIdsByTrackId[
+                                                track.id
+                                            ] ?? []
+                                        }
+                                        altPressed={altPressed}
+                                        selectedClipId={
+                                            selectedClipTrackId === track.id
+                                                ? s.selectedClipId
+                                                : null
+                                        }
+                                        multiSelectedClipIds={multiSelectedClipIds}
+                                        multiSelectedSet={multiSelectedSet}
+                                        trackColor={track.color || undefined}
+                                        ensureSelected={ensureTrackLaneSelected}
+                                        selectClipRemote={selectTrackLaneClipRemote}
+                                        onShiftRangeSelect={selectClipRangeByRect}
+                                        rangeSelectAnchorClipId={rangeSelectAnchorClipId}
+                                        openContextMenu={openTrackLaneContextMenu}
+                                        seekFromClientX={seekFromTrackLaneClientX}
+                                        ghostDrag={ghostDrag}
+                                        verticalTrackLockTrackId={verticalTrackLockTrackId}
+                                        allClips={s.clips}
+                                        startClipDrag={startClipDrag}
+                                        startEditDrag={startEditDrag}
+                                        toggleClipMuted={toggleTrackLaneClipMuted}
+                                        onCtrlToggleSelect={toggleTrackLaneCtrlSelection}
+                                        clearContextMenu={clearContextMenu}
+                                        toggleMultiSelect={toggleTrackLaneMultiSelect}
+                                        renamingClipId={renamingClipId}
+                                        onRenameCommit={commitTrackLaneRename}
+                                        onRenameDone={handleTrackLaneRenameDone}
+                                        onGainCommit={commitTrackLaneGain}
+                                    />
+                                );
+                            })}
+                        </div>
 
                         <div className="absolute inset-0 pointer-events-none z-[12]">
                             <BackgroundGrid
@@ -920,7 +1173,7 @@ export const TimelinePanel: React.FC = () => {
                             ref={playheadRef}
                             className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20 cursor-ew-resize"
                             style={{
-                                left: s.playheadSec * pxPerSec,
+                                left: (Number(sessionRef.current.playheadSec ?? 0) || 0) * pxPerSec,
                             }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
@@ -931,7 +1184,7 @@ export const TimelinePanel: React.FC = () => {
                                 const startY = e.clientY;
                                 let moved = false;
                                 const bounds = scroller.getBoundingClientRect();
-                                const initialSec = s.playheadSec;
+                                const initialSec = Number(sessionRef.current.playheadSec ?? 0) || 0;
                                 playheadDragRef.current = {
                                     pointerId: e.pointerId,
                                     lastBeat: initialSec,
@@ -1315,6 +1568,16 @@ export const TimelinePanel: React.FC = () => {
                         </Flex>
                     </Dialog.Content>
                 </Dialog.Root>
+
+                <TimelineTransportBridge
+                    pxPerSecRef={pxPerSecRef}
+                    playheadRef={playheadRef}
+                    rulerPlayheadLineRef={rulerPlayheadLineRef}
+                    rulerPlayheadHeadRef={rulerPlayheadHeadRef}
+                    scrollRef={scrollRef}
+                    syncScrollLeft={syncScrollLeft}
+                    autoScrollEnabled={s.autoScrollEnabled}
+                />
             </Flex>
         </Flex>
     );

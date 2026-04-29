@@ -94,6 +94,7 @@ export const webApi = {
     getTrackSummary: timelineApi.getTrackSummary,
 
     addClip: timelineApi.addClip,
+    createClipsBulk: timelineApi.createClipsBulk,
     removeClip: timelineApi.removeClip,
     removeClips: timelineApi.removeClips,
     moveClip: timelineApi.moveClip,
@@ -101,6 +102,8 @@ export const webApi = {
     getClipLinkedParams: timelineApi.getClipLinkedParams,
     applyClipLinkedParams: timelineApi.applyClipLinkedParams,
     setClipState: timelineApi.setClipState,
+    setClipsStateBulk: timelineApi.setClipsStateBulk,
+    duplicateClipsBulk: timelineApi.duplicateClipsBulk,
     replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
     glueClips: timelineApi.glueClips,

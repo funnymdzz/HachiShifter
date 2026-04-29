@@ -406,6 +406,15 @@ pub fn add_clip(
 ) -> crate::models::TimelineStatePayload {
     timeline::add_clip(state, track_id, name, start_sec, length_sec, source_path)
 }
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn create_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::CreateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::create_clips_bulk(state, payload)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn remove_clip(
     state: State<'_, AppState>,
@@ -496,6 +505,23 @@ pub fn set_clip_state(
         color,
         checkpoint,
     )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_clips_state_bulk(
+    state: State<'_, AppState>,
+    updates: Vec<crate::state::BulkClipStatePatch>,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::set_clips_state_bulk(state, updates, checkpoint)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn duplicate_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::DuplicateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::duplicate_clips_bulk(state, payload)
 }
 
 #[tauri::command(rename_all = "camelCase")]

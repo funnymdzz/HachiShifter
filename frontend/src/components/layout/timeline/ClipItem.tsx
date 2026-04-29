@@ -14,7 +14,6 @@ import React from "react";
 import { useI18n } from "../../../i18n/I18nProvider";
 import type { ClipInfo } from "../../../features/session/sessionTypes";
 import { CLIP_BODY_PADDING_Y, CLIP_HEADER_HEIGHT } from "./constants";
-import { fadeInAreaPath, fadeOutAreaPath } from "./paths";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
 
@@ -34,6 +33,7 @@ export const ClipItem = React.memo(function ClipItem({
     ensureSelected,
     selectClipRemote,
     openContextMenu,
+    trackColor,
     seekFromClientX,
     startClipDrag,
     startEditDrag,
@@ -47,7 +47,7 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameCommit,
     onRenameDone,
     onGainCommit,
-    trackColor,
+    hovered = false,
 }: {
     clip: ClipInfo;
     rowHeight: number;
@@ -105,12 +105,12 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
+    hovered?: boolean;
 }) {
     const { t } = useI18n();
 
     const left = Math.max(0, Math.round(clip.startSec * pxPerSec));
     const width = Math.max(1, Math.round(clip.lengthSec * pxPerSec));
-    const bodyHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
     const leadingOverlapPx = Math.max(
         0,
         Math.min(width, Math.round(Math.max(0, leadingOverlapSec) * pxPerSec)),
@@ -120,9 +120,11 @@ export const ClipItem = React.memo(function ClipItem({
             ? `linear-gradient(to right, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) 0px, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) ${leadingOverlapPx}px, rgba(0,0,0,1) ${leadingOverlapPx}px, rgba(0,0,0,1) 100%)`
             : undefined;
 
-    const showRepeatMarker = false;
-    const repeatMarkerX = 0;
-    const fadeStrokeColor = selected ? "var(--qt-clip-selected-border)" : "var(--qt-clip-border)";
+    const interactionHintBoxShadow = selected
+        ? "0 0 0 1px rgba(156, 196, 255, 0.68), 0 0 0 2px rgba(156, 196, 255, 0.16)"
+        : hovered
+          ? "0 0 0 1px rgba(255, 255, 255, 0.24)"
+          : undefined;
 
     const startDeferredFadeEditDrag = React.useCallback(
         (e: React.PointerEvent<HTMLDivElement>, type: "fade_in" | "fade_out") => {
@@ -224,7 +226,7 @@ export const ClipItem = React.memo(function ClipItem({
     return (
         <div
             data-hs-clip-item="1"
-            className={`absolute cursor-pointer overflow-visible group ${clip.muted ? "opacity-60 grayscale" : "opacity-95"}`}
+            className="absolute cursor-pointer overflow-visible group"
             style={{
                 left,
                 width,
@@ -238,6 +240,7 @@ export const ClipItem = React.memo(function ClipItem({
                 maskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
                 WebkitMaskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
                 maskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
+                boxShadow: interactionHintBoxShadow,
             }}
             onContextMenu={(e) => {
                 e.preventDefault();
@@ -325,6 +328,8 @@ export const ClipItem = React.memo(function ClipItem({
             <ClipHeader
                 clip={clip}
                 clipWidthPx={width}
+                trackColor={trackColor}
+                transparentVisuals
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}
                 startEditDrag={startEditDrag}
@@ -339,18 +344,11 @@ export const ClipItem = React.memo(function ClipItem({
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className="absolute left-0 right-0 bottom-0 shadow-sm overflow-visible border"
+                className="absolute left-0 right-0 bottom-0 overflow-visible"
                 style={{
                     top: CLIP_HEADER_HEIGHT,
-                    backgroundColor: trackColor
-                        ? `color-mix(in oklab, var(--qt-clip-bg) 60%, ${trackColor} 40%)`
-                        : "var(--qt-clip-bg)",
-                    borderColor: selected
-                        ? "var(--qt-clip-selected-border)"
-                        : "var(--qt-clip-border)",
                 }}
             >
-                <div className="absolute left-0 right-0 top-1/2 h-px bg-black/28 pointer-events-none z-20" />
                 {/* Body (waveform + edit handles) */}
                 <div className="absolute inset-0">
                     {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
@@ -385,16 +383,6 @@ export const ClipItem = React.memo(function ClipItem({
                             }}
                             title={t("fade_in")}
                         >
-                            {/* 全区域条带：与可交互区域完全重合，右边缘竖线表示可拖拽边�?*/}
-                            <div
-                                className={
-                                    "absolute inset-0 border-r transition-opacity " +
-                                    (selected
-                                        ? "opacity-100"
-                                        : "opacity-42 group-hover:opacity-100")
-                                }
-                                style={{ borderRightColor: fadeStrokeColor }}
-                            />
                         </div>
                     )}
                     {(clip.fadeOutSec ?? 0) > 0 && (
@@ -408,76 +396,8 @@ export const ClipItem = React.memo(function ClipItem({
                             }}
                             title={t("fade_out")}
                         >
-                            {/* 全区域条带：与可交互区域完全重合，左边缘竖线表示可拖拽边�?*/}
-                            <div
-                                className={
-                                    "absolute inset-0 border-l transition-opacity " +
-                                    (selected
-                                        ? "opacity-100"
-                                        : "opacity-42 group-hover:opacity-100")
-                                }
-                                style={{ borderLeftColor: fadeStrokeColor }}
-                            />
                         </div>
                     )}
-
-                    <div className="absolute inset-0 pointer-events-none z-30">
-                        {showRepeatMarker ? (
-                            <div
-                                className="absolute top-0 bottom-0"
-                                style={{
-                                    left: Math.max(0, Math.min(width - 1, repeatMarkerX)),
-                                    width: 1,
-                                    backgroundColor: "rgba(255,255,255,0.35)",
-                                }}
-                                title={t("repeat")}
-                            />
-                        ) : null}
-                        {clip.fadeInSec > 0 ? (
-                            <svg
-                                className="absolute left-0 top-0 h-full"
-                                width={Math.min(width, clip.fadeInSec * pxPerSec)}
-                                height={bodyHeight}
-                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeInSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
-                                preserveAspectRatio="none"
-                            >
-                                <path
-                                    d={fadeInAreaPath(
-                                        Math.max(1, Math.min(width, clip.fadeInSec * pxPerSec)),
-                                        Math.max(1, bodyHeight),
-                                        24,
-                                        clip.fadeInCurve ?? "sine",
-                                    )}
-                                    fill="rgba(0,0,0,0.30)"
-                                    stroke={fadeStrokeColor}
-                                    strokeWidth="1"
-                                    vectorEffect="non-scaling-stroke"
-                                />
-                            </svg>
-                        ) : null}
-                        {clip.fadeOutSec > 0 ? (
-                            <svg
-                                className="absolute right-0 top-0 h-full"
-                                width={Math.min(width, clip.fadeOutSec * pxPerSec)}
-                                height={bodyHeight}
-                                viewBox={`0 0 ${Math.max(1, Math.min(width, clip.fadeOutSec * pxPerSec))} ${Math.max(1, bodyHeight)}`}
-                                preserveAspectRatio="none"
-                            >
-                                <path
-                                    d={fadeOutAreaPath(
-                                        Math.max(1, Math.min(width, clip.fadeOutSec * pxPerSec)),
-                                        Math.max(1, bodyHeight),
-                                        24,
-                                        clip.fadeOutCurve ?? "sine",
-                                    )}
-                                    fill="rgba(0,0,0,0.30)"
-                                    stroke={fadeStrokeColor}
-                                    strokeWidth="1"
-                                    vectorEffect="non-scaling-stroke"
-                                />
-                            </svg>
-                        ) : null}
-                    </div>
 
                     {/* 波形由 WaveformTrackCanvas（轨道级 Canvas）统一渲染，此处不再包含波形内容 */}
                 </div>

@@ -24,7 +24,7 @@ const MAGIC = "WFPK";
 export interface WaveformMipmapBinary {
     /** 采样率 */
     sampleRate: number;
-    /** 该级别的除数因子（L0=64, L1=512, L2=4096） */
+    /** 该级别的除数因子（L0=16, L1=512, L2=4096） */
     divisionFactor: number;
     /** 峰值数据点数量 */
     peakCount: number;

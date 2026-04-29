@@ -7,6 +7,7 @@ import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
+import { buildTimelineHitTestIndex, hitTestTimeline } from "./runtime/timelineHitTest";
 import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
@@ -15,6 +16,16 @@ function compareClipRenderOrder(a: ClipInfo, b: ClipInfo): number {
     const d = (a.startSec ?? 0) - (b.startSec ?? 0);
     if (Math.abs(d) > 1e-9) return d;
     return String(a.id).localeCompare(String(b.id));
+}
+
+function sameStringArray(a: string[] | undefined, b: string[] | undefined): boolean {
+    if (a === b) return true;
+    if (!a || !b) return !a && !b;
+    if (a.length !== b.length) return false;
+    for (let index = 0; index < a.length; index += 1) {
+        if (a[index] !== b[index]) return false;
+    }
+    return true;
 }
 
 /**
@@ -49,7 +60,7 @@ export function computeLeadingOverlapSecByClipId(clips: ClipInfo[]): Record<stri
     return leadingOverlapSecByClipId;
 }
 
-export const TrackLane = React.memo(function TrackLane(props: {
+type TrackLaneProps = {
     track: TrackInfo;
     allTracks: TrackInfo[];
     trackClips: ClipInfo[];
@@ -60,6 +71,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
     viewportWidthPx: number;
     viewportStartSec: number;
     viewportEndSec: number;
+    overlayClipIds?: string[];
 
     altPressed: boolean;
 
@@ -113,9 +125,13 @@ export const TrackLane = React.memo(function TrackLane(props: {
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
     ghostDrag?: GhostDragInfo | null;
+    /** 当前拖拽处于纯竖直换轨锁定时，高亮的目标轨道 */
+    verticalTrackLockTrackId?: string | null;
     /** 所有 clip 数据（用于跨轨道 ghost 查找） */
     allClips?: ClipInfo[];
-}) {
+};
+
+export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
     const {
         track,
         allTracks,
@@ -125,6 +141,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         viewportWidthPx,
         viewportStartSec,
         viewportEndSec,
+        overlayClipIds = [],
         altPressed,
         selectedClipId,
         multiSelectedClipIds,
@@ -147,6 +164,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         onRenameDone,
         onGainCommit,
         ghostDrag,
+        verticalTrackLockTrackId,
         allClips,
     } = props;
 
@@ -159,6 +177,8 @@ export const TrackLane = React.memo(function TrackLane(props: {
 
     // 波形区域高度计算（与 ClipItem 一致）
     const waveformHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
+    const [hoveredClipId, setHoveredClipId] = React.useState<string | null>(null);
+    const showVerticalTrackLock = verticalTrackLockTrackId === track.id;
 
     // 计算当前轨道上需要渲染的 ghost clip 列表
     const ghostClips = React.useMemo(() => {
@@ -168,6 +188,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
         const trackIndexById = Object.fromEntries(
             orderedTrackIds.map((id, idx) => [id, idx]),
         ) as Record<string, number>;
+        const clipById = new Map((allClips ?? []).map((clip) => [clip.id, clip] as const));
         for (const clipId of ghostDrag.clipIds) {
             const initial = ghostDrag.initialById[clipId];
             if (!initial) continue;
@@ -183,11 +204,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 }
             }
             if (ghostTrackId !== track.id) continue;
-            // 优先从当前轨道 clips 查找，跨轨道时从全部 clips 中查找
-            const clip =
-                trackClips.find((c) => c.id === clipId) ??
-                allClips?.find((c) => c.id === clipId) ??
-                undefined;
+            const clip = clipById.get(clipId);
             if (!clip) continue;
             result.push({
                 clip,
@@ -197,40 +214,271 @@ export const TrackLane = React.memo(function TrackLane(props: {
         return result;
     }, [ghostDrag, track.id, trackClips, allClips, allTracks]);
 
-    const visibleTrackClips = React.useMemo(() => {
-        const start = Number(viewportStartSec);
-        const end = Number(viewportEndSec);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-            return trackClips;
-        }
-
-        // Render a neighbor window to avoid pop-in/thrashing while zooming.
-        const viewportSec = end - start;
-        const bufferSec = Math.max(2.0, viewportSec * 0.5);
-        const minSec = start - bufferSec;
-        const maxSec = end + bufferSec;
-
-        return trackClips.filter((clip) => {
-            const clipStart = clip.startSec;
-            const clipEnd = clip.startSec + clip.lengthSec;
-            return clipEnd >= minSec && clipStart <= maxSec;
-        });
-    }, [trackClips, viewportStartSec, viewportEndSec]);
-
     const leadingOverlapSecByClipId = React.useMemo(
-        () => computeLeadingOverlapSecByClipId(visibleTrackClips),
-        [visibleTrackClips],
+        () => computeLeadingOverlapSecByClipId(trackClips),
+        [trackClips],
+    );
+    const laneHitTestIndex = React.useMemo(
+        () =>
+            buildTimelineHitTestIndex({
+                rowHeight,
+                pxPerSec,
+                visibleTracks: [{ id: track.id, topPx: 0 }],
+                visibleClips: trackClips.map((clip) => ({
+                    id: clip.id,
+                    trackId: clip.trackId,
+                    startSec: clip.startSec,
+                    lengthSec: clip.lengthSec,
+                })),
+            }),
+        [pxPerSec, rowHeight, track.id, trackClips],
+    );
+    const overlayClipIdSet = React.useMemo(() => {
+        const next = new Set(overlayClipIds);
+        if (hoveredClipId) {
+            next.add(hoveredClipId);
+        }
+        return next;
+    }, [hoveredClipId, overlayClipIds]);
+    const overlayTrackClips = React.useMemo(
+        () => trackClips.filter((clip) => overlayClipIdSet.has(clip.id)),
+        [overlayClipIdSet, trackClips],
+    );
+    const hitTestLane = React.useCallback(
+        (clientX: number, clientY: number, currentTarget: HTMLDivElement) => {
+            const bounds = currentTarget.getBoundingClientRect();
+            return hitTestTimeline(
+                {
+                    screenX: clientX - bounds.left,
+                    screenY: clientY - bounds.top,
+                    scrollLeftPx: 0,
+                    scrollTopPx: 0,
+                },
+                laneHitTestIndex,
+            );
+        },
+        [laneHitTestIndex],
+    );
+    const isClipItemTarget = React.useCallback((target: EventTarget | null) => {
+        return (target as HTMLElement | null)?.closest?.("[data-hs-clip-item='1']") != null;
+    }, []);
+    const primeSelection = React.useCallback(
+        (clipId: string, shouldPrimeSelection: boolean) => {
+            if (!shouldPrimeSelection) {
+                return;
+            }
+            if (multiSelectedClipIds.length === 0 || !multiSelectedSet.has(clipId)) {
+                ensureSelected(clipId);
+            }
+            selectClipRemote(clipId);
+        },
+        [ensureSelected, multiSelectedClipIds.length, multiSelectedSet, selectClipRemote],
+    );
+    const beginBodyInteraction = React.useCallback(
+        (event: React.PointerEvent<HTMLDivElement>, clip: ClipInfo) => {
+            const alt = Boolean(
+                altPressed || event.altKey || event.nativeEvent.getModifierState?.("Alt"),
+            );
+            const ctrlOrMeta = event.ctrlKey || event.metaKey;
+            const doShiftRangeSelect = event.shiftKey && !alt && !ctrlOrMeta;
+            const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+            const doCtrlToggleOnly = ctrlOrMeta && !event.shiftKey && !alt;
+            const allowSeek = !alt && !ctrlOrMeta && !event.shiftKey;
+            const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+            const startX = event.clientX;
+            const startY = event.clientY;
+            let moved = false;
+
+            event.preventDefault();
+            event.stopPropagation();
+            clearContextMenu();
+
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== event.pointerId) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy >= 9) moved = true;
+            };
+
+            const onUp = (ev: PointerEvent) => {
+                if (ev.pointerId !== event.pointerId) return;
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onUp, true);
+                window.removeEventListener("pointercancel", onUp, true);
+                if (doShiftRangeSelect && !moved) {
+                    onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
+                } else if (!moved && allowSeek) {
+                    seekFromClientX(ev.clientX, true);
+                }
+            };
+
+            window.addEventListener("pointermove", onMove, true);
+            window.addEventListener("pointerup", onUp, true);
+            window.addEventListener("pointercancel", onUp, true);
+
+            primeSelection(clip.id, shouldPrimeSelection);
+            startClipDrag(event, clip.id, clip.startSec, alt);
+        },
+        [
+            altPressed,
+            clearContextMenu,
+            onShiftRangeSelect,
+            primeSelection,
+            rangeSelectAnchorClipId,
+            seekFromClientX,
+            startClipDrag,
+        ],
+    );
+    const beginEdgeInteraction = React.useCallback(
+        (
+            event: React.PointerEvent<HTMLDivElement>,
+            clipId: string,
+            edge: "trim_left" | "trim_right",
+        ) => {
+            if (event.button !== 0) return;
+
+            const alt = Boolean(
+                altPressed || event.altKey || event.nativeEvent.getModifierState?.("Alt"),
+            );
+            const ctrlOrMeta = event.ctrlKey || event.metaKey;
+            const doShiftRangeSelect = event.shiftKey && !alt && !ctrlOrMeta;
+            const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
+            const doCtrlToggleOnly = ctrlOrMeta && !event.shiftKey && !alt;
+            const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
+            const mode =
+                edge === "trim_left"
+                    ? alt
+                        ? "stretch_left"
+                        : "trim_left"
+                    : alt
+                      ? "stretch_right"
+                      : "trim_right";
+            const startX = event.clientX;
+            const startY = event.clientY;
+            const pointerId = event.pointerId;
+            let dragStarted = false;
+
+            event.preventDefault();
+            event.stopPropagation();
+            clearContextMenu();
+            primeSelection(clipId, shouldPrimeSelection);
+
+            const onMove = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId || dragStarted) return;
+                const dx = ev.clientX - startX;
+                const dy = ev.clientY - startY;
+                if (dx * dx + dy * dy < 9) return;
+                dragStarted = true;
+                startEditDrag(event, clipId, mode);
+            };
+
+            const onEnd = (ev: PointerEvent) => {
+                if (ev.pointerId !== pointerId) return;
+                window.removeEventListener("pointermove", onMove, true);
+                window.removeEventListener("pointerup", onEnd, true);
+                window.removeEventListener("pointercancel", onEnd, true);
+                if (!dragStarted) {
+                    if (doCtrlToggleOnly) {
+                        onCtrlToggleSelect(clipId);
+                        return;
+                    }
+                    if (doShiftRangeSelect) {
+                        onShiftRangeSelect(clipId, shiftRangeAnchorClipId);
+                        return;
+                    }
+                    seekFromClientX(ev.clientX, true);
+                }
+            };
+
+            window.addEventListener("pointermove", onMove, true);
+            window.addEventListener("pointerup", onEnd, true);
+            window.addEventListener("pointercancel", onEnd, true);
+        },
+        [
+            altPressed,
+            clearContextMenu,
+            onCtrlToggleSelect,
+            onShiftRangeSelect,
+            primeSelection,
+            rangeSelectAnchorClipId,
+            seekFromClientX,
+            startEditDrag,
+        ],
     );
 
     return (
         <div
             key={track.id}
             className="border-b border-qt-border relative"
-            style={{ height: rowHeight }}
+            style={{
+                height: rowHeight,
+                backgroundColor: showVerticalTrackLock ? "rgba(112, 192, 255, 0.08)" : undefined,
+                boxShadow: showVerticalTrackLock
+                    ? "inset 0 0 0 1px rgba(112, 192, 255, 0.72), inset 0 0 0 9999px rgba(112, 192, 255, 0.04)"
+                    : undefined,
+            }}
+            onPointerMoveCapture={(event) => {
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                setHoveredClipId((previous) => (previous === hit.clipId ? previous : hit.clipId));
+            }}
+            onContextMenuCapture={(event) => {
+                if (isClipItemTarget(event.target)) {
+                    return;
+                }
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                if (!hit.clipId) {
+                    return;
+                }
+                event.preventDefault();
+                event.stopPropagation();
+                if (multiSelectedClipIds.length <= 1) {
+                    ensureSelected(hit.clipId);
+                    selectClipRemote(hit.clipId);
+                }
+                openContextMenu(hit.clipId, event.clientX, event.clientY);
+            }}
+            onPointerDownCapture={(event) => {
+                if (isClipItemTarget(event.target)) {
+                    return;
+                }
+                if (event.button !== 0) {
+                    return;
+                }
+                const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
+                if (!hit.clipId) {
+                    return;
+                }
+                const clip = trackClips.find((candidate) => candidate.id === hit.clipId);
+                if (!clip) {
+                    return;
+                }
+                if (hit.zone === "trim_left" || hit.zone === "trim_right") {
+                    beginEdgeInteraction(event, clip.id, hit.zone);
+                    return;
+                }
+                beginBodyInteraction(event, clip);
+            }}
+            onPointerLeave={() => {
+                setHoveredClipId(null);
+            }}
         >
+            {showVerticalTrackLock ? (
+                <div className="absolute right-2 top-1 pointer-events-none z-20">
+                    <div
+                        className="rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]"
+                        style={{
+                            color: "rgba(235, 246, 255, 0.96)",
+                            backgroundColor: "rgba(41, 117, 173, 0.88)",
+                            boxShadow: "0 0 0 1px rgba(164, 217, 255, 0.38)",
+                        }}
+                    >
+                        Vertical Lock
+                    </div>
+                </div>
+            ) : null}
             {/* 轨道级波形 Canvas：一个 Canvas 绘制该轨道所有可见 clip 的波形 */}
             <WaveformTrackCanvas
-                clips={visibleTrackClips}
+                clips={trackClips}
                 leadingOverlapSecByClipId={leadingOverlapSecByClipId}
                 trackHeight={rowHeight}
                 waveformTop={CLIP_HEADER_HEIGHT}
@@ -242,7 +490,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 strokeColor={waveformColors.stroke}
                 strokeWidth={1}
             />
-            {visibleTrackClips.map((clip) => {
+            {overlayTrackClips.map((clip) => {
                 const selected =
                     multiSelectedClipIds.length > 0
                         ? multiSelectedSet.has(clip.id)
@@ -260,8 +508,6 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         isInMultiSelectedSet={multiSelectedSet.has(clip.id)}
                         multiSelectedCount={multiSelectedClipIds.length}
                         trackColor={trackColor}
-                        viewportStartSec={viewportStartSec}
-                        viewportEndSec={viewportEndSec}
                         ensureSelected={ensureSelected}
                         selectClipRemote={selectClipRemote}
                         openContextMenu={openContextMenu}
@@ -278,6 +524,7 @@ export const TrackLane = React.memo(function TrackLane(props: {
                         onRenameCommit={onRenameCommit}
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
+                        hovered={hoveredClipId === clip.id}
                     />
                 );
             })}
@@ -320,5 +567,42 @@ export const TrackLane = React.memo(function TrackLane(props: {
                 );
             })}
         </div>
+    );
+}, (prev, next) => {
+    return (
+        prev.track === next.track &&
+        prev.allTracks === next.allTracks &&
+        prev.trackClips === next.trackClips &&
+        prev.rowHeight === next.rowHeight &&
+        prev.pxPerSec === next.pxPerSec &&
+        prev.bpm === next.bpm &&
+        prev.viewportWidthPx === next.viewportWidthPx &&
+        prev.altPressed === next.altPressed &&
+        prev.selectedClipId === next.selectedClipId &&
+        prev.multiSelectedClipIds === next.multiSelectedClipIds &&
+        prev.multiSelectedSet === next.multiSelectedSet &&
+        prev.trackColor === next.trackColor &&
+        prev.ensureSelected === next.ensureSelected &&
+        prev.selectClipRemote === next.selectClipRemote &&
+        prev.openContextMenu === next.openContextMenu &&
+        prev.seekFromClientX === next.seekFromClientX &&
+        prev.startClipDrag === next.startClipDrag &&
+        prev.startEditDrag === next.startEditDrag &&
+        prev.toggleClipMuted === next.toggleClipMuted &&
+        prev.onCtrlToggleSelect === next.onCtrlToggleSelect &&
+        prev.toggleMultiSelect === next.toggleMultiSelect &&
+        prev.onShiftRangeSelect === next.onShiftRangeSelect &&
+        prev.rangeSelectAnchorClipId === next.rangeSelectAnchorClipId &&
+        prev.clearContextMenu === next.clearContextMenu &&
+        prev.renamingClipId === next.renamingClipId &&
+        prev.onRenameCommit === next.onRenameCommit &&
+        prev.onRenameDone === next.onRenameDone &&
+        prev.onGainCommit === next.onGainCommit &&
+        prev.ghostDrag === next.ghostDrag &&
+        prev.verticalTrackLockTrackId === next.verticalTrackLockTrackId &&
+        prev.allClips === next.allClips &&
+        sameStringArray(prev.overlayClipIds, next.overlayClipIds)
+        // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus
+        // after mount, so pure horizontal scroll should not force a TrackLane rerender.
     );
 });

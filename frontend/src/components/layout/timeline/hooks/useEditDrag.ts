@@ -10,12 +10,13 @@ import {
     setClipLength,
     setClipPlaybackRate,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     setClipSourceRange,
     beginInteraction,
     endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { applyAutoCrossfade } from "./autoCrossfade";
-import { clamp, gainToDb, dbToGain } from "../math";
+import { clamp } from "../math";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { paramsApi } from "../../../../services/api";
@@ -26,6 +27,12 @@ import {
     scaleClipFadesForStretch,
     type StretchGroupState,
 } from "./stretchGroup";
+import {
+    applyBulkFadeValue,
+    applyBulkGainDeltaDb,
+    getBulkEditableClipIds,
+} from "./bulkClipEdit";
+import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 export function resolveStretchParamTypes(
     pitchEditUserModified: boolean | null | undefined,
@@ -161,6 +168,8 @@ export type EditDragState = {
     baseSourceSampleRate: number | null;
     baseDurationSec: number | null;
     stretchGroup: StretchGroupState | null;
+    selectedClipIds: string[];
+    baseGainById: Record<string, number>;
 };
 
 export function useEditDrag(deps: {
@@ -200,10 +209,17 @@ export function useEditDrag(deps: {
         if (!scroller) return;
         const rightEdgeBeat = clip.startSec + clip.lengthSec;
 
-        const selectedClipIds =
-            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
-                ? [...multiSelectedClipIds]
-                : [clipId];
+        const selectedClipIds = getBulkEditableClipIds({
+            activeClipId: clipId,
+            multiSelectedClipIds,
+            multiSelectedSet,
+        });
+        const baseGainById = Object.fromEntries(
+            selectedClipIds.map((id) => {
+                const selectedClip = sessionRef.current.clips.find((entry) => entry.id === id);
+                return [id, Number(selectedClip?.gain ?? 1) || 1];
+            }),
+        ) as Record<string, number>;
         const stretchGroup =
             type === "stretch_left" || type === "stretch_right"
                 ? buildStretchGroupState({
@@ -241,13 +257,15 @@ export function useEditDrag(deps: {
             baseSourceSampleRate: clip.sourceSampleRate ?? null,
             baseDurationSec: clip.durationSec ?? null,
             stretchGroup,
+            selectedClipIds,
+            baseGainById,
         };
 
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
         let ticking = false;
         let latestEvent: PointerEvent | null = null;
-        let currentTrackingGain = clip.gain;
+        let accumulatedGainDeltaDb = 0;
 
         function onMove(ev: PointerEvent) {
             latestEvent = ev;
@@ -279,15 +297,29 @@ export function useEditDrag(deps: {
                 if (drag.type === "fade_in") {
                     const raw = beat - drag.basestartSec;
                     const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                    dispatch(setClipFades({ clipId: drag.clipId, fadeInSec: next }));
+                    const fadeUpdates = applyBulkFadeValue({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            sessionRef.current.clips.map((clip) => [clip.id, clip] as const),
+                        ),
+                        target: "fadeInSec",
+                        nextValue: next,
+                    });
+                    batch(() => {
+                        for (const update of fadeUpdates) {
+                            dispatch(setClipFades(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void dispatch(
-                                setClipStateRemote({ clipId: drag.clipId, fadeInSec: next }),
-                            );
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            if (now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void dispatch(
+                                    setClipStateRemote({ clipId: drag.clipId, fadeInSec: next }),
+                                );
+                            }
                         }
                     } catch {}
                     return;
@@ -295,15 +327,29 @@ export function useEditDrag(deps: {
                 if (drag.type === "fade_out") {
                     const raw = drag.rightEdgeBeat - beat;
                     const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                    dispatch(setClipFades({ clipId: drag.clipId, fadeOutSec: next }));
+                    const fadeUpdates = applyBulkFadeValue({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            sessionRef.current.clips.map((clip) => [clip.id, clip] as const),
+                        ),
+                        target: "fadeOutSec",
+                        nextValue: next,
+                    });
+                    batch(() => {
+                        for (const update of fadeUpdates) {
+                            dispatch(setClipFades(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void dispatch(
-                                setClipStateRemote({ clipId: drag.clipId, fadeOutSec: next }),
-                            );
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            if (now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void dispatch(
+                                    setClipStateRemote({ clipId: drag.clipId, fadeOutSec: next }),
+                                );
+                            }
                         }
                     } catch {}
                     return;
@@ -311,20 +357,37 @@ export function useEditDrag(deps: {
                 if (drag.type === "gain") {
                     const movementY = (currentEv.movementY ?? 0) as number;
                     const deltaDb = -movementY * 0.25;
-                    const nextDb = clamp(gainToDb(currentTrackingGain) + deltaDb, -12, 12);
-                    const nextGain = clamp(dbToGain(nextDb), dbToGain(-12), dbToGain(12));
-                    currentTrackingGain = nextGain;
-                    dispatch(setClipGain({ clipId: drag.clipId, gain: nextGain }));
+                    accumulatedGainDeltaDb += deltaDb;
+                    const gainUpdates = applyBulkGainDeltaDb({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            drag.selectedClipIds.map((id) => [
+                                id,
+                                { gain: drag.baseGainById[id] ?? 1 },
+                            ]),
+                        ),
+                        deltaDb: accumulatedGainDeltaDb,
+                        minDb: -12,
+                        maxDb: 12,
+                    });
+                    batch(() => {
+                        for (const update of gainUpdates) {
+                            dispatch(setClipGain(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void webApi.setClipState({
-                                clipId: drag.clipId,
-                                gain: nextGain,
-                                checkpoint: false,
-                            });
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            const nextGain = gainUpdates[0]?.gain;
+                            if (nextGain != null && now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void webApi.setClipState({
+                                    clipId: drag.clipId,
+                                    gain: nextGain,
+                                    checkpoint: false,
+                                });
+                            }
                         }
                     } catch {}
                     return;
@@ -749,25 +812,48 @@ export function useEditDrag(deps: {
                     ).unwrap();
                 }
             } else if (drag.type === "fade_in" && singleClipNow) {
-                // 确保结束时把最终值持久化到后端
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { fadeInSec: nextClip?.fadeInSec ?? 0 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        fadeInSec: singleClipNow.fadeInSec,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
             } else if (drag.type === "fade_out" && singleClipNow) {
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { fadeOutSec: nextClip?.fadeOutSec ?? 0 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        fadeOutSec: singleClipNow.fadeOutSec,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
             } else if (drag.type === "gain" && singleClipNow) {
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { gain: nextClip?.gain ?? 1 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        gain: singleClipNow.gain,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
                 // 结束 gain 拖动时调用 endUndoGroup，结束 undo group

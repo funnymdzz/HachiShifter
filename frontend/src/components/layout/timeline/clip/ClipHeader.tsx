@@ -4,12 +4,16 @@ import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
 import { useI18n } from "../../../../i18n/I18nProvider";
 import { useAppTheme } from "../../../../theme/AppThemeProvider";
+import { resolveTimelineClipHeaderVisibility } from "../runtime/timelineClipHeaderVisibility";
+import { buildTimelineClipVisualStyle } from "../runtime/timelineCanvasStyle";
 
 const CLIP_GAIN_WHEEL_STEP_DB = 0.5;
 
 export const ClipHeader: React.FC<{
     clip: ClipInfo;
     clipWidthPx: number;
+    trackColor?: string;
+    transparentVisuals?: boolean;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
@@ -25,6 +29,8 @@ export const ClipHeader: React.FC<{
 }> = ({
     clip,
     clipWidthPx,
+    trackColor,
+    transparentVisuals = false,
     ensureSelected,
     selectClipRemote,
     startEditDrag,
@@ -63,11 +69,24 @@ export const ClipHeader: React.FC<{
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
     // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
-    const showAny = clipWidthPx >= 32;
-    const showMute = clipWidthPx >= 32;
-    const showGainKnob = clipWidthPx >= 52;
-    const showGainVal = clipWidthPx >= 80;
-    const showName = clipWidthPx >= 120;
+    const {
+        showAny,
+        showMute,
+        showGainKnob,
+        showPlaybackRate,
+        showGainLabel: showGainVal,
+        showName,
+    } =
+        resolveTimelineClipHeaderVisibility(clipWidthPx);
+    const visualStyle = buildTimelineClipVisualStyle({
+        widthPx: clipWidthPx,
+        trackColor,
+        selected: false,
+        muted: Boolean(clip.muted),
+        gain: clip.gain,
+        playbackRate: clip.playbackRate,
+        name: clip.name,
+    });
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────
     const [gainEditing, setGainEditing] = useState(false);
@@ -118,6 +137,7 @@ export const ClipHeader: React.FC<{
     }
 
     if (!showAny) return null;
+    const hideVisuals = transparentVisuals && !nameEditing && !gainEditing;
 
     return (
         <div
@@ -127,30 +147,11 @@ export const ClipHeader: React.FC<{
                 height: CLIP_HEADER_HEIGHT,
             }}
         >
-            {/* 静音按钮 */}
-            {showMute && (
-                <button
-                    className={`w-5 h-4 rounded flex items-center justify-center border transition-all text-[10px] font-bold ${clip.muted ? "bg-qt-danger-bg text-qt-danger-text border-qt-danger-border" : "bg-qt-button text-qt-text border-transparent hover:border-qt-danger-border hover:bg-qt-danger-bg hover:text-qt-danger-text"}`}
-                    onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }}
-                    onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toggleClipMuted(clip.id, !Boolean(clip.muted));
-                    }}
-                    title={clip.muted ? t("clip_unmute") : t("clip_mute")}
-                >
-                    M
-                </button>
-            )}
-
             {/* 增益拖拽把手 */}
             {showGainKnob && (
                 <div
                     title={t("clip_gain_drag_hint")}
-                    style={{ cursor: "ns-resize" }}
+                    style={{ cursor: "ns-resize", opacity: hideVisuals ? 0 : 1 }}
                     data-clip-gain-knob
                     onPointerDown={(e) => {
                         e.preventDefault();
@@ -201,25 +202,56 @@ export const ClipHeader: React.FC<{
                         }, 200);
                     }}
                 >
-                    <div
-                        className="relative w-4 h-4 rounded-full border"
-                        style={{
-                            borderColor: isDark ? "rgba(255,255,255,0.65)" : "rgba(0,0,0,0.45)",
-                            backgroundColor: isDark ? "rgba(0,0,0,0.15)" : "rgba(255,255,255,0.28)",
-                        }}
-                    >
-                        <span
-                            className="absolute left-1/2 top-1/2 w-[2px] h-1.5 -translate-x-1/2 -translate-y-full rounded-full"
+                        <div
+                            className="relative rounded-full border"
                             style={{
-                                backgroundColor: isDark
-                                    ? "rgba(255,255,255,0.92)"
-                                    : "rgba(0,0,0,0.72)",
-                                transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
-                                transformOrigin: "50% 100%",
+                                width: visualStyle.gainKnobRadius * 2 + 4,
+                                height: visualStyle.gainKnobRadius * 2 + 4,
+                                borderColor: visualStyle.gainKnobStroke,
+                                backgroundColor: visualStyle.gainKnobFill,
                             }}
-                        />
-                    </div>
+                        >
+                            <span
+                                className="absolute left-1/2 top-1/2 w-[2px] h-[7px] -translate-x-1/2 -translate-y-full rounded-full"
+                                style={{
+                                    backgroundColor: visualStyle.gainKnobIndicator,
+                                    transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
+                                    transformOrigin: "50% 100%",
+                                }}
+                            />
+                            <span
+                                className="absolute left-1/2 top-1/2 h-[4px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                                style={{ backgroundColor: visualStyle.gainKnobCoreFill }}
+                            />
+                        </div>
                 </div>
+            )}
+
+            {/* 静音按钮 */}
+            {showMute && (
+                <button
+                    className="rounded flex items-center justify-center border transition-all text-[10px] font-bold"
+                    onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                    }}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        toggleClipMuted(clip.id, !Boolean(clip.muted));
+                    }}
+                    title={clip.muted ? t("clip_unmute") : t("clip_mute")}
+                    style={{
+                        opacity: hideVisuals ? 0 : 1,
+                        width: visualStyle.muteBadgeWidth,
+                        height: visualStyle.muteBadgeHeight,
+                        backgroundColor: visualStyle.muteBadgeFill,
+                        borderColor: visualStyle.muteBadgeStroke,
+                        color: visualStyle.muteBadgeTextFill,
+                    }}
+                >
+                    M
+                </button>
             )}
 
             {/* Clip 名称区域 */}
@@ -251,7 +283,8 @@ export const ClipHeader: React.FC<{
                         <div
                             className="text-xs font-medium drop-shadow-md truncate cursor-text"
                             style={{
-                                color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.86)",
+                                color: visualStyle.textFill,
+                                opacity: hideVisuals ? 0 : 1,
                             }}
                             onDoubleClick={(e) => {
                                 e.preventDefault();
@@ -267,41 +300,61 @@ export const ClipHeader: React.FC<{
                 </div>
             )}
 
-            {/* 增益数值显示 / 输入框 */}
-            {showGainVal && gainEditing ? (
-                <input
-                    ref={gainInputRef}
-                    className="w-14 text-xs rounded px-1 outline-none text-right"
-                    style={{
-                        color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.88)",
-                        backgroundColor: isDark ? "rgba(0,0,0,0.45)" : "rgba(255,255,255,0.70)",
-                        border: `1px solid ${isDark ? "rgba(255,255,255,0.40)" : "rgba(0,0,0,0.35)"}`,
-                    }}
-                    value={gainInputVal}
-                    onChange={(e) => setGainInputVal(e.target.value)}
-                    onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") commitGainEdit();
-                        if (e.key === "Escape") cancelGainEdit();
-                    }}
-                    onBlur={commitGainEdit}
-                    onPointerDown={(e) => e.stopPropagation()}
-                />
-            ) : showGainVal ? (
-                <div
-                    className="text-xs drop-shadow-md cursor-ns-resize"
-                    style={{ color: isDark ? "rgba(255,255,255,0.82)" : "rgba(0,0,0,0.72)" }}
-                    title={t("clip_gain_drag_hint")}
-                    onDoubleClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        onGainCommit?.(clip.id, 0);
-                    }}
-                >
-                    {activeGainDb >= 0 ? "+" : ""}
-                    {activeGainDb.toFixed(1)}dB
+            {/* 播放倍率 / 增益数值显示 */}
+            {showGainVal && (
+                <div className="ml-auto flex items-center gap-2 min-w-0">
+                    {showPlaybackRate && (
+                        <div
+                            className="text-[10px] tracking-wide"
+                            style={{
+                                color: "rgba(208, 216, 223, 0.76)",
+                                opacity: hideVisuals ? 0 : 1,
+                            }}
+                        >
+                            {visualStyle.playbackRateLabel}
+                        </div>
+                    )}
+                    {gainEditing ? (
+                        <input
+                            ref={gainInputRef}
+                            className="w-14 text-xs rounded px-1 outline-none text-right"
+                            style={{
+                                color: isDark ? "rgba(255,255,255,0.94)" : "rgba(0,0,0,0.88)",
+                                backgroundColor: isDark
+                                    ? "rgba(0,0,0,0.45)"
+                                    : "rgba(255,255,255,0.70)",
+                                border: `1px solid ${isDark ? "rgba(255,255,255,0.40)" : "rgba(0,0,0,0.35)"}`,
+                            }}
+                            value={gainInputVal}
+                            onChange={(e) => setGainInputVal(e.target.value)}
+                            onKeyDown={(e) => {
+                                e.stopPropagation();
+                                if (e.key === "Enter") commitGainEdit();
+                                if (e.key === "Escape") cancelGainEdit();
+                            }}
+                            onBlur={commitGainEdit}
+                            onPointerDown={(e) => e.stopPropagation()}
+                        />
+                    ) : (
+                        <div
+                            className="text-xs drop-shadow-md cursor-ns-resize"
+                            style={{
+                                color: "rgba(233, 239, 244, 0.82)",
+                                opacity: hideVisuals ? 0 : 1,
+                            }}
+                            title={t("clip_gain_drag_hint")}
+                            onDoubleClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onGainCommit?.(clip.id, 0);
+                            }}
+                        >
+                            {activeGainDb >= 0 ? "+" : ""}
+                            {activeGainDb.toFixed(1)}dB
+                        </div>
+                    )}
                 </div>
-            ) : null}
+            )}
         </div>
     );
 };

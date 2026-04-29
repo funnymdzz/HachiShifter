@@ -253,6 +253,16 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 }
             }
 
+            // clip.* 操作由 TimelinePanel 内部处理，避免全局层提前吞掉事件。
+            const matchedClipAction = findMatchingAction(
+                e,
+                keybindingsRef.current,
+                inPianoRoll ? EXCLUDE_QUICK_SEARCH : EXCLUDE_BOTH,
+            );
+            if (matchedClipAction?.startsWith("clip.")) {
+                return;
+            }
+
             // 非 PianoRoll 上下文：排除 paramEditorSelect 级别操作以避免冲突
             const actionId = findMatchingAction(
                 e,

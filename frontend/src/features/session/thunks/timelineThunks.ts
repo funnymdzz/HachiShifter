@@ -159,117 +159,50 @@ export const createClipsRemote = createAsyncThunk(
             }
         }
 
-        const state0 = getState() as { session: SessionState };
-        const knownIds = new Set(state0.session.clips.map((c) => c.id));
-        const createdIdsInBatch = new Set<string>();
+        const normalizedTemplates = templates.map((tpl) => ({
+            ...tpl,
+            ...(shouldApplyLinkedParams ? {} : { linkedParams: undefined }),
+        }));
 
-        // ========================================
-        // 废弃 Promise.all 并发推测
-        // ========================================
-        const results: Array<{ createdId: string; timeline: TimelineState }> = [];
+        const result = await webApi.createClipsBulk({
+            templates: normalizedTemplates,
+            selectCreatedClips: true,
+        });
 
-        try {
-            for (const tpl of templates) {
-                const added = await webApi.addClip({
-                    trackId: tpl.trackId,
-                    name: tpl.name,
-                    startSec: tpl.startSec,
-                    lengthSec: tpl.lengthSec,
-                    sourcePath: tpl.sourcePath,
-                });
-                if (!(added as { ok?: boolean }).ok) {
-                    throw new Error(
-                        (added as { error?: { message?: string } }).error?.message ??
-                            "add_clip_failed",
-                    );
-                }
+        if (!(result as { ok?: boolean }).ok) {
+            return rejectWithValue("create_clips_failed");
+        }
 
-                const addedTimeline = added as TimelineState;
-                const createdId =
-                    addedTimeline.clips.find(
-                        (c) => !knownIds.has(c.id) && !createdIdsInBatch.has(c.id),
-                    )?.id ??
-                    (addedTimeline.selected_clip_id &&
-                    !knownIds.has(addedTimeline.selected_clip_id) &&
-                    !createdIdsInBatch.has(addedTimeline.selected_clip_id)
-                        ? addedTimeline.selected_clip_id
-                        : null);
+        const timeline = result as TimelineState & {
+            createdClipIds?: string[];
+            created_clip_ids?: string[];
+        };
+        const createdClipIds = Array.isArray(timeline.created_clip_ids)
+            ? timeline.created_clip_ids
+            : Array.isArray(timeline.createdClipIds)
+              ? timeline.createdClipIds
+              : [];
 
-                if (!createdId) {
-                    throw new Error("add_clip_failed");
-                }
-                // 串行推入已知 ID
-                createdIdsInBatch.add(createdId);
+        if (createdClipIds.length === 0) {
+            return rejectWithValue("create_clips_failed");
+        }
 
-                const updated = await webApi.setClipState({
-                    clipId: createdId,
-                    lengthSec: tpl.lengthSec,
-                    gain: tpl.gain,
-                    muted: tpl.muted,
-                    sourceStartSec: tpl.sourceStartSec,
-                    sourceEndSec: tpl.sourceEndSec,
-                    playbackRate: tpl.playbackRate,
-                    fadeInSec: tpl.fadeInSec,
-                    fadeOutSec: tpl.fadeOutSec,
-                    fadeInCurve: tpl.fadeInCurve,
-                    fadeOutCurve: tpl.fadeOutCurve,
-                });
-
-                if (!(updated as { ok?: boolean }).ok) {
-                    throw new Error(
-                        (updated as { error?: { message?: string } }).error?.message ??
-                            "set_clip_state_failed",
-                    );
-                }
-
-                let finalTimeline = updated as TimelineState;
-                if (shouldApplyLinkedParams && tpl.linkedParams) {
-                    const linkedApplied = await webApi.applyClipLinkedParams({
-                        clipId: createdId,
-                        linkedParams: tpl.linkedParams,
-                    });
-                    if (!(linkedApplied as { ok?: boolean }).ok) {
-                        throw new Error(
-                            (linkedApplied as { error?: { message?: string } }).error?.message ??
-                                "apply_clip_linked_params_failed",
-                        );
-                    }
-                    finalTimeline = linkedApplied as TimelineState;
-                }
-
-                if (Array.isArray(tpl.waveformPreview)) {
-                    const createdClip = finalTimeline.clips.find((c) => c.id === createdId);
-                    if (
-                        createdClip &&
-                        (!Array.isArray(createdClip.waveform_preview) ||
-                            createdClip.waveform_preview.length === 0)
-                    ) {
-                        createdClip.waveform_preview = tpl.waveformPreview;
-                    }
-                }
-
-                results.push({ createdId, timeline: finalTimeline });
+        for (let i = 0; i < createdClipIds.length; i += 1) {
+            const createdId = createdClipIds[i];
+            const tpl = normalizedTemplates[i];
+            if (!createdId || !tpl || !Array.isArray(tpl.waveformPreview)) continue;
+            const createdClip = timeline.clips.find((clip) => clip.id === createdId);
+            if (
+                createdClip &&
+                (!Array.isArray(createdClip.waveform_preview) ||
+                    createdClip.waveform_preview.length === 0)
+            ) {
+                createdClip.waveform_preview = tpl.waveformPreview;
             }
-        } catch (err: unknown) {
-            return rejectWithValue(err instanceof Error ? err.message : "create_clips_failed");
         }
 
-        if (results.length === 0) {
-            return rejectWithValue("create_clips_failed");
-        }
-
-        if (!results || !Array.isArray(results)) {
-            return results as ReturnType<typeof rejectWithValue>;
-        }
-
-        const createdClipIds = results.map((r) => r.createdId);
-        // 取最后一�?timeline 作为最终状态（�?clip �?setClipState 结果�?
-        const lastTimeline = results[results.length - 1]?.timeline ?? null;
-        if (!lastTimeline) {
-            return rejectWithValue("create_clips_failed");
-        }
         return {
-            ...(lastTimeline as object),
+            ...(timeline as object),
             createdClipIds,
         } as TimelineState & { createdClipIds: string[] };
     },
@@ -336,6 +269,51 @@ export const setClipStateRemote = createAsyncThunk(
         checkpoint?: boolean;
     }) => {
         return webApi.setClipState(payload);
+    },
+);
+
+export const setClipsStateBulkRemote = createAsyncThunk(
+    "session/setClipsStateBulkRemote",
+    async (payload: {
+        updates: Array<{
+            clipId: string;
+            gain?: number;
+            muted?: boolean;
+            fadeInSec?: number;
+            fadeOutSec?: number;
+        }>;
+        checkpoint?: boolean;
+    }) => {
+        return webApi.setClipsStateBulk(payload);
+    },
+);
+
+export const duplicateClipsBulkRemote = createAsyncThunk<
+    TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] },
+    {
+        sourceClipIds: string[];
+        deltaSec: number;
+        trackMode: Record<string, unknown>;
+        copyLinkedParams?: boolean;
+        selectCreatedClips?: boolean;
+        applyAutoCrossfade?: boolean;
+        placeOnSelectedTrack?: boolean;
+        renameCopies?: boolean;
+    }
+>(
+    "session/duplicateClipsBulkRemote",
+    async (payload) => {
+        const result = await webApi.duplicateClipsBulk(payload);
+        if (result && typeof result === "object" && "clips" in result) {
+            const typed = result as TimelineState & { created_clip_ids?: string[] };
+            return {
+                ...typed,
+                createdClipIds: Array.isArray(typed.created_clip_ids)
+                    ? typed.created_clip_ids
+                    : undefined,
+            };
+        }
+        return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
     },
 );
 

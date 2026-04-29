@@ -1,5 +1,6 @@
 import React from "react";
 import { Box } from "@radix-ui/themes";
+import { screenXToWorldSec } from "./runtime/timelineWorld";
 
 type TimeRulerBar = { beat: number; label: string };
 
@@ -119,6 +120,7 @@ export const TimeRuler: React.FC<{
     playheadLineRef?: React.Ref<HTMLDivElement>;
     playheadHeadRef?: React.Ref<HTMLDivElement>;
     onMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
+    onMouseDownAtSec?: (sec: number, e: React.MouseEvent<HTMLDivElement>) => void;
     contentRef?: React.Ref<HTMLDivElement>;
 }> = ({
     contentWidth,
@@ -132,6 +134,7 @@ export const TimeRuler: React.FC<{
     playheadLineRef,
     playheadHeadRef,
     onMouseDown,
+    onMouseDownAtSec,
     contentRef,
 }) => {
     // 统一用 sec 坐标系：beat 位置 = beat * secPerBeat * pxPerSec
@@ -151,6 +154,16 @@ export const TimeRuler: React.FC<{
                     e.preventDefault();
                     return;
                 }
+                const bounds = e.currentTarget.getBoundingClientRect();
+                onMouseDownAtSec?.(
+                    screenXToWorldSec(e.clientX - bounds.left, {
+                        pxPerSec,
+                        rowHeight: 1,
+                        scrollLeftPx: scrollLeft,
+                        scrollTopPx: 0,
+                    }),
+                    e,
+                );
                 onMouseDown(e);
             }}
             onAuxClick={(e) => {

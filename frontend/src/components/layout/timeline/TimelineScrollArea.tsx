@@ -5,7 +5,10 @@ import { clamp } from "./math";
 import { isNoneBinding, isModifierActive } from "../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../features/keybindings/types";
 import { getTimelineWheelAction } from "../wheelGesture";
-import { computeAnchoredHorizontalZoom } from "../../../utils/horizontalZoom";
+import { resolveWheelZoom } from "./runtime/timelineInteractionController";
+import { shouldDispatchTimelineViewport } from "./runtime/timelineViewportDispatch";
+import { resolveTimelineMinPxPerSec } from "./runtime/timelineZoomBounds";
+import { screenXToWorldSec } from "./runtime/timelineWorld";
 
 export const TimelineScrollArea: React.FC<
     Omit<React.HTMLAttributes<HTMLDivElement>, "ref"> & {
@@ -21,7 +24,7 @@ export const TimelineScrollArea: React.FC<
         scrollVerticalKb?: Keybinding;
         horizontalZoomKb?: Keybinding;
         verticalZoomKb?: Keybinding;
-        playheadSec?: number;
+        getPlayheadSec?: () => number;
         playheadZoomEnabled?: boolean;
     }
 > = ({
@@ -39,11 +42,16 @@ export const TimelineScrollArea: React.FC<
     scrollVerticalKb,
     horizontalZoomKb,
     verticalZoomKb,
-    playheadSec,
+    getPlayheadSec,
     playheadZoomEnabled,
     ...divProps
 }) => {
     const lastScrollLeftRef = useRef<number | null>(null);
+    const lastViewportDispatchRef = useRef<{
+        scrollLeft: number;
+        pxPerSec: number;
+        viewportWidth: number;
+    } | null>(null);
     const pxPerSecRef = useRef(pxPerSec);
     const zoomRafRef = useRef<number | null>(null);
     const zoomPendingRef = useRef<{
@@ -75,9 +83,20 @@ export const TimelineScrollArea: React.FC<
 
     function syncScrollLeft(scroller: HTMLDivElement) {
         const next = scroller.scrollLeft;
-        if (lastScrollLeftRef.current != null && lastScrollLeftRef.current === next) {
+        const nextSnapshot = {
+            scrollLeft: next,
+            pxPerSec: pxPerSecRef.current,
+            viewportWidth: scroller.clientWidth,
+        };
+        if (
+            !shouldDispatchTimelineViewport({
+                previous: lastViewportDispatchRef.current,
+                next: nextSnapshot,
+            })
+        ) {
             return;
         }
+        lastViewportDispatchRef.current = nextSnapshot;
         lastScrollLeftRef.current = next;
         setScrollLeft(next);
     }
@@ -235,28 +254,38 @@ export const TimelineScrollArea: React.FC<
             let anchorSec: number;
 
             // Playhead-based zoom: use playhead as anchor instead of pointer
-            if (playheadZoomEnabled && playheadSec != null) {
-                anchorSec = clamp(playheadSec, 0, totalSec);
+            if (playheadZoomEnabled && getPlayheadSec) {
+                anchorSec = clamp(getPlayheadSec(), 0, totalSec);
             } else {
                 const anchorX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
-                anchorSec = (anchorX + baseScrollLeft) / Math.max(1e-9, basePxPerSec);
+                anchorSec = screenXToWorldSec(anchorX, {
+                    pxPerSec: basePxPerSec,
+                    rowHeight: rowHeightRef.current,
+                    scrollLeftPx: baseScrollLeft,
+                    scrollTopPx: scroller.scrollTop,
+                });
             }
 
-            const zoom = computeAnchoredHorizontalZoom({
-                currentScale: basePxPerSec,
-                factor,
-                minScale: MIN_PX_PER_SEC,
-                maxScale: MAX_PX_PER_SEC,
-                scrollLeft: baseScrollLeft,
-                viewportWidth: Math.max(1, bounds.width),
-                anchorSec,
-                contentSec: totalSec,
+            const minPxPerSec = resolveTimelineMinPxPerSec({
+                baseMinPxPerSec: MIN_PX_PER_SEC,
+                projectSec: totalSec,
+                viewportWidthPx: bounds.width,
             });
-            if (!zoom) return;
+            const nextPxPerSec = clamp(basePxPerSec * factor, minPxPerSec, MAX_PX_PER_SEC);
+            if (Math.abs(nextPxPerSec - basePxPerSec) < 1e-9) return;
+
+            const anchorScreenX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
+            const zoom = resolveWheelZoom({
+                anchorScreenX,
+                anchorSec,
+                nextPxPerSec,
+            });
+            const maxScrollLeft = Math.max(0, totalSec * nextPxPerSec - Math.max(1, bounds.width));
+            const nextScrollLeft = clamp(zoom.nextScrollLeftPx, 0, maxScrollLeft);
 
             zoomPendingRef.current = {
-                nextPxPerSec: zoom.nextScale,
-                nextScrollLeft: zoom.nextScrollLeft,
+                nextPxPerSec,
+                nextScrollLeft,
             };
 
             if (zoomRafRef.current == null) {
@@ -286,7 +315,7 @@ export const TimelineScrollArea: React.FC<
         scrollVerticalKb,
         horizontalZoomKb,
         verticalZoomKb,
-        playheadSec,
+        getPlayheadSec,
         playheadZoomEnabled,
     ]);
 
