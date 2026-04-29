@@ -2,7 +2,7 @@
  * 波形 Mipmap 缓存管理器（整文件级）
  *
  * 每个音频文件缓存三级 Float32Array 数据：
- * - L0 (div=32):   精细级，近距离对轨，spp ≤ 512
+ * - L0 (div=16):   精细级，近距离对轨，spp ≤ 512
  * - L1 (div=512):  中间级，日常编辑，512 < spp ≤ 1024
  * - L2 (div=4096): 全局级，预览/导航，spp > 1024
  *
@@ -17,7 +17,7 @@ import { decodeWaveformFromBase64, type WaveformMipmapBinary } from "./waveformB
 // ============== 常量 ==============
 
 /** 三级 mipmap 的除数因子 */
-const DIV_FACTORS = [32, 512, 4096] as const;
+const DIV_FACTORS = [16, 512, 4096] as const;
 
 /** 级别选择的 spp 阈值 */
 const SPP_THRESHOLDS = [512, 1024] as const;

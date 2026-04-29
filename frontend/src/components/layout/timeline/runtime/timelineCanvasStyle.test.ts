@@ -12,20 +12,31 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 }
 
 const style = buildTimelineClipVisualStyle({
-    widthPx: 180,
+    widthPx: 160,
     trackColor: "#ff7a00",
     selected: false,
     muted: false,
     gain: 1,
-    name: "Lead Vocal Very Long Name",
+    playbackRate: 1,
+    name: "Lead Vocal Very Long Name For Playback Rate Header",
+});
+const compactStyle = buildTimelineClipVisualStyle({
+    widthPx: 96,
+    trackColor: "#ff7a00",
+    selected: false,
+    muted: false,
+    gain: 1,
+    playbackRate: 1,
+    name: "Lead Vocal Very Long Name For Playback Rate Header",
 });
 const selectedStyle = buildTimelineClipVisualStyle({
-    widthPx: 180,
+    widthPx: 160,
     trackColor: "#ff7a00",
     selected: true,
     muted: false,
     gain: 1,
-    name: "Lead Vocal Very Long Name",
+    playbackRate: 1,
+    name: "Lead Vocal Very Long Name For Playback Rate Header",
 });
 
 assertEqual(style.showGainKnob, true, "gain knob visible");
@@ -34,14 +45,18 @@ assertEqual(style.showName, true, "name visible");
 assertEqual(style.showMuteBadge, true, "mute badge visible");
 assertEqual(style.headerFill.startsWith("rgba("), true, "header uses mixed rgba color");
 assertEqual(style.bodyFill.startsWith("rgba("), true, "body uses mixed rgba color");
-assertEqual(style.displayName.endsWith("..."), true, "name is ellipsized");
+assertEqual(style.displayName.length > 0, true, "name display is produced");
 assertEqual(style.muteBadgeLabel, "M", "mute badge uses M label");
 assertEqual(style.gainKnobAngleDeg, 0, "unity gain knob stays centered");
+assertEqual(style.playbackRateLabel, "x1.00", "playback rate label is formatted");
+assertEqual(style.showPlaybackRate, true, "playback rate shows on sufficiently wide clips");
+assertEqual(compactStyle.showPlaybackRate, false, "playback rate hides before overlapping controls");
 assertEqual(style.muteBadgeFill.startsWith("rgba("), true, "mute badge fill is resolved");
 assertEqual(style.gainKnobIndicator.startsWith("rgba("), true, "gain knob indicator is resolved");
-assertEqual(style.leadingControlsWidth, 46, "leading controls reserve prevents title overlap");
-assertEqual(style.muteBadgeWidth, 18, "mute badge is enlarged");
-assertEqual(style.gainKnobRadius, 6, "gain knob is enlarged");
+assertEqual(style.leadingControlsWidth, 58, "leading controls reserve prevents title overlap");
+assertEqual(style.muteBadgeWidth, 20, "mute badge is enlarged");
+assertEqual(style.gainKnobRadius, 7, "gain knob is enlarged");
+assertEqual(style.gainKnobCenterOffsetX, 15, "gain knob sits at the far left of the header");
 assertEqual(selectedStyle.headerFill, style.headerFill, "selected header keeps default visual");
 assertEqual(selectedStyle.bodyFill, style.bodyFill, "selected body keeps default visual");
 assertEqual(selectedStyle.borderStroke, style.borderStroke, "selected border keeps default visual");

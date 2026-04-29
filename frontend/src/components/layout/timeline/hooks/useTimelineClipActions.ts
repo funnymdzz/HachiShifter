@@ -17,7 +17,6 @@ import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import {
     checkpointHistory,
     createClipsRemote,
-    duplicateClipsBulkRemote,
     seekPlayhead,
     selectClipRemote,
     setClipGain,
@@ -38,7 +37,7 @@ import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
 import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
 import { getBulkEditableClipIds } from "./bulkClipEdit";
-import { buildBulkClipStateUpdates, buildDuplicateClipsBulkPayload } from "./bulkClipRemotePayloads";
+import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -458,40 +457,15 @@ export function useTimelineClipActions(
                 ...c,
                 startSec: Math.max(0, c.startSec + delta),
             }));
-            const sourceClipIds = tpl
-                .map((template) => template.sourceClipId)
-                .filter(
-                    (clipId): clipId is string =>
-                        typeof clipId === "string" &&
-                        sessionRef.current.clips.some((clip) => clip.id === clipId),
-                );
-            const canReuseDuplicate =
-                sourceClipIds.length === tpl.length &&
-                sourceClipIds.length > 0 &&
-                new Set(sourceClipIds).size === sourceClipIds.length;
-
             dispatch(checkpointHistory());
             await webApi.beginUndoGroup();
             try {
-                const payload = canReuseDuplicate
-                    ? await dispatch(
-                          duplicateClipsBulkRemote(
-                              buildDuplicateClipsBulkPayload({
-                                  sourceClipIds,
-                                  deltaSec: delta,
-                                  copyLinkedParams: sessionRef.current.lockParamLinesEnabled,
-                                  applyAutoCrossfade: sessionRef.current.autoCrossfadeEnabled,
-                                  trackMode: { kind: "same_track" },
-                                  placeOnSelectedTrack: true,
-                              }),
-                          ),
-                      ).unwrap()
-                    : await dispatch(
-                          createClipsRemote({
-                              templates,
-                              options: { placeOnSelectedTrack: true },
-                          }),
-                      ).unwrap();
+                const payload = await dispatch(
+                    createClipsRemote({
+                        templates,
+                        options: { placeOnSelectedTrack: true },
+                    }),
+                ).unwrap();
                 const created: string[] = payload?.createdClipIds ?? [];
                 if (!Array.isArray(created) || created.length === 0) return;
 

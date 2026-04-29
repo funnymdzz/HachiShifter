@@ -15,9 +15,23 @@ assertEqual(
         showMute: false,
         showGainKnob: false,
         showGainLabel: false,
+        showPlaybackRate: false,
         showName: false,
     },
     "very narrow clips hide header contents",
+);
+
+assertEqual(
+    resolveTimelineClipHeaderVisibility(40),
+    {
+        showAny: true,
+        showMute: false,
+        showGainKnob: true,
+        showGainLabel: false,
+        showPlaybackRate: false,
+        showName: false,
+    },
+    "narrow clips prioritize gain knob before mute",
 );
 
 assertEqual(
@@ -27,18 +41,33 @@ assertEqual(
         showMute: true,
         showGainKnob: true,
         showGainLabel: false,
+        showPlaybackRate: false,
         showName: false,
     },
-    "medium clips keep mute and gain knob always visible",
+    "medium clips keep mute and gain knob visible",
 );
 
 assertEqual(
-    resolveTimelineClipHeaderVisibility(128),
+    resolveTimelineClipHeaderVisibility(120),
     {
         showAny: true,
         showMute: true,
         showGainKnob: true,
         showGainLabel: true,
+        showPlaybackRate: true,
+        showName: false,
+    },
+    "playback rate appears before name when width is limited",
+);
+
+assertEqual(
+    resolveTimelineClipHeaderVisibility(160),
+    {
+        showAny: true,
+        showMute: true,
+        showGainKnob: true,
+        showGainLabel: true,
+        showPlaybackRate: true,
         showName: true,
     },
     "wide clips keep full header contents visible",

@@ -23,6 +23,7 @@ export function buildDuplicateClipsBulkPayload(args: {
     applyAutoCrossfade: boolean;
     trackMode: Record<string, unknown>;
     placeOnSelectedTrack?: boolean;
+    renameCopies?: boolean;
 }) {
     return {
         sourceClipIds: args.sourceClipIds,
@@ -32,5 +33,6 @@ export function buildDuplicateClipsBulkPayload(args: {
         selectCreatedClips: true,
         trackMode: args.trackMode,
         ...(args.placeOnSelectedTrack ? { placeOnSelectedTrack: true } : {}),
+        ...(args.renameCopies === false ? { renameCopies: false } : {}),
     };
 }

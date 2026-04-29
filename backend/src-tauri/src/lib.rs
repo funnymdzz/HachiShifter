@@ -277,6 +277,7 @@ pub fn run() {
             commands::set_param_frames,
             commands::restore_param_frames,
             commands::add_clip,
+            commands::create_clips_bulk,
             commands::get_static_param,
             commands::set_static_param,
             commands::remove_clip,

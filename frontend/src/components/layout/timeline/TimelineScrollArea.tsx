@@ -24,7 +24,7 @@ export const TimelineScrollArea: React.FC<
         scrollVerticalKb?: Keybinding;
         horizontalZoomKb?: Keybinding;
         verticalZoomKb?: Keybinding;
-        playheadSec?: number;
+        getPlayheadSec?: () => number;
         playheadZoomEnabled?: boolean;
     }
 > = ({
@@ -42,7 +42,7 @@ export const TimelineScrollArea: React.FC<
     scrollVerticalKb,
     horizontalZoomKb,
     verticalZoomKb,
-    playheadSec,
+    getPlayheadSec,
     playheadZoomEnabled,
     ...divProps
 }) => {
@@ -254,8 +254,8 @@ export const TimelineScrollArea: React.FC<
             let anchorSec: number;
 
             // Playhead-based zoom: use playhead as anchor instead of pointer
-            if (playheadZoomEnabled && playheadSec != null) {
-                anchorSec = clamp(playheadSec, 0, totalSec);
+            if (playheadZoomEnabled && getPlayheadSec) {
+                anchorSec = clamp(getPlayheadSec(), 0, totalSec);
             } else {
                 const anchorX = clamp(e.clientX - bounds.left, 0, Math.max(1, bounds.width));
                 anchorSec = screenXToWorldSec(anchorX, {
@@ -315,7 +315,7 @@ export const TimelineScrollArea: React.FC<
         scrollVerticalKb,
         horizontalZoomKb,
         verticalZoomKb,
-        playheadSec,
+        getPlayheadSec,
         playheadZoomEnabled,
     ]);
 

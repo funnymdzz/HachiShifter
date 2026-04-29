@@ -146,6 +146,36 @@ pub struct DuplicateClipsBulkPayload {
     pub apply_auto_crossfade: bool,
     #[serde(default)]
     pub place_on_selected_track: bool,
+    pub rename_copies: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateClipTemplatePayload {
+    pub track_id: String,
+    pub name: String,
+    pub start_sec: f64,
+    pub length_sec: f64,
+    pub source_path: Option<String>,
+    pub gain: Option<f32>,
+    pub muted: Option<bool>,
+    pub source_start_sec: Option<f64>,
+    pub source_end_sec: Option<f64>,
+    pub playback_rate: Option<f32>,
+    pub reversed: Option<bool>,
+    pub fade_in_sec: Option<f64>,
+    pub fade_out_sec: Option<f64>,
+    pub fade_in_curve: Option<String>,
+    pub fade_out_curve: Option<String>,
+    pub linked_params: Option<LinkedParamCurvesPayload>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateClipsBulkPayload {
+    pub templates: Vec<CreateClipTemplatePayload>,
+    #[serde(default)]
+    pub select_created_clips: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1271,6 +1301,70 @@ mod tests {
     }
 
     #[test]
+    fn create_clips_bulk_creates_multiple_snapshot_clips() {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.add_track(Some("Track".to_string()), None, None);
+
+        let created = timeline.create_clips_bulk(&CreateClipsBulkPayload {
+            templates: vec![
+                CreateClipTemplatePayload {
+                    track_id: track_id.clone(),
+                    name: "Snap A".into(),
+                    start_sec: 1.0,
+                    length_sec: 2.0,
+                    source_path: Some("a.wav".into()),
+                    gain: Some(1.25),
+                    muted: Some(true),
+                    source_start_sec: Some(0.3),
+                    source_end_sec: Some(1.8),
+                    playback_rate: Some(0.8),
+                    reversed: Some(true),
+                    fade_in_sec: Some(0.15),
+                    fade_out_sec: Some(0.25),
+                    fade_in_curve: Some("sine".into()),
+                    fade_out_curve: Some("logarithmic".into()),
+                    linked_params: None,
+                },
+                CreateClipTemplatePayload {
+                    track_id,
+                    name: "Snap B".into(),
+                    start_sec: 4.0,
+                    length_sec: 1.5,
+                    source_path: None,
+                    gain: Some(0.9),
+                    muted: Some(false),
+                    source_start_sec: Some(0.0),
+                    source_end_sec: Some(1.5),
+                    playback_rate: Some(1.0),
+                    reversed: Some(false),
+                    fade_in_sec: Some(0.05),
+                    fade_out_sec: Some(0.1),
+                    fade_in_curve: Some("linear".into()),
+                    fade_out_curve: Some("scurve".into()),
+                    linked_params: None,
+                },
+            ],
+            select_created_clips: true,
+        });
+
+        assert_eq!(created.len(), 2);
+        let first = timeline
+            .clips
+            .iter()
+            .find(|clip| clip.id == created[0])
+            .expect("first created clip");
+        assert_eq!(first.name, "Snap A");
+        assert!((first.start_sec - 1.0).abs() < 1e-6);
+        assert_eq!(first.gain, 1.25);
+        assert!(first.muted);
+        assert!((first.source_start_sec - 0.3).abs() < 1e-6);
+        assert!((first.source_end_sec - 1.8).abs() < 1e-6);
+        assert_eq!(first.fade_in_curve, "sine");
+        assert_eq!(first.fade_out_curve, "logarithmic");
+        assert_eq!(timeline.selected_clip_id.as_deref(), Some(created[0].as_str()));
+    }
+
+    #[test]
     fn duplicate_clips_bulk_duplicates_multiple_clips_with_delta() {
         let mut timeline = TimelineState::default();
         let track_id = timeline.add_track(Some("Track".to_string()), None, None);
@@ -1287,6 +1381,7 @@ mod tests {
                 select_created_clips: true,
                 apply_auto_crossfade: false,
                 place_on_selected_track: false,
+                rename_copies: None,
             },
         );
 
@@ -1294,6 +1389,33 @@ mod tests {
         assert_eq!(timeline.clips.len(), 4);
         assert!(timeline.clips.iter().any(|clip| (clip.start_sec - 1.25).abs() < 1e-6));
         assert!(timeline.clips.iter().any(|clip| (clip.start_sec - 3.25).abs() < 1e-6));
+        assert!(timeline.clips.iter().any(|clip| clip.name == "A Copy"));
+    }
+
+    #[test]
+    fn duplicate_clips_bulk_can_preserve_source_names() {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.add_track(Some("Track".to_string()), None, None);
+        timeline.add_clip(Some(track_id), Some("A".into()), Some(0.0), Some(1.0), None);
+
+        let source_clip_id = timeline.clips[0].id.clone();
+        let created = timeline.duplicate_clips_bulk(&DuplicateClipsBulkPayload {
+            source_clip_ids: vec![source_clip_id],
+            delta_sec: 1.0,
+            track_mode: DuplicateClipsTrackMode::SameTrack,
+            copy_linked_params: false,
+            select_created_clips: true,
+            apply_auto_crossfade: false,
+            place_on_selected_track: false,
+            rename_copies: Some(false),
+        });
+
+        let duplicated = timeline
+            .clips
+            .iter()
+            .find(|clip| clip.id == created[0])
+            .expect("duplicated clip");
+        assert_eq!(duplicated.name, "A");
     }
 
     #[test]
@@ -1337,6 +1459,7 @@ mod tests {
             select_created_clips: false,
             apply_auto_crossfade: false,
             place_on_selected_track: false,
+            rename_copies: None,
         });
 
         assert_eq!(created.len(), 2);
@@ -1366,14 +1489,14 @@ fn new_id(prefix: &str) -> String {
 }
 
 const TRACK_COLOR_PALETTE: &[&str] = &[
-    "#4f8ef7", // 蓝
-    "#a78bfa", // 紫
-    "#34d399", // 绿
-    "#fb923c", // 橙
-    "#f472b6", // 粉
-    "#38bdf8", // 天蓝
-    "#facc15", // 黄
-    "#f87171", // 红
+    "#6f8fa9", // 烟蓝
+    "#8c7fa3", // 石紫
+    "#6f9581", // 苔绿
+    "#aa7f67", // 铜橙
+    "#9a6f82", // 酒粉
+    "#6e95a0", // 雾青
+    "#a39061", // 暗金
+    "#996d68", // 铁锈红
 ];
 
 fn track_palette_color(index: usize) -> String {
@@ -2121,6 +2244,59 @@ impl TimelineState {
         }
     }
 
+    pub fn create_clips_bulk(&mut self, payload: &CreateClipsBulkPayload) -> Vec<String> {
+        let mut created_clip_ids = Vec::with_capacity(payload.templates.len());
+
+        for template in &payload.templates {
+            let created_id = self.add_clip(
+                Some(template.track_id.clone()),
+                Some(template.name.clone()),
+                Some(template.start_sec),
+                Some(template.length_sec),
+                template.source_path.clone(),
+            );
+
+            self.patch_clip_state(
+                &created_id,
+                ClipStatePatch {
+                    name: Some(template.name.clone()),
+                    start_sec: Some(template.start_sec),
+                    length_sec: Some(template.length_sec),
+                    gain: template.gain,
+                    muted: template.muted,
+                    source_start_sec: template.source_start_sec,
+                    source_end_sec: template.source_end_sec,
+                    playback_rate: template.playback_rate,
+                    reversed: template.reversed,
+                    fade_in_sec: template.fade_in_sec,
+                    fade_out_sec: template.fade_out_sec,
+                    fade_in_curve: template.fade_in_curve.clone(),
+                    fade_out_curve: template.fade_out_curve.clone(),
+                    color: None,
+                },
+            );
+
+            if let Some(linked_params) = template.linked_params.as_ref() {
+                self.apply_linked_params_to_clip(&created_id, linked_params);
+            }
+
+            created_clip_ids.push(created_id);
+        }
+
+        if payload.select_created_clips {
+            self.selected_clip_id = created_clip_ids.first().cloned();
+            if let Some(first_created_clip) = created_clip_ids
+                .first()
+                .and_then(|id| self.clips.iter().find(|clip| clip.id == *id))
+            {
+                self.selected_track_id = Some(first_created_clip.track_id.clone());
+                self.playhead_sec = first_created_clip.start_sec;
+            }
+        }
+
+        created_clip_ids
+    }
+
     pub fn duplicate_clips_bulk(&mut self, payload: &DuplicateClipsBulkPayload) -> Vec<String> {
         let unique_source_ids: Vec<String> = {
             let mut seen = HashSet::new();
@@ -2244,7 +2420,9 @@ impl TimelineState {
             duplicated.id = new_id("clip");
             duplicated.track_id = target_track_id;
             duplicated.start_sec = (duplicated.start_sec + payload.delta_sec).max(0.0);
-            duplicated.name = format!("{} Copy", duplicated.name);
+            if payload.rename_copies.unwrap_or(true) {
+                duplicated.name = format!("{} Copy", duplicated.name);
+            }
             self.ensure_project_end_sec(duplicated.start_sec + duplicated.length_sec);
             created_clip_ids.push(duplicated.id.clone());
             self.clips.push(duplicated.clone());

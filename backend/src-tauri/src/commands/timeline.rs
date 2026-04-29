@@ -284,6 +284,20 @@ pub(super) fn add_clip(
     payload
 }
 
+pub(super) fn create_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::CreateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let created_clip_ids = tl.create_clips_bulk(&payload);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut timeline_payload = tl.to_payload();
+    timeline_payload.created_clip_ids = Some(created_clip_ids);
+    timeline_payload.project = Some(state.project_meta_payload());
+    timeline_payload
+}
+
 pub(super) fn remove_clip(
     state: State<'_, AppState>,
     clip_id: String,

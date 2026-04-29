@@ -94,6 +94,7 @@ export const webApi = {
     getTrackSummary: timelineApi.getTrackSummary,
 
     addClip: timelineApi.addClip,
+    createClipsBulk: timelineApi.createClipsBulk,
     removeClip: timelineApi.removeClip,
     removeClips: timelineApi.removeClips,
     moveClip: timelineApi.moveClip,

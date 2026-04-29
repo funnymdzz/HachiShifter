@@ -89,10 +89,7 @@ export interface UseTimelineEventHandlersArgs {
     // auto-scroll
     syncScrollLeft: (next: number) => void;
 
-    // session values (for auto-scroll / focusCursor)
-    autoScrollEnabled: boolean;
-    isPlaying: boolean;
-    playheadSec: number;
+    // session values (for zoom / focusCursor)
     dynamicProjectSec: number;
 }
 
@@ -121,9 +118,6 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         setContextMenu,
         setTrackAreaMenu,
         syncScrollLeft,
-        autoScrollEnabled,
-        isPlaying,
-        playheadSec,
         dynamicProjectSec,
     } = args;
 
@@ -340,30 +334,13 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         return () => window.removeEventListener("pointerdown", onAnyPointerDown, true);
     }, [contextMenu, trackAreaMenu]);
 
-    // ── Auto-scroll: keep playhead visible during playback ───
-    useEffect(() => {
-        if (!autoScrollEnabled || !isPlaying) return;
-        const scroller = scrollRef.current;
-        if (!scroller) return;
-        const next = computeAutoFollowScrollLeft({
-            playheadSec,
-            pxPerSec,
-            viewportWidth: scroller.clientWidth,
-            contentWidth: scroller.scrollWidth,
-        });
-        if (Math.abs(scroller.scrollLeft - next) > 0.5) {
-            scroller.scrollLeft = next;
-            syncScrollLeft(next);
-        }
-    }, [autoScrollEnabled, isPlaying, playheadSec, pxPerSec]);
-
     // ── hifi:focusCursor ─────────────────────────────────────
     useEffect(() => {
         function handler() {
             const scroller = scrollRef.current;
             if (!scroller) return;
             const next = computeAutoFollowScrollLeft({
-                playheadSec,
+                playheadSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
                 pxPerSec,
                 viewportWidth: scroller.clientWidth,
                 contentWidth: scroller.scrollWidth,
@@ -373,5 +350,5 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         }
         window.addEventListener("hifi:focusCursor", handler);
         return () => window.removeEventListener("hifi:focusCursor", handler);
-    }, [playheadSec, pxPerSec]);
+    }, [pxPerSec, sessionRef, syncScrollLeft]);
 }

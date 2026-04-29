@@ -46,9 +46,7 @@ type TimelineSessionSlice = Pick<
     | "clips"
     | "grid"
     | "gridSnapEnabled"
-    | "playheadSec"
     | "playheadZoomEnabled"
-    | "runtime"
     | "selectedClipId"
     | "selectedTrackId"
     | "trackMeters"
@@ -192,9 +190,7 @@ export function useTimelineState(): TimelineStateResult {
             clips: state.session.clips,
             grid: state.session.grid,
             gridSnapEnabled: state.session.gridSnapEnabled,
-            playheadSec: state.session.playheadSec,
             playheadZoomEnabled: state.session.playheadZoomEnabled,
-            runtime: state.session.runtime,
             selectedClipId: state.session.selectedClipId,
             selectedTrackId: state.session.selectedTrackId,
             trackMeters: state.session.trackMeters,

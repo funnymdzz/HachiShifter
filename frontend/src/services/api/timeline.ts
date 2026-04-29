@@ -2,6 +2,7 @@ import type { TimelineResult, TrackSummaryResult } from "../../types/api";
 import type { LinkedParamCurves } from "../../features/session/sessionTypes";
 
 import { invoke } from "../invoke";
+import type { ClipTemplate } from "../../features/session/sessionTypes";
 
 export const timelineApi = {
     // Undo/Redo (backend-authoritative)
@@ -102,6 +103,11 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
+    createClipsBulk: (payload: {
+        templates: ClipTemplate[];
+        selectCreatedClips?: boolean;
+    }) => invoke<TimelineResult>("create_clips_bulk", payload),
+
     removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
 
     removeClips: (clipIds: string[]) => invoke<TimelineResult>("remove_clips", clipIds),
@@ -193,6 +199,7 @@ export const timelineApi = {
         selectCreatedClips?: boolean;
         applyAutoCrossfade?: boolean;
         placeOnSelectedTrack?: boolean;
+        renameCopies?: boolean;
     }) => invoke<TimelineResult>("duplicate_clips_bulk", payload),
 
     replaceClipSource: (payload: {

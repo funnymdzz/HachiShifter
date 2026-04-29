@@ -70,4 +70,19 @@ assertDeepEqual(
     "paste can reuse duplicate bulk payload",
 );
 
+const duplicatePayloadWithoutRename = buildDuplicateClipsBulkPayload({
+    sourceClipIds: ["clip-2"],
+    deltaSec: 2,
+    copyLinkedParams: true,
+    applyAutoCrossfade: false,
+    trackMode: { kind: "explicit_mapping", mapping: { t1: "t2" } },
+    renameCopies: false,
+});
+
+assertDeepEqual(
+    duplicatePayloadWithoutRename.renameCopies,
+    false,
+    "duplicate payload can preserve source names",
+);
+
 console.log("bulk remote payload helper checks passed");

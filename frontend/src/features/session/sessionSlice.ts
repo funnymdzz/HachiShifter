@@ -453,6 +453,164 @@ function applyTimelineTracksOnly(state: SessionState, timeline: TimelineState) {
     state.selectedTrackId = timeline.selected_track_id;
 }
 
+function applyOptimisticTrackState(
+    state: SessionState,
+    payload: {
+        trackId: string;
+        muted?: boolean;
+        solo?: boolean;
+        volume?: number;
+        composeEnabled?: boolean;
+        pitchAnalysisAlgo?: string;
+        color?: string;
+        name?: string;
+    },
+) {
+    const track = state.tracks.find((entry) => entry.id === payload.trackId);
+    if (!track) return;
+    if (payload.muted !== undefined) {
+        track.muted = Boolean(payload.muted);
+    }
+    if (payload.solo !== undefined) {
+        track.solo = Boolean(payload.solo);
+    }
+    if (payload.volume !== undefined) {
+        track.volume = clamp(Number(payload.volume), 0, MAX_TRACK_VOLUME);
+    }
+    if (payload.composeEnabled !== undefined) {
+        track.composeEnabled = Boolean(payload.composeEnabled);
+    }
+    if (payload.pitchAnalysisAlgo !== undefined) {
+        track.pitchAnalysisAlgo = String(payload.pitchAnalysisAlgo || track.pitchAnalysisAlgo);
+    }
+    if (payload.color !== undefined) {
+        track.color = payload.color || undefined;
+    }
+    if (payload.name !== undefined) {
+        track.name = String(payload.name || track.name);
+    }
+}
+
+function applyOptimisticClipState(
+    state: SessionState,
+    payload: {
+        clipId: string;
+        name?: string;
+        color?: string;
+        startSec?: number;
+        lengthSec?: number;
+        gain?: number;
+        muted?: boolean;
+        sourceStartSec?: number;
+        sourceEndSec?: number;
+        playbackRate?: number;
+        reversed?: boolean;
+        fadeInSec?: number;
+        fadeOutSec?: number;
+        fadeInCurve?: string;
+        fadeOutCurve?: string;
+    },
+) {
+    const clip = state.clips.find((entry) => entry.id === payload.clipId);
+    if (!clip) return;
+    if (payload.name !== undefined) {
+        clip.name = String(payload.name || clip.name);
+    }
+    if (payload.color !== undefined) {
+        clip.color = normalizeClipColor(payload.color);
+    }
+    if (payload.startSec !== undefined) {
+        clip.startSec = Math.max(0, Number(payload.startSec) || 0);
+    }
+    if (payload.lengthSec !== undefined) {
+        clip.lengthSec = Math.max(0, Number(payload.lengthSec) || 0);
+    }
+    if (payload.gain !== undefined) {
+        clip.gain = clamp(Number(payload.gain), 0, 4);
+    }
+    if (payload.muted !== undefined) {
+        clip.muted = Boolean(payload.muted);
+    }
+    if (payload.sourceStartSec !== undefined) {
+        clip.sourceStartSec = Number(payload.sourceStartSec) || 0;
+    }
+    if (payload.sourceEndSec !== undefined) {
+        clip.sourceEndSec = Math.max(0, Number(payload.sourceEndSec) || 0);
+    }
+    if (payload.playbackRate !== undefined) {
+        clip.playbackRate = clamp(Number(payload.playbackRate), 0.1, 10);
+    }
+    if (payload.reversed !== undefined) {
+        clip.reversed = Boolean(payload.reversed);
+    }
+    if (payload.fadeInSec !== undefined) {
+        clip.fadeInSec = Math.max(0, Number(payload.fadeInSec) || 0);
+    }
+    if (payload.fadeOutSec !== undefined) {
+        clip.fadeOutSec = Math.max(0, Number(payload.fadeOutSec) || 0);
+    }
+    if (payload.fadeInCurve !== undefined) {
+        clip.fadeInCurve = payload.fadeInCurve as FadeCurveType;
+    }
+    if (payload.fadeOutCurve !== undefined) {
+        clip.fadeOutCurve = payload.fadeOutCurve as FadeCurveType;
+    }
+
+    const clipEnd = clip.startSec + clip.lengthSec;
+    if (clipEnd > state.projectSec) {
+        state.projectSec = Math.ceil(clipEnd);
+    }
+}
+
+function applyOptimisticBulkClipState(
+    state: SessionState,
+    updates: Array<{
+        clipId: string;
+        gain?: number;
+        muted?: boolean;
+        fadeInSec?: number;
+        fadeOutSec?: number;
+    }>,
+) {
+    for (const update of updates) {
+        const clip = state.clips.find((entry) => entry.id === update.clipId);
+        if (!clip) continue;
+        if (update.gain !== undefined) {
+            clip.gain = clamp(Number(update.gain), 0, 4);
+        }
+        if (update.muted !== undefined) {
+            clip.muted = Boolean(update.muted);
+        }
+        if (update.fadeInSec !== undefined) {
+            clip.fadeInSec = Math.max(0, Number(update.fadeInSec) || 0);
+        }
+        if (update.fadeOutSec !== undefined) {
+            clip.fadeOutSec = Math.max(0, Number(update.fadeOutSec) || 0);
+        }
+    }
+}
+
+function parseSelectClipRemoteArg(
+    arg:
+        | string
+        | null
+        | {
+              clipId: string | null;
+              preserveTrackFocus?: boolean;
+          },
+): { clipId: string | null; preserveTrackFocus: boolean } {
+    if (typeof arg === "object" && arg !== null && "clipId" in arg) {
+        return {
+            clipId: arg.clipId,
+            preserveTrackFocus: Boolean(arg.preserveTrackFocus),
+        };
+    }
+    return {
+        clipId: arg,
+        preserveTrackFocus: false,
+    };
+}
+
 /**
  * 将后端返回的 TimelineState 全量覆写到前端 Redux state。
  *
@@ -1925,6 +2083,10 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload, { force: true });
             })
 
+            .addCase(undoRemote.pending, (state) => {
+                sessionSlice.caseReducers.undo(state);
+            })
+
             .addCase(undoRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -1936,6 +2098,14 @@ const sessionSlice = createSlice({
                 state.playheadSec = currentPlayheadSec;
             })
 
+            .addCase(undoRemote.rejected, (state) => {
+                sessionSlice.caseReducers.redo(state);
+            })
+
+            .addCase(redoRemote.pending, (state) => {
+                sessionSlice.caseReducers.redo(state);
+            })
+
             .addCase(redoRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -1945,6 +2115,10 @@ const sessionSlice = createSlice({
                 const currentPlayheadSec = state.playheadSec;
                 applyTimelineState(state, payload, { force: true });
                 state.playheadSec = currentPlayheadSec;
+            })
+
+            .addCase(redoRemote.rejected, (state) => {
+                sessionSlice.caseReducers.undo(state);
             })
 
             .addCase(newProjectRemote.fulfilled, (state, action) => {
@@ -2408,6 +2582,10 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload);
             })
 
+            .addCase(setClipStateRemote.pending, (state, action) => {
+                applyOptimisticClipState(state, action.meta.arg);
+            })
+
             .addCase(setClipsStateBulkRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2416,6 +2594,10 @@ const sessionSlice = createSlice({
                     return;
                 }
                 applyTimelineState(state, payload);
+            })
+
+            .addCase(setClipsStateBulkRemote.pending, (state, action) => {
+                applyOptimisticBulkClipState(state, action.meta.arg.updates);
             })
 
             .addCase(replaceClipSourceRemote.fulfilled, (state, action) => {
@@ -2428,6 +2610,24 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload, { force: true });
             })
 
+            .addCase(selectClipRemote.pending, (state, action) => {
+                const { clipId, preserveTrackFocus } = parseSelectClipRemoteArg(action.meta.arg);
+                state.selectedClipId = clipId;
+                state.selectedPointId = null;
+                if (clipId) {
+                    const nextTrackId = resolveTrackIdForClipSelection({
+                        currentTrackId: state.selectedTrackId,
+                        clips: state.clips,
+                        clipId,
+                        preserveTrackFocus,
+                    });
+                    if (nextTrackId !== state.selectedTrackId) {
+                        state.selectedTrackId = nextTrackId;
+                    }
+                    ensureClipAutomation(state, clipId);
+                }
+            })
+
             .addCase(selectClipRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2436,13 +2636,21 @@ const sessionSlice = createSlice({
                 if (!payload.ok) {
                     return;
                 }
-                const currentPlayheadSec = state.playheadSec;
                 const currentSelectedTrackId = state.selectedTrackId;
-                applyTimelineState(state, payload);
-                state.playheadSec = currentPlayheadSec;
+                state.selectedClipId = payload.selected_clip_id;
+                state.selectedPointId = null;
+                if (payload.selected_clip_id) {
+                    ensureClipAutomation(state, payload.selected_clip_id);
+                }
                 if (payload.__preserveTrackFocus) {
                     state.selectedTrackId = currentSelectedTrackId;
+                } else if (payload.selected_track_id !== undefined) {
+                    state.selectedTrackId = payload.selected_track_id;
                 }
+            })
+
+            .addCase(setTrackStateRemote.pending, (state, action) => {
+                applyOptimisticTrackState(state, action.meta.arg);
             })
 
             .addCase(setTrackStateRemote.fulfilled, (state, action) => {
@@ -2457,7 +2665,7 @@ const sessionSlice = createSlice({
                 // 保留 paramsEpoch 和 clipPitchCurves，避免触发钢琴窗音高曲线重新渲染
                 const currentParamsEpoch = state.paramsEpoch;
                 const currentClipPitchCurves = state.clipPitchCurves;
-                applyTimelineState(state, payload);
+                applyTimelineTracksOnly(state, payload);
                 state.playheadSec = currentPlayheadSec;
                 state.paramsEpoch = currentParamsEpoch;
                 state.clipPitchCurves = currentClipPitchCurves;
@@ -2542,6 +2750,10 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload, { force: true });
             })
 
+            .addCase(selectTrackRemote.pending, (state, action) => {
+                state.selectedTrackId = action.meta.arg;
+            })
+
             .addCase(selectTrackRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2550,7 +2762,10 @@ const sessionSlice = createSlice({
                     return;
                 }
                 const currentPlayheadSec = state.playheadSec;
-                applyTimelineState(state, payload);
+                applyTimelineTracksOnly(state, payload);
+                if (payload.selected_clip_id !== undefined) {
+                    state.selectedClipId = payload.selected_clip_id;
+                }
                 state.playheadSec = currentPlayheadSec;
             })
 

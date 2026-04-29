@@ -55,6 +55,7 @@ export function drawTimelineCanvas(
             selected: boolean;
             muted: boolean;
             gain: number;
+            playbackRate?: number;
             name: string;
             trackColor?: string;
         }>;
@@ -76,6 +77,7 @@ export function drawTimelineCanvas(
             selected: clip.selected,
             muted: clip.muted,
             gain: clip.gain,
+            playbackRate: clip.playbackRate ?? 1,
             name: clip.name,
         });
         const fadeShadeRange = computeTimelineFadeShadeRange({
@@ -94,7 +96,7 @@ export function drawTimelineCanvas(
         ctx.fillRect(clipLeft, bodyTop, clipWidth, bodyHeight);
 
         if (fadeShadeRange) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.14)";
+            ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
             ctx.fillRect(
                 clipLeft + fadeShadeRange.startPx,
                 bodyTop,
@@ -109,31 +111,6 @@ export function drawTimelineCanvas(
 
         ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
         ctx.fillRect(clipLeft, clipTop + headerHeight, clipWidth, 1);
-
-        if (visualStyle.showMuteBadge) {
-            const buttonX = clipLeft + 6;
-            const buttonY = clipTop + 3;
-            const buttonWidth = visualStyle.muteBadgeWidth;
-            const buttonHeight = visualStyle.muteBadgeHeight;
-            const buttonRadius = visualStyle.muteBadgeRadius;
-            ctx.beginPath();
-            ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, buttonRadius);
-            ctx.fillStyle = visualStyle.muteBadgeFill;
-            ctx.fill();
-            ctx.strokeStyle = visualStyle.muteBadgeStroke;
-            ctx.lineWidth = 1;
-            ctx.stroke();
-            ctx.fillStyle = visualStyle.muteBadgeTextFill;
-            ctx.font = "bold 9px sans-serif";
-            ctx.textBaseline = "middle";
-            ctx.textAlign = "center";
-            ctx.fillText(
-                visualStyle.muteBadgeLabel,
-                buttonX + buttonWidth / 2,
-                buttonY + buttonHeight / 2 + 0.5,
-            );
-            ctx.textAlign = "start";
-        }
 
         if (visualStyle.showGainKnob) {
             const knobCenterX = clipLeft + visualStyle.gainKnobCenterOffsetX;
@@ -164,14 +141,45 @@ export function drawTimelineCanvas(
             ctx.stroke();
         }
 
+        if (visualStyle.showMuteBadge) {
+            const buttonX = clipLeft + visualStyle.muteBadgeOffsetX;
+            const buttonY = clipTop + visualStyle.muteBadgeOffsetY;
+            const buttonWidth = visualStyle.muteBadgeWidth;
+            const buttonHeight = visualStyle.muteBadgeHeight;
+            const buttonRadius = visualStyle.muteBadgeRadius;
+            ctx.beginPath();
+            ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, buttonRadius);
+            ctx.fillStyle = visualStyle.muteBadgeFill;
+            ctx.fill();
+            ctx.strokeStyle = visualStyle.muteBadgeStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = visualStyle.muteBadgeTextFill;
+            ctx.font = "bold 9px sans-serif";
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "center";
+            ctx.fillText(
+                visualStyle.muteBadgeLabel,
+                buttonX + buttonWidth / 2,
+                buttonY + buttonHeight / 2 + 0.5,
+            );
+            ctx.textAlign = "start";
+        }
+
         if (visualStyle.showGainLabel) {
             ctx.fillStyle = visualStyle.textFill;
             ctx.font = "10px sans-serif";
             ctx.textBaseline = "middle";
             const metrics = ctx.measureText(visualStyle.gainLabel);
+            const gainX = clipLeft + clipWidth - metrics.width - 6;
+            if (visualStyle.showPlaybackRate) {
+                const rateMetrics = ctx.measureText(visualStyle.playbackRateLabel);
+                const rateX = gainX - rateMetrics.width - 8;
+                ctx.fillText(visualStyle.playbackRateLabel, rateX, clipTop + 9);
+            }
             ctx.fillText(
                 visualStyle.gainLabel,
-                clipLeft + clipWidth - metrics.width - 6,
+                gainX,
                 clipTop + 9,
             );
         }
@@ -179,7 +187,9 @@ export function drawTimelineCanvas(
         if (visualStyle.showName && visualStyle.displayName.length > 0) {
             const textStartX = clipLeft + visualStyle.leadingControlsWidth;
             const textEndX = visualStyle.showGainLabel
-                ? clipLeft + clipWidth - 60
+                ? clipLeft +
+                  clipWidth -
+                  (visualStyle.showPlaybackRate ? 112 : 60)
                 : clipLeft + clipWidth - 8;
             const availableWidth = Math.max(0, textEndX - textStartX);
             if (availableWidth > 12) {
@@ -196,8 +206,10 @@ export function drawTimelineCanvas(
         }
 
         if (clip.fadeInPx > 0) {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
-            ctx.lineWidth = 1;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+            ctx.fillRect(clipLeft, bodyTop, Math.min(clipWidth, clip.fadeInPx), bodyHeight);
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.lineWidth = 1.2;
             drawFadeCurveStroke(ctx, {
                 leftPx: clipLeft,
                 topPx: bodyTop + 1,
@@ -208,8 +220,15 @@ export function drawTimelineCanvas(
             });
         }
         if (clip.fadeOutPx > 0) {
-            ctx.strokeStyle = "rgba(255, 255, 255, 0.58)";
-            ctx.lineWidth = 1;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.05)";
+            ctx.fillRect(
+                clipLeft + clipWidth - Math.min(clipWidth, clip.fadeOutPx),
+                bodyTop,
+                Math.min(clipWidth, clip.fadeOutPx),
+                bodyHeight,
+            );
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.8)";
+            ctx.lineWidth = 1.2;
             drawFadeCurveStroke(ctx, {
                 leftPx: clipLeft + clipWidth - Math.min(clipWidth, clip.fadeOutPx),
                 topPx: bodyTop + 1,

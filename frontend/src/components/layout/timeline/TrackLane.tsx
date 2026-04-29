@@ -125,6 +125,8 @@ type TrackLaneProps = {
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
     ghostDrag?: GhostDragInfo | null;
+    /** 当前拖拽处于纯竖直换轨锁定时，高亮的目标轨道 */
+    verticalTrackLockTrackId?: string | null;
     /** 所有 clip 数据（用于跨轨道 ghost 查找） */
     allClips?: ClipInfo[];
 };
@@ -162,6 +164,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         onRenameDone,
         onGainCommit,
         ghostDrag,
+        verticalTrackLockTrackId,
         allClips,
     } = props;
 
@@ -175,6 +178,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
     // 波形区域高度计算（与 ClipItem 一致）
     const waveformHeight = Math.max(1, rowHeight - CLIP_BODY_PADDING_Y - CLIP_HEADER_HEIGHT);
     const [hoveredClipId, setHoveredClipId] = React.useState<string | null>(null);
+    const showVerticalTrackLock = verticalTrackLockTrackId === track.id;
 
     // 计算当前轨道上需要渲染的 ghost clip 列表
     const ghostClips = React.useMemo(() => {
@@ -406,7 +410,13 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         <div
             key={track.id}
             className="border-b border-qt-border relative"
-            style={{ height: rowHeight }}
+            style={{
+                height: rowHeight,
+                backgroundColor: showVerticalTrackLock ? "rgba(112, 192, 255, 0.08)" : undefined,
+                boxShadow: showVerticalTrackLock
+                    ? "inset 0 0 0 1px rgba(112, 192, 255, 0.72), inset 0 0 0 9999px rgba(112, 192, 255, 0.04)"
+                    : undefined,
+            }}
             onPointerMoveCapture={(event) => {
                 const hit = hitTestLane(event.clientX, event.clientY, event.currentTarget);
                 setHoveredClipId((previous) => (previous === hit.clipId ? previous : hit.clipId));
@@ -452,6 +462,20 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
                 setHoveredClipId(null);
             }}
         >
+            {showVerticalTrackLock ? (
+                <div className="absolute right-2 top-1 pointer-events-none z-20">
+                    <div
+                        className="rounded px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em]"
+                        style={{
+                            color: "rgba(235, 246, 255, 0.96)",
+                            backgroundColor: "rgba(41, 117, 173, 0.88)",
+                            boxShadow: "0 0 0 1px rgba(164, 217, 255, 0.38)",
+                        }}
+                    >
+                        Vertical Lock
+                    </div>
+                </div>
+            ) : null}
             {/* 轨道级波形 Canvas：一个 Canvas 绘制该轨道所有可见 clip 的波形 */}
             <WaveformTrackCanvas
                 clips={trackClips}
@@ -575,6 +599,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         prev.onRenameDone === next.onRenameDone &&
         prev.onGainCommit === next.onGainCommit &&
         prev.ghostDrag === next.ghostDrag &&
+        prev.verticalTrackLockTrackId === next.verticalTrackLockTrackId &&
         prev.allClips === next.allClips &&
         sameStringArray(prev.overlayClipIds, next.overlayClipIds)
         // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus

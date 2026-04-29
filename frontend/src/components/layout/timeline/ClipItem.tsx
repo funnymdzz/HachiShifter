@@ -33,6 +33,7 @@ export const ClipItem = React.memo(function ClipItem({
     ensureSelected,
     selectClipRemote,
     openContextMenu,
+    trackColor,
     seekFromClientX,
     startClipDrag,
     startEditDrag,
@@ -327,6 +328,7 @@ export const ClipItem = React.memo(function ClipItem({
             <ClipHeader
                 clip={clip}
                 clipWidthPx={width}
+                trackColor={trackColor}
                 transparentVisuals
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}

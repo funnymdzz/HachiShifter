@@ -1,4 +1,5 @@
 import {
+    getDivisionFactors,
     getSppThresholds,
     waveformMipmapStore,
     type WaveformMipmapLevel,
@@ -13,6 +14,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 }
 
 assertEqual(getSppThresholds(), [512, 1024], "updated spp thresholds");
+assertEqual(getDivisionFactors(), [16, 512, 4096], "updated division factors");
 
 assertEqual(waveformMipmapStore.selectLevel(512), 0, "L0 covers spp <= 512");
 assertEqual(waveformMipmapStore.selectLevel(513), 1, "L1 starts above 512");

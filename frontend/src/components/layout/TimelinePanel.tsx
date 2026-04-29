@@ -12,6 +12,7 @@
 import React, { useMemo } from "react";
 import { Flex, Dialog, Button, Text } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
+import { useAppSelector } from "../../app/hooks";
 import {
     addTrackRemote,
     duplicateTrackRemote,
@@ -64,6 +65,76 @@ import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 import { writeSystemClipboardObject } from "../../utils/systemClipboard";
 import { buildSparseClipRenderModel } from "./timeline/runtime/timelineCanvasModel";
 import { buildTimelineRenderModel } from "./timeline/runtime/timelineRenderModel";
+
+const TimelineTransportBridge = React.memo(function TimelineTransportBridge(props: {
+    pxPerSecRef: React.MutableRefObject<number>;
+    playheadRef: React.MutableRefObject<HTMLDivElement | null>;
+    rulerPlayheadLineRef: React.MutableRefObject<HTMLDivElement | null>;
+    rulerPlayheadHeadRef: React.MutableRefObject<HTMLDivElement | null>;
+    scrollRef: React.MutableRefObject<HTMLDivElement | null>;
+    syncScrollLeft: (next: number) => void;
+    autoScrollEnabled: boolean;
+}) {
+    const {
+        pxPerSecRef,
+        playheadRef,
+        rulerPlayheadLineRef,
+        rulerPlayheadHeadRef,
+        scrollRef,
+        syncScrollLeft,
+        autoScrollEnabled,
+    } = props;
+    const transport = useAppSelector((state) => ({
+        playheadSec: state.session.playheadSec,
+        isPlaying: state.session.runtime.isPlaying,
+        playbackPositionSec: state.session.runtime.playbackPositionSec,
+    }));
+
+    const isTransportAdvancing = transport.isPlaying && transport.playbackPositionSec > 1e-4;
+
+    useVisualPlayhead({
+        syncedPlayheadSec: transport.playheadSec,
+        isTransportAdvancing,
+        onFrame: React.useCallback(
+            (visualPlayheadSec: number) => {
+                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
+                if (playheadRef.current) {
+                    playheadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadLineRef.current) {
+                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (rulerPlayheadHeadRef.current) {
+                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
+                }
+                if (!autoScrollEnabled || !transport.isPlaying) return;
+                const scroller = scrollRef.current;
+                if (!scroller) return;
+                const next = computeAutoFollowScrollLeft({
+                    playheadSec: visualPlayheadSec,
+                    pxPerSec: pxPerSecRef.current,
+                    viewportWidth: scroller.clientWidth,
+                    contentWidth: scroller.scrollWidth,
+                });
+                if (Math.abs(scroller.scrollLeft - next) <= 0.5) return;
+                scroller.scrollLeft = next;
+                syncScrollLeft(next);
+            },
+            [
+                autoScrollEnabled,
+                pxPerSecRef,
+                playheadRef,
+                rulerPlayheadHeadRef,
+                rulerPlayheadLineRef,
+                scrollRef,
+                syncScrollLeft,
+                transport.isPlaying,
+            ],
+        ),
+    });
+
+    return null;
+});
 
 export const TimelinePanel: React.FC = () => {
     const { t } = useI18n();
@@ -230,44 +301,7 @@ export const TimelinePanel: React.FC = () => {
         setContextMenu,
         setTrackAreaMenu,
         syncScrollLeft,
-        autoScrollEnabled: s.autoScrollEnabled,
-        isPlaying: s.runtime.isPlaying,
-        playheadSec: s.playheadSec,
         dynamicProjectSec,
-    });
-
-    const isTransportAdvancing = s.runtime.isPlaying && s.runtime.playbackPositionSec > 1e-4;
-
-    useVisualPlayhead({
-        syncedPlayheadSec: s.playheadSec,
-        isTransportAdvancing,
-        onFrame: React.useCallback(
-            (visualPlayheadSec: number) => {
-                const playheadLeftPx = visualPlayheadSec * pxPerSecRef.current;
-                if (playheadRef.current) {
-                    playheadRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (rulerPlayheadLineRef.current) {
-                    rulerPlayheadLineRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (rulerPlayheadHeadRef.current) {
-                    rulerPlayheadHeadRef.current.style.left = `${playheadLeftPx}px`;
-                }
-                if (!s.autoScrollEnabled || !s.runtime.isPlaying) return;
-                const scroller = scrollRef.current;
-                if (!scroller) return;
-                const next = computeAutoFollowScrollLeft({
-                    playheadSec: visualPlayheadSec,
-                    pxPerSec: pxPerSecRef.current,
-                    viewportWidth: scroller.clientWidth,
-                    contentWidth: scroller.scrollWidth,
-                });
-                if (Math.abs(scroller.scrollLeft - next) <= 0.5) return;
-                scroller.scrollLeft = next;
-                syncScrollLeft(next);
-            },
-            [pxPerSecRef, s.autoScrollEnabled, s.runtime.isPlaying, scrollRef, syncScrollLeft],
-        ),
     });
 
     // ── 5. 拖拽 hooks 桥接 ──────────────────────────────────
@@ -296,10 +330,12 @@ export const TimelinePanel: React.FC = () => {
         clipDragRef: _clipDragRef,
         startClipDrag: _startClipDragInner,
         ghostDrag,
+        verticalTrackLockTrackId,
     } = useClipDrag({
         scrollRef,
         sessionRef,
         rowHeight,
+        pxPerSec,
         multiSelectedClipIds,
         multiSelectedSet,
         dispatch,
@@ -657,7 +693,7 @@ export const TimelinePanel: React.FC = () => {
                     pxPerSec={pxPerSec}
                     secPerBeat={secPerBeat}
                     viewportWidth={viewportWidth}
-                    playheadSec={s.playheadSec}
+                    playheadSec={Number(sessionRef.current.playheadSec ?? 0) || 0}
                     playheadLineRef={rulerPlayheadLineRef}
                     playheadHeadRef={rulerPlayheadHeadRef}
                     contentRef={rulerContentRef}
@@ -690,7 +726,7 @@ export const TimelinePanel: React.FC = () => {
                     scrollVerticalKb={scrollVerticalKb}
                     horizontalZoomKb={horizontalZoomKb}
                     verticalZoomKb={verticalZoomKb}
-                    playheadSec={s.playheadSec}
+                    getPlayheadSec={() => Number(sessionRef.current.playheadSec ?? 0) || 0}
                     playheadZoomEnabled={s.playheadZoomEnabled}
                     className="flex-1 bg-qt-graph-bg overflow-auto relative custom-scrollbar"
                     data-timeline-scroller
@@ -1071,6 +1107,7 @@ export const TimelinePanel: React.FC = () => {
                                         openContextMenu={openTrackLaneContextMenu}
                                         seekFromClientX={seekFromTrackLaneClientX}
                                         ghostDrag={ghostDrag}
+                                        verticalTrackLockTrackId={verticalTrackLockTrackId}
                                         allClips={s.clips}
                                         startClipDrag={startClipDrag}
                                         startEditDrag={startEditDrag}
@@ -1136,7 +1173,7 @@ export const TimelinePanel: React.FC = () => {
                             ref={playheadRef}
                             className="absolute top-0 bottom-0 w-px bg-qt-playhead z-20 cursor-ew-resize"
                             style={{
-                                left: s.playheadSec * pxPerSec,
+                                left: (Number(sessionRef.current.playheadSec ?? 0) || 0) * pxPerSec,
                             }}
                             onPointerDown={(e) => {
                                 if (e.button !== 0) return;
@@ -1147,7 +1184,7 @@ export const TimelinePanel: React.FC = () => {
                                 const startY = e.clientY;
                                 let moved = false;
                                 const bounds = scroller.getBoundingClientRect();
-                                const initialSec = s.playheadSec;
+                                const initialSec = Number(sessionRef.current.playheadSec ?? 0) || 0;
                                 playheadDragRef.current = {
                                     pointerId: e.pointerId,
                                     lastBeat: initialSec,
@@ -1531,6 +1568,16 @@ export const TimelinePanel: React.FC = () => {
                         </Flex>
                     </Dialog.Content>
                 </Dialog.Root>
+
+                <TimelineTransportBridge
+                    pxPerSecRef={pxPerSecRef}
+                    playheadRef={playheadRef}
+                    rulerPlayheadLineRef={rulerPlayheadLineRef}
+                    rulerPlayheadHeadRef={rulerPlayheadHeadRef}
+                    scrollRef={scrollRef}
+                    syncScrollLeft={syncScrollLeft}
+                    autoScrollEnabled={s.autoScrollEnabled}
+                />
             </Flex>
         </Flex>
     );
