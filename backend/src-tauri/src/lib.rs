@@ -62,6 +62,8 @@ mod reaper_import;
 mod reaper_parser;
 #[path = "audio/sstretch.rs"]
 mod sstretch;
+#[path = "audio/soundtouch.rs"]
+mod soundtouch;
 mod state;
 #[path = "vocoder/streaming_world.rs"]
 mod streaming_world;

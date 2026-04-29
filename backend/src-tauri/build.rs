@@ -11,6 +11,7 @@ fn main() {
         build_world_static();
         build_signalsmith_stretch();
         build_vslib();
+        build_soundtouch();
     }
 }
 
@@ -328,5 +329,68 @@ fn build_vslib() {
         }
     } else {
         println!("cargo:warning=[vslib] OUT_DIR not set; skipping DLL copy")
+    }
+}
+
+/// Link against SoundTouchDLL_x64 via its import library.
+///
+/// The DLL and import lib live in third_party/soundtouch/:
+///   SoundTouchDLL_x64.dll  — needs to sit next to the final binary at runtime
+///   SoundTouchDLL_x64.lib  — import library linked at compile time
+fn build_soundtouch() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let target_lc = target.to_lowercase();
+    if !(target_lc.contains("windows") && target_lc.contains("x86_64")) {
+        println!(
+            "cargo:warning=[soundtouch] target '{}' not an x86_64 Windows target; skipping",
+            target
+        );
+        return;
+    }
+
+    let lib_dir = std::path::Path::new("third_party/soundtouch");
+    if !lib_dir.exists() {
+        panic!(
+            "[soundtouch] third_party/soundtouch/ not found. \
+             Place SoundTouchDLL_x64.dll and SoundTouchDLL_x64.lib there."
+        );
+    }
+
+    let abs = lib_dir
+        .canonicalize()
+        .expect("[soundtouch] failed to canonicalize third_party/soundtouch path");
+
+    let dll_src = lib_dir.join("SoundTouchDLL_x64.dll");
+    let lib_src = lib_dir.join("SoundTouchDLL_x64.lib");
+    if !dll_src.exists() {
+        panic!("[soundtouch] SoundTouchDLL_x64.dll not found");
+    }
+    if !lib_src.exists() {
+        panic!("[soundtouch] SoundTouchDLL_x64.lib not found");
+    }
+
+    println!("cargo:rerun-if-changed=third_party/soundtouch/SoundTouchDLL_x64.dll");
+    println!("cargo:rerun-if-changed=third_party/soundtouch/SoundTouchDLL_x64.lib");
+    println!("cargo:rustc-link-search=native={}", abs.display());
+    println!("cargo:rustc-link-lib=dylib=SoundTouchDLL_x64");
+
+    if let Ok(out_dir) = std::env::var("OUT_DIR") {
+        let target_dir = std::path::Path::new(&out_dir)
+            .ancestors()
+            .nth(3)
+            .expect("[soundtouch] unexpected OUT_DIR depth");
+        let dll_dst = target_dir.join("SoundTouchDLL_x64.dll");
+        if let Err(e) = std::fs::copy(&dll_src, &dll_dst) {
+            println!(
+                "cargo:warning=[soundtouch] could not copy DLL to {}: {}",
+                dll_dst.display(),
+                e
+            );
+        } else {
+            println!(
+                "cargo:warning=[soundtouch] copied SoundTouchDLL_x64.dll to {}",
+                dll_dst.display()
+            );
+        }
     }
 }

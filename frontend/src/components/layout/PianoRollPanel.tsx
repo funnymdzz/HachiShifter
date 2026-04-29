@@ -75,6 +75,7 @@ import {
     cleanupVisibleReferenceRootTrackIds,
     listReferenceRootTracks,
 } from "./pianoRoll/referenceRootTracks";
+import { buildReferenceRootTrackTriggerElement } from "./pianoRoll/referenceRootTrackTrigger";
 import { averageSelectionValues, smoothSelectionValues } from "./pianoRoll/selectionTransforms";
 import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
@@ -3536,11 +3537,13 @@ export const PianoRollPanel: React.FC = () => {
                             {editParam === "pitch" ? (
                                 <DropdownMenu.Root>
                                     <DropdownMenu.Trigger className="shrink-0 rounded border border-qt-border bg-qt-panel px-2 py-1 text-xs text-qt-text hover:bg-qt-hover">
-                                        {`${t("reference_root_tracks")}${
-                                            visibleReferenceRootTrackIds.length > 0
-                                                ? ` (${visibleReferenceRootTrackIds.length})`
-                                                : ""
-                                        }`}
+                                        {buildReferenceRootTrackTriggerElement(
+                                            `${t("reference_root_tracks")}${
+                                                visibleReferenceRootTrackIds.length > 0
+                                                    ? ` (${visibleReferenceRootTrackIds.length})`
+                                                    : ""
+                                            }`,
+                                        )}
                                     </DropdownMenu.Trigger>
                                     <DropdownMenu.Content variant="soft" color="gray">
                                         <DropdownMenu.Item

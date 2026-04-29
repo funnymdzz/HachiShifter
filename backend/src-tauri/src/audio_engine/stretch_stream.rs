@@ -7,9 +7,13 @@ use std::thread;
 use super::ring::StreamRingStereo;
 use super::types::ResampledStereo;
 
+pub(crate) fn default_realtime_stretch_algorithm() -> crate::time_stretch::StretchAlgorithm {
+    crate::time_stretch::StretchAlgorithm::SoundTouchDll
+}
+
 /// 启动 stretch_stream 后台 worker。
 ///
-/// Worker 使用 Signalsmith Stretch 实时拉伸器将 `src` 中 `[src_start, src_end)` 范围的 PCM
+/// Worker 使用 SoundTouch 实时拉伸器将 `src` 中 `[src_start, src_end)` 范围的 PCM
 /// 以 `playback_rate` 速率写入 `ring`，供音频回调低延迟读取。
 ///
 /// # 参数
@@ -58,13 +62,13 @@ pub(crate) fn spawn_stretch_stream(
             "[StretchStream] Interpretation: playback_rate={:.3}x means audio plays {:.3}x faster",
             pr, pr
         );
-        eprintln!("[StretchStream] Signalsmith time_ratio={:.6} means stretched duration is {:.6}x original", time_ratio, time_ratio);
+        eprintln!("[StretchStream] SoundTouch time_ratio={:.6} means stretched duration is {:.6}x original", time_ratio, time_ratio);
         let mut rb =
-            match crate::sstretch::SignalsmithRealtimeStretcher::new(out_rate, 2, time_ratio) {
+            match crate::soundtouch::RealtimeStretcher::new(out_rate, 2, time_ratio) {
                 Ok(v) => v,
                 Err(e) => {
                     eprintln!(
-                        "[StretchStream ERROR] Failed to create SignalsmithStretch: {}",
+                        "[StretchStream ERROR] Failed to create SoundTouch stretcher: {}",
                         e
                     );
                     return;
@@ -190,4 +194,17 @@ pub(crate) fn spawn_stretch_stream(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::time_stretch::StretchAlgorithm;
+
+    #[test]
+    fn realtime_stream_defaults_to_soundtouch() {
+        assert!(matches!(
+            super::default_realtime_stretch_algorithm(),
+            StretchAlgorithm::SoundTouchDll
+        ));
+    }
 }

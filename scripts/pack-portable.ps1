@@ -165,6 +165,7 @@ $Resources = @(
 # Only include vslib_x64.dll for x86_64 builds
 if ($ArchShort -eq "x64") {
     $Resources += @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll"; Dst = "vslib_x64.dll" }
+    $Resources += @{ Src = Join-Path $TauriDir "third_party\soundtouch\SoundTouchDLL_x64.dll"; Dst = "SoundTouchDLL_x64.dll" }
 }
 
 # 检查所有资源文件是否存在

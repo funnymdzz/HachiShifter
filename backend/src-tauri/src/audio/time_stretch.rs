@@ -11,6 +11,9 @@ pub enum StretchAlgorithm {
     /// statically linked at compile time. Always available.
     SignalsmithStretch,
 
+    /// Default time-stretch implementation via SoundTouch Windows DLL.
+    SoundTouchDll,
+
     /// Desired: zplane Elastique (Soloist) time-stretch preserving pitch + formants.
     /// This requires integrating the Elastique SDK (commercial).
     ElastiqueSoloist,
@@ -189,11 +192,81 @@ pub fn time_stretch_interleaved(
                 }
             }
         }
+        StretchAlgorithm::SoundTouchDll => {
+            let in_frames = if channels == 0 {
+                0
+            } else {
+                input.len() / channels
+            };
+            if in_frames < 2 || out_frames < 2 {
+                return linear_time_stretch_interleaved(input, channels, out_frames);
+            }
+            let ratio = (out_frames as f64) / (in_frames as f64);
+            let result = crate::soundtouch::try_time_stretch_interleaved_realtime(
+                input,
+                channels,
+                sample_rate.max(1),
+                ratio,
+                out_frames,
+            )
+            .or_else(|_| {
+                crate::soundtouch::try_time_stretch_interleaved_offline(
+                    input,
+                    channels,
+                    sample_rate.max(1),
+                    ratio,
+                    out_frames,
+                )
+            });
+
+            match result {
+                Ok(mut out) => {
+                    preserve_hard_silence_after_stretch(
+                        input,
+                        &mut out,
+                        channels,
+                        sample_rate.max(1),
+                    );
+                    out.resize(out_frames * channels, 0.0);
+                    out
+                }
+                Err(e) => {
+                    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                        eprintln!("time_stretch: SoundTouch failed, falling back: {e}");
+                    }
+                    linear_time_stretch_interleaved(input, channels, out_frames)
+                }
+            }
+        }
         StretchAlgorithm::ElastiqueSoloist => {
             // TODO: integrate Elastique SDK and implement true pitch/formant-preserving stretch.
             // For now, fall back to the existing linear method to keep the app functional.
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{time_stretch_interleaved, StretchAlgorithm};
+
+    #[test]
+    fn soundtouch_fallback_keeps_requested_length() {
+        let input = vec![0.0f32, 0.5, 0.25, -0.25];
+        let out = time_stretch_interleaved(
+            &input,
+            1,
+            44_100,
+            8,
+            StretchAlgorithm::SoundTouchDll,
+        );
+        assert_eq!(out.len(), 8);
+    }
+
+    #[test]
+    fn default_algorithm_symbol_exists() {
+        let algo = StretchAlgorithm::SoundTouchDll;
+        assert!(matches!(algo, StretchAlgorithm::SoundTouchDll));
     }
 }
 

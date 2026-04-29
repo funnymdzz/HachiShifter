@@ -4,7 +4,6 @@
 //! [`ProcessorChain`] 串联多个 Stage 并实现 [`ClipProcessor`] trait。
 //!
 //! 内置 Stage：
-//! - [`SignalsmithTimeStretchStage`]：应用 playback_rate 时间拉伸
 //! - [`WorldVocoderStage`]：WORLD 声码器合成
 //! - [`HiFiGanStage`]：NSF-HiFiGAN 合成
 //!
@@ -103,9 +102,9 @@ pub struct ProcessorChain {
     #[allow(dead_code)]
     pub display_name: String,
     pub stages: Vec<Box<dyn ProcessingStage>>,
-    /// 链内是否包含时间拉伸 Stage（[`SignalsmithTimeStretchStage`]）。
-    /// 为 `true` 时调用方（`render_single_clip` / `render_mixdown_interleaved`）跳过外部
-    /// Signalsmith 预拉伸，并将实际 `playback_rate` 通过 [`ClipProcessContext`] 传入链内。
+    /// 处理器是否自行处理时间拉伸。
+    /// 为 `true` 时调用方会跳过外部预拉伸，并将 `playback_rate`
+    /// 通过 [`ClipProcessContext`] 传入处理器链内部。
     pub handles_time_stretch: bool,
 }
 
@@ -150,45 +149,7 @@ impl ClipProcessor for ProcessorChain {
 
 // ─── 内置 Stage 实现 ──────────────────────────────────────────────────────────
 
-/// Stage 1：Signalsmith Stretch 时间拉伸（playback_rate ≈ 1.0 时直接透传）。
-pub struct SignalsmithTimeStretchStage;
-
-impl ProcessingStage for SignalsmithTimeStretchStage {
-    fn id(&self) -> &str {
-        "signalsmith_stretch"
-    }
-
-    fn display_name(&self) -> &str {
-        "时间拉伸 (Signalsmith)"
-    }
-
-    fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
-        let cc = ctx.clip_ctx;
-        let rate = cc.playback_rate;
-        if (rate - 1.0).abs() <= 1e-6 {
-            return Ok(input_pcm);
-        }
-
-        // 目标帧数：优先使用 out_frames（若调用方已计算），否则由 rate 推算。
-        let out_frames = if cc.out_frames > 0 {
-            cc.out_frames
-        } else {
-            let in_frames = input_pcm.len();
-            ((in_frames as f64) / rate).round().max(2.0) as usize
-        };
-
-        let stretched = crate::time_stretch::time_stretch_interleaved(
-            &input_pcm,
-            1, // mono
-            cc.sample_rate,
-            out_frames,
-            crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
-        );
-        Ok(stretched)
-    }
-}
-
-/// Stage 2a：WORLD 声码器合成。
+/// Stage 1a：WORLD 声码器合成。
 pub struct WorldVocoderStage;
 
 impl ProcessingStage for WorldVocoderStage {
@@ -220,7 +181,7 @@ impl ProcessingStage for WorldVocoderStage {
     }
 }
 
-/// Stage 2b：NSF-HiFiGAN ONNX 合成。
+/// Stage 1b：NSF-HiFiGAN ONNX 合成。
 pub struct HiFiGanStage;
 
 fn sample_curve_at_abs_sec(
@@ -268,9 +229,6 @@ impl ProcessingStage for HiFiGanStage {
             return Ok(input_pcm);
         }
 
-        let rate = cc.playback_rate;
-        let needs_stretch = (rate - 1.0).abs() > 1e-6;
-
         let breath_enabled =
             crate::pitch_editing::extra_param_enabled(cc.extra_params, "breath_enabled");
         let formant_curve = cc.extra_curves.get("formant_shift_cents");
@@ -287,17 +245,8 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            if needs_stretch {
-                // mel 域时间拉伸 + HiFiGAN 推理
-                return crate::renderer::hifigan::HiFiGanRenderer.render_mel_stretch(
-                    &render_ctx,
-                    rate,
-                    formant_curve,
-                );
-            } else {
-                return crate::renderer::hifigan::HiFiGanRenderer
-                    .render_with_formant(&render_ctx, formant_curve);
-            }
+            return crate::renderer::hifigan::HiFiGanRenderer
+                .render_with_formant(&render_ctx, formant_curve);
         }
 
         // ── Breath 路径 ─────────────────────────────────────────────────────
@@ -308,7 +257,7 @@ impl ProcessingStage for HiFiGanStage {
         let (harmonic, noise) =
             crate::hnsep_onnx::infer_harmonic_noise_mono(cc.clip_id, &input_pcm, cc.sample_rate)?;
 
-        // harmonic 走 mel stretch
+        // harmonic 直接走 HiFiGAN；时间拉伸已在处理器外部完成
         let processed_harmonic = if cc.clip_midi.is_empty() {
             harmonic
         } else {
@@ -323,31 +272,11 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            if needs_stretch {
-                crate::renderer::hifigan::HiFiGanRenderer.render_mel_stretch(
-                    &render_ctx,
-                    rate,
-                    formant_curve,
-                )?
-            } else {
-                crate::renderer::hifigan::HiFiGanRenderer
-                    .render_with_formant(&render_ctx, formant_curve)?
-            }
+            crate::renderer::hifigan::HiFiGanRenderer
+                .render_with_formant(&render_ctx, formant_curve)?
         };
 
-        // noise 走 Signalsmith Stretch 时间拉伸（noise 是非谐波信号，波形域拉伸无明显伪影）
-        let stretched_noise = if needs_stretch {
-            let out_frames = processed_harmonic.len();
-            crate::time_stretch::time_stretch_interleaved(
-                &noise,
-                1,
-                cc.sample_rate,
-                out_frames,
-                crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
-            )
-        } else {
-            noise
-        };
+        let stretched_noise = noise;
 
         let breath_curve = cc.extra_curves.get("breath_gain");
         let out_len = processed_harmonic.len().min(stretched_noise.len());
@@ -394,23 +323,26 @@ pub fn world_chain() -> ProcessorChain {
     ProcessorChain {
         id: "world".into(),
         display_name: "WORLD Vocoder".into(),
-        stages: vec![
-            Box::new(SignalsmithTimeStretchStage),
-            Box::new(WorldVocoderStage),
-        ],
-        handles_time_stretch: true,
+        stages: vec![Box::new(WorldVocoderStage)],
+        handles_time_stretch: false,
     }
 }
 
 /// 构造 NSF-HiFiGAN 处理链。
-///
-/// 时间拉伸由 HiFiGanStage 内部通过 mel 域线性插值完成，
-/// 不再需要外部 SignalsmithTimeStretchStage。
 pub fn hifigan_chain() -> ProcessorChain {
     ProcessorChain {
         id: "nsf_hifigan".into(),
         display_name: "NSF-HiFiGAN".into(),
         stages: vec![Box::new(HiFiGanStage)],
-        handles_time_stretch: true,
+        handles_time_stretch: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn hifigan_chain_no_longer_handles_time_stretch() {
+        let chain = super::hifigan_chain();
+        assert!(!chain.handles_time_stretch);
     }
 }

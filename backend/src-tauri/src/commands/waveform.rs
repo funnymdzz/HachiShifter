@@ -111,7 +111,7 @@ pub(super) fn get_root_mix_waveform_peaks_segment(
             end_sec: Some(start_sec + duration_sec.max(0.0)),
             // Peaks are used as a visual timing reference. Use Signalsmith Stretch so
             // stretched clips line up with the same timing as pitch analysis.
-            stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+            stretch: crate::time_stretch::StretchAlgorithm::SoundTouchDll,
             apply_pitch_edit: true,
             // 瀹炴椂棰勮浣跨敤榛樿璐ㄩ噺锛圵av16 + Realtime锛夈€?
             export_format: crate::mixdown::ExportFormat::Wav16,
@@ -251,7 +251,7 @@ pub(super) fn get_track_mix_waveform_peaks_segment(
             end_sec: Some(start_sec + duration_sec.max(0.0)),
             // Peaks are used as a visual timing reference. Use Signalsmith Stretch so
             // stretched clips line up with the same timing as pitch analysis.
-            stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+            stretch: crate::time_stretch::StretchAlgorithm::SoundTouchDll,
             apply_pitch_edit: true,
             // 瀹炴椂棰勮浣跨敤榛樿璐ㄩ噺锛圵av16 + Realtime锛夈€?
             export_format: crate::mixdown::ExportFormat::Wav16,

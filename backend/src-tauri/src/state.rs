@@ -2729,7 +2729,7 @@ impl TimelineState {
                     sample_rate: 44_100,
                     start_sec: start,
                     end_sec: Some(end),
-                    stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+                    stretch: crate::time_stretch::StretchAlgorithm::SoundTouchDll,
                     apply_pitch_edit: true,
                     export_format: crate::mixdown::ExportFormat::Wav32f,
                     quality_preset: crate::mixdown::QualityPreset::Export,

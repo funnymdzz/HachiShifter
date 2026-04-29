@@ -232,7 +232,7 @@ impl AudioEngine {
 
             let (stretch_tx, stretch_rx) = mpsc::channel::<StretchJob>();
 
-            // Worker that computes Signalsmith Stretch off the command thread.
+            // Worker that computes SoundTouch stretch off the command thread.
             // Keep it small to avoid CPU spikes.
             {
                 let cache = cache_for_cmd.clone();
@@ -241,8 +241,8 @@ impl AudioEngine {
                 let tx_ready = tx_for_worker.clone();
                 thread::spawn(move || {
                     while let Ok(job) = stretch_rx.recv() {
-                        // If Signalsmith Stretch isn't available, drop the job.
-                        if !crate::sstretch::is_available() {
+                        // If SoundTouch isn't available, drop the job.
+                        if !crate::soundtouch::is_available() {
                             if let Ok(mut s) = inflight.lock() {
                                 s.remove(&job.key);
                             }
@@ -319,7 +319,7 @@ impl AudioEngine {
                             2,
                             job.key.out_rate,
                             loop_out_frames,
-                            StretchAlgorithm::SignalsmithStretch,
+                            StretchAlgorithm::SoundTouchDll,
                         );
 
                         let stretched_src = ResampledStereo {

@@ -503,7 +503,7 @@ pub fn render_mixdown_interleaved(
             })
             .unwrap_or(false);
         let mut segment = segment;
-        // 外部 SignalsmithStretch 拉伸的执行条件：
+        // 外部 SoundTouch 拉伸的执行条件：
         //   !processor_handles_stretch → 处理器不内部拉伸（World/HiFiGAN chain 内有 TimeStretchStage，vslib 原生拉伸）
         //   !opts.apply_pitch_edit    → pitch edit 链不会运行，内部拉伸无法触发，需回退到外部拉伸
         if (playback_rate - 1.0).abs() > 1e-6

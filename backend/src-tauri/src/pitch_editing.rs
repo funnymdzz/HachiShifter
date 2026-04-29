@@ -950,7 +950,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
-    // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行 mel 域拉伸。
+    // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
         let handles = crate::renderer::get_processor(kind)
@@ -962,7 +962,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
 
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
-    // 例外：needs_processor_stretch 时必须进入处理器以执行 mel 拉伸。
+    // 例外：needs_processor_stretch 时必须进入处理器以执行其内部拉伸。
     if !entry.pitch_edit_user_modified
         && !extra_processing
         && !tension_processing
@@ -977,9 +977,9 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let pitch_edit = entry.pitch_edit.as_slice();
 
     // 预计算处理器能力：决定 seg_end_sec 的时间轴计算方式。
-    // - handles_time_stretch=true（如 World/HiFiGAN chain、vslib）：
+    // - handles_time_stretch=true（如 vslib）：
     //     输入 PCM 为源速率，输出 = 源帧数 / playback_rate（时间轴帧数）
-    // - handles_time_stretch=false：输入 PCM 已由外部 Signalsmith Stretch 预拉伸，帧数 = 时间轴帧数
+    // - handles_time_stretch=false：输入 PCM 已由外部时间拉伸预拉伸，帧数 = 时间轴帧数
     let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
     let clip_playback_rate = (clip.playback_rate as f64).max(1e-6);
     let processor_handles_stretch = crate::renderer::get_processor(kind)
@@ -1120,7 +1120,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip.extra_params.as_ref().unwrap_or(extra_params);
 
         // 若处理器自己处理时间拉伸（如 vslib 使用 Timing 控制点），传递实际 playback_rate；
-        // 否则 PCM 已由外部 Signalsmith Stretch 预处理，rate=1.0。
+        // 否则 PCM 已由外部时间拉伸预处理，rate=1.0。
         let ctx_playback_rate = if processor_handles_stretch { clip_playback_rate } else { 1.0 };
 
         let ctx = crate::renderer::ClipProcessContext {
@@ -1292,7 +1292,7 @@ pub fn does_clip_need_processor_render(
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
-    // 即使用户没有编辑音高，也需要触发处理器预渲染以执行 mel 域拉伸。
+    // 即使用户没有编辑音高，也需要触发处理器预渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
         let handles = crate::renderer::get_processor(kind)
@@ -1305,7 +1305,7 @@ pub fn does_clip_need_processor_render(
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
-    // 例外：needs_processor_stretch 时必须触发预渲染以执行 mel 拉伸。
+    // 例外：needs_processor_stretch 时必须触发预渲染以执行其内部拉伸。
     if !entry.pitch_edit_user_modified
         && !extra_processing
         && !tension_processing
