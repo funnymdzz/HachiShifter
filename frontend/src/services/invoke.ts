@@ -287,6 +287,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "preview_export_audio_plan":
             return { request: args[0] };
 
+        case "quick_export_selected_clips":
+            return { request: args[0] };
+
         case "play_original":
             return { startSec: args[0] };
 

@@ -704,6 +704,14 @@ pub fn preview_export_audio_plan(
     synth::preview_export_audio_plan(state, request)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn quick_export_selected_clips(
+    state: State<'_, AppState>,
+    request: synth::QuickExportSelectedClipsRequest,
+) -> serde_json::Value {
+    synth::quick_export_selected_clips(state, request)
+}
+
 // ===================== playback =====================
 
 #[tauri::command(rename_all = "camelCase")]

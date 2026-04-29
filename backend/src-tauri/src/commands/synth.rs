@@ -12,6 +12,9 @@ use tauri::{Emitter, Manager, State};
 
 use super::common::{new_temp_wav_path, render_timeline_to_wav};
 
+#[cfg(test)]
+mod synth_quick_export_tests;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ExportAudioMode {
@@ -67,6 +70,15 @@ pub(crate) struct ExportAudioRequest {
     pub skip_existing_paths: Vec<String>,
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct QuickExportSelectedClipsRequest {
+    #[serde(default)]
+    pub clip_ids: Vec<String>,
+    pub output_dir: String,
+    pub file_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1235,6 +1247,185 @@ pub(super) fn export_audio_advanced(
                 "output_dir": output_dir,
             })
         }
+    }
+}
+
+pub(crate) fn build_quick_export_timeline_and_range(
+    timeline: &crate::state::TimelineState,
+    clip_ids: &[String],
+) -> Result<(crate::state::TimelineState, f64, f64), String> {
+    if clip_ids.is_empty() {
+        return Err("quick export requires at least one clip".to_string());
+    }
+
+    let selected_ids: HashSet<&str> = clip_ids.iter().map(String::as_str).collect();
+    let mut export_timeline = timeline.clone();
+    export_timeline
+        .clips
+        .retain(|clip| selected_ids.contains(clip.id.as_str()));
+
+    if export_timeline.clips.is_empty() {
+        return Err("quick export could not find selected clips".to_string());
+    }
+
+    let start_sec = export_timeline
+        .clips
+        .iter()
+        .map(|clip| clip.start_sec.max(0.0))
+        .fold(f64::INFINITY, f64::min);
+    let end_sec = export_timeline
+        .clips
+        .iter()
+        .map(|clip| (clip.start_sec + clip.length_sec).max(0.0))
+        .fold(0.0_f64, f64::max);
+
+    export_timeline.selected_clip_id = None;
+
+    Ok((export_timeline, start_sec, end_sec))
+}
+
+pub(super) fn quick_export_selected_clips(
+    state: State<'_, AppState>,
+    request: QuickExportSelectedClipsRequest,
+) -> serde_json::Value {
+    let output_dir_template = request.output_dir.trim();
+    if output_dir_template.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "error": "quick_export_output_dir_required",
+        });
+    }
+
+    let file_name_template = request.file_name.trim();
+    if file_name_template.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "error": "quick_export_file_name_required",
+        });
+    }
+
+    let timeline = state
+        .timeline
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let (export_timeline, start_sec, end_sec) =
+        match build_quick_export_timeline_and_range(&timeline, &request.clip_ids) {
+            Ok(value) => value,
+            Err(error) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "error": error,
+                });
+            }
+        };
+
+    let export_settings = state
+        .config_dir
+        .get()
+        .map(|config_dir| crate::config::load_export_settings(config_dir))
+        .unwrap_or_default();
+    let requested_sample_rate = normalize_export_sample_rate(export_settings.sample_rate);
+    let requested_bit_depth = normalize_export_bit_depth(export_settings.bit_depth);
+    let requested_export_format = export_format_from_bit_depth(requested_bit_depth);
+
+    let project_name = resolve_project_name(&state);
+    let project_folder = resolve_project_folder(&state).display().to_string();
+    let export_start_time = Local::now();
+    let output_dir = match resolve_output_dir_template(
+        output_dir_template,
+        &project_name,
+        &project_folder,
+        export_start_time,
+    ) {
+        Ok(value) if !value.trim().is_empty() => value,
+        Ok(_) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": "quick_export_output_dir_required",
+            });
+        }
+        Err(error) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": error,
+            });
+        }
+    };
+
+    let mut rendered_file_name = file_name_template
+        .replace("<ProjectName>", &project_name)
+        .replace("<ProjectFolder>", &project_folder)
+        .trim()
+        .to_string();
+    rendered_file_name = match try_apply_time_format(&rendered_file_name, export_start_time) {
+        Ok(value) => value,
+        Err(error) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": error,
+            });
+        }
+    };
+    rendered_file_name = sanitize_file_name_segment(&rendered_file_name);
+    if rendered_file_name.is_empty() {
+        rendered_file_name = format!("{project_name}_quick_export.wav");
+    }
+    if !rendered_file_name.to_ascii_lowercase().ends_with(".wav") {
+        rendered_file_name.push_str(".wav");
+    }
+
+    let out_path = Path::new(&output_dir).join(&rendered_file_name);
+    if let Some(parent) = out_path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            return serde_json::json!({
+                "ok": false,
+                "path": out_path.display().to_string(),
+                "error": format!("Cannot create directory: {error}"),
+            });
+        }
+    }
+
+    match crate::mixdown::render_mixdown_wav(
+        &export_timeline,
+        &out_path,
+        crate::mixdown::MixdownOptions {
+            sample_rate: requested_sample_rate,
+            start_sec,
+            end_sec: Some(end_sec),
+            stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+            apply_pitch_edit: true,
+            export_format: requested_export_format,
+            quality_preset: crate::mixdown::QualityPreset::Export,
+            cancel_flag: None,
+        },
+    ) {
+        Ok(result) => {
+            persist_successful_export_settings(
+                &state,
+                Some(output_dir_template.to_string()),
+                None,
+                None,
+                None,
+                Some(requested_sample_rate),
+                Some(requested_bit_depth),
+            );
+            let num_samples = (result.duration_sec * result.sample_rate as f64)
+                .round()
+                .max(0.0) as u32;
+            serde_json::json!({
+                "ok": true,
+                "path": out_path.display().to_string(),
+                "sample_rate": result.sample_rate,
+                "num_samples": num_samples,
+                "duration_sec": result.duration_sec,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "path": out_path.display().to_string(),
+            "error": error,
+        }),
     }
 }
 

@@ -96,6 +96,7 @@ export const ClipContextMenu: React.FC<{
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
     onReplace: (ids: string[]) => void;
+    onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
@@ -116,6 +117,7 @@ export const ClipContextMenu: React.FC<{
     onCopy,
     onCut,
     onReplace,
+    onQuickExport,
     onSplit,
     onGlue,
     onNormalize,
@@ -240,6 +242,13 @@ export const ClipContextMenu: React.FC<{
                 label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
                 onClick={() => {
                     onReplace(ids);
+                    close();
+                }}
+            />
+            <MenuItem
+                label={t("ctx_quick_export")}
+                onClick={() => {
+                    onQuickExport(ids);
                     close();
                 }}
             />

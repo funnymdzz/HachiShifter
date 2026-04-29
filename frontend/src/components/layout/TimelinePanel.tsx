@@ -39,6 +39,7 @@ import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement";
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
+import { QuickClipExportDialog } from "./QuickClipExportDialog";
 
 import {
     BackgroundGrid,
@@ -65,6 +66,7 @@ import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 import { writeSystemClipboardObject } from "../../utils/systemClipboard";
 import { buildSparseClipRenderModel } from "./timeline/runtime/timelineCanvasModel";
 import { buildTimelineRenderModel } from "./timeline/runtime/timelineRenderModel";
+import { resolveQuickExportClipIds } from "./timeline/quickExportSelection";
 
 const TimelineTransportBridge = React.memo(function TimelineTransportBridge(props: {
     pxPerSecRef: React.MutableRefObject<number>;
@@ -141,6 +143,10 @@ export const TimelinePanel: React.FC = () => {
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
     const [timelineScrollTop, setTimelineScrollTop] = React.useState(0);
+    const [quickExportDialog, setQuickExportDialog] = React.useState<{
+        open: boolean;
+        clipIds: string[];
+    }>({ open: false, clipIds: [] });
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -1327,10 +1333,10 @@ export const TimelinePanel: React.FC = () => {
                           );
                           if (!ctxClip) return null;
 
-                          const selectedIds =
-                              multiSelectedClipIds.length >= 2
-                                  ? multiSelectedClipIds
-                                  : [contextMenu.clipId];
+                          const selectedIds = resolveQuickExportClipIds({
+                              contextClipId: contextMenu.clipId,
+                              multiSelectedClipIds,
+                          });
                           const selectedClips = sessionRef.current.clips.filter((c) =>
                               selectedIds.includes(c.id),
                           );
@@ -1441,6 +1447,12 @@ export const TimelinePanel: React.FC = () => {
                                   onReplace={(ids) => {
                                       void replaceClipSources(ids);
                                   }}
+                                  onQuickExport={(ids) => {
+                                      setQuickExportDialog({
+                                          open: true,
+                                          clipIds: ids,
+                                      });
+                                  }}
                                   onSplit={(clipIds) => {
                                       setContextMenu(null);
                                       splitClipIdsAtPlayhead(clipIds);
@@ -1524,6 +1536,16 @@ export const TimelinePanel: React.FC = () => {
                         onClose={() => setTrackAreaMenu(null)}
                     />
                 ) : null}
+
+                <QuickClipExportDialog
+                    open={quickExportDialog.open}
+                    clipIds={quickExportDialog.clipIds}
+                    onOpenChange={(open) =>
+                        setQuickExportDialog((prev) =>
+                            open ? prev : { open: false, clipIds: [] },
+                        )
+                    }
+                />
 
                 <Dialog.Root
                     open={sameSourceConfirmOpen}

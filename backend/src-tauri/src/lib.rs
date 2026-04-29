@@ -312,6 +312,7 @@ pub fn run() {
             commands::cancel_export_audio,
             commands::get_export_audio_defaults,
             commands::preview_export_audio_plan,
+            commands::quick_export_selected_clips,
             commands::play_original,
             commands::stop_audio,
             commands::get_playback_state,

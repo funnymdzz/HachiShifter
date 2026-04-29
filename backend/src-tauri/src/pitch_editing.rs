@@ -140,6 +140,24 @@ fn curve_differs_from_default_in_range(
     end_sec: f64,
     default_value: f32,
 ) -> bool {
+    curve_differs_from_default_in_range_with_tolerance(
+        curve,
+        frame_period_ms,
+        start_sec,
+        end_sec,
+        default_value,
+        1e-3,
+    )
+}
+
+fn curve_differs_from_default_in_range_with_tolerance(
+    curve: Option<&Vec<f32>>,
+    frame_period_ms: f64,
+    start_sec: f64,
+    end_sec: f64,
+    default_value: f32,
+    tolerance: f32,
+) -> bool {
     let Some(curve) = curve else {
         return false;
     };
@@ -154,7 +172,7 @@ fn curve_differs_from_default_in_range(
     let hi = end_idx.min(curve.len());
     curve[lo..hi]
         .iter()
-        .any(|value| (value - default_value).abs() > 1e-3)
+        .any(|value| (value - default_value).abs() >= tolerance)
 }
 
 pub(crate) fn hifigan_tension_curve_for_clip<'a>(
@@ -198,12 +216,13 @@ pub(crate) fn hifigan_formant_shift_active_for_clip(
     clip_start_sec: f64,
 ) -> bool {
     let curve = hifigan_formant_shift_curve_for_clip(entry, clip);
-    curve_differs_from_default_in_range(
+    curve_differs_from_default_in_range_with_tolerance(
         curve,
         entry.frame_period_ms.max(0.1),
         clip_start_sec,
         clip_start_sec + clip.length_sec.max(0.0),
         0.0,
+        0.5,
     )
 }
 
@@ -256,6 +275,65 @@ pub fn selected_pitch_edit_algorithm(timeline: &TimelineState) -> PitchEditAlgor
     };
 
     PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hifigan_formant_shift_active_for_clip;
+    use crate::state::{Clip, TrackParamsState};
+    use std::collections::HashMap;
+
+    fn make_clip() -> Clip {
+        Clip {
+            id: "clip-a".to_string(),
+            track_id: "track-a".to_string(),
+            name: "Clip".to_string(),
+            start_sec: 0.0,
+            length_sec: 2.0,
+            color: "blue".to_string(),
+            source_path: Some("a.wav".to_string()),
+            source_path_relative: None,
+            duration_sec: Some(2.0),
+            duration_frames: None,
+            source_sample_rate: Some(44_100),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
+            playback_rate: 1.0,
+            reversed: false,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
+        }
+    }
+
+    #[test]
+    fn hifigan_formant_shift_ignores_near_zero_residual_values() {
+        let mut entry = TrackParamsState {
+            frame_period_ms: 5.0,
+            ..Default::default()
+        };
+        entry.extra_curves = HashMap::from([("formant_shift_cents".to_string(), vec![0.1; 500])]);
+
+        assert!(!hifigan_formant_shift_active_for_clip(&entry, &make_clip(), 0.0));
+    }
+
+    #[test]
+    fn hifigan_formant_shift_detects_meaningful_offsets() {
+        let mut entry = TrackParamsState {
+            frame_period_ms: 5.0,
+            ..Default::default()
+        };
+        entry.extra_curves = HashMap::from([("formant_shift_cents".to_string(), vec![1.0; 500])]);
+
+        assert!(hifigan_formant_shift_active_for_clip(&entry, &make_clip(), 0.0));
+    }
 }
 
 fn semitone_ratio(semitones: f64) -> f64 {
