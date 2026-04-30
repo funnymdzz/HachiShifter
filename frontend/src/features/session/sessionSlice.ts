@@ -53,6 +53,7 @@ import {
     saveProjectRemote,
     setProjectBaseScaleRemote,
     setProjectCustomScaleRemote,
+    setProjectStretchSettingsRemote,
     setProjectTimelineSettingsRemote,
     undoRemote,
 } from "./thunks/projectThunks";
@@ -140,6 +141,7 @@ export type {
 
 type ClipColor = ClipInfo["color"];
 type WaveformPreview = number[] | { l: number[]; r: number[] };
+type StretchAlgorithmOption = "linear" | "signalsmith" | "soundtouch";
 
 export interface SessionState {
     toolMode: ToolMode;
@@ -190,6 +192,10 @@ export interface SessionState {
     quickSearchAutoNormalizeEnabled: boolean;
     /** PianoRoll 中显示的其他 root track 参考线 */
     visibleReferenceRootTrackIds: string[];
+    /** 全局默认外部拉伸算法 */
+    defaultStretchAlgorithm: StretchAlgorithmOption;
+    /** 全局默认 HiFiGAN mel stretch 开关 */
+    defaultHifiganMelStretch: boolean;
 
     // Monotonic bump token for invalidating parameter curve caches.
     // - Not included in undo/redo snapshots.
@@ -262,6 +268,8 @@ export interface SessionState {
         customScale: CustomScalePreset | null;
         beatsPerBar: number;
         gridSize: GridSize;
+        stretchAlgorithmOverride: StretchAlgorithmOption | null;
+        hifiganMelStretchOverride: boolean | null;
     };
 
     busy: boolean;
@@ -704,6 +712,8 @@ function applyTimelineState(
               } | null;
               beats_per_bar?: number;
               grid_size?: string;
+              stretch_algorithm_override?: StretchAlgorithmOption | null;
+              hifigan_mel_stretch_override?: boolean | null;
           }
         | undefined;
     if (project) {
@@ -737,6 +747,14 @@ function applyTimelineState(
                 : null,
             beatsPerBar: nextBeatsPerBar,
             gridSize: nextGridSize,
+            stretchAlgorithmOverride:
+                project.stretch_algorithm_override === undefined
+                    ? state.project.stretchAlgorithmOverride
+                    : (project.stretch_algorithm_override ?? null),
+            hifiganMelStretchOverride:
+                project.hifigan_mel_stretch_override === undefined
+                    ? state.project.hifiganMelStretchOverride
+                    : (project.hifigan_mel_stretch_override ?? null),
         };
         state.beats = nextBeatsPerBar;
         state.grid = nextGridSize;
@@ -884,6 +902,8 @@ const initialState: SessionState = {
     lockParamLinesEnabled: false,
     quickSearchAutoNormalizeEnabled: false,
     visibleReferenceRootTrackIds: [],
+    defaultStretchAlgorithm: "signalsmith",
+    defaultHifiganMelStretch: true,
 
     paramsEpoch: 0,
 
@@ -950,6 +970,8 @@ const initialState: SessionState = {
         customScale: null,
         beatsPerBar: 4,
         gridSize: "1/4",
+        stretchAlgorithmOverride: null,
+        hifiganMelStretchOverride: null,
     },
 
     busy: false,
@@ -973,6 +995,7 @@ export {
     saveProjectAsRemote,
     setProjectBaseScaleRemote,
     setProjectCustomScaleRemote,
+    setProjectStretchSettingsRemote,
     setProjectTimelineSettingsRemote,
 } from "./thunks/projectThunks";
 
@@ -1146,6 +1169,12 @@ const sessionSlice = createSlice({
         },
         toggleQuickSearchAutoNormalize(state) {
             state.quickSearchAutoNormalizeEnabled = !state.quickSearchAutoNormalizeEnabled;
+        },
+        setDefaultStretchAlgorithm(state, action: PayloadAction<StretchAlgorithmOption>) {
+            state.defaultStretchAlgorithm = action.payload;
+        },
+        setDefaultHifiganMelStretch(state, action: PayloadAction<boolean>) {
+            state.defaultHifiganMelStretch = action.payload;
         },
         setVisibleReferenceRootTrackIds(state, action: PayloadAction<string[]>) {
             state.visibleReferenceRootTrackIds = Array.from(
@@ -1654,6 +1683,19 @@ const sessionSlice = createSlice({
                         .filter((id: unknown): id is string => typeof id === "string")
                         .map((id: string) => id.trim())
                         .filter((id: string) => id.length > 0);
+                }
+                const defaultStretchAlgorithm = (s as any).defaultStretchAlgorithm;
+                if (
+                    defaultStretchAlgorithm != null &&
+                    ["linear", "signalsmith", "soundtouch"].includes(defaultStretchAlgorithm)
+                ) {
+                    state.defaultStretchAlgorithm =
+                        defaultStretchAlgorithm as StretchAlgorithmOption;
+                }
+                if ((s as any).defaultHifiganMelStretch != null) {
+                    state.defaultHifiganMelStretch = Boolean(
+                        (s as any).defaultHifiganMelStretch,
+                    );
                 }
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
@@ -2546,6 +2588,31 @@ const sessionSlice = createSlice({
                 }
             })
 
+            .addCase(setProjectStretchSettingsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                    project?: {
+                        stretch_algorithm_override?: StretchAlgorithmOption | null;
+                        hifigan_mel_stretch_override?: boolean | null;
+                        dirty?: boolean;
+                    };
+                };
+                if (!payload.ok) {
+                    return;
+                }
+                if (payload.project?.stretch_algorithm_override !== undefined) {
+                    state.project.stretchAlgorithmOverride =
+                        payload.project.stretch_algorithm_override ?? null;
+                }
+                if (payload.project?.hifigan_mel_stretch_override !== undefined) {
+                    state.project.hifiganMelStretchOverride =
+                        payload.project.hifigan_mel_stretch_override ?? null;
+                }
+                if (typeof payload.project?.dirty === "boolean") {
+                    state.project.dirty = payload.project.dirty;
+                }
+            })
+
             .addCase(addClipOnTrack.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2921,6 +2988,8 @@ export const {
     removeCustomScalePreset,
     toggleLockParamLines,
     toggleQuickSearchAutoNormalize,
+    setDefaultStretchAlgorithm,
+    setDefaultHifiganMelStretch,
     setVisibleReferenceRootTrackIds,
     toggleVisibleReferenceRootTrackId,
     setSelectedClip,

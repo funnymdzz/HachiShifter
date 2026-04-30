@@ -1,4 +1,5 @@
 use crate::state::{SynthPipelineKind, TimelineState};
+use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -60,6 +61,12 @@ pub struct SynthConfig {
     /// 工程默认合成管线，`None` 时由 Track 的 `pitch_analysis_algo` 决定。
     #[serde(default)]
     pub default_pipeline: Option<SynthPipelineKind>,
+    /// 工程级外部时间拉伸算法覆盖；`None` 表示继承全局默认值。
+    #[serde(default)]
+    pub stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    /// 工程级 HiFiGAN mel-stretch 开关覆盖；`None` 表示继承全局默认值。
+    #[serde(default)]
+    pub hifigan_mel_stretch_override: Option<bool>,
 }
 
 // ─── 工程文件 ──────────────────────────────────────────────────────────────────

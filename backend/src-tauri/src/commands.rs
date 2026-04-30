@@ -209,6 +209,19 @@ pub fn set_project_timeline_settings(
     project::set_project_timeline_settings(state, beats_per_bar, grid_size)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_project_stretch_settings(
+    state: State<'_, AppState>,
+    stretch_algorithm_override: Option<crate::time_stretch::UserStretchAlgorithm>,
+    hifigan_mel_stretch_override: Option<bool>,
+) -> serde_json::Value {
+    project::set_project_stretch_settings(
+        state,
+        stretch_algorithm_override,
+        hifigan_mel_stretch_override,
+    )
+}
+
 // ===================== dialogs =====================
 
 #[tauri::command(rename_all = "camelCase")]

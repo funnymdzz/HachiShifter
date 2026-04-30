@@ -202,4 +202,69 @@ impl HiFiGanRenderer {
 
         Ok(result)
     }
+
+    pub fn render_mel_stretch_with_formant(
+        &self,
+        ctx: &RenderContext<'_>,
+        playback_rate: f64,
+        formant_shift_curve: Option<&Vec<f32>>,
+    ) -> Result<Vec<f32>, String> {
+        let fp = ctx.frame_period_ms;
+        let clip_start = ctx.clip_start_sec;
+        let pitch_edit = ctx.pitch_edit;
+        let clip_midi = ctx.clip_midi;
+
+        if clip_midi.is_empty() {
+            return Ok(ctx.mono_pcm.to_vec());
+        }
+
+        let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
+        let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
+        let fp_local = fp.max(0.1);
+        let time_to_idx_mul = 1000.0 / fp_local;
+
+        let formant_shift_fn = move |abs_time_sec: f64| -> f32 {
+            let Some(curve) = formant_shift_curve else {
+                return 0.0;
+            };
+            if curve.is_empty() {
+                return 0.0;
+            }
+            let idx_f = abs_time_sec.max(0.0) * time_to_idx_mul;
+            if !idx_f.is_finite() {
+                return 0.0;
+            }
+            let i0 = idx_f.floor().max(0.0) as usize;
+            let i1 = (i0 + 1).min(curve.len().saturating_sub(1));
+            let frac = (idx_f - i0 as f64).clamp(0.0, 1.0) as f32;
+            let a = curve.get(i0).copied().unwrap_or(0.0);
+            let b = curve.get(i1).copied().unwrap_or(a);
+            a + (b - a) * frac
+        };
+
+        crate::nsf_hifigan_onnx::infer_pitch_edit_chunked_mel_stretch(
+            ctx.mono_pcm,
+            ctx.sample_rate,
+            playback_rate.max(1e-6),
+            ctx.seg_start_sec,
+            move |abs_time_sec| {
+                let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
+                if !(orig.is_finite() && orig > 0.0) {
+                    return 0.0;
+                }
+                let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
+                    Some(v) => v,
+                    None => orig,
+                };
+                if target.is_finite() && target > 0.0 {
+                    target
+                } else {
+                    0.0
+                }
+            },
+            formant_shift_fn,
+            chunk_sec,
+            overlap_sec,
+        )
+    }
 }

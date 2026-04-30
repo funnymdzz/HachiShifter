@@ -308,6 +308,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "set_project_timeline_settings":
             return { beatsPerBar: args[0], gridSize: args[1] };
 
+        case "set_project_stretch_settings":
+            return {
+                stretchAlgorithmOverride: args[0],
+                hifiganMelStretchOverride: args[1],
+            };
+
         case "save_project":
             return args[0] === undefined ? undefined : { notesMarkdown: args[0] };
 

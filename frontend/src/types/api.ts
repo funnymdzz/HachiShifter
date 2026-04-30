@@ -75,6 +75,8 @@ export interface ProjectMeta {
     } | null;
     beats_per_bar?: number;
     grid_size?: string;
+    stretch_algorithm_override?: "linear" | "signalsmith" | "soundtouch" | null;
+    hifigan_mel_stretch_override?: boolean | null;
 }
 
 export interface TimelineState {

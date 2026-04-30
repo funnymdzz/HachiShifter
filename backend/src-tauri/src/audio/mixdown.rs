@@ -497,9 +497,7 @@ pub fn render_mixdown_interleaved(
             .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
             .map(|t| {
                 let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                crate::renderer::get_processor(kind)
-                    .capabilities()
-                    .handles_time_stretch
+                crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
             })
             .unwrap_or(false);
         let mut segment = segment;

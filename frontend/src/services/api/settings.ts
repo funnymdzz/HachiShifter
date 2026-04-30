@@ -1,5 +1,7 @@
 import { invoke } from "../invoke";
 
+export type StretchAlgorithmOption = "linear" | "signalsmith" | "soundtouch";
+
 export interface UiSettings {
     autoCrossfade: boolean;
     gridSnap: boolean;
@@ -17,6 +19,8 @@ export interface UiSettings {
     lockParamLines?: boolean;
     quickSearchAutoNormalize?: boolean;
     visibleReferenceRootTrackIds?: string[];
+    defaultStretchAlgorithm?: StretchAlgorithmOption;
+    defaultHifiganMelStretch?: boolean;
     selectDragDirection?: string;
     drawDragDirection?: string;
     lineVibratoDragDirection?: string;

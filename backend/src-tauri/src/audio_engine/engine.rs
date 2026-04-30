@@ -11,7 +11,7 @@ use arc_swap::ArcSwap;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::state::TimelineState;
-use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
+use crate::time_stretch::time_stretch_interleaved;
 
 use super::mix::{
     render_callback_f32, render_callback_i16, render_callback_u16, SnapshotTransitionState,
@@ -241,8 +241,15 @@ impl AudioEngine {
                 let tx_ready = tx_for_worker.clone();
                 thread::spawn(move || {
                     while let Ok(job) = stretch_rx.recv() {
-                        // If SoundTouch isn't available, drop the job.
-                        if !crate::soundtouch::is_available() {
+                        let runtime_available = match job.algorithm {
+                            crate::time_stretch::StretchAlgorithm::SoundTouchDll => {
+                                crate::soundtouch::is_available()
+                            }
+                            crate::time_stretch::StretchAlgorithm::SignalsmithStretch
+                            | crate::time_stretch::StretchAlgorithm::LinearResample => true,
+                            crate::time_stretch::StretchAlgorithm::ElastiqueSoloist => false,
+                        };
+                        if !runtime_available {
                             if let Ok(mut s) = inflight.lock() {
                                 s.remove(&job.key);
                             }
@@ -319,7 +326,7 @@ impl AudioEngine {
                             2,
                             job.key.out_rate,
                             loop_out_frames,
-                            StretchAlgorithm::SoundTouchDll,
+                            job.algorithm,
                         );
 
                         let stretched_src = ResampledStereo {
@@ -1031,8 +1038,17 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
 
 fn handle_audio_ready(s: &mut EngineWorkerState, _key: super::types::AudioKey) {
     // A decoded/resampled buffer became available.
-    // Rebuild the snapshot so missing clips can be attached.
+    // Requeue stretch work now that the source PCM cache exists, then rebuild the snapshot so
+    // plain-audio clips can swap from playback_rate fallback to the selected external stretcher.
     if let Some(tl) = s.last_timeline.as_ref() {
+        schedule_stretch_jobs(
+            tl,
+            s.sr,
+            s.stretch_tx,
+            s.stretch_inflight,
+            s.stretch_cache,
+            s.app_handle.as_ref(),
+        );
         let snap = build_snapshot(tl, s.sr, s.cache, s.stretch_cache);
         s.duration_frames
             .store(snap.duration_frames, Ordering::Relaxed);
@@ -1149,4 +1165,115 @@ fn emit_clip_pitch_data_for_clip(
 /// 而是由 moved_clip_ids 分支重新推送 trim+resample 后的 pitch 数据。
 fn clip_pitch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
     old.source_path != new.source_path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_engine::resource_manager::ResourceManager;
+    use crate::audio_engine::types::{EngineCommand, EngineSnapshot};
+    use crate::state::{Clip, TimelineState};
+    use crate::time_stretch::{update_runtime_stretch_settings, UserStretchAlgorithm};
+    use arc_swap::ArcSwap;
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    fn make_plain_stretch_timeline() -> TimelineState {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.tracks[0].id.clone();
+        timeline.clips.push(Clip {
+            id: "clip-1".to_string(),
+            track_id,
+            name: "clip".to_string(),
+            start_sec: 0.0,
+            length_sec: 1.0,
+            color: "#ffffff".to_string(),
+            source_path: Some("E:/virtual/test.wav".to_string()),
+            source_path_relative: None,
+            duration_sec: Some(1.0),
+            duration_frames: Some(44_100),
+            source_sample_rate: Some(44_100),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 1.0,
+            playback_rate: 0.75,
+            reversed: false,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
+        });
+        timeline
+    }
+
+    #[test]
+    fn audio_ready_requeues_stretch_jobs_for_plain_audio_clips() {
+        update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, false, None, None);
+
+        let timeline = make_plain_stretch_timeline();
+        let (engine_tx, _engine_rx) = mpsc::channel::<EngineCommand>();
+        let (stretch_tx, stretch_rx) = mpsc::channel();
+
+        let resources = ResourceManager::new(engine_tx.clone());
+        let cache = resources.cache().clone();
+        let stretch_cache = Arc::new(Mutex::new(HashMap::new()));
+        let stretch_inflight = Arc::new(Mutex::new(HashSet::new()));
+        let snapshot = Arc::new(ArcSwap::from_pointee(EngineSnapshot {
+            bpm: 120.0,
+            sample_rate: 44_100,
+            duration_frames: 0,
+            track_ids: Arc::new(vec![]),
+            clips: Arc::new(vec![]),
+        }));
+        let is_playing = Arc::new(AtomicBool::new(false));
+        let target = Arc::new(Mutex::new(None));
+        let base_frames = Arc::new(AtomicU64::new(0));
+        let position_frames = Arc::new(AtomicU64::new(0));
+        let duration_frames = Arc::new(AtomicU64::new(0));
+        let meter_state = Arc::new(Mutex::new(HashMap::new()));
+        let meter_generation = Arc::new(AtomicU64::new(0));
+        let mut last_timeline = Some(timeline);
+        let mut last_play_file = None;
+
+        let mut worker = EngineWorkerState {
+            sr: 44_100,
+            is_playing: &is_playing,
+            target: &target,
+            base_frames: &base_frames,
+            position_frames: &position_frames,
+            duration_frames: &duration_frames,
+            snapshot: &snapshot,
+            cache: &cache,
+            stretch_cache: &stretch_cache,
+            stretch_inflight: &stretch_inflight,
+            stretch_tx: &stretch_tx,
+            resources: &resources,
+            tx: &engine_tx,
+            last_timeline: &mut last_timeline,
+            last_play_file: &mut last_play_file,
+            app_handle: None,
+            meter_state: &meter_state,
+            meter_generation: &meter_generation,
+        };
+
+        handle_audio_ready(
+            &mut worker,
+            (PathBuf::from("E:/virtual/test.wav"), 44_100),
+        );
+
+        let job = stretch_rx
+            .try_recv()
+            .expect("audio_ready should requeue stretch work once source audio becomes available");
+        assert!(matches!(
+            job.algorithm,
+            crate::time_stretch::StretchAlgorithm::SignalsmithStretch
+        ));
+    }
 }

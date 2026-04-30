@@ -860,18 +860,16 @@ fn render_single_clip(
     // 5. 时间拉伸（playback_rate != 1）
     // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
     // 则跳过此处的时间拉伸，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
-    let processor_handles_stretch = {
-        let clip_root = timeline.resolve_root_track_id(&clip.track_id);
-        clip_root
-            .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
-            .map(|t| {
-                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                crate::renderer::get_processor(kind)
-                    .capabilities()
-                    .handles_time_stretch
-            })
-            .unwrap_or(false)
-    };
+        let processor_handles_stretch = {
+            let clip_root = timeline.resolve_root_track_id(&clip.track_id);
+            clip_root
+                .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
+                .map(|t| {
+                    let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                    crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
+                })
+                .unwrap_or(false)
+        };
     let mut segment = segment;
     if (playback_rate - 1.0).abs() > 1e-6 && !processor_handles_stretch {
         let seg_frames_in = segment.len() / 2;
@@ -881,7 +879,7 @@ fn render_single_clip(
             2,
             out_rate,
             target_frames,
-            crate::time_stretch::StretchAlgorithm::SoundTouchDll,
+            crate::time_stretch::resolved_external_stretch_algorithm(),
         );
     }
 

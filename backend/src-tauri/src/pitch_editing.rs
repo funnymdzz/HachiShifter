@@ -953,9 +953,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::get_processor(kind)
-            .capabilities()
-            .handles_time_stretch;
+        let handles = crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };
@@ -982,9 +980,8 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // - handles_time_stretch=false：输入 PCM 已由外部时间拉伸预拉伸，帧数 = 时间轴帧数
     let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
     let clip_playback_rate = (clip.playback_rate as f64).max(1e-6);
-    let processor_handles_stretch = crate::renderer::get_processor(kind)
-        .capabilities()
-        .handles_time_stretch;
+    let processor_handles_stretch =
+        crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
 
     // Quick skip when user never set a target in this segment window.
     let seg_frames = pcm_stereo.len() / 2;
@@ -1144,7 +1141,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
                 clip.id,
                 processor.id(),
                 processor.is_available(),
-                processor.capabilities().handles_time_stretch,
+                processor_handles_stretch,
                 mono.len(),
                 expected_out_frames,
                 seg_start_sec,
@@ -1295,9 +1292,7 @@ pub fn does_clip_need_processor_render(
     // 即使用户没有编辑音高，也需要触发处理器预渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::get_processor(kind)
-            .capabilities()
-            .handles_time_stretch;
+        let handles = crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };

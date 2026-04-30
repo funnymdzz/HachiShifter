@@ -261,6 +261,7 @@ pub fn run() {
             commands::run_timed_auto_backup,
             commands::set_project_base_scale,
             commands::set_project_custom_scale,
+            commands::set_project_stretch_settings,
             commands::set_project_timeline_settings,
             commands::open_audio_dialog,
             commands::open_audio_dialog_multi,

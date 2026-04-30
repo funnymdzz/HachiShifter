@@ -1,4 +1,5 @@
 use crate::project::CustomScale;
+use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +23,10 @@ pub struct ProjectMetaPayload {
     pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hifigan_mel_stretch_override: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

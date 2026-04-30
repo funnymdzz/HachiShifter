@@ -1,4 +1,5 @@
 use crate::project::CustomScale;
+use crate::time_stretch::UserStretchAlgorithm;
 use std::fs;
 use std::path::Path;
 
@@ -45,6 +46,10 @@ pub struct UiSettings {
     pub quick_search_auto_normalize: bool,
     #[serde(default)]
     pub visible_reference_root_track_ids: Vec<String>,
+    #[serde(default)]
+    pub default_stretch_algorithm: UserStretchAlgorithm,
+    #[serde(default = "default_hifigan_mel_stretch")]
+    pub default_hifigan_mel_stretch: bool,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
     #[serde(default = "default_drag_direction")]
@@ -177,6 +182,10 @@ fn default_draw_drag_direction() -> String {
     "free".to_string()
 }
 
+fn default_hifigan_mel_stretch() -> bool {
+    true
+}
+
 fn default_scale_highlight_mode() -> String {
     "off".to_string()
 }
@@ -198,6 +207,8 @@ impl Default for UiSettings {
             lock_param_lines: true,
             quick_search_auto_normalize: false,
             visible_reference_root_track_ids: Vec::new(),
+            default_stretch_algorithm: UserStretchAlgorithm::default(),
+            default_hifigan_mel_stretch: default_hifigan_mel_stretch(),
             drag_direction: default_drag_direction(),
             select_drag_direction: default_drag_direction(),
             draw_drag_direction: default_draw_drag_direction(),
@@ -206,6 +217,22 @@ impl Default for UiSettings {
             scale_highlight_mode: default_scale_highlight_mode(),
             custom_scale_presets: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UiSettings;
+    use crate::time_stretch::UserStretchAlgorithm;
+
+    #[test]
+    fn ui_settings_defaults_to_signalsmith_and_hifigan_mel_stretch_on() {
+        let settings = UiSettings::default();
+        assert_eq!(
+            settings.default_stretch_algorithm,
+            UserStretchAlgorithm::Signalsmith
+        );
+        assert!(settings.default_hifigan_mel_stretch);
     }
 }
 

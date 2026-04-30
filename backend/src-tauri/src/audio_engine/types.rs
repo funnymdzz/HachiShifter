@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::state::TimelineState;
+use crate::time_stretch::{StretchAlgorithm, UserStretchAlgorithm};
 
 pub(crate) type AudioKey = (PathBuf, u32);
 
@@ -9,6 +10,7 @@ pub(crate) type AudioKey = (PathBuf, u32);
 pub(crate) struct StretchKey {
     pub(crate) path: PathBuf,
     pub(crate) out_rate: u32,
+    pub(crate) algorithm: UserStretchAlgorithm,
     pub(crate) bpm_q: u32, // 保留字段以兼容 Hash，固定为 0
     pub(crate) trim_start_q: i64,
     pub(crate) trim_end_q: i64,
@@ -18,6 +20,7 @@ pub(crate) struct StretchKey {
 #[derive(Debug, Clone)]
 pub(crate) struct StretchJob {
     pub(crate) key: StretchKey,
+    pub(crate) algorithm: StretchAlgorithm,
     pub(crate) source_start_sec: f64,
     pub(crate) source_end_sec: f64,
     pub(crate) playback_rate: f64,

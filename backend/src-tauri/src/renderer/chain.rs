@@ -245,8 +245,16 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            return crate::renderer::hifigan::HiFiGanRenderer
-                .render_with_formant(&render_ctx, formant_curve);
+            let renderer = crate::renderer::hifigan::HiFiGanRenderer;
+            return if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
+                renderer.render_mel_stretch_with_formant(
+                    &render_ctx,
+                    cc.playback_rate,
+                    formant_curve,
+                )
+            } else {
+                renderer.render_with_formant(&render_ctx, formant_curve)
+            };
         }
 
         // ── Breath 路径 ─────────────────────────────────────────────────────
@@ -272,8 +280,16 @@ impl ProcessingStage for HiFiGanStage {
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
             };
-            crate::renderer::hifigan::HiFiGanRenderer
-                .render_with_formant(&render_ctx, formant_curve)?
+            let renderer = crate::renderer::hifigan::HiFiGanRenderer;
+            if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
+                renderer.render_mel_stretch_with_formant(
+                    &render_ctx,
+                    cc.playback_rate,
+                    formant_curve,
+                )?
+            } else {
+                renderer.render_with_formant(&render_ctx, formant_curve)?
+            }
         };
 
         let stretched_noise = noise;

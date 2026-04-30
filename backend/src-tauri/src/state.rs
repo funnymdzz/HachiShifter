@@ -6,6 +6,7 @@ use crate::models::{
     TimelineClip, TimelineStatePayload, TimelineTrack,
 };
 use crate::project::CustomScale;
+use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -312,6 +313,8 @@ pub struct ProjectState {
     pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
+    pub stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    pub hifigan_mel_stretch_override: Option<bool>,
     #[allow(dead_code)]
     pub allow_close: bool,
 }
@@ -329,6 +332,8 @@ impl Default for ProjectState {
             custom_scale: None,
             beats_per_bar: 4,
             grid_size: "1/4".to_string(),
+            stretch_algorithm_override: None,
+            hifigan_mel_stretch_override: None,
             allow_close: false,
         }
     }
@@ -1134,6 +1139,8 @@ impl AppState {
             custom_scale: p.custom_scale,
             beats_per_bar: p.beats_per_bar,
             grid_size: p.grid_size,
+            stretch_algorithm_override: p.stretch_algorithm_override,
+            hifigan_mel_stretch_override: p.hifigan_mel_stretch_override,
         }
     }
 
@@ -2729,7 +2736,7 @@ impl TimelineState {
                     sample_rate: 44_100,
                     start_sec: start,
                     end_sec: Some(end),
-                    stretch: crate::time_stretch::StretchAlgorithm::SoundTouchDll,
+                    stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
                     apply_pitch_edit: true,
                     export_format: crate::mixdown::ExportFormat::Wav32f,
                     quality_preset: crate::mixdown::QualityPreset::Export,

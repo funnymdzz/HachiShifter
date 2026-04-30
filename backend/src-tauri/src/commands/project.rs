@@ -4,6 +4,9 @@ use crate::project::{
 };
 use crate::state::AppState;
 use crate::synth_clip_cache;
+use crate::time_stretch::{
+    update_project_stretch_overrides, update_runtime_stretch_settings, UserStretchAlgorithm,
+};
 use chrono::Local;
 use std::fs;
 use std::io::Write;
@@ -110,6 +113,28 @@ fn load_auto_backup_settings(state: &AppState) -> crate::config::AutoBackupSetti
         return crate::config::load_auto_backup_settings(config_dir);
     }
     crate::config::AutoBackupSettings::default()
+}
+
+fn load_ui_stretch_defaults(state: &AppState) -> (UserStretchAlgorithm, bool) {
+    if let Some(config_dir) = state.config_dir.get() {
+        let settings = crate::config::load_ui_settings(config_dir);
+        return (
+            settings.default_stretch_algorithm,
+            settings.default_hifigan_mel_stretch,
+        );
+    }
+    (UserStretchAlgorithm::default(), true)
+}
+
+fn sync_runtime_stretch_settings(state: &AppState) {
+    let (default_algorithm, default_hifigan_mel_stretch) = load_ui_stretch_defaults(state);
+    let project = state.project.lock().unwrap_or_else(|e| e.into_inner());
+    update_runtime_stretch_settings(
+        default_algorithm,
+        default_hifigan_mel_stretch,
+        project.stretch_algorithm_override,
+        project.hifigan_mel_stretch_override,
+    );
 }
 
 fn is_hifishifter_project_path(path: &Path) -> bool {
@@ -375,7 +400,16 @@ fn build_project_file_snapshot(
         .clone();
     tl.project_sec = latest_clip_end_sec(&tl).max(4.0).ceil();
 
-    let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size, notes_markdown) = {
+    let (
+        base_scale,
+        use_custom_scale,
+        custom_scale,
+        beats_per_bar,
+        grid_size,
+        notes_markdown,
+        stretch_algorithm_override,
+        hifigan_mel_stretch_override,
+    ) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
             normalize_scale_key(&p.base_scale),
@@ -384,6 +418,8 @@ fn build_project_file_snapshot(
             normalize_beats_per_bar(p.beats_per_bar),
             normalize_grid_size(&p.grid_size),
             p.notes_markdown.clone(),
+            p.stretch_algorithm_override,
+            p.hifigan_mel_stretch_override,
         )
     };
 
@@ -398,6 +434,8 @@ fn build_project_file_snapshot(
     pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
     pf.custom_scale = custom_scale;
     pf.notes_markdown = notes_markdown;
+    pf.synth_config.stretch_algorithm_override = stretch_algorithm_override;
+    pf.synth_config.hifigan_mel_stretch_override = hifigan_mel_stretch_override;
     pf
 }
 
@@ -776,7 +814,10 @@ pub(super) fn new_project(
         p.custom_scale = None;
         p.beats_per_bar = 4;
         p.grid_size = "1/4".to_string();
+        p.stretch_algorithm_override = None;
+        p.hifigan_mel_stretch_override = None;
     }
+    sync_runtime_stretch_settings(state.inner());
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         tl.project_scale_notes = base_scale_notes("C");
@@ -856,6 +897,8 @@ pub(super) fn open_project(
         p.use_custom_scale = pf.use_custom_scale && p.custom_scale.is_some();
         p.beats_per_bar = normalize_beats_per_bar(pf.beats_per_bar);
         p.grid_size = normalize_grid_size(&pf.grid_size);
+        p.stretch_algorithm_override = pf.synth_config.stretch_algorithm_override;
+        p.hifigan_mel_stretch_override = pf.synth_config.hifigan_mel_stretch_override;
         // recent list (in-memory)
         p.recent.retain(|x| x != &project_path);
         p.recent.insert(0, project_path.clone());
@@ -864,6 +907,7 @@ pub(super) fn open_project(
         }
         update_window_title(&window, &p.name, p.dirty);
     }
+    sync_runtime_stretch_settings(state.inner());
 
     // 持久化最近工程列表
     save_recent_projects(state.inner());
@@ -1067,5 +1111,45 @@ pub(super) fn set_project_timeline_settings(
         }
     }
 
+    serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
+}
+
+pub(super) fn set_project_stretch_settings(
+    state: State<'_, AppState>,
+    stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    hifigan_mel_stretch_override: Option<bool>,
+) -> serde_json::Value {
+    let (name, changed, was_clean) = {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = p.stretch_algorithm_override != stretch_algorithm_override
+            || p.hifigan_mel_stretch_override != hifigan_mel_stretch_override;
+        if !changed {
+            return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
+        }
+        let was_clean = !p.dirty;
+        p.stretch_algorithm_override = stretch_algorithm_override;
+        p.hifigan_mel_stretch_override = hifigan_mel_stretch_override;
+        p.dirty = true;
+        (p.name.clone(), true, was_clean)
+    };
+
+    if changed && was_clean {
+        if let Some(handle) = state.app_handle.get() {
+            use tauri::Manager;
+            if let Some(win) = handle.get_webview_window("main") {
+                let title = format!("HiFiShifter - {}*", name);
+                let _ = win.set_title(&title);
+            }
+        }
+    }
+
+    update_project_stretch_overrides(stretch_algorithm_override, hifigan_mel_stretch_override);
+    {
+        let timeline = state.timeline.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        for clip in &timeline.clips {
+            crate::synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+        }
+        state.audio_engine.update_timeline(timeline);
+    }
     serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
 }

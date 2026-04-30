@@ -133,6 +133,23 @@ export const setProjectTimelineSettingsRemote = createAsyncThunk(
     },
 );
 
+export const setProjectStretchSettingsRemote = createAsyncThunk(
+    "session/setProjectStretchSettingsRemote",
+    async (
+        payload: {
+            stretchAlgorithmOverride?: "linear" | "signalsmith" | "soundtouch" | null;
+            hifiganMelStretchOverride?: boolean | null;
+        },
+        { rejectWithValue },
+    ) => {
+        const res = await webApi.setProjectStretchSettings(payload);
+        if (!res || res.ok === false) {
+            return rejectWithValue("set_project_stretch_settings_failed");
+        }
+        return res;
+    },
+);
+
 export const openVocalShifterFromDialog = createAsyncThunk(
     "session/openVocalShifterFromDialog",
     async (_, { rejectWithValue }) => {
