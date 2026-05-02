@@ -3,6 +3,7 @@ import type { TimelineClip, TimelineState, TrackSummaryResult } from "../../type
 import type {
     AutomationPoint,
     ClipInfo,
+    ClipFormantMorph,
     ClipTemplate,
     DrawToolMode,
     DragDirection,
@@ -142,6 +143,13 @@ export type {
 type ClipColor = ClipInfo["color"];
 type WaveformPreview = number[] | { l: number[]; r: number[] };
 type StretchAlgorithmOption = "linear" | "signalsmith" | "soundtouch";
+type ClipFormantToolWindowState = {
+    open: boolean;
+    clipId: string | null;
+    x: number;
+    y: number;
+    hasMoved: boolean;
+};
 
 export interface SessionState {
     toolMode: ToolMode;
@@ -229,6 +237,8 @@ export interface SessionState {
             framePeriodMs: number;
         }
     >;
+    clipFormantStatus: Record<string, "ready" | "rebuilding" | "failed">;
+    clipFormantToolWindow: ClipFormantToolWindowState;
     modelDir: string;
     audioPath: string;
     outputPath: string;
@@ -530,6 +540,7 @@ function applyOptimisticClipState(
         fadeOutSec?: number;
         fadeInCurve?: string;
         fadeOutCurve?: string;
+        formantMorph?: ClipFormantMorph;
     },
 ) {
     const clip = state.clips.find((entry) => entry.id === payload.clipId);
@@ -575,6 +586,9 @@ function applyOptimisticClipState(
     }
     if (payload.fadeOutCurve !== undefined) {
         clip.fadeOutCurve = payload.fadeOutCurve as FadeCurveType;
+    }
+    if (payload.formantMorph !== undefined) {
+        clip.formantMorph = payload.formantMorph ? { ...payload.formantMorph } : undefined;
     }
 
     const clipEnd = clip.startSec + clip.lengthSec;
@@ -685,10 +699,30 @@ function applyTimelineState(
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
             fadeInCurve: (clip.fade_in_curve ?? "sine") as FadeCurveType,
             fadeOutCurve: (clip.fade_out_curve ?? "sine") as FadeCurveType,
+            formantMorph: clip.formant_morph
+                ? {
+                      enabled: Boolean(clip.formant_morph.enabled),
+                      targetF1Hz: Number(clip.formant_morph.target_f1_hz ?? 800),
+                      targetF2Hz: Number(clip.formant_morph.target_f2_hz ?? 1400),
+                      strength: Number(clip.formant_morph.strength ?? 0.50),
+                  }
+                : undefined,
         };
 
         return parsed;
     });
+    state.clipFormantStatus = Object.fromEntries(
+        Object.entries(state.clipFormantStatus).filter(([clipId]) =>
+            state.clips.some((clip) => clip.id === clipId),
+        ),
+    ) as Record<string, "ready" | "rebuilding" | "failed">;
+    if (
+        state.clipFormantToolWindow.clipId &&
+        !state.clips.some((clip) => clip.id === state.clipFormantToolWindow.clipId)
+    ) {
+        state.clipFormantToolWindow.open = false;
+        state.clipFormantToolWindow.clipId = null;
+    }
 
     state.selectedTrackId = timeline.selected_track_id;
     state.selectedClipId = timeline.selected_clip_id;
@@ -930,6 +964,14 @@ const initialState: SessionState = {
     clipWaveforms: {},
     clipPitchRanges: {},
     clipPitchCurves: {},
+    clipFormantStatus: {},
+    clipFormantToolWindow: {
+        open: false,
+        clipId: null,
+        x: 160,
+        y: 120,
+        hasMoved: false,
+    },
 
     modelDir: "pc_nsf_hifigan_44.1k_hop512_128bin_2025.02",
     audioPath: "",
@@ -1549,6 +1591,45 @@ const sessionSlice = createSlice({
         /** 移除某个 clip 的音高曲线（clip 被删除时清理�?*/
         removeClipPitchData(state, action: PayloadAction<string>) {
             delete state.clipPitchCurves[action.payload];
+        },
+        setClipFormantStatus(
+            state,
+            action: PayloadAction<{
+                clipId: string;
+                status: "ready" | "rebuilding" | "failed";
+            }>,
+        ) {
+            state.clipFormantStatus[action.payload.clipId] = action.payload.status;
+        },
+        openClipFormantToolWindow(
+            state,
+            action: PayloadAction<{
+                clipId: string;
+                anchor: { x: number; y: number };
+            }>,
+        ) {
+            const { clipId, anchor } = action.payload;
+            state.clipFormantToolWindow.open = true;
+            state.clipFormantToolWindow.clipId = clipId;
+            if (!state.clipFormantToolWindow.hasMoved) {
+                state.clipFormantToolWindow.x = Math.max(12, Math.round(anchor.x));
+                state.clipFormantToolWindow.y = Math.max(12, Math.round(anchor.y));
+            }
+        },
+        setClipFormantToolWindowPosition(
+            state,
+            action: PayloadAction<{
+                x: number;
+                y: number;
+            }>,
+        ) {
+            state.clipFormantToolWindow.x = Math.max(0, Math.round(action.payload.x));
+            state.clipFormantToolWindow.y = Math.max(0, Math.round(action.payload.y));
+            state.clipFormantToolWindow.hasMoved = true;
+        },
+        closeClipFormantToolWindow(state) {
+            state.clipFormantToolWindow.open = false;
+            state.clipFormantToolWindow.clipId = null;
         },
         undo(state) {
             const snapshot = state.historyPast.pop();
@@ -2739,6 +2820,17 @@ const sessionSlice = createSlice({
 
             .addCase(setClipStateRemote.pending, (state, action) => {
                 applyOptimisticClipState(state, action.meta.arg);
+                const clip = state.clips.find((entry) => entry.id === action.meta.arg.clipId);
+                const formantEnabled =
+                    action.meta.arg.formantMorph?.enabled ?? clip?.formantMorph?.enabled ?? false;
+                const formantRelevantChange =
+                    action.meta.arg.formantMorph !== undefined ||
+                    action.meta.arg.sourceStartSec !== undefined ||
+                    action.meta.arg.sourceEndSec !== undefined ||
+                    action.meta.arg.reversed !== undefined;
+                if (formantEnabled && formantRelevantChange) {
+                    state.clipFormantStatus[action.meta.arg.clipId] = "rebuilding";
+                }
             })
 
             .addCase(setClipsStateBulkRemote.fulfilled, (state, action) => {
@@ -3015,6 +3107,10 @@ export const {
     setSelectedPoint,
     removeAutomationPoint,
     setClipPitchData,
+    setClipFormantStatus,
+    openClipFormantToolWindow,
+    setClipFormantToolWindowPosition,
+    closeClipFormantToolWindow,
     removeClipPitchData,
     undo,
     redo,

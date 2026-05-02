@@ -12,7 +12,7 @@
 import React from "react";
 
 import { useI18n } from "../../../i18n/I18nProvider";
-import type { ClipInfo } from "../../../features/session/sessionTypes";
+import type { ClipFormantMorph, ClipInfo } from "../../../features/session/sessionTypes";
 import { CLIP_BODY_PADDING_Y, CLIP_HEADER_HEIGHT } from "./constants";
 import { ClipEdgeHandles } from "./clip/ClipEdgeHandles";
 import { ClipHeader } from "./clip/ClipHeader";
@@ -47,6 +47,7 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameCommit,
     onRenameDone,
     onGainCommit,
+    onFormantMorphCommit,
     hovered = false,
 }: {
     clip: ClipInfo;
@@ -105,6 +106,11 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
+    onFormantMorphCommit?: (
+        clipId: string,
+        value: ClipFormantMorph,
+        checkpoint: boolean,
+    ) => void;
     hovered?: boolean;
 }) {
     const { t } = useI18n();
@@ -340,6 +346,7 @@ export const ClipItem = React.memo(function ClipItem({
                 onRenameCommit={onRenameCommit}
                 onRenameDone={onRenameDone}
                 onGainCommit={onGainCommit}
+                onFormantMorphCommit={onFormantMorphCommit}
             />
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}

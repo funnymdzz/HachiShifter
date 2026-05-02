@@ -3,7 +3,7 @@
  */
 import React from "react";
 
-import type { ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
+import type { ClipFormantMorph, ClipInfo, TrackInfo } from "../../../features/session/sessionTypes";
 import type { GhostDragInfo } from "./hooks/useClipDrag";
 import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
@@ -122,6 +122,11 @@ type TrackLaneProps = {
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
+    onFormantMorphCommit?: (
+        clipId: string,
+        value: ClipFormantMorph,
+        checkpoint: boolean,
+    ) => void;
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
     ghostDrag?: GhostDragInfo | null;
@@ -163,6 +168,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         onRenameCommit,
         onRenameDone,
         onGainCommit,
+        onFormantMorphCommit,
         ghostDrag,
         verticalTrackLockTrackId,
         allClips,
@@ -524,6 +530,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
                         onRenameCommit={onRenameCommit}
                         onRenameDone={onRenameDone}
                         onGainCommit={onGainCommit}
+                        onFormantMorphCommit={onFormantMorphCommit}
                         hovered={hoveredClipId === clip.id}
                     />
                 );
@@ -598,6 +605,7 @@ export const TrackLane = React.memo(function TrackLane(props: TrackLaneProps) {
         prev.onRenameCommit === next.onRenameCommit &&
         prev.onRenameDone === next.onRenameDone &&
         prev.onGainCommit === next.onGainCommit &&
+        prev.onFormantMorphCommit === next.onFormantMorphCommit &&
         prev.ghostDrag === next.ghostDrag &&
         prev.verticalTrackLockTrackId === next.verticalTrackLockTrackId &&
         prev.allClips === next.allClips &&

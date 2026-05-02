@@ -238,7 +238,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 fadeInCurve: args[12],
                 fadeOutCurve: args[13],
                 color: args[14],
-                checkpoint: args[15],
+                formantMorph: args[15],
+                checkpoint: args[16],
             };
 
         case "set_clips_state_bulk":

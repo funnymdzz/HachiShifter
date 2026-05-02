@@ -835,6 +835,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -936,6 +937,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
             });
 
             // 写入 pitch 数据
@@ -1516,6 +1518,7 @@ pub fn import_vsp_clipboard(
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -1616,6 +1619,7 @@ pub fn import_vsp_clipboard(
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
             });
 
             write_pitch_data_for_segment(
@@ -2018,6 +2022,7 @@ fn import_vsp_clipboard_selected_tracks(
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -2116,6 +2121,7 @@ fn import_vsp_clipboard_selected_tracks(
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
             });
 
             write_pitch_data_for_segment(

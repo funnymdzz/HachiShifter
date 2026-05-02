@@ -48,6 +48,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 rustfft = "6"
 num-complex = "0.4"
+aberth = "0.4"
 ndarray = { version = "0.16", optional = true }
 
 [target.'cfg(windows)'.dependencies]

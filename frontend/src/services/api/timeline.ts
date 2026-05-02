@@ -157,6 +157,12 @@ export const timelineApi = {
         fadeInCurve?: string;
         fadeOutCurve?: string;
         color?: string;
+        formantMorph?: {
+            enabled: boolean;
+            targetF1Hz: number;
+            targetF2Hz: number;
+            strength: number;
+        };
         /** 是否创建 undo checkpoint，默认为 true */
         checkpoint?: boolean;
     }) =>
@@ -177,6 +183,7 @@ export const timelineApi = {
             payload.fadeInCurve,
             payload.fadeOutCurve,
             payload.color,
+            payload.formantMorph,
             payload.checkpoint,
         ),
 

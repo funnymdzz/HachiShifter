@@ -750,6 +750,7 @@ fn collect_clips_needing_render(
             playback_rate,
             &entry.extra_curves,
             &entry.extra_params,
+            clip.formant_morph.as_ref().filter(|params| params.enabled),
             None,
         );
         let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
@@ -856,6 +857,36 @@ fn render_single_clip(
     } else {
         return Err("unsupported channel count".to_string());
     };
+    let mut segment = segment;
+
+    if let Some(params) = clip.formant_morph.as_ref().filter(|params| params.enabled) {
+        let key = crate::formant_cache::make_formant_cache_key(
+            &clip.id,
+            std::path::Path::new(source_path),
+            out_rate,
+            clip.source_start_sec.max(0.0),
+            clip.source_end_sec,
+            clip.reversed,
+            params,
+        );
+        match crate::formant_cache::get_or_compute_formant_audio(key, &segment, out_rate, params) {
+            Ok(entry) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "render_single_clip using formant clip_id={} frames={} diff={:.8}",
+                    clip.id,
+                    entry.frames,
+                    crate::formant_cache::average_abs_diff(&segment, entry.pcm_stereo.as_ref())
+                ));
+                segment = entry.pcm_stereo.as_ref().clone();
+            }
+            Err(error) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "render_single_clip formant error clip_id={} error={}",
+                    clip.id, error
+                ));
+            }
+        }
+    }
 
     // 5. 时间拉伸（playback_rate != 1）
     // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
@@ -870,7 +901,6 @@ fn render_single_clip(
                 })
                 .unwrap_or(false)
         };
-    let mut segment = segment;
     if (playback_rate - 1.0).abs() > 1e-6 && !processor_handles_stretch {
         let seg_frames_in = segment.len() / 2;
         let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
@@ -1002,6 +1032,7 @@ fn render_single_clip(
                     playback_rate,
                     &entry.extra_curves,
                     &entry.extra_params,
+                    clip.formant_morph.as_ref().filter(|params| params.enabled),
                 );
                 Some(crate::synth_clip_cache::BreathNoiseCacheKey {
                     clip_id: clip.id.clone(),

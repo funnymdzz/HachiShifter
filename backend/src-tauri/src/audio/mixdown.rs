@@ -486,6 +486,33 @@ pub fn render_mixdown_interleaved(
         } else {
             continue;
         };
+        let mut segment = segment;
+
+        if let Some(params) = clip.formant_morph.as_ref().filter(|params| params.enabled) {
+            let key = crate::formant_cache::make_formant_cache_key(
+                &clip.id,
+                Path::new(source_path),
+                out_rate,
+                clip.source_start_sec.max(0.0),
+                clip.source_end_sec,
+                clip.reversed,
+                params,
+            );
+            match crate::formant_cache::get_or_compute_formant_audio(key, &segment, out_rate, params)
+            {
+                Ok(entry) => {
+                    segment = entry.pcm_stereo.as_ref().clone();
+                }
+                Err(err) => {
+                    if debug {
+                        eprintln!(
+                            "mixdown: formant morph failed; clip_id={} path={} err={}",
+                            clip.id, source_path, err
+                        );
+                    }
+                }
+            }
+        }
 
         // Pitch-preserving time-stretch:
         // - playback_rate == 1: keep source window duration as-is.
@@ -500,7 +527,6 @@ pub fn render_mixdown_interleaved(
                 crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
             })
             .unwrap_or(false);
-        let mut segment = segment;
         // 外部 SoundTouch 拉伸的执行条件：
         //   !processor_handles_stretch → 处理器不内部拉伸（World/HiFiGAN chain 内有 TimeStretchStage，vslib 原生拉伸）
         //   !opts.apply_pitch_edit    → pitch edit 链不会运行，内部拉伸无法触发，需回退到外部拉伸

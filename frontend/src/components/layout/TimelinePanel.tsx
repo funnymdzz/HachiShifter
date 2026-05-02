@@ -15,9 +15,11 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { useAppSelector } from "../../app/hooks";
 import {
     addTrackRemote,
+    closeClipFormantToolWindow,
     duplicateTrackRemote,
     removeTrackRemote,
     selectTrackRemote,
+    setClipFormantToolWindowPosition,
     setTrackStateRemote,
     seekPlayhead,
     moveTrackRemote,
@@ -67,6 +69,8 @@ import { writeSystemClipboardObject } from "../../utils/systemClipboard";
 import { buildSparseClipRenderModel } from "./timeline/runtime/timelineCanvasModel";
 import { buildTimelineRenderModel } from "./timeline/runtime/timelineRenderModel";
 import { resolveQuickExportClipIds } from "./timeline/quickExportSelection";
+import type { ClipFormantMorph } from "../../features/session/sessionTypes";
+import { ClipFormantToolWindow } from "./timeline/clip/ClipFormantToolWindow";
 
 const TimelineTransportBridge = React.memo(function TimelineTransportBridge(props: {
     pxPerSecRef: React.MutableRefObject<number>;
@@ -260,6 +264,25 @@ export const TimelinePanel: React.FC = () => {
         handleTrackLaneRenameDone,
         commitTrackLaneGain,
     } = clipActions;
+    const commitTrackLaneFormantMorph = React.useCallback(
+        (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => {
+            void dispatch(
+                setClipStateRemote({
+                    clipId,
+                    formantMorph: value,
+                    checkpoint,
+                }),
+            );
+        },
+        [dispatch],
+    );
+    const activeFormantToolClip = React.useMemo(
+        () =>
+            s.clipFormantToolWindow.clipId
+                ? s.clips.find((clip) => clip.id === s.clipFormantToolWindow.clipId) ?? null
+                : null,
+        [s.clipFormantToolWindow.clipId, s.clips],
+    );
 
     // ── 3. DragDrop (Tauri + 文件浏览器) ─────────────────────
     const { tauriDraggedPathRef, tauriLastDropPathRef, tauriDropHandledAtRef } =
@@ -1125,6 +1148,7 @@ export const TimelinePanel: React.FC = () => {
                                         onRenameCommit={commitTrackLaneRename}
                                         onRenameDone={handleTrackLaneRenameDone}
                                         onGainCommit={commitTrackLaneGain}
+                                        onFormantMorphCommit={commitTrackLaneFormantMorph}
                                     />
                                 );
                             })}
@@ -1172,6 +1196,22 @@ export const TimelinePanel: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
+                        ) : null}
+
+                        {s.clipFormantToolWindow.open && activeFormantToolClip ? (
+                            <ClipFormantToolWindow
+                                clip={activeFormantToolClip}
+                                status={
+                                    s.clipFormantStatus[activeFormantToolClip.id] ?? "ready"
+                                }
+                                x={s.clipFormantToolWindow.x}
+                                y={s.clipFormantToolWindow.y}
+                                onCommit={commitTrackLaneFormantMorph}
+                                onMove={(x, y) =>
+                                    dispatch(setClipFormantToolWindowPosition({ x, y }))
+                                }
+                                onClose={() => dispatch(closeClipFormantToolWindow())}
+                            />
                         ) : null}
 
                         {/* Playhead Cursor */}

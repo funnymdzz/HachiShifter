@@ -1,4 +1,5 @@
 use crate::project::CustomScale;
+use crate::state::ClipFormantMorph;
 use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 
@@ -77,6 +78,28 @@ pub struct TimelineClip {
     pub fade_out_sec: Option<f64>,
     pub fade_in_curve: Option<String>,
     pub fade_out_curve: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formant_morph: Option<ClipFormantMorphPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ClipFormantMorphPayload {
+    pub enabled: bool,
+    pub target_f1_hz: f64,
+    pub target_f2_hz: f64,
+    pub strength: f64,
+}
+
+impl From<&ClipFormantMorph> for ClipFormantMorphPayload {
+    fn from(value: &ClipFormantMorph) -> Self {
+        Self {
+            enabled: value.enabled,
+            target_f1_hz: value.target_f1_hz,
+            target_f2_hz: value.target_f2_hz,
+            strength: value.strength,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

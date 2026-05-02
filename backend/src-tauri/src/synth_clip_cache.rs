@@ -519,6 +519,7 @@ pub fn compute_rendered_clip_hash(
     playback_rate: f64,
     extra_curves: &std::collections::HashMap<String, Vec<f32>>,
     extra_params: &std::collections::HashMap<String, f64>,
+    formant_morph: Option<&crate::state::ClipFormantMorph>,
     input_pitch_curve: Option<&[f32]>,
 ) -> u64 {
     let mut h: u64 = 14695981039346656037u64;
@@ -594,6 +595,14 @@ pub fn compute_rendered_clip_hash(
         mix_bytes!(&v.to_le_bytes());
     }
 
+    if let Some(formant) = formant_morph {
+        mix_bytes!(b"clip_formant_morph");
+        mix_bytes!(&[u8::from(formant.enabled)]);
+        mix_bytes!(&formant.target_f1_hz.to_le_bytes());
+        mix_bytes!(&formant.target_f2_hz.to_le_bytes());
+        mix_bytes!(&formant.strength.to_le_bytes());
+    }
+
     h
 }
 
@@ -609,6 +618,7 @@ pub fn compute_breath_noise_hash(
     playback_rate: f64,
     extra_curves: &std::collections::HashMap<String, Vec<f32>>,
     extra_params: &std::collections::HashMap<String, f64>,
+    formant_morph: Option<&crate::state::ClipFormantMorph>,
 ) -> u64 {
     let mut filtered_curves = extra_curves.clone();
     filtered_curves.remove("formant_shift_cents");
@@ -624,6 +634,7 @@ pub fn compute_breath_noise_hash(
         playback_rate,
         &filtered_curves,
         extra_params,
+        formant_morph,
         None,
     )
 }
@@ -1015,4 +1026,56 @@ pub fn get_latest_tension_rendered_pcm(clip_id: &str) -> Option<Arc<Vec<f32>>> {
     let found_key = cache.order.iter().find(|k| k.clip_id == clip_id).cloned()?;
     let entry = cache.inner.get(&found_key)?;
     Some(entry.pcm_stereo.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_rendered_clip_hash;
+
+    #[test]
+    fn rendered_clip_hash_changes_when_formant_morph_changes() {
+        let formant_a = crate::state::ClipFormantMorph {
+            enabled: true,
+            target_f1_hz: 700.0,
+            target_f2_hz: 1_400.0,
+            strength: 0.55,
+        };
+        let formant_b = crate::state::ClipFormantMorph {
+            target_f1_hz: 900.0,
+            ..formant_a.clone()
+        };
+
+        let hash_a = compute_rendered_clip_hash(
+            "clip-1",
+            "demo.wav",
+            0,
+            48_000,
+            48_000,
+            "nsf_hifigan_onnx",
+            &[60.0, 61.0, 62.0],
+            5.0,
+            1.0,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            Some(&formant_a),
+            None,
+        );
+        let hash_b = compute_rendered_clip_hash(
+            "clip-1",
+            "demo.wav",
+            0,
+            48_000,
+            48_000,
+            "nsf_hifigan_onnx",
+            &[60.0, 61.0, 62.0],
+            5.0,
+            1.0,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            Some(&formant_b),
+            None,
+        );
+
+        assert_ne!(hash_a, hash_b);
+    }
 }

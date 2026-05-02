@@ -75,6 +75,14 @@ export interface ClipInfo {
     fadeOutSec: number;
     fadeInCurve: FadeCurveType;
     fadeOutCurve: FadeCurveType;
+    formantMorph?: ClipFormantMorph;
+}
+
+export interface ClipFormantMorph {
+    enabled: boolean;
+    targetF1Hz: number;
+    targetF2Hz: number;
+    strength: number;
 }
 
 export type WaveformPreview = number[] | { l: number[]; r: number[] };

@@ -266,6 +266,12 @@ export const setClipStateRemote = createAsyncThunk(
         fadeOutSec?: number;
         fadeInCurve?: string;
         fadeOutCurve?: string;
+        formantMorph?: {
+            enabled: boolean;
+            targetF1Hz: number;
+            targetF2Hz: number;
+            strength: number;
+        };
         checkpoint?: boolean;
     }) => {
         return webApi.setClipState(payload);

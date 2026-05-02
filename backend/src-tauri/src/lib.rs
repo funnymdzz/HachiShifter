@@ -8,6 +8,9 @@ mod clip_rendering_state;
 mod commands;
 #[path = "audio/hifigan_tension.rs"]
 mod hifigan_tension;
+#[path = "audio/formant_morph.rs"]
+mod formant_morph;
+mod formant_cache;
 mod launch_args;
 #[path = "audio/mixdown.rs"]
 mod mixdown;

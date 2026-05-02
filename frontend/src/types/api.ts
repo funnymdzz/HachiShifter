@@ -58,6 +58,12 @@ export interface TimelineClip {
     fade_out_sec?: number;
     fade_in_curve?: string;
     fade_out_curve?: string;
+    formant_morph?: {
+        enabled: boolean;
+        target_f1_hz: number;
+        target_f2_hz: number;
+        strength: number;
+    };
 }
 
 export interface ProjectMeta {

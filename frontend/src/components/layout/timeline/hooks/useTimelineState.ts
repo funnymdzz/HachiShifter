@@ -44,6 +44,8 @@ type TimelineSessionSlice = Pick<
     | "beats"
     | "bpm"
     | "clips"
+    | "clipFormantStatus"
+    | "clipFormantToolWindow"
     | "grid"
     | "gridSnapEnabled"
     | "playheadZoomEnabled"
@@ -188,6 +190,8 @@ export function useTimelineState(): TimelineStateResult {
             beats: state.session.beats,
             bpm: state.session.bpm,
             clips: state.session.clips,
+            clipFormantStatus: state.session.clipFormantStatus,
+            clipFormantToolWindow: state.session.clipFormantToolWindow,
             grid: state.session.grid,
             gridSnapEnabled: state.session.gridSnapEnabled,
             playheadZoomEnabled: state.session.playheadZoomEnabled,

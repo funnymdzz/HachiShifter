@@ -323,11 +323,78 @@ pub(crate) fn build_snapshot(
                 0
             };
 
-        // If playback_rate != 1, prefer an asynchronously precomputed, pitch-preserving buffer.
-        // Never block snapshot building here.
+        // If the clip has formant morph enabled, build/use a clip-local preprocessed buffer first,
+        // then feed that buffer into later stretch / processor stages.
+        let formant_params = clip.formant_morph.as_ref().filter(|params| params.enabled);
         let mut src_render = src;
         let mut playback_rate_render = playback_rate;
-        if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
+        if let Some(params) = formant_params {
+            let slice_start = (src_start as usize).saturating_mul(2);
+            let slice_end = (src_end as usize).saturating_mul(2).min(src_render.pcm.len());
+            let mut clip_pcm = src_render.pcm[slice_start..slice_end].to_vec();
+            if clip.reversed {
+                crate::mixdown::reverse_interleaved_frames(&mut clip_pcm, 2);
+            }
+
+            let key = crate::formant_cache::make_formant_cache_key(
+                &clip.id,
+                path,
+                out_rate,
+                clip.source_start_sec.max(0.0),
+                clip.source_end_sec,
+                clip.reversed,
+                params,
+            );
+            match crate::formant_cache::get_or_compute_formant_audio(
+                key,
+                &clip_pcm,
+                out_rate,
+                params,
+            ) {
+                Ok(entry) => {
+                    crate::formant_cache::formant_debug_log(format!(
+                        "snapshot using formant clip_id={} frames={} diff={:.8} processor_handles_stretch={} playback_rate={:.4}",
+                        clip.id,
+                        entry.frames,
+                        crate::formant_cache::average_abs_diff(&clip_pcm, entry.pcm_stereo.as_ref()),
+                        processor_handles_stretch,
+                        playback_rate,
+                    ));
+                    src_render = ResampledStereo {
+                        sample_rate: entry.sample_rate,
+                        frames: entry.frames,
+                        pcm: entry.pcm_stereo,
+                    };
+                    src_start = 0;
+                    src_end = src_render.frames as u64;
+                    repeat = false;
+                    if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
+                        let target_frames =
+                            ((src_render.frames as f64) / playback_rate).round().max(2.0) as usize;
+                        let stretched = crate::time_stretch::time_stretch_interleaved(
+                            src_render.pcm.as_slice(),
+                            2,
+                            out_rate,
+                            target_frames,
+                            stretch_algorithm.to_runtime(),
+                        );
+                        src_render = ResampledStereo {
+                            sample_rate: out_rate,
+                            frames: target_frames,
+                            pcm: Arc::new(stretched),
+                        };
+                        src_end = src_render.frames as u64;
+                        playback_rate_render = 1.0;
+                    }
+                }
+                Err(error) => {
+                    crate::formant_cache::formant_debug_log(format!(
+                        "snapshot formant error clip_id={} error={}",
+                        clip.id, error
+                    ));
+                }
+            }
+        } else if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
             let key = make_stretch_key(
                 path,
                 out_rate,
@@ -452,6 +519,7 @@ pub(crate) fn build_snapshot(
                             playback_rate,
                             extra_curves,
                             extra_params,
+                            clip.formant_morph.as_ref().filter(|params| params.enabled),
                             None,
                         );
                         if debug {
@@ -637,7 +705,7 @@ pub(crate) fn build_snapshot(
             src: src_render,
             src_start_frame: src_start,
             src_end_frame: src_end,
-            reversed: clip.reversed,
+            reversed: formant_params.is_some().then_some(false).unwrap_or(clip.reversed),
             playback_rate: playback_rate_render,
             local_src_offset_frames,
             repeat,

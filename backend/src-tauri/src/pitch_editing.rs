@@ -310,6 +310,7 @@ mod tests {
             fade_out_curve: "sine".to_string(),
             extra_curves: None,
             extra_params: None,
+            formant_morph: None,
         }
     }
 

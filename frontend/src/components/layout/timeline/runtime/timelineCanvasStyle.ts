@@ -85,6 +85,15 @@ export function buildTimelineClipVisualStyle(args: {
     muteBadgeRadius: number;
     muteBadgeOffsetX: number;
     muteBadgeOffsetY: number;
+    formantBadgeFill: string;
+    formantBadgeStroke: string;
+    formantBadgeTextFill: string;
+    formantBadgeLabel: string;
+    formantBadgeWidth: number;
+    formantBadgeHeight: number;
+    formantBadgeRadius: number;
+    formantBadgeOffsetX: number;
+    formantBadgeOffsetY: number;
     gainKnobFill: string;
     gainKnobStroke: string;
     gainKnobIndicator: string;
@@ -100,6 +109,7 @@ export function buildTimelineClipVisualStyle(args: {
     mutedAlpha: number;
     leadingControlsWidth: number;
     showMuteBadge: boolean;
+    showFormantBadge: boolean;
     showGainKnob: boolean;
     showGainLabel: boolean;
     showName: boolean;
@@ -128,12 +138,17 @@ export function buildTimelineClipVisualStyle(args: {
     const muteBadgeWidth = 20;
     const muteBadgeHeight = 14;
     const muteBadgeRadius = 4;
+    const formantBadgeWidth = 20;
+    const formantBadgeHeight = 14;
+    const formantBadgeRadius = 4;
     const gainKnobRadius = 7;
     const gainKnobCenterOffsetX = 15;
     const gainKnobCenterOffsetY = 10;
     const muteBadgeOffsetX = showGainKnob ? 28 : 8;
     const muteBadgeOffsetY = 3;
-    const leadingControlsWidth = showGainKnob ? (showMute ? 58 : 28) : showMute ? 34 : 8;
+    const formantBadgeOffsetX = muteBadgeOffsetX + muteBadgeWidth + 2;
+    const formantBadgeOffsetY = 3;
+    const leadingControlsWidth = showGainKnob ? (showMute ? 80 : 28) : showMute ? 56 : 8;
 
     return {
         headerFill: rgba(headerRgb, 0.95),
@@ -154,6 +169,18 @@ export function buildTimelineClipVisualStyle(args: {
         muteBadgeRadius,
         muteBadgeOffsetX,
         muteBadgeOffsetY,
+        formantBadgeFill: rgba(controlRgb, 0.9),
+        formantBadgeStroke: rgba(
+            mixHexColor(trackColor, { r: 182, g: 193, b: 206 }, 0.18),
+            0.66,
+        ),
+        formantBadgeTextFill: "rgba(244, 247, 250, 0.94)",
+        formantBadgeLabel: "F",
+        formantBadgeWidth,
+        formantBadgeHeight,
+        formantBadgeRadius,
+        formantBadgeOffsetX,
+        formantBadgeOffsetY,
         gainKnobFill: rgba(knobRgb, 0.94),
         gainKnobStroke: rgba(mixHexColor(trackColor, { r: 34, g: 40, b: 48 }, 0.46), 0.92),
         gainKnobIndicator: "rgba(248, 251, 255, 0.94)",
@@ -169,6 +196,7 @@ export function buildTimelineClipVisualStyle(args: {
         mutedAlpha: args.muted ? 0.58 : 1,
         leadingControlsWidth,
         showMuteBadge: showMute,
+        showFormantBadge: showMute,
         showGainKnob,
         showGainLabel,
         showName,

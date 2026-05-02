@@ -55,6 +55,7 @@ import {
 import type { MessageKey } from "./i18n/messages";
 import type { CloseRequestedEvent } from "@tauri-apps/api/window";
 import { useAutoBackupScheduler } from "./hooks/useAutoBackupScheduler";
+import { useClipFormantStatusListener } from "./hooks/useClipFormantStatusListener";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -266,6 +267,7 @@ function AppInner() {
 
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store
     useClipPitchDataListener();
+    useClipFormantStatusListener();
 
     // 阻止浏览器默认的 Ctrl+F 搜索、右键菜单和 Alt 键
 

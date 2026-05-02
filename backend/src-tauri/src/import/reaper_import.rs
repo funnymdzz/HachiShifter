@@ -907,6 +907,7 @@ fn process_item(
                 fade_out_curve: "sine".to_string(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
             });
             segment_clip_indices.push(clip_index);
             segment_actual_pre_tl.push(actual_pre_tl);
@@ -1033,6 +1034,7 @@ fn process_item(
             fade_out_curve,
             extra_curves: None,
             extra_params: None,
+            formant_morph: None,
         });
 
         // 写入 pitch 偏移数据

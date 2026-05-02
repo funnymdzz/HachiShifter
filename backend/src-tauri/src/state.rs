@@ -21,6 +21,18 @@ fn default_project_scale_notes() -> Vec<u8> {
     vec![0, 2, 4, 5, 7, 9, 11]
 }
 
+fn default_formant_target_f1_hz() -> f64 {
+    800.0
+}
+
+fn default_formant_target_f2_hz() -> f64 {
+    1400.0
+}
+
+fn default_formant_strength() -> f64 {
+    0.50
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
@@ -105,6 +117,30 @@ pub struct LinkedParamCurvesPayload {
     pub tension_edit: Vec<f32>,
     #[serde(default)]
     pub extra_curves: HashMap<String, Vec<f32>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipFormantMorph {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_formant_target_f1_hz")]
+    pub target_f1_hz: f64,
+    #[serde(default = "default_formant_target_f2_hz")]
+    pub target_f2_hz: f64,
+    #[serde(default = "default_formant_strength")]
+    pub strength: f64,
+}
+
+impl Default for ClipFormantMorph {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            target_f1_hz: default_formant_target_f1_hz(),
+            target_f2_hz: default_formant_target_f2_hz(),
+            strength: default_formant_strength(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -245,6 +281,8 @@ pub struct Clip {
     /// Clip 级别的声码器静态参数覆盖（None = 使用 Track 级别的 extra_params）。
     #[serde(default)]
     pub extra_params: Option<HashMap<String, f64>>,
+    #[serde(default)]
+    pub formant_morph: Option<ClipFormantMorph>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -264,6 +302,7 @@ pub struct ClipStatePatch {
     pub fade_in_curve: Option<String>,
     pub fade_out_curve: Option<String>,
     pub color: Option<String>,
+    pub formant_morph: Option<ClipFormantMorph>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1587,6 +1626,35 @@ mod tests {
         assert_eq!(low_duplicate.track_id, new_tracks[0].id);
         assert_eq!(high_duplicate.track_id, new_tracks[1].id);
     }
+
+    #[test]
+    fn clip_formant_morph_defaults_to_disabled_when_missing() {
+        let json = serde_json::json!({
+            "id": "clip-1",
+            "trackId": "track_main",
+            "name": "clip",
+            "startSec": 0.0,
+            "lengthSec": 1.0,
+            "color": "#fff",
+            "sourcePath": "demo.wav",
+            "sourceStartSec": 0.0,
+            "sourceEndSec": 1.0,
+            "playbackRate": 1.0,
+            "gain": 1.0,
+            "muted": false,
+            "fadeInSec": 0.0,
+            "fadeOutSec": 0.0,
+            "fadeInCurve": "sine",
+            "fadeOutCurve": "sine"
+        });
+
+        let clip: Clip = serde_json::from_value(json).expect("clip should deserialize");
+        let morph = clip.formant_morph.unwrap_or_default();
+        assert!(!morph.enabled);
+        assert_eq!(morph.target_f1_hz, 800.0);
+        assert_eq!(morph.target_f2_hz, 1400.0);
+        assert!((morph.strength - 0.50).abs() < 1e-6);
+    }
 }
 
 fn new_id(prefix: &str) -> String {
@@ -1658,6 +1726,10 @@ impl TimelineState {
                 fade_out_sec: Some(c.fade_out_sec),
                 fade_in_curve: Some(c.fade_in_curve.clone()),
                 fade_out_curve: Some(c.fade_out_curve.clone()),
+                formant_morph: c
+                    .formant_morph
+                    .as_ref()
+                    .map(crate::models::ClipFormantMorphPayload::from),
             })
             .collect::<Vec<_>>();
 
@@ -2084,6 +2156,7 @@ impl TimelineState {
             fade_out_curve: default_fade_curve(),
             extra_curves: None,
             extra_params: None,
+            formant_morph: None,
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());
@@ -2282,6 +2355,7 @@ impl TimelineState {
                 fade_in_curve: None,
                 fade_out_curve: None,
                 color: None,
+                formant_morph: None,
             },
         );
     }
@@ -2334,6 +2408,9 @@ impl TimelineState {
             }
             if let Some(v) = patch.color {
                 c.color = v;
+            }
+            if let Some(v) = patch.formant_morph {
+                c.formant_morph = Some(v);
             }
 
             end_sec = Some(c.start_sec + c.length_sec);
@@ -2403,6 +2480,7 @@ impl TimelineState {
                     fade_in_curve: template.fade_in_curve.clone(),
                     fade_out_curve: template.fade_out_curve.clone(),
                     color: None,
+                    formant_morph: None,
                 },
             );
 

@@ -2,10 +2,131 @@ use crate::state::AppState;
 use base64::Engine;
 use std::fs;
 use std::path::Path;
+use tauri::Emitter;
+use tauri::Manager;
 use tauri::State;
 use uuid::Uuid;
 
 use super::common::ensure_temp_dir;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipFormantStatusPayload {
+    clip_id: String,
+    status: String,
+}
+
+fn emit_clip_formant_status(app: &tauri::AppHandle, clip_id: &str, status: &str) {
+    let _ = app.emit(
+        "clip_formant_status",
+        ClipFormantStatusPayload {
+            clip_id: clip_id.to_string(),
+            status: status.to_string(),
+        },
+    );
+}
+
+fn clip_formant_rebuild_needs_refresh(
+    before: Option<&crate::state::Clip>,
+    after: &crate::state::Clip,
+) -> bool {
+    let before_enabled = before
+        .and_then(|clip| clip.formant_morph.as_ref())
+        .map(|params| params.enabled)
+        .unwrap_or(false);
+    let after_enabled = after
+        .formant_morph
+        .as_ref()
+        .map(|params| params.enabled)
+        .unwrap_or(false);
+
+    if !before_enabled && !after_enabled {
+        return false;
+    }
+
+    let before_params = before.and_then(|clip| clip.formant_morph.as_ref());
+    let after_params = after.formant_morph.as_ref();
+    let params_changed = before_params != after_params;
+    let source_changed = before
+        .map(|clip| {
+            clip.source_path != after.source_path
+                || (clip.source_start_sec - after.source_start_sec).abs() > 1e-9
+                || (clip.source_end_sec - after.source_end_sec).abs() > 1e-9
+                || clip.reversed != after.reversed
+        })
+        .unwrap_or(after_enabled);
+
+    params_changed || source_changed
+}
+
+fn schedule_clip_formant_rebuild(state: &AppState, clip: crate::state::Clip) {
+    let Some(app) = state.app_handle.get().cloned() else {
+        return;
+    };
+    let clip_id = clip.id.clone();
+    let Some(formant) = clip.formant_morph.as_ref() else {
+        crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
+        return;
+    };
+    if !formant.enabled {
+        crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
+        return;
+    }
+
+    let generation = crate::formant_cache::begin_formant_rebuild_generation(&clip_id);
+    if let Some(formant) = clip.formant_morph.as_ref() {
+        crate::formant_cache::formant_debug_log(format!(
+            "schedule rebuild clip_id={} generation={} f1={:.1} f2={:.1} strength={:.3} source={} range=[{:.3},{:.3}] reversed={}",
+            clip_id,
+            generation,
+            formant.target_f1_hz,
+            formant.target_f2_hz,
+            formant.strength,
+            clip.source_path.as_deref().unwrap_or(""),
+            clip.source_start_sec,
+            clip.source_end_sec,
+            clip.reversed,
+        ));
+    }
+    emit_clip_formant_status(&app, &clip_id, "rebuilding");
+
+    let out_rate = state.audio_engine.sample_rate_hz().max(8_000);
+    std::thread::spawn(move || {
+        let result = crate::formant_cache::compute_formant_cache_entry_for_clip(&clip, out_rate);
+
+        if !crate::formant_cache::is_current_formant_rebuild_generation(&clip_id, generation) {
+            crate::formant_cache::formant_debug_log(format!(
+                "discard stale rebuild clip_id={} generation={}",
+                clip_id, generation
+            ));
+            return;
+        }
+
+        match result {
+            Ok((key, entry)) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "rebuild ready clip_id={} generation={} frames={} sr={}",
+                    clip_id, generation, entry.frames, entry.sample_rate
+                ));
+                crate::formant_cache::insert_formant_cache_entry(key, entry);
+                emit_clip_formant_status(&app, &clip_id, "ready");
+                let state = app.state::<AppState>();
+                let timeline = match state.timeline.lock() {
+                    Ok(guard) => guard.clone(),
+                    Err(poisoned) => poisoned.into_inner().clone(),
+                };
+                state.audio_engine.update_timeline(timeline);
+            }
+            Err(error) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "rebuild failed clip_id={} generation={} error={}",
+                    clip_id, generation, error
+                ));
+                emit_clip_formant_status(&app, &clip_id, "failed");
+            }
+        }
+    });
+}
 
 // ===================== dialogs / io =====================
 
@@ -302,6 +423,7 @@ pub(super) fn remove_clip(
     state: State<'_, AppState>,
     clip_id: String,
 ) -> crate::models::TimelineStatePayload {
+    crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
     tl.remove_clip(&clip_id);
@@ -311,11 +433,13 @@ pub(super) fn remove_clip(
     payload
 }
 
-/// 批量删除多个 clip，只产生一个 undo checkpoint
 pub(super) fn remove_clips(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,
 ) -> crate::models::TimelineStatePayload {
+    for clip_id in &clip_ids {
+        crate::formant_cache::cancel_formant_rebuild_generation(clip_id);
+    }
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
     tl.remove_clips(&clip_ids);
@@ -410,9 +534,11 @@ pub(super) fn set_clip_state(
     fade_in_curve: Option<String>,
     fade_out_curve: Option<String>,
     color: Option<String>,
+    formant_morph: Option<crate::state::ClipFormantMorph>,
     checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let previous_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
     // checkpoint 默认为 true，但可以通过传递 false 来抑制 undo checkpoint
     // 这在 undo group 内进行多次操作时很有用
     let do_checkpoint = checkpoint.unwrap_or(true);
@@ -436,11 +562,20 @@ pub(super) fn set_clip_state(
             fade_in_curve,
             fade_out_curve,
             color,
+            formant_morph,
         },
     );
+    let next_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+
+    if let Some(next_clip) = next_clip {
+        if clip_formant_rebuild_needs_refresh(previous_clip.as_ref(), &next_clip) {
+            schedule_clip_formant_rebuild(&state, next_clip);
+        }
+    }
     payload
 }
 

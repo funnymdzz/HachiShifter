@@ -47,14 +47,16 @@ assertEqual(style.headerFill.startsWith("rgba("), true, "header uses mixed rgba 
 assertEqual(style.bodyFill.startsWith("rgba("), true, "body uses mixed rgba color");
 assertEqual(style.displayName.length > 0, true, "name display is produced");
 assertEqual(style.muteBadgeLabel, "M", "mute badge uses M label");
+assertEqual(style.formantBadgeLabel, "F", "formant badge uses F label");
 assertEqual(style.gainKnobAngleDeg, 0, "unity gain knob stays centered");
 assertEqual(style.playbackRateLabel, "x1.00", "playback rate label is formatted");
 assertEqual(style.showPlaybackRate, true, "playback rate shows on sufficiently wide clips");
 assertEqual(compactStyle.showPlaybackRate, false, "playback rate hides before overlapping controls");
 assertEqual(style.muteBadgeFill.startsWith("rgba("), true, "mute badge fill is resolved");
 assertEqual(style.gainKnobIndicator.startsWith("rgba("), true, "gain knob indicator is resolved");
-assertEqual(style.leadingControlsWidth, 58, "leading controls reserve prevents title overlap");
+assertEqual(style.leadingControlsWidth, 80, "leading controls reserve prevents title overlap");
 assertEqual(style.muteBadgeWidth, 20, "mute badge is enlarged");
+assertEqual(style.formantBadgeWidth, 20, "formant badge matches mute width");
 assertEqual(style.gainKnobRadius, 7, "gain knob is enlarged");
 assertEqual(style.gainKnobCenterOffsetX, 15, "gain knob sits at the far left of the header");
 assertEqual(selectedStyle.headerFill, style.headerFill, "selected header keeps default visual");

@@ -166,6 +166,31 @@ export function drawTimelineCanvas(
             ctx.textAlign = "start";
         }
 
+        if (visualStyle.showFormantBadge) {
+            const buttonX = clipLeft + visualStyle.formantBadgeOffsetX;
+            const buttonY = clipTop + visualStyle.formantBadgeOffsetY;
+            const buttonWidth = visualStyle.formantBadgeWidth;
+            const buttonHeight = visualStyle.formantBadgeHeight;
+            const buttonRadius = visualStyle.formantBadgeRadius;
+            ctx.beginPath();
+            ctx.roundRect(buttonX, buttonY, buttonWidth, buttonHeight, buttonRadius);
+            ctx.fillStyle = visualStyle.formantBadgeFill;
+            ctx.fill();
+            ctx.strokeStyle = visualStyle.formantBadgeStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+            ctx.fillStyle = visualStyle.formantBadgeTextFill;
+            ctx.font = "bold 9px sans-serif";
+            ctx.textBaseline = "middle";
+            ctx.textAlign = "center";
+            ctx.fillText(
+                visualStyle.formantBadgeLabel,
+                buttonX + buttonWidth / 2,
+                buttonY + buttonHeight / 2 + 0.5,
+            );
+            ctx.textAlign = "start";
+        }
+
         if (visualStyle.showGainLabel) {
             ctx.fillStyle = visualStyle.textFill;
             ctx.font = "10px sans-serif";

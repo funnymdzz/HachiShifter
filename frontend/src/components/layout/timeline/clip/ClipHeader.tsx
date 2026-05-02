@@ -1,11 +1,12 @@
 import React, { useRef, useState } from "react";
-import type { ClipInfo } from "../../../../features/session/sessionTypes";
+import type { ClipFormantMorph, ClipInfo } from "../../../../features/session/sessionTypes";
 import { CLIP_HEADER_HEIGHT } from "../constants";
 import { gainToDb } from "../math";
 import { useI18n } from "../../../../i18n/I18nProvider";
 import { useAppTheme } from "../../../../theme/AppThemeProvider";
 import { resolveTimelineClipHeaderVisibility } from "../runtime/timelineClipHeaderVisibility";
 import { buildTimelineClipVisualStyle } from "../runtime/timelineCanvasStyle";
+import { ClipFormantButton } from "./ClipFormantButton";
 
 const CLIP_GAIN_WHEEL_STEP_DB = 0.5;
 
@@ -26,6 +27,7 @@ export const ClipHeader: React.FC<{
     onRenameDone?: () => void;
     /** 增益双击输入框提交（dB 值，已 clamp 到 -24~+12） */
     onGainCommit?: (clipId: string, db: number) => void;
+    onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
 }> = ({
     clip,
     clipWidthPx,
@@ -253,6 +255,17 @@ export const ClipHeader: React.FC<{
                     M
                 </button>
             )}
+
+            <ClipFormantButton
+                clip={clip}
+                hidden={!showMute}
+                opacity={hideVisuals ? 0 : 1}
+                width={visualStyle.muteBadgeWidth}
+                height={visualStyle.muteBadgeHeight}
+                baseBackgroundColor={visualStyle.muteBadgeFill}
+                baseBorderColor={visualStyle.muteBadgeStroke}
+                baseTextColor={visualStyle.muteBadgeTextFill}
+            />
 
             {/* Clip 名称区域 */}
             {showName && (
