@@ -270,7 +270,10 @@ export function useKeybindings(handler: KeybindingActionHandler): void {
                 inPianoRoll ? EXCLUDE_QUICK_SEARCH : EXCLUDE_BOTH,
             );
             if (!actionId) return;
-            if (e.repeat && !REPEATABLE_ACTIONS.has(actionId)) return;
+            if (e.repeat && !REPEATABLE_ACTIONS.has(actionId)) {
+                e.preventDefault();
+                return;
+            }
 
             e.preventDefault();
             e.stopPropagation();
