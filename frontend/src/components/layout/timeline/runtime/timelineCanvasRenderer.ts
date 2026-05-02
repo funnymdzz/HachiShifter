@@ -1,6 +1,7 @@
 import {
     buildTimelineClipVisualStyle,
     computeTimelineFadeShadeRange,
+    resolveFontFamily,
 } from "./timelineCanvasStyle.js";
 import { fadeCurveGain } from "../paths.js";
 
@@ -23,9 +24,7 @@ function drawFadeCurveStroke(
         const t = index / Math.max(1, steps - 1);
         const x = args.leftPx + t * widthPx;
         const gain =
-            args.mode === "in"
-                ? fadeCurveGain(t, args.curve)
-                : fadeCurveGain(1 - t, args.curve);
+            args.mode === "in" ? fadeCurveGain(t, args.curve) : fadeCurveGain(1 - t, args.curve);
         const y = args.topPx + heightPx * (1 - gain);
         if (index === 0) {
             ctx.moveTo(x, y);
@@ -59,8 +58,11 @@ export function drawTimelineCanvas(
             name: string;
             trackColor?: string;
         }>;
+        fontFamily?: string;
     },
 ): void {
+    const fontFamily = args.fontFamily || resolveFontFamily();
+
     ctx.clearRect(0, 0, args.width, args.height);
 
     for (const clip of args.clips) {
@@ -79,6 +81,7 @@ export function drawTimelineCanvas(
             gain: clip.gain,
             playbackRate: clip.playbackRate ?? 1,
             name: clip.name,
+            fontFamily,
         });
         const fadeShadeRange = computeTimelineFadeShadeRange({
             widthPx: clipWidth,
@@ -107,7 +110,12 @@ export function drawTimelineCanvas(
 
         ctx.strokeStyle = visualStyle.borderStroke;
         ctx.lineWidth = 1;
-        ctx.strokeRect(clipLeft + 0.5, bodyTop + 0.5, Math.max(0, clipWidth - 1), Math.max(0, bodyHeight - 1));
+        ctx.strokeRect(
+            clipLeft + 0.5,
+            bodyTop + 0.5,
+            Math.max(0, clipWidth - 1),
+            Math.max(0, bodyHeight - 1),
+        );
 
         ctx.fillStyle = "rgba(0, 0, 0, 0.24)";
         ctx.fillRect(clipLeft, clipTop + headerHeight, clipWidth, 1);
@@ -155,7 +163,7 @@ export function drawTimelineCanvas(
             ctx.lineWidth = 1;
             ctx.stroke();
             ctx.fillStyle = visualStyle.muteBadgeTextFill;
-            ctx.font = "bold 9px sans-serif";
+            ctx.font = `bold 9px ${fontFamily}`;
             ctx.textBaseline = "middle";
             ctx.textAlign = "center";
             ctx.fillText(
@@ -180,7 +188,7 @@ export function drawTimelineCanvas(
             ctx.lineWidth = 1;
             ctx.stroke();
             ctx.fillStyle = visualStyle.formantBadgeTextFill;
-            ctx.font = "bold 9px sans-serif";
+            ctx.font = `bold 9px ${fontFamily}`;
             ctx.textBaseline = "middle";
             ctx.textAlign = "center";
             ctx.fillText(
@@ -193,7 +201,7 @@ export function drawTimelineCanvas(
 
         if (visualStyle.showGainLabel) {
             ctx.fillStyle = visualStyle.textFill;
-            ctx.font = "10px sans-serif";
+            ctx.font = `10px ${fontFamily}`;
             ctx.textBaseline = "middle";
             const metrics = ctx.measureText(visualStyle.gainLabel);
             const gainX = clipLeft + clipWidth - metrics.width - 6;
@@ -202,19 +210,13 @@ export function drawTimelineCanvas(
                 const rateX = gainX - rateMetrics.width - 8;
                 ctx.fillText(visualStyle.playbackRateLabel, rateX, clipTop + 9);
             }
-            ctx.fillText(
-                visualStyle.gainLabel,
-                gainX,
-                clipTop + 9,
-            );
+            ctx.fillText(visualStyle.gainLabel, gainX, clipTop + 9);
         }
 
         if (visualStyle.showName && visualStyle.displayName.length > 0) {
             const textStartX = clipLeft + visualStyle.leadingControlsWidth;
             const textEndX = visualStyle.showGainLabel
-                ? clipLeft +
-                  clipWidth -
-                  (visualStyle.showPlaybackRate ? 112 : 60)
+                ? clipLeft + clipWidth - visualStyle.trailingReservePx + 4
                 : clipLeft + clipWidth - 8;
             const availableWidth = Math.max(0, textEndX - textStartX);
             if (availableWidth > 12) {
@@ -223,7 +225,7 @@ export function drawTimelineCanvas(
                 ctx.rect(textStartX, clipTop, availableWidth, headerHeight);
                 ctx.clip();
                 ctx.fillStyle = visualStyle.textFill;
-                ctx.font = "12px sans-serif";
+                ctx.font = `12px ${fontFamily}`;
                 ctx.textBaseline = "middle";
                 ctx.fillText(visualStyle.displayName, textStartX, clipTop + 9);
                 ctx.restore();

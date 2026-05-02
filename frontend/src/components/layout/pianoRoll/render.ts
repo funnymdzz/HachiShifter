@@ -326,6 +326,8 @@ export function drawPianoRoll(args: {
     snapToggleHeld?: boolean;
     scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
     paramMorphOverlay?: ParamMorphOverlay | null;
+    /** 自定义字体族，用于 canvas 文本渲染 */
+    fontFamily?: string;
 }) {
     const {
         axisCanvas,
@@ -357,7 +359,10 @@ export function drawPianoRoll(args: {
         isDark = true,
         clipboardPreview,
         paramMorphOverlay,
+        fontFamily,
     } = args;
+
+    const resolvedFontFamily = fontFamily || "sans-serif";
 
     // 主题颜色查找表
     const colors = isDark
@@ -478,7 +483,10 @@ export function drawPianoRoll(args: {
                         if (!black) {
                             // 白键：C 音用蓝色加粗，其他用灰色
                             ctx.fillStyle = pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
-                            ctx.font = pc === 0 ? "bold 9px sans-serif" : "9px sans-serif";
+                            ctx.font =
+                                pc === 0
+                                    ? `bold 9px ${resolvedFontFamily}`
+                                    : `9px ${resolvedFontFamily}`;
                             ctx.fillText(midiToLabel(midi), 4, midY);
                         } else {
                             // 黑键：在黑键宽度内裁剪绘制
@@ -487,7 +495,7 @@ export function drawPianoRoll(args: {
                             ctx.rect(0, top, w * 0.7, keyH);
                             ctx.clip();
                             ctx.fillStyle = colors.blackKeyLabel;
-                            ctx.font = "8px sans-serif";
+                            ctx.font = `8px ${resolvedFontFamily}`;
                             ctx.fillText(midiToLabel(midi), 3, midY);
                             ctx.restore();
                         }
@@ -509,7 +517,7 @@ export function drawPianoRoll(args: {
                 const vMin = view.center - span / 2;
                 const vMax = view.center + span / 2;
                 ctx.fillStyle = colors.tensionLabel;
-                ctx.font = "10px sans-serif";
+                ctx.font = `10px ${resolvedFontFamily}`;
                 ctx.textBaseline = "middle";
 
                 if (isChildPitchOffsetCentsParam(editParam)) {
@@ -1131,7 +1139,7 @@ export function drawPianoRoll(args: {
     if (overlayText) {
         ctx.save();
         ctx.fillStyle = colors.overlayTextColor;
-        ctx.font = "12px sans-serif";
+        ctx.font = `12px ${resolvedFontFamily}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(overlayText, w / 2, h * 0.88);

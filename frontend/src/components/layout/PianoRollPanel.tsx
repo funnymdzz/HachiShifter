@@ -253,7 +253,7 @@ export const PianoRollPanel: React.FC = () => {
             window.removeEventListener("blur", onBlur);
         };
     }, [mergedKeybindings]);
-    const { mode: themeMode } = useAppTheme();
+    const { mode: themeMode, fontFamily } = useAppTheme();
     const waveformColors = useMemo(() => getWaveformColors(themeMode, "piano-roll"), [themeMode]);
 
     const effectivePitchSnapVisual =
@@ -1564,6 +1564,7 @@ export const PianoRollPanel: React.FC = () => {
             referencePitchOverlays,
             detectedPitchCurves,
             isDark: themeMode === "dark",
+            fontFamily,
             clipboardPreview: s.showClipboardPreview ? clipboardRef.current : null,
             // pitch snap visual helpers
             pitchSnapUnit: s.pitchSnapUnit,
@@ -3549,7 +3550,9 @@ export const PianoRollPanel: React.FC = () => {
                                         <DropdownMenu.Item
                                             onSelect={() =>
                                                 updateVisibleReferenceRootTrackIds(
-                                                    referenceRootTrackOptions.map((track) => track.id),
+                                                    referenceRootTrackOptions.map(
+                                                        (track) => track.id,
+                                                    ),
                                                 )
                                             }
                                         >

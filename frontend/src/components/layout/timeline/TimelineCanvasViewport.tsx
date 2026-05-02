@@ -1,6 +1,7 @@
 import React from "react";
 
 import { drawTimelineCanvas } from "./runtime/timelineCanvasRenderer";
+import { resolveFontFamily } from "./runtime/timelineCanvasStyle";
 import type { TimelineCanvasClipModel } from "./runtime/timelineCanvasModel";
 
 export const TimelineCanvasViewport: React.FC<{
@@ -45,6 +46,7 @@ export const TimelineCanvasViewport: React.FC<{
                 width: displayWidth,
                 height: displayHeight,
                 clips: modelRef.current.drawClips,
+                fontFamily: resolveFontFamily(),
             });
         });
     }, []);
@@ -62,7 +64,5 @@ export const TimelineCanvasViewport: React.FC<{
         };
     }, []);
 
-    return (
-        <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
-    );
+    return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />;
 };

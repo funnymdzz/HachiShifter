@@ -1,6 +1,39 @@
 import { gainToDb } from "../math.js";
 import { resolveTimelineClipHeaderVisibility } from "./timelineClipHeaderVisibility.js";
 
+// ── Font helpers ─────────────────────────────────────────────────────────
+
+let _measureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureCtx(): CanvasRenderingContext2D {
+    if (!_measureCtx) {
+        const canvas = document.createElement("canvas");
+        _measureCtx = canvas.getContext("2d")!;
+    }
+    return _measureCtx;
+}
+
+/** Measure the pixel width of `text` using the given CSS font style + family. */
+export function measureTextWidth(text: string, fontStyle: string, fontFamily: string): number {
+    const ctx = getMeasureCtx();
+    ctx.font = `${fontStyle} ${fontFamily}`;
+    return ctx.measureText(text).width;
+}
+
+/** Read the current font-family from the --qt-font-family CSS custom property. */
+export function resolveFontFamily(): string {
+    if (typeof document === "undefined") return "sans-serif";
+    const font = getComputedStyle(document.documentElement)
+        .getPropertyValue("--qt-font-family")
+        .trim();
+    return font || "sans-serif";
+}
+
+const NAME_FONT_STYLE = "12px";
+const LABEL_FONT_STYLE = "10px";
+
+/** A representative character set for estimating average char width. */
+const CHAR_SAMPLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
 function clamp(value: number, min: number, max: number): number {
     return Math.min(max, Math.max(min, value));
 }
@@ -71,6 +104,7 @@ export function buildTimelineClipVisualStyle(args: {
     gain: number;
     playbackRate: number;
     name: string;
+    fontFamily?: string;
 }): {
     headerFill: string;
     bodyFill: string;
@@ -108,12 +142,14 @@ export function buildTimelineClipVisualStyle(args: {
     displayName: string;
     mutedAlpha: number;
     leadingControlsWidth: number;
+    trailingReservePx: number;
     showMuteBadge: boolean;
     showFormantBadge: boolean;
     showGainKnob: boolean;
     showGainLabel: boolean;
     showName: boolean;
 } {
+    const fontFamily = args.fontFamily || resolveFontFamily();
     const trackColor = args.trackColor ?? "#68839d";
     const headerRgb = mixHexColor(trackColor, { r: 160, g: 171, b: 183 }, 0.16);
     const bodyRgb = mixHexColor(trackColor, { r: 58, g: 63, b: 71 }, 0.68);
@@ -123,21 +159,47 @@ export function buildTimelineClipVisualStyle(args: {
     const controlActiveRgb = mixHexColor(trackColor, { r: 120, g: 64, b: 69 }, 0.4);
     const { showMute, showFormant, showGainKnob, showPlaybackRate, showGainLabel, showName } =
         resolveTimelineClipHeaderVisibility(args.widthPx);
-    const textStartPx = showGainKnob ? (showMute ? 58 : 28) : showMute ? 34 : 8;
+
+    // Compute labels early so we can measure their widths with the correct font
+    const gainDb = gainToDb(args.gain);
+    const clampedGainDb = clamp(gainDb, -12, 12);
+    const playbackRate =
+        Number.isFinite(args.playbackRate) && args.playbackRate > 0 ? args.playbackRate : 1;
+    const playbackRateOneDecimal =
+        Math.abs(playbackRate - Math.round(playbackRate)) < 0.001
+            ? playbackRate.toFixed(1)
+            : playbackRate.toFixed(2);
+    const playbackRateLabel = `x${playbackRateOneDecimal}`;
+    const gainLabel = `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`;
+
+    // Font-aware trailing reserve: measure actual label widths
+    const gainLabelWidth = showGainLabel
+        ? measureTextWidth(gainLabel, LABEL_FONT_STYLE, fontFamily)
+        : 0;
+    const rateLabelWidth =
+        showGainLabel && showPlaybackRate
+            ? measureTextWidth(playbackRateLabel, LABEL_FONT_STYLE, fontFamily)
+            : 0;
     const trailingReservePx = showGainLabel
         ? showPlaybackRate
-            ? 124
-            : 72
+            ? rateLabelWidth + gainLabelWidth + 16
+            : gainLabelWidth + 12
         : showGainKnob
           ? 26
           : 10;
-    const maxChars = Math.max(1, Math.floor((args.widthPx - textStartPx - trailingReservePx) / 7));
-    const gainDb = gainToDb(args.gain);
-    const clampedGainDb = clamp(gainDb, -12, 12);
-        const playbackRate = Number.isFinite(args.playbackRate) && args.playbackRate > 0 ? args.playbackRate : 1;
-    const playbackRateOneDecimal = Math.abs(playbackRate - Math.round(playbackRate)) < 0.001
-        ? playbackRate.toFixed(1)
-        : playbackRate.toFixed(2);
+
+    const textStartPx = showGainKnob ? (showMute ? 58 : 28) : showMute ? 34 : 8;
+
+    // Font-aware average char width for name truncation
+    const avgCharWidth = Math.max(
+        1,
+        measureTextWidth(CHAR_SAMPLE, NAME_FONT_STYLE, fontFamily) / CHAR_SAMPLE.length,
+    );
+    const maxChars = Math.max(
+        1,
+        Math.floor((args.widthPx - textStartPx - trailingReservePx) / avgCharWidth),
+    );
+
     const muteBadgeWidth = 20;
     const muteBadgeHeight = 14;
     const muteBadgeRadius = 4;
@@ -151,7 +213,17 @@ export function buildTimelineClipVisualStyle(args: {
     const muteBadgeOffsetY = 3;
     const formantBadgeOffsetX = muteBadgeOffsetX + muteBadgeWidth + 2;
     const formantBadgeOffsetY = 3;
-    const leadingControlsWidth = showGainKnob ? (showMute ? (showFormant ? 80 : 60) : 28) : showMute ? (showFormant ? 56 : 36) : 8;
+    const leadingControlsWidth = showGainKnob
+        ? showMute
+            ? showFormant
+                ? 80
+                : 60
+            : 28
+        : showMute
+          ? showFormant
+              ? 56
+              : 36
+          : 8;
 
     return {
         headerFill: rgba(headerRgb, 0.95),
@@ -173,10 +245,7 @@ export function buildTimelineClipVisualStyle(args: {
         muteBadgeOffsetX,
         muteBadgeOffsetY,
         formantBadgeFill: rgba(controlRgb, 0.9),
-        formantBadgeStroke: rgba(
-            mixHexColor(trackColor, { r: 182, g: 193, b: 206 }, 0.18),
-            0.66,
-        ),
+        formantBadgeStroke: rgba(mixHexColor(trackColor, { r: 182, g: 193, b: 206 }, 0.18), 0.66),
         formantBadgeTextFill: "rgba(244, 247, 250, 0.94)",
         formantBadgeLabel: "F",
         formantBadgeWidth,
@@ -193,11 +262,12 @@ export function buildTimelineClipVisualStyle(args: {
         gainKnobCenterOffsetX,
         gainKnobCenterOffsetY,
         showPlaybackRate,
-        playbackRateLabel: `x${playbackRateOneDecimal}`,
-        gainLabel: `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`,
+        playbackRateLabel,
+        gainLabel,
         displayName: ellipsizeText(args.name, maxChars),
         mutedAlpha: args.muted ? 0.29 : 1,
         leadingControlsWidth,
+        trailingReservePx,
         showMuteBadge: showMute,
         showFormantBadge: showFormant,
         showGainKnob,

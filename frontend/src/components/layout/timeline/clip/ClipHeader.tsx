@@ -45,7 +45,7 @@ export const ClipHeader: React.FC<{
     onGainCommit,
 }) => {
     const { t } = useI18n();
-    const { mode } = useAppTheme();
+    const { mode, fontFamily } = useAppTheme();
     const isDark = mode === "dark";
     const gainDb = gainToDb(clip.gain);
     const clampedGainDb = Math.min(12, Math.max(-12, gainDb));
@@ -79,8 +79,7 @@ export const ClipHeader: React.FC<{
         showPlaybackRate,
         showGainLabel: showGainVal,
         showName,
-    } =
-        resolveTimelineClipHeaderVisibility(clipWidthPx);
+    } = resolveTimelineClipHeaderVisibility(clipWidthPx);
     const visualStyle = buildTimelineClipVisualStyle({
         widthPx: clipWidthPx,
         trackColor,
@@ -89,6 +88,7 @@ export const ClipHeader: React.FC<{
         gain: clip.gain,
         playbackRate: clip.playbackRate,
         name: clip.name,
+        fontFamily,
     });
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────
@@ -205,28 +205,28 @@ export const ClipHeader: React.FC<{
                         }, 200);
                     }}
                 >
-                        <div
-                            className="relative rounded-full border"
+                    <div
+                        className="relative rounded-full border"
+                        style={{
+                            width: visualStyle.gainKnobRadius * 2 + 4,
+                            height: visualStyle.gainKnobRadius * 2 + 4,
+                            borderColor: visualStyle.gainKnobStroke,
+                            backgroundColor: visualStyle.gainKnobFill,
+                        }}
+                    >
+                        <span
+                            className="absolute left-1/2 top-1/2 w-[2px] h-[7px] -translate-x-1/2 -translate-y-full rounded-full"
                             style={{
-                                width: visualStyle.gainKnobRadius * 2 + 4,
-                                height: visualStyle.gainKnobRadius * 2 + 4,
-                                borderColor: visualStyle.gainKnobStroke,
-                                backgroundColor: visualStyle.gainKnobFill,
+                                backgroundColor: visualStyle.gainKnobIndicator,
+                                transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
+                                transformOrigin: "50% 100%",
                             }}
-                        >
-                            <span
-                                className="absolute left-1/2 top-1/2 w-[2px] h-[7px] -translate-x-1/2 -translate-y-full rounded-full"
-                                style={{
-                                    backgroundColor: visualStyle.gainKnobIndicator,
-                                    transform: `translate(-50%, -100%) rotate(${gainKnobDeg}deg)`,
-                                    transformOrigin: "50% 100%",
-                                }}
-                            />
-                            <span
-                                className="absolute left-1/2 top-1/2 h-[4px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-                                style={{ backgroundColor: visualStyle.gainKnobCoreFill }}
-                            />
-                        </div>
+                        />
+                        <span
+                            className="absolute left-1/2 top-1/2 h-[4px] w-[4px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                            style={{ backgroundColor: visualStyle.gainKnobCoreFill }}
+                        />
+                    </div>
                 </div>
             )}
 
