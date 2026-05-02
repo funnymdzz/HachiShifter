@@ -17,22 +17,12 @@ function parseHexColor(input: string): { r: number; g: number; b: number } | nul
     };
 }
 
-function mixChannel(a: number, b: number, ratio: number): number {
-    return Math.round(a * (1 - ratio) + b * ratio);
-}
-
 export function buildReferencePitchStrokeColor(
     trackColor: string | null | undefined,
     highlighted: boolean,
 ): string {
     const rgb = parseHexColor(trackColor ?? "") ?? { r: 120, g: 160, b: 220 };
-    const mixed = {
-        r: mixChannel(rgb.r, 190, 0.35),
-        g: mixChannel(rgb.g, 190, 0.35),
-        b: mixChannel(rgb.b, 190, 0.35),
-    };
-    const alpha = highlighted ? 0.7 : 0.4;
-    return `rgba(${mixed.r}, ${mixed.g}, ${mixed.b}, ${alpha})`;
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${highlighted ? 1 : 0.85})`;
 }
 
 export function listReferenceRootTracks(args: {

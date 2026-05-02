@@ -209,6 +209,8 @@ export interface SessionState {
     // - Not included in undo/redo snapshots.
     // - Should be bumped on any timeline/undo/redo operation that may affect param rendering.
     paramsEpoch: number;
+    /** 单调递增，任何 clip 的 playbackRate 变更时 +1，强制 UI 刷新 */
+    playbackRateVersion: number;
 
     playheadSec: number;
     tracks: TrackInfo[];
@@ -693,7 +695,10 @@ function applyTimelineState(
                 }
                 return raw;
             })(),
-            playbackRate: clamp(Number(clip.playback_rate ?? 1), 0.1, 10),
+            playbackRate:
+                clip.playback_rate != null
+                    ? clamp(Number(clip.playback_rate), 0.1, 10)
+                    : state.clips.find((c) => c.id === clip.id)?.playbackRate ?? 1,
             reversed: Boolean(clip.reversed),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
@@ -940,6 +945,7 @@ const initialState: SessionState = {
     defaultHifiganMelStretch: true,
 
     paramsEpoch: 0,
+    playbackRateVersion: 0,
 
     playheadSec: 0,
     tracks: [
@@ -1235,6 +1241,17 @@ const sessionSlice = createSlice({
                 );
                 return;
             }
+            const track = state.tracks.find((t) => t.id === trackId);
+            if (!track || track.parentId) return;
+            let currentRootId: string | null = state.selectedTrackId;
+            if (currentRootId) {
+                let cursor: { id: string; parentId?: string | null } | undefined = state.tracks.find((t) => t.id === currentRootId);
+                while (cursor?.parentId) {
+                    cursor = state.tracks.find((t) => t.id === cursor!.parentId);
+                }
+                currentRootId = cursor?.id ?? null;
+            }
+            if (trackId === currentRootId) return;
             state.visibleReferenceRootTrackIds = [...state.visibleReferenceRootTrackIds, trackId];
         },
         toggleAutoScroll(state) {
@@ -1376,6 +1393,7 @@ const sessionSlice = createSlice({
             const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.playbackRate = clamp(action.payload.playbackRate, 0.1, 10);
+            state.playbackRateVersion = (Number(state.playbackRateVersion) || 0) + 1;
         },
         setClipSourceRange(
             state,

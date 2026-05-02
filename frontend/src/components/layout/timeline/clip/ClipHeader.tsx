@@ -70,10 +70,11 @@ export const ClipHeader: React.FC<{
     }, [clip.gain, clip.id]);
 
     // 根据 clip 像素宽度决定显示哪些元素（从右往左依次隐藏）
-    // >= 120px: 全显示 | 80-120px: 隐藏名称 | 52-80px: 隐藏名称+增益值 | 32-52px: 只留M | < 32px: 全隐藏
+    // >= 152px: 全显示 | 116-152: 隐藏名称 | 96-116: 隐藏播放速率 | 68-96: 隐藏增益值+F | 52-68: 隐藏F | 32-52: 只留增益旋钮 | < 32px: 全隐藏
     const {
         showAny,
         showMute,
+        showFormant,
         showGainKnob,
         showPlaybackRate,
         showGainLabel: showGainVal,
@@ -258,7 +259,7 @@ export const ClipHeader: React.FC<{
 
             <ClipFormantButton
                 clip={clip}
-                hidden={!showMute}
+                hidden={!showFormant}
                 opacity={hideVisuals ? 0 : 1}
                 width={visualStyle.muteBadgeWidth}
                 height={visualStyle.muteBadgeHeight}

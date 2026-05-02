@@ -121,7 +121,7 @@ export function buildTimelineClipVisualStyle(args: {
     const knobRgb = mixHexColor(trackColor, { r: 205, g: 212, b: 220 }, 0.24);
     const controlRgb = mixHexColor(trackColor, { r: 40, g: 46, b: 55 }, 0.52);
     const controlActiveRgb = mixHexColor(trackColor, { r: 120, g: 64, b: 69 }, 0.4);
-    const { showMute, showGainKnob, showPlaybackRate, showGainLabel, showName } =
+    const { showMute, showFormant, showGainKnob, showPlaybackRate, showGainLabel, showName } =
         resolveTimelineClipHeaderVisibility(args.widthPx);
     const textStartPx = showGainKnob ? (showMute ? 58 : 28) : showMute ? 34 : 8;
     const trailingReservePx = showGainLabel
@@ -134,7 +134,10 @@ export function buildTimelineClipVisualStyle(args: {
     const maxChars = Math.max(1, Math.floor((args.widthPx - textStartPx - trailingReservePx) / 7));
     const gainDb = gainToDb(args.gain);
     const clampedGainDb = clamp(gainDb, -12, 12);
-    const playbackRate = Number.isFinite(args.playbackRate) && args.playbackRate > 0 ? args.playbackRate : 1;
+        const playbackRate = Number.isFinite(args.playbackRate) && args.playbackRate > 0 ? args.playbackRate : 1;
+    const playbackRateOneDecimal = Math.abs(playbackRate - Math.round(playbackRate)) < 0.001
+        ? playbackRate.toFixed(1)
+        : playbackRate.toFixed(2);
     const muteBadgeWidth = 20;
     const muteBadgeHeight = 14;
     const muteBadgeRadius = 4;
@@ -148,7 +151,7 @@ export function buildTimelineClipVisualStyle(args: {
     const muteBadgeOffsetY = 3;
     const formantBadgeOffsetX = muteBadgeOffsetX + muteBadgeWidth + 2;
     const formantBadgeOffsetY = 3;
-    const leadingControlsWidth = showGainKnob ? (showMute ? 80 : 28) : showMute ? 56 : 8;
+    const leadingControlsWidth = showGainKnob ? (showMute ? (showFormant ? 80 : 60) : 28) : showMute ? (showFormant ? 56 : 36) : 8;
 
     return {
         headerFill: rgba(headerRgb, 0.95),
@@ -190,13 +193,13 @@ export function buildTimelineClipVisualStyle(args: {
         gainKnobCenterOffsetX,
         gainKnobCenterOffsetY,
         showPlaybackRate,
-        playbackRateLabel: `x${playbackRate.toFixed(2)}`,
+        playbackRateLabel: `x${playbackRateOneDecimal}`,
         gainLabel: `${gainDb >= 0 ? "+" : ""}${gainDb.toFixed(1)}dB`,
         displayName: ellipsizeText(args.name, maxChars),
-        mutedAlpha: args.muted ? 0.58 : 1,
+        mutedAlpha: args.muted ? 0.29 : 1,
         leadingControlsWidth,
         showMuteBadge: showMute,
-        showFormantBadge: showMute,
+        showFormantBadge: showFormant,
         showGainKnob,
         showGainLabel,
         showName,

@@ -619,6 +619,9 @@ export function useEditDrag(deps: {
             }
             const singleClipNow = clipNow ?? null;
 
+            // 保存拉伸后的播放速率，persist 后重新应用（两阶段更新策略）
+            let reapplyRates: Array<{ clipId: string; rate: number }> | null = null;
+
             const autoCrossfadeClipIds =
                 isGroupStretch && drag.stretchGroup ? drag.stretchGroup.clipIds : [drag.clipId];
             const shouldApplyAutoCrossfade =
@@ -684,6 +687,9 @@ export function useEditDrag(deps: {
                     );
 
                 if (stretchPatches.length > 0) {
+                    reapplyRates = stretchPatches
+                        .filter((p) => p.playbackRate !== 1)
+                        .map((p) => ({ clipId: p.clipId, rate: p.playbackRate }));
                     persistPromise = runInsideUndoGroup(async () => {
                         const stretchPersistPromises = stretchPatches.map((patch) =>
                             dispatch(
@@ -786,6 +792,9 @@ export function useEditDrag(deps: {
                         }),
                     ).unwrap();
                 }
+                if (singleClipNow.playbackRate !== 1) {
+                    reapplyRates = [{ clipId: drag.clipId, rate: singleClipNow.playbackRate }];
+                }
             } else if (drag.type === "stretch_right" && singleClipNow) {
                 if (shouldApplyAutoCrossfade) {
                     persistPromise = runWithOptionalAutoCrossfade(async () => {
@@ -810,6 +819,9 @@ export function useEditDrag(deps: {
                             fadeOutSec: singleClipNow.fadeOutSec,
                         }),
                     ).unwrap();
+                }
+                if (singleClipNow.playbackRate !== 1) {
+                    reapplyRates = [{ clipId: drag.clipId, rate: singleClipNow.playbackRate }];
                 }
             } else if (drag.type === "fade_in" && singleClipNow) {
                 const changesById = new Map(
@@ -859,6 +871,15 @@ export function useEditDrag(deps: {
                 // 结束 gain 拖动时调用 endUndoGroup，结束 undo group
                 void Promise.resolve(persistPromise).finally(() => {
                     void webApi.endUndoGroup();
+                });
+            }
+
+            // 两阶段播放速率更新：后端响应后重新应用前端计算的值
+            if (reapplyRates && reapplyRates.length > 0 && persistPromise) {
+                void persistPromise.then(() => {
+                    for (const { clipId, rate } of reapplyRates!) {
+                        dispatch(setClipPlaybackRate({ clipId, playbackRate: rate }));
+                    }
                 });
             }
 

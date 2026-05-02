@@ -195,6 +195,7 @@ export function useTimelineState(): TimelineStateResult {
             grid: state.session.grid,
             gridSnapEnabled: state.session.gridSnapEnabled,
             playheadZoomEnabled: state.session.playheadZoomEnabled,
+            playbackRateVersion: state.session.playbackRateVersion,
             selectedClipId: state.session.selectedClipId,
             selectedTrackId: state.session.selectedTrackId,
             trackMeters: state.session.trackMeters,

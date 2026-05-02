@@ -854,8 +854,8 @@ export function drawPianoRoll(args: {
             if (values.length < 2) return;
             ctx.save();
             ctx.strokeStyle = overlay.strokeColor;
-            ctx.lineWidth = overlay.highlighted ? 1.9 : 1.4;
-            ctx.setLineDash(getFixedDashPattern(4, 5));
+            ctx.lineWidth = overlay.highlighted ? 3.2 : 2.6;
+            ctx.setLineDash([]);
             drawCurveTimed({
                 ctx,
                 values,
@@ -893,8 +893,6 @@ export function drawPianoRoll(args: {
             const curveStartSec = curve.curveStartSec;
 
             ctx.save();
-
-            ctx.strokeStyle;
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
