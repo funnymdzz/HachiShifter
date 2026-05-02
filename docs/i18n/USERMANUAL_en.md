@@ -49,6 +49,8 @@ The `Edit` menu allows various editing operations. Besides regular track and par
     - Audio clip data: Imports as note clips in HiFiShifter, preserving various parameter curve data.
     - Track data: Imports tracks along with their audio clips into HiFiShifter. Note that HiFiShifter currently cannot distinguish whether your last copied content was an audio clip or a track. If you intend to import a track, before performing the copy track operation in VocalShifter, ensure that no audio clip is selected in the VocalShifter project; otherwise, only the selected audio clips will be imported.
 
+The `Stretch` menu allows you to modify the current project and global stretching algorithms.
+
 ### 2.2 Track View
 
 The track view is one of HiFiShifter's core features, allowing you to crop, splice, and edit audio clips. Its operation logic is largely based on Reaper.
@@ -72,7 +74,7 @@ Common shortcuts:
 - Modifier `Shift`: Hold to temporarily toggle grid snap
 - Modifier `Ctrl`: Hold while dragging a clip to copy it
 
-The `M` button at the top-left of a clip can mute that clip individually; the small circle is a volume adjustment knob. The left and right edges of a clip allow adjusting fade-in/fade-out envelope lengths.
+The small circle at the top-left of a clip is a volume adjustment knob, the `M` button can mute that clip individually, and the `F` button can open that clip's formant editing menu. The left and right edges of a clip allow adjusting fade-in/fade-out envelope lengths.
 
 Right-click a clip to open the context menu, which includes functions like `Reverse`, `Normalize`, `Fade Curve Type`. If you select multiple clips on the same track, the context menu allows `Glue` to merge them into a single audio clip.
 
@@ -88,6 +90,7 @@ Track view toolbar buttons:
 - `Base Scale`: Adjust the global base scale setting for the project, supports custom scales. The scale function is mainly used with `Pitch Snap` and other pitch-related adjustments.
 - `Stop` and `Play/Pause` buttons: Control playback.
 - `File Browser`: Open the HiFiShifter file browser window.
+- `Notepad`: Open the HiFiShifter notepad window, which records and displays Markdown-formatted text.
 - `Auto Crossfade`: Similar to Reaper/VEGAS Pro, when enabled, moving clips that overlap will automatically adjust crossfade envelopes.
 - `Grid Snap`: When enabled, all clip adjustments attempt to snap to grid. Hold `Shift` to temporarily toggle snap.
 - `Zoom at Playhead`: When enabled, horizontal zoom centers on the playhead; otherwise, centers on the mouse cursor.
@@ -214,6 +217,7 @@ Additional convenient features of the parameter editor:
 - `Popup Param Values`: Shows parameter values when the mouse is near the curve or during drawing edits.
 - `Lock Param Lines`: When dragging an audio clip on the track, whether to also move its corresponding parameter curves. All parameter editing in HiFiShifter is track-based; if not locked, edited curves will not follow the clip.
 - `Smoothness`: Whether to automatically smooth parameter edits and the smoothing strength.
+- `Reference Track Group`: When the parameter is `Pitch`, lets you choose other tracks and display pitch curves from other track groups as references in the pitch editor.
 - `Import MIDI`: Allows you to select a MIDI file and import notes from one or more tracks as a pitch curve.
 
 ### 2.5 Export Audio
