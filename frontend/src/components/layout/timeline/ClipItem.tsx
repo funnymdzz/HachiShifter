@@ -42,6 +42,7 @@ export const ClipItem = React.memo(function ClipItem({
     toggleMultiSelect: _toggleMultiSelect,
     onShiftRangeSelect,
     rangeSelectAnchorClipId,
+    recordLastClickPosition,
     clearContextMenu,
     triggerRename,
     onRenameCommit,
@@ -94,10 +95,16 @@ export const ClipItem = React.memo(function ClipItem({
     onCtrlToggleSelect: (clipId: string) => void;
     /** Ctrl+左键多选切换 */
     toggleMultiSelect: (clipId: string) => void;
-    /** Shift+点击范围选择（跨轨按包围矩形选中） */
-    onShiftRangeSelect: (clipId: string, anchorClipIdOverride?: string | null) => void;
+    /** Shift+点击范围选择（跨轨按包围矩形选中）；targetClientX 用于基于鼠标位置构建矩形 */
+    onShiftRangeSelect: (
+        clipId: string,
+        anchorClipIdOverride?: string | null,
+        targetClientX?: number,
+    ) => void;
     /** Shift 范围选择锚点（点击前快照） */
     rangeSelectAnchorClipId: string | null;
+    /** 记录最近的点击 clientX，用于 Shift 范围选择的锚点位置 */
+    recordLastClickPosition?: (clientX: number) => void;
 
     clearContextMenu: () => void;
 
@@ -106,11 +113,7 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameCommit?: (clipId: string, newName: string) => void;
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
-    onFormantMorphCommit?: (
-        clipId: string,
-        value: ClipFormantMorph,
-        checkpoint: boolean,
-    ) => void;
+    onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
     hovered?: boolean;
 }) {
     const { t } = useI18n();
@@ -150,6 +153,7 @@ export const ClipItem = React.memo(function ClipItem({
                     ensureSelected(clip.id);
                 }
                 selectClipRemote(clip.id);
+                recordLastClickPosition?.(e.clientX);
             }
 
             const startX = e.clientX;
@@ -186,7 +190,7 @@ export const ClipItem = React.memo(function ClipItem({
                         return;
                     }
                     if (doShiftRangeSelect) {
-                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
+                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
                         return;
                     }
                     seekFromClientX(ev.clientX, true);
@@ -206,6 +210,7 @@ export const ClipItem = React.memo(function ClipItem({
             onCtrlToggleSelect,
             onShiftRangeSelect,
             rangeSelectAnchorClipId,
+            recordLastClickPosition,
             seekFromClientX,
             selectClipRemote,
             startEditDrag,
@@ -292,7 +297,7 @@ export const ClipItem = React.memo(function ClipItem({
                     window.removeEventListener("pointercancel", onUp, true);
                     // Shift+点击且未移动时执行范围选择
                     if (doShiftRangeSelect && !moved) {
-                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId);
+                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
                     } else if (!moved && allowSeek) {
                         seekFromClientX(ev.clientX, true);
                     }
@@ -312,6 +317,7 @@ export const ClipItem = React.memo(function ClipItem({
                         ensureSelected(clip.id);
                     }
                     selectClipRemote(clip.id);
+                    recordLastClickPosition?.(e.clientX);
                 }
                 startClipDrag(e, clip.id, clip.startSec, alt);
             }}
@@ -327,6 +333,7 @@ export const ClipItem = React.memo(function ClipItem({
                 onCtrlToggleSelect={onCtrlToggleSelect}
                 onShiftRangeSelect={onShiftRangeSelect}
                 rangeSelectAnchorClipId={rangeSelectAnchorClipId}
+                recordLastClickPosition={recordLastClickPosition}
                 seekFromClientX={seekFromClientX}
                 startEditDrag={startEditDrag}
             />
@@ -389,8 +396,7 @@ export const ClipItem = React.memo(function ClipItem({
                                 startDeferredFadeEditDrag(e, "fade_in");
                             }}
                             title={t("fade_in")}
-                        >
-                        </div>
+                        ></div>
                     )}
                     {(clip.fadeOutSec ?? 0) > 0 && (
                         <div
@@ -402,8 +408,7 @@ export const ClipItem = React.memo(function ClipItem({
                                 startDeferredFadeEditDrag(e, "fade_out");
                             }}
                             title={t("fade_out")}
-                        >
-                        </div>
+                        ></div>
                     )}
 
                     {/* 波形由 WaveformTrackCanvas（轨道级 Canvas）统一渲染，此处不再包含波形内容 */}

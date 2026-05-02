@@ -21,7 +21,10 @@ import {
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade, computeAutoCrossfadeFromPayload } from "./autoCrossfade";
-import { buildBulkClipStateUpdates, buildDuplicateClipsBulkPayload } from "./bulkClipRemotePayloads";
+import {
+    buildBulkClipStateUpdates,
+    buildDuplicateClipsBulkPayload,
+} from "./bulkClipRemotePayloads";
 import { buildDropToNewTrackMoves, computeSelectedTrackSpan } from "./clipDropMoveUtils";
 import {
     computeTimelineTrackDragLock,
@@ -221,8 +224,6 @@ export function useClipDrag(deps: {
         const targetTrackId = trackIdFromClientY(e.clientY) ?? initialTrackId;
         // 允许对混合轨道选择也创建新轨（后续释放时会根据源轨跨度创建多条轨道）
         const allowDropToNewTrackComputed = true;
-        const copyMode =
-            e.ctrlKey || e.metaKey || isModifierActive(copyDragKb, e.nativeEvent);
         clipDragRef.current = {
             pointerId: e.pointerId,
             anchorClipId: clipId,
@@ -242,10 +243,10 @@ export function useClipDrag(deps: {
             lastTrackOffset: 0,
             lastTrackId: targetTrackId,
             lastDeltaBeat: 0,
-            copyMode,
-            // Ctrl is also the default copy-drag modifier.
-            // When copy mode is active, suppress plain ctrl-click toggle semantics.
-            ctrlSelectionToggle: !copyMode && (e.ctrlKey || e.metaKey),
+            copyMode: false,
+            // Ctrl+点击（无拖动）多选切换标记；仅在未发生拖动时生效。
+            // 拖动开始后此标记被清除，由拖拽逻辑接管（Ctrl 拖动 = 复制模式）。
+            ctrlSelectionToggle: e.ctrlKey || e.metaKey,
             startClientX: e.clientX,
             startClientY: e.clientY,
             hasMoved: false,
@@ -258,6 +259,29 @@ export function useClipDrag(deps: {
             const el = scrollRef.current;
             if (!drag || drag.pointerId !== e.pointerId || !el) return;
 
+            if (!drag.hasMoved) {
+                const dx = ev.clientX - drag.startClientX;
+                const dy = ev.clientY - drag.startClientY;
+                if (dx * dx + dy * dy < 9) return;
+                drag.hasMoved = true;
+                drag.ctrlSelectionToggle = false;
+                // 拖动开始时根据当前按键状态决定是否为复制拖动
+                drag.copyMode = resolveClipDragCopyMode({
+                    existingCopyMode: drag.copyMode,
+                    ctrlKey: ev.ctrlKey,
+                    metaKey: ev.metaKey,
+                    modifierActive: isModifierActive(copyDragKb, ev),
+                });
+                if (!drag.copyMode) {
+                    dispatch(checkpointHistory());
+                    dispatch(beginInteraction());
+                    // Begin backend undo group so that move_clip + auto-crossfade
+                    // share a single backend undo entry.
+                    void webApi.beginUndoGroup();
+                }
+            }
+
+            // 拖动过程中允许 copyMode 随按键变化（但不会从 true 变回 false）
             const copyMode = resolveClipDragCopyMode({
                 existingCopyMode: drag.copyMode,
                 ctrlKey: ev.ctrlKey,
@@ -266,23 +290,6 @@ export function useClipDrag(deps: {
             });
             if (copyMode !== drag.copyMode) {
                 drag.copyMode = copyMode;
-                if (copyMode) {
-                    drag.ctrlSelectionToggle = false;
-                }
-            }
-
-            if (!drag.hasMoved) {
-                const dx = ev.clientX - drag.startClientX;
-                const dy = ev.clientY - drag.startClientY;
-                if (dx * dx + dy * dy < 9) return;
-                drag.hasMoved = true;
-                if (!copyMode) {
-                    dispatch(checkpointHistory());
-                    dispatch(beginInteraction());
-                    // Begin backend undo group so that move_clip + auto-crossfade
-                    // share a single backend undo entry.
-                    void webApi.beginUndoGroup();
-                }
             }
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
@@ -523,8 +530,7 @@ export function useClipDrag(deps: {
                                     for (const clipId of sourceClipIds) {
                                         const initial = drag.initialById[clipId];
                                         if (!initial) continue;
-                                        const srcIdx =
-                                            drag.initialTrackIndexById[initial.trackId];
+                                        const srcIdx = drag.initialTrackIndexById[initial.trackId];
                                         if (!Number.isFinite(srcIdx)) continue;
                                         const offset = Number(srcIdx) - spanInfo.minTrackIndex;
                                         const targetTrackId = created[offset];
@@ -592,17 +598,14 @@ export function useClipDrag(deps: {
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
                             // 复制拖动后，将播放光标定位到目标时间点（所有副本中最靠前的起始位置）
-                            const targetStartSec = sourceClipIds.reduce(
-                                (min, clipId) => {
-                                    const initial = drag.initialById[clipId];
-                                    if (!initial) return min;
-                                    return Math.min(
-                                        min,
-                                        Math.max(0, initial.startSec + drag.lastDeltaBeat),
-                                    );
-                                },
-                                Infinity,
-                            );
+                            const targetStartSec = sourceClipIds.reduce((min, clipId) => {
+                                const initial = drag.initialById[clipId];
+                                if (!initial) return min;
+                                return Math.min(
+                                    min,
+                                    Math.max(0, initial.startSec + drag.lastDeltaBeat),
+                                );
+                            }, Infinity);
                             if (Number.isFinite(targetStartSec)) {
                                 dispatch(setplayheadSec(targetStartSec));
                                 void dispatch(seekPlayhead(targetStartSec));

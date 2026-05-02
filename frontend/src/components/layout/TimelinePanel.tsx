@@ -217,11 +217,15 @@ export const TimelinePanel: React.FC = () => {
         keyboardZoomPendingRef,
     } = state;
 
+    // ── 记录最近点击的 clientX，用于 Shift 范围选择的锚点位置
+    const lastClickedClientXRef = React.useRef<number | null>(null);
+
     // ── 2. Clip 多选 + 操作回调 ─────────────────────────────
     const clipActions = useTimelineClipActions({
         sessionRef,
         scrollRef,
         lastClickedClipIdRef,
+        lastClickedClientXRef,
         pxPerSec,
         pxPerBeat,
         rowHeight,
@@ -251,6 +255,7 @@ export const TimelinePanel: React.FC = () => {
         splitSelectedAtPlayhead,
         selectClipRangeByRect,
         rangeSelectAnchorClipId,
+        recordLastClickPosition,
         pasteClipsAtPlayhead,
         clearContextMenu,
         ensureTrackLaneSelected,
@@ -279,7 +284,7 @@ export const TimelinePanel: React.FC = () => {
     const activeFormantToolClip = React.useMemo(
         () =>
             s.clipFormantToolWindow.clipId
-                ? s.clips.find((clip) => clip.id === s.clipFormantToolWindow.clipId) ?? null
+                ? (s.clips.find((clip) => clip.id === s.clipFormantToolWindow.clipId) ?? null)
                 : null,
         [s.clipFormantToolWindow.clipId, s.clips],
     );
@@ -434,11 +439,7 @@ export const TimelinePanel: React.FC = () => {
         [dispatch],
     );
     const handleMoveTrack = React.useCallback(
-        (payload: {
-            trackId: string;
-            targetIndex: number;
-            parentTrackId: string | null;
-        }) => {
+        (payload: { trackId: string; targetIndex: number; parentTrackId: string | null }) => {
             dispatch(
                 moveTrackRemote({
                     trackId: payload.trackId,
@@ -610,40 +611,40 @@ export const TimelinePanel: React.FC = () => {
             }
         >
     >({});
-    const visibleTrackClipsById = useMemo(
-        () => {
-            const nextCache: typeof visibleTrackClipCacheRef.current = {};
-            const nextByTrackId = {} as Record<string, typeof s.clips>;
+    const visibleTrackClipsById = useMemo(() => {
+        const nextCache: typeof visibleTrackClipCacheRef.current = {};
+        const nextByTrackId = {} as Record<string, typeof s.clips>;
 
-            for (const track of visibleTracks) {
-                const clipIds = timelineRenderModel.visibleClipIdsByTrackId[track.id] ?? [];
-                const prev = visibleTrackClipCacheRef.current[track.id];
-                const canReusePrev =
-                    prev != null &&
-                    prev.clipIds.length === clipIds.length &&
-                    clipIds.every(
-                        (clipId, index) =>
-                            prev.clipIds[index] === clipId && prev.clips[index] === clipById.get(clipId),
-                    );
+        for (const track of visibleTracks) {
+            const clipIds = timelineRenderModel.visibleClipIdsByTrackId[track.id] ?? [];
+            const prev = visibleTrackClipCacheRef.current[track.id];
+            const canReusePrev =
+                prev != null &&
+                prev.clipIds.length === clipIds.length &&
+                clipIds.every(
+                    (clipId, index) =>
+                        prev.clipIds[index] === clipId &&
+                        prev.clips[index] === clipById.get(clipId),
+                );
 
-                const clips = canReusePrev
-                    ? prev.clips
-                    : (clipIds
-                          .map((clipId) => clipById.get(clipId) ?? null)
-                          .filter((clip): clip is (typeof s.clips)[number] => clip != null) as typeof s.clips);
+            const clips = canReusePrev
+                ? prev.clips
+                : (clipIds
+                      .map((clipId) => clipById.get(clipId) ?? null)
+                      .filter(
+                          (clip): clip is (typeof s.clips)[number] => clip != null,
+                      ) as typeof s.clips);
 
-                nextCache[track.id] = {
-                    clipIds,
-                    clips,
-                };
-                nextByTrackId[track.id] = clips;
-            }
+            nextCache[track.id] = {
+                clipIds,
+                clips,
+            };
+            nextByTrackId[track.id] = clips;
+        }
 
-            visibleTrackClipCacheRef.current = nextCache;
-            return nextByTrackId;
-        },
-        [clipById, timelineRenderModel.visibleClipIdsByTrackId, visibleTracks],
-    );
+        visibleTrackClipCacheRef.current = nextCache;
+        return nextByTrackId;
+    }, [clipById, timelineRenderModel.visibleClipIdsByTrackId, visibleTracks]);
     const selectedClipTrackId = s.selectedClipId
         ? (clipById.get(s.selectedClipId)?.trackId ?? null)
         : null;
@@ -1133,6 +1134,7 @@ export const TimelinePanel: React.FC = () => {
                                         selectClipRemote={selectTrackLaneClipRemote}
                                         onShiftRangeSelect={selectClipRangeByRect}
                                         rangeSelectAnchorClipId={rangeSelectAnchorClipId}
+                                        recordLastClickPosition={recordLastClickPosition}
                                         openContextMenu={openTrackLaneContextMenu}
                                         seekFromClientX={seekFromTrackLaneClientX}
                                         ghostDrag={ghostDrag}
@@ -1201,9 +1203,7 @@ export const TimelinePanel: React.FC = () => {
                         {s.clipFormantToolWindow.open && activeFormantToolClip ? (
                             <ClipFormantToolWindow
                                 clip={activeFormantToolClip}
-                                status={
-                                    s.clipFormantStatus[activeFormantToolClip.id] ?? "ready"
-                                }
+                                status={s.clipFormantStatus[activeFormantToolClip.id] ?? "ready"}
                                 x={s.clipFormantToolWindow.x}
                                 y={s.clipFormantToolWindow.y}
                                 onCommit={commitTrackLaneFormantMorph}
@@ -1581,9 +1581,7 @@ export const TimelinePanel: React.FC = () => {
                     open={quickExportDialog.open}
                     clipIds={quickExportDialog.clipIds}
                     onOpenChange={(open) =>
-                        setQuickExportDialog((prev) =>
-                            open ? prev : { open: false, clipIds: [] },
-                        )
+                        setQuickExportDialog((prev) => (open ? prev : { open: false, clipIds: [] }))
                     }
                 />
 

@@ -45,6 +45,7 @@ export interface UseTimelineClipActionsArgs {
     sessionRef: React.MutableRefObject<RootState["session"]>;
     scrollRef: React.MutableRefObject<HTMLDivElement | null>;
     lastClickedClipIdRef: React.MutableRefObject<string | null>;
+    lastClickedClientXRef: React.MutableRefObject<number | null>;
     pxPerSec: number;
     pxPerBeat: number;
     rowHeight: number;
@@ -122,8 +123,13 @@ export interface UseTimelineClipActionsResult {
     replaceClipSources: (ids: string[]) => Promise<void>;
     splitClipIdsAtPlayhead: (clipIds: string[]) => string[];
     splitSelectedAtPlayhead: () => void;
-    selectClipRangeByRect: (targetClipId: string, anchorClipIdOverride?: string | null) => void;
+    selectClipRangeByRect: (
+        targetClipId: string,
+        anchorClipIdOverride?: string | null,
+        targetClientX?: number,
+    ) => void;
     rangeSelectAnchorClipId: string | null;
+    recordLastClickPosition: (clientX: number) => void;
     pasteClipsAtPlayhead: () => void;
     clearContextMenu: () => void;
 
@@ -162,6 +168,7 @@ export function useTimelineClipActions(
         sessionRef,
         scrollRef,
         lastClickedClipIdRef,
+        lastClickedClientXRef,
         pxPerSec,
         rowHeight,
         dispatch,
@@ -362,9 +369,17 @@ export function useTimelineClipActions(
         splitClipIdsAtPlayhead(selectedIds);
     }, [splitClipIdsAtPlayhead]);
 
+    // ── recordLastClickPosition ──────────────────────────────
+    const recordLastClickPosition = React.useCallback(
+        (clientX: number) => {
+            lastClickedClientXRef.current = clientX;
+        },
+        [lastClickedClientXRef],
+    );
+
     // ── selectClipRangeByRect ────────────────────────────────
     const selectClipRangeByRect = React.useCallback(
-        (targetClipId: string, anchorClipIdOverride?: string | null) => {
+        (targetClipId: string, anchorClipIdOverride?: string | null, targetClientX?: number) => {
             const session = sessionRef.current;
             const target = session.clips.find((c) => c.id === targetClipId);
             if (!target) return;
@@ -383,16 +398,32 @@ export function useTimelineClipActions(
                 setMultiSelectedClipIds([targetClipId]);
                 dispatch(setSelectedClip(targetClipId));
                 lastClickedClipIdRef.current = targetClipId;
+                lastClickedClientXRef.current = targetClientX ?? null;
                 return;
             }
 
             const minTrack = Math.min(anchorTrackIndex, targetTrackIndex);
             const maxTrack = Math.max(anchorTrackIndex, targetTrackIndex);
-            const minStartSec = Math.min(anchor.startSec, target.startSec);
-            const maxEndSec = Math.max(
-                anchor.startSec + anchor.lengthSec,
-                target.startSec + target.lengthSec,
-            );
+
+            // 使用鼠标点击位置（时间秒）构建选择矩形，避免长 clip 导致的过度选择
+            let anchorClickSec: number;
+            let targetClickSec: number;
+
+            const scroller = scrollRef.current;
+            const anchorClientX = lastClickedClientXRef.current;
+            if (scroller && anchorClientX != null && targetClientX != null) {
+                const bounds = scroller.getBoundingClientRect();
+                const xScroll = scroller.scrollLeft;
+                anchorClickSec = Math.max(0, (anchorClientX - bounds.left + xScroll) / pxPerSec);
+                targetClickSec = Math.max(0, (targetClientX - bounds.left + xScroll) / pxPerSec);
+            } else {
+                // 降级：使用 clip 的 startSec 作为点击时间近似
+                anchorClickSec = anchor.startSec;
+                targetClickSec = target.startSec;
+            }
+
+            const minStartSec = Math.min(anchorClickSec, targetClickSec);
+            const maxEndSec = Math.max(anchorClickSec, targetClickSec);
 
             const selected = session.clips
                 .filter((clip) => {
@@ -410,8 +441,9 @@ export function useTimelineClipActions(
             setMultiSelectedClipIds(next);
             dispatch(setSelectedClip(targetClipId));
             lastClickedClipIdRef.current = targetClipId;
+            lastClickedClientXRef.current = targetClientX ?? null;
         },
-        [dispatch, setMultiSelectedClipIds],
+        [dispatch, setMultiSelectedClipIds, pxPerSec],
     );
 
     // ── pasteClipsAtPlayhead ─────────────────────────────────
@@ -723,6 +755,7 @@ export function useTimelineClipActions(
         splitSelectedAtPlayhead,
         selectClipRangeByRect,
         rangeSelectAnchorClipId,
+        recordLastClickPosition,
         pasteClipsAtPlayhead,
         clearContextMenu,
 

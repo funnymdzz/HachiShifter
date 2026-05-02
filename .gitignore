@@ -166,3 +166,5 @@ cython_debug/
 
 run_gui.bat
 build_and_run.bat
+
+.claude/settings.json
