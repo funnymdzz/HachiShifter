@@ -21,14 +21,15 @@ fn assemble_pitch_orig_from_cache(
     };
     let _bs = 60.0 / bpm;
 
-    // 收集属于?root track 的所?clip（保?tl.clips 原始顺序 = z-order?
+    // 收集属于 root track 的所有 clip（保 tl.clips 原始顺序 = z-order）
+    // 同时包含有音频源的 clip 和带 midi_note_data 的 MIDI clip。
     let clips: Vec<&crate::state::Clip> = tl
         .clips
         .iter()
         .filter(|c| {
             tl.resolve_root_track_id(&c.track_id).as_deref() == Some(root_track_id)
                 && !c.muted
-                && c.source_path.is_some()
+                && (c.source_path.is_some() || c.midi_note_data.is_some())
         })
         .collect();
 
@@ -40,8 +41,51 @@ fn assemble_pitch_orig_from_cache(
     let mut out = vec![0.0f32; target_frames];
     let mut all_cache_hit = true;
 
-    // ?z-order 从低到高（tl.clips 顺序）写入，后面?clip 覆盖前面?
+    // 按 z-order 从低到高（tl.clips 顺序）写入，后面 clip 覆盖前面
     for clip in &clips {
+        // 计算 clip 在 timeline 中的起始帧（MIDI clip 和音频 clip 共用）
+        let clip_start_sec = clip.start_sec.max(0.0);
+        let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
+        let clip_len_sec = clip.length_sec.max(0.0);
+        let clip_len_frames = ((clip_len_sec * 1000.0) / fp).round().max(0.0) as usize;
+
+        // ── MIDI clip 路径：直接从 midi_note_data 生成音高帧 ──
+        if let Some(ref notes) = clip.midi_note_data {
+            let src_start = clip.source_start_sec.max(0.0);
+            let src_end = if clip.source_end_sec > 0.0 {
+                clip.source_end_sec
+            } else {
+                clip_len_sec
+            };
+            for note in notes {
+                if note.end_sec <= src_start || note.start_sec >= src_end {
+                    continue; // 音符在可见范围之外
+                }
+                let rel_start = (note.start_sec - src_start).max(0.0);
+                let rel_end = (note.end_sec - src_start).min(src_end - src_start);
+                if rel_end <= rel_start {
+                    continue;
+                }
+                let note_start_frame = ((rel_start * 1000.0) / fp).round() as usize;
+                let note_end_frame = ((rel_end * 1000.0) / fp).round() as usize;
+                let write_start = clip_start_frame.saturating_add(note_start_frame);
+                let write_end = clip_start_frame
+                    .saturating_add(note_end_frame)
+                    .min(target_frames);
+                if write_start < write_end {
+                    let note_value = note.note as f32;
+                    for frame in write_start..write_end {
+                        let current = out[frame];
+                        if note_value > current || current <= 0.0 {
+                            out[frame] = note_value;
+                        }
+                    }
+                }
+            }
+            continue; // 跳过音频缓存路径
+        }
+
+        // ── 音频 clip 路径：从缓存获取 FCPE 分析结果 ──
         let root = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
         let cached =
             match crate::pitch_clip::get_or_compute_clip_pitch_midi_global(tl, clip, &root, fp) {
@@ -52,19 +96,12 @@ fn assemble_pitch_orig_from_cache(
                 }
             };
 
-        // 计算 clip ?timeline 中的起始?
-        let clip_start_sec = clip.start_sec.max(0.0);
-        let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
-
-        // 判断是否为全量源音频缓存（playback_rate == 1?
+        // 判断是否为全量源音频缓存（playback_rate == 1）
         let pr = clip.playback_rate as f64;
         let is_full_source = pr.is_finite() && pr > 0.0 && (pr - 1.0).abs() <= 1e-6;
 
-        // 缓存中始终是全量源音频的 MIDI 曲线?
         // is_full_source (rate==1)：从 source_start_sec 处偏移截取，直接写入 out
-        // !is_full_source (rate!=1)：从全量曲线中截?source range 区间 ?resample ?clip timeline 长度 ?写入 out
-        let clip_len_sec = clip.length_sec.max(0.0);
-        let clip_len_frames = ((clip_len_sec * 1000.0) / fp).round().max(0.0) as usize;
+        // !is_full_source (rate!=1)：从全量曲线中截取 source range 区间并 resample 到 clip timeline 长度再写入 out
 
         if is_full_source {
             let src_offset = ((clip.source_start_sec.max(0.0) * 1000.0) / fp)

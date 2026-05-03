@@ -267,6 +267,13 @@ fn paste_midi_clipboard_inner(
         let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
         // 限制 pitch_edit 的写入范围
         let clamp_len = max_frame.min(entry.pitch_edit.len());
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit[..clamp_len],
+            offset_sec,
+        );
         midi_import::write_notes_to_pitch_edit(
             &all_notes,
             frame_period_ms,
@@ -275,6 +282,13 @@ fn paste_midi_clipboard_inner(
         )
     } else {
         // 默认以光标位置作为偏移写入 pitch_edit
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit,
+            playhead_sec,
+        );
         midi_import::write_notes_to_pitch_edit(
             &all_notes,
             frame_period_ms,

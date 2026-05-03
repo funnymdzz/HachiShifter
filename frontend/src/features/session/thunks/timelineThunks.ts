@@ -306,22 +306,19 @@ export const duplicateClipsBulkRemote = createAsyncThunk<
         placeOnSelectedTrack?: boolean;
         renameCopies?: boolean;
     }
->(
-    "session/duplicateClipsBulkRemote",
-    async (payload) => {
-        const result = await webApi.duplicateClipsBulk(payload);
-        if (result && typeof result === "object" && "clips" in result) {
-            const typed = result as TimelineState & { created_clip_ids?: string[] };
-            return {
-                ...typed,
-                createdClipIds: Array.isArray(typed.created_clip_ids)
-                    ? typed.created_clip_ids
-                    : undefined,
-            };
-        }
-        return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
-    },
-);
+>("session/duplicateClipsBulkRemote", async (payload) => {
+    const result = await webApi.duplicateClipsBulk(payload);
+    if (result && typeof result === "object" && "clips" in result) {
+        const typed = result as TimelineState & { created_clip_ids?: string[] };
+        return {
+            ...typed,
+            createdClipIds: Array.isArray(typed.created_clip_ids)
+                ? typed.created_clip_ids
+                : undefined,
+        };
+    }
+    return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
+});
 
 export const replaceClipSourceRemote = createAsyncThunk(
     "session/replaceClipSourceRemote",

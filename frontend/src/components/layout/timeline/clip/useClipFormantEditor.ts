@@ -5,7 +5,7 @@ const DEFAULT_FORMANT_MORPH: ClipFormantMorph = {
     enabled: false,
     targetF1Hz: 800,
     targetF2Hz: 1400,
-    strength: 0.50,
+    strength: 0.5,
 };
 
 export function debounceMs(): number {

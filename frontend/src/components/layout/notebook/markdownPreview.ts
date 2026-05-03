@@ -27,7 +27,9 @@ function flushParagraph(lines: string[], blocks: string[]): void {
 
 function flushList(items: string[], blocks: string[]): void {
     if (items.length === 0) return;
-    blocks.push(`<ul>${items.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`);
+    blocks.push(
+        `<ul>${items.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join("")}</ul>`,
+    );
     items.length = 0;
 }
 

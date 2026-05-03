@@ -885,571 +885,609 @@ const TrackListInner: React.FC<TrackListProps> = ({
                         minHeight: tracks.length * rowHeight,
                     }}
                 >
-                    <div style={{ transform: `translateY(${visibleTrackWindow.startIndex * rowHeight}px)` }}>
-                {visibleTracks.map((track) => {
-                    const selected = selectedTrackId === track.id;
-                    const depth = Math.max(0, Number(track.depth ?? 0) || 0);
-                    const indent = depth * 16;
-                    const dragging = dragUi?.draggingTrackId === track.id;
-                    const isOver = dragUi?.overTrackId === track.id;
-                    const muted = Boolean(track.muted);
-                    const solo = Boolean(track.solo);
-                    const isRoot = (track.parentId ?? null) == null;
-                    const composeEnabled = Boolean(track.composeEnabled);
-                    const volume = currentTrackVolumeById[track.id] ?? 1;
-                    const meter = meterDisplayByTrackId[track.id];
-                    const peakLinear = meter?.peakLinear ?? 0;
-                    const maxPeakLinear = meter?.maxPeakLinear ?? 0;
-                    const clipped = Boolean(meter?.clipped);
-                    const volumeDb = clampGainDb(gainToDb(volume));
-                    const knobDeg =
-                        volumeDb >= 0
-                            ? (volumeDb / TRACK_GAIN_MAX_DB) * 135
-                            : (volumeDb / Math.abs(TRACK_GAIN_MIN_DB)) * 135;
+                    <div
+                        style={{
+                            transform: `translateY(${visibleTrackWindow.startIndex * rowHeight}px)`,
+                        }}
+                    >
+                        {visibleTracks.map((track) => {
+                            const selected = selectedTrackId === track.id;
+                            const depth = Math.max(0, Number(track.depth ?? 0) || 0);
+                            const indent = depth * 16;
+                            const dragging = dragUi?.draggingTrackId === track.id;
+                            const isOver = dragUi?.overTrackId === track.id;
+                            const muted = Boolean(track.muted);
+                            const solo = Boolean(track.solo);
+                            const isRoot = (track.parentId ?? null) == null;
+                            const composeEnabled = Boolean(track.composeEnabled);
+                            const volume = currentTrackVolumeById[track.id] ?? 1;
+                            const meter = meterDisplayByTrackId[track.id];
+                            const peakLinear = meter?.peakLinear ?? 0;
+                            const maxPeakLinear = meter?.maxPeakLinear ?? 0;
+                            const clipped = Boolean(meter?.clipped);
+                            const volumeDb = clampGainDb(gainToDb(volume));
+                            const knobDeg =
+                                volumeDb >= 0
+                                    ? (volumeDb / TRACK_GAIN_MAX_DB) * 135
+                                    : (volumeDb / Math.abs(TRACK_GAIN_MIN_DB)) * 135;
 
-                    const guideLines = depth > 0 ? Array.from({ length: depth }) : [];
+                            const guideLines = depth > 0 ? Array.from({ length: depth }) : [];
 
-                    return (
-                        <div
-                            key={track.id}
-                            style={{ height: rowHeight }}
-                            className="border-b border-qt-border relative group overflow-hidden"
-                            onPointerDownCapture={(e) => {
-                                if (e.button !== 0) return;
-                                if (selectedTrackId === track.id) return;
-                                onSelectTrack(track.id);
-                            }}
-                            onContextMenu={(e) => {
-                                e.preventDefault();
-                                setTrackCtxMenu({
-                                    x: e.clientX,
-                                    y: e.clientY,
-                                    trackId: track.id,
-                                });
-                            }}
-                            onPointerDown={(e) => {
-                                if (e.button !== 0) return;
+                            return (
+                                <div
+                                    key={track.id}
+                                    style={{ height: rowHeight }}
+                                    className="border-b border-qt-border relative group overflow-hidden"
+                                    onPointerDownCapture={(e) => {
+                                        if (e.button !== 0) return;
+                                        if (selectedTrackId === track.id) return;
+                                        onSelectTrack(track.id);
+                                    }}
+                                    onContextMenu={(e) => {
+                                        e.preventDefault();
+                                        setTrackCtxMenu({
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            trackId: track.id,
+                                        });
+                                    }}
+                                    onPointerDown={(e) => {
+                                        if (e.button !== 0) return;
 
-                                // If the pointer down starts on an interactive control, do not start a drag.
-                                const target = e.target as HTMLElement | null;
-                                if (
-                                    target?.closest?.(
-                                        "button,[role='slider'],input,textarea,select,a",
-                                    )
-                                ) {
-                                    return;
-                                }
-
-                                const overSiblings = siblingsOf(track.parentId ?? null);
-                                const originalIndexSelf = Math.max(
-                                    0,
-                                    overSiblings.indexOf(track.id),
-                                );
-
-                                dragRef.current = {
-                                    pointerId: e.pointerId,
-                                    trackId: track.id,
-                                    startClientX: e.clientX,
-                                    startClientY: e.clientY,
-                                    hasMoved: false,
-                                    originalParentId: track.parentId ?? null,
-                                    originalIndexSelf,
-                                };
-
-                                const el = e.currentTarget as HTMLDivElement;
-                                el.setPointerCapture(e.pointerId);
-
-                                const prevCursor = document.body.style.cursor;
-                                const prevSelect = document.body.style.userSelect;
-
-                                function onMove(ev: PointerEvent) {
-                                    const drag = dragRef.current;
-                                    if (!drag || drag.pointerId !== e.pointerId) return;
-
-                                    if (!drag.hasMoved) {
-                                        const dx = ev.clientX - drag.startClientX;
-                                        const dy = ev.clientY - drag.startClientY;
-                                        if (dx * dx + dy * dy < 9) {
+                                        // If the pointer down starts on an interactive control, do not start a drag.
+                                        const target = e.target as HTMLElement | null;
+                                        if (
+                                            target?.closest?.(
+                                                "button,[role='slider'],input,textarea,select,a",
+                                            )
+                                        ) {
                                             return;
                                         }
-                                        drag.hasMoved = true;
-                                        document.body.style.cursor = "grabbing";
-                                        document.body.style.userSelect = "none";
-                                    }
 
-                                    const spec = computeDropSpec(
-                                        drag.trackId,
-                                        ev.clientX,
-                                        ev.clientY,
-                                    );
-                                    const overInfo = trackAtClientY(ev.clientY);
-                                    const over = overInfo.track;
+                                        const overSiblings = siblingsOf(track.parentId ?? null);
+                                        const originalIndexSelf = Math.max(
+                                            0,
+                                            overSiblings.indexOf(track.id),
+                                        );
 
-                                    let indicatorY: number | null = null;
-                                    if (spec.mode === "reorder") {
-                                        const listBounds = listRef.current?.getBoundingClientRect();
-                                        // 鼠标在列表上方时，指示线固定在顶�?
-                                        if (listBounds && ev.clientY < listBounds.top) {
-                                            indicatorY = 0;
-                                        } else {
-                                            const idx = overInfo.index;
-                                            const edgeZone = rowHeight * 0.35;
-                                            if (!Number.isFinite(idx)) {
-                                                indicatorY = null;
-                                            } else if (!over) {
-                                                indicatorY = tracks.length * rowHeight;
-                                            } else {
-                                                const insertAfter =
-                                                    overInfo.yInRow > rowHeight - edgeZone;
-                                                const insertBefore = overInfo.yInRow < edgeZone;
-                                                if (insertAfter) {
-                                                    indicatorY = idx * rowHeight + rowHeight;
-                                                } else if (insertBefore) {
-                                                    indicatorY = idx * rowHeight;
+                                        dragRef.current = {
+                                            pointerId: e.pointerId,
+                                            trackId: track.id,
+                                            startClientX: e.clientX,
+                                            startClientY: e.clientY,
+                                            hasMoved: false,
+                                            originalParentId: track.parentId ?? null,
+                                            originalIndexSelf,
+                                        };
+
+                                        const el = e.currentTarget as HTMLDivElement;
+                                        el.setPointerCapture(e.pointerId);
+
+                                        const prevCursor = document.body.style.cursor;
+                                        const prevSelect = document.body.style.userSelect;
+
+                                        function onMove(ev: PointerEvent) {
+                                            const drag = dragRef.current;
+                                            if (!drag || drag.pointerId !== e.pointerId) return;
+
+                                            if (!drag.hasMoved) {
+                                                const dx = ev.clientX - drag.startClientX;
+                                                const dy = ev.clientY - drag.startClientY;
+                                                if (dx * dx + dy * dy < 9) {
+                                                    return;
+                                                }
+                                                drag.hasMoved = true;
+                                                document.body.style.cursor = "grabbing";
+                                                document.body.style.userSelect = "none";
+                                            }
+
+                                            const spec = computeDropSpec(
+                                                drag.trackId,
+                                                ev.clientX,
+                                                ev.clientY,
+                                            );
+                                            const overInfo = trackAtClientY(ev.clientY);
+                                            const over = overInfo.track;
+
+                                            let indicatorY: number | null = null;
+                                            if (spec.mode === "reorder") {
+                                                const listBounds =
+                                                    listRef.current?.getBoundingClientRect();
+                                                // 鼠标在列表上方时，指示线固定在顶�?
+                                                if (listBounds && ev.clientY < listBounds.top) {
+                                                    indicatorY = 0;
                                                 } else {
-                                                    // 中间区域不显示指示线
-                                                    indicatorY = null;
+                                                    const idx = overInfo.index;
+                                                    const edgeZone = rowHeight * 0.35;
+                                                    if (!Number.isFinite(idx)) {
+                                                        indicatorY = null;
+                                                    } else if (!over) {
+                                                        indicatorY = tracks.length * rowHeight;
+                                                    } else {
+                                                        const insertAfter =
+                                                            overInfo.yInRow > rowHeight - edgeZone;
+                                                        const insertBefore =
+                                                            overInfo.yInRow < edgeZone;
+                                                        if (insertAfter) {
+                                                            indicatorY =
+                                                                idx * rowHeight + rowHeight;
+                                                        } else if (insertBefore) {
+                                                            indicatorY = idx * rowHeight;
+                                                        } else {
+                                                            // 中间区域不显示指示线
+                                                            indicatorY = null;
+                                                        }
+                                                    }
                                                 }
                                             }
+
+                                            setDragUi({
+                                                draggingTrackId: drag.trackId,
+                                                overTrackId: over?.id ?? null,
+                                                mode: spec.mode,
+                                                indicatorY,
+                                            });
                                         }
-                                    }
 
-                                    setDragUi({
-                                        draggingTrackId: drag.trackId,
-                                        overTrackId: over?.id ?? null,
-                                        mode: spec.mode,
-                                        indicatorY,
-                                    });
-                                }
+                                        function end(ev: PointerEvent) {
+                                            const drag = dragRef.current;
+                                            if (!drag || drag.pointerId !== e.pointerId) return;
+                                            dragRef.current = null;
 
-                                function end(ev: PointerEvent) {
-                                    const drag = dragRef.current;
-                                    if (!drag || drag.pointerId !== e.pointerId) return;
-                                    dragRef.current = null;
+                                            window.removeEventListener("pointermove", onMove);
+                                            window.removeEventListener("pointerup", end);
+                                            window.removeEventListener("pointercancel", end);
 
-                                    window.removeEventListener("pointermove", onMove);
-                                    window.removeEventListener("pointerup", end);
-                                    window.removeEventListener("pointercancel", end);
+                                            document.body.style.cursor = prevCursor;
+                                            document.body.style.userSelect = prevSelect;
 
-                                    document.body.style.cursor = prevCursor;
-                                    document.body.style.userSelect = prevSelect;
+                                            const moved = drag.hasMoved;
+                                            setDragUi(null);
 
-                                    const moved = drag.hasMoved;
-                                    setDragUi(null);
+                                            if (!moved) {
+                                                return;
+                                            }
 
-                                    if (!moved) {
-                                        return;
-                                    }
+                                            const spec = computeDropSpec(
+                                                drag.trackId,
+                                                ev.clientX,
+                                                ev.clientY,
+                                            );
 
-                                    const spec = computeDropSpec(
-                                        drag.trackId,
-                                        ev.clientX,
-                                        ev.clientY,
-                                    );
+                                            if (
+                                                spec.parentTrackId === drag.originalParentId &&
+                                                spec.targetIndex === drag.originalIndexSelf
+                                            ) {
+                                                return;
+                                            }
 
-                                    if (
-                                        spec.parentTrackId === drag.originalParentId &&
-                                        spec.targetIndex === drag.originalIndexSelf
-                                    ) {
-                                        return;
-                                    }
+                                            onMoveTrack({
+                                                trackId: drag.trackId,
+                                                targetIndex: spec.targetIndex,
+                                                parentTrackId: spec.parentTrackId,
+                                            });
+                                        }
 
-                                    onMoveTrack({
-                                        trackId: drag.trackId,
-                                        targetIndex: spec.targetIndex,
-                                        parentTrackId: spec.parentTrackId,
-                                    });
-                                }
-
-                                window.addEventListener("pointermove", onMove);
-                                window.addEventListener("pointerup", end);
-                                window.addEventListener("pointercancel", end);
-                            }}
-                        >
-                            {/* Always-visible left accent bar (pinned to list edge) */}
-                            <div
-                                className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-80 group-hover:opacity-90"}`}
-                                style={{
-                                    backgroundColor: track.color || "var(--qt-highlight)",
-                                }}
-                            />
-
-                            {/* Left gutter: makes nesting depth visible at a glance */}
-                            <div
-                                className="absolute left-0 top-0 bottom-0 bg-qt-window pointer-events-none"
-                                style={{ width: indent }}
-                            >
-                                {guideLines.map((_, i) => (
-                                    <div
-                                        key={i}
-                                        className="absolute top-0 bottom-0 border-l border-qt-border opacity-60"
-                                        style={{ left: i * 16 + 8 }}
-                                    />
-                                ))}
-                                {depth > 0 ? (
-                                    <div
-                                        className="absolute border-t border-qt-border opacity-60"
-                                        style={{
-                                            left: (depth - 1) * 16 + 8,
-                                            right: 0,
-                                            top: "50%",
-                                        }}
-                                    />
-                                ) : null}
-                            </div>
-
-                            {/* Content block: shifted right by depth */}
-                            <Box
-                                className={`absolute top-0 bottom-0 right-0 bg-qt-base transition-colors overflow-hidden ${selected ? "bg-qt-button-hover" : "hover:bg-qt-button-hover"} ${dragging ? "opacity-60" : ""} ${isOver ? "bg-qt-button-hover" : ""}`}
-                                style={{ left: indent }}
-                            >
-                                {/* Keep a subtle in-row bar too, but don't rely on it */}
-                                <div
-                                    className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-10 group-hover:opacity-30"}`}
-                                    style={{
-                                        backgroundColor: track.color || "var(--qt-highlight)",
+                                        window.addEventListener("pointermove", onMove);
+                                        window.addEventListener("pointerup", end);
+                                        window.addEventListener("pointercancel", end);
                                     }}
-                                />
-
-                                {isOver && dragUi?.mode === "nest" ? (
+                                >
+                                    {/* Always-visible left accent bar (pinned to list edge) */}
                                     <div
-                                        className="absolute inset-0 pointer-events-none"
+                                        className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-80 group-hover:opacity-90"}`}
                                         style={{
-                                            backgroundColor:
-                                                "color-mix(in oklab, var(--qt-highlight) 14%, transparent)",
-                                            border: "1px dashed var(--qt-highlight)",
+                                            backgroundColor: track.color || "var(--qt-highlight)",
                                         }}
                                     />
-                                ) : null}
 
-                                <Flex height="100%" align="stretch">
-                                    <Flex
-                                        direction="column"
-                                        p="2"
-                                        gap="2"
-                                        justify="center"
-                                        className="min-w-0 flex-1"
+                                    {/* Left gutter: makes nesting depth visible at a glance */}
+                                    <div
+                                        className="absolute left-0 top-0 bottom-0 bg-qt-window pointer-events-none"
+                                        style={{ width: indent }}
                                     >
-                                        <Flex justify="between" align="center" gap="2">
-                                            <Flex align="center" gap="1" className="min-w-0 flex-1">
-                                                {/* ??????????????? */}
-                                                <div
-                                                    className="relative shrink-0"
-                                                    data-track-color-picker
-                                                >
-                                                    <button
-                                                        className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
-                                                        style={{
-                                                            backgroundColor:
-                                                                track.color || "#4f8ef7",
-                                                        }}
-                                                        title={t("track_change_color")}
+                                        {guideLines.map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className="absolute top-0 bottom-0 border-l border-qt-border opacity-60"
+                                                style={{ left: i * 16 + 8 }}
+                                            />
+                                        ))}
+                                        {depth > 0 ? (
+                                            <div
+                                                className="absolute border-t border-qt-border opacity-60"
+                                                style={{
+                                                    left: (depth - 1) * 16 + 8,
+                                                    right: 0,
+                                                    top: "50%",
+                                                }}
+                                            />
+                                        ) : null}
+                                    </div>
+
+                                    {/* Content block: shifted right by depth */}
+                                    <Box
+                                        className={`absolute top-0 bottom-0 right-0 bg-qt-base transition-colors overflow-hidden ${selected ? "bg-qt-button-hover" : "hover:bg-qt-button-hover"} ${dragging ? "opacity-60" : ""} ${isOver ? "bg-qt-button-hover" : ""}`}
+                                        style={{ left: indent }}
+                                    >
+                                        {/* Keep a subtle in-row bar too, but don't rely on it */}
+                                        <div
+                                            className={`absolute left-0 top-0 bottom-0 w-1 transition-opacity ${selected ? "opacity-100" : "opacity-10 group-hover:opacity-30"}`}
+                                            style={{
+                                                backgroundColor:
+                                                    track.color || "var(--qt-highlight)",
+                                            }}
+                                        />
+
+                                        {isOver && dragUi?.mode === "nest" ? (
+                                            <div
+                                                className="absolute inset-0 pointer-events-none"
+                                                style={{
+                                                    backgroundColor:
+                                                        "color-mix(in oklab, var(--qt-highlight) 14%, transparent)",
+                                                    border: "1px dashed var(--qt-highlight)",
+                                                }}
+                                            />
+                                        ) : null}
+
+                                        <Flex height="100%" align="stretch">
+                                            <Flex
+                                                direction="column"
+                                                p="2"
+                                                gap="2"
+                                                justify="center"
+                                                className="min-w-0 flex-1"
+                                            >
+                                                <Flex justify="between" align="center" gap="2">
+                                                    <Flex
+                                                        align="center"
+                                                        gap="1"
+                                                        className="min-w-0 flex-1"
+                                                    >
+                                                        {/* ??????????????? */}
+                                                        <div
+                                                            className="relative shrink-0"
+                                                            data-track-color-picker
+                                                        >
+                                                            <button
+                                                                className="w-3.5 h-3.5 rounded-full border border-white/20 hover:scale-125 transition-transform cursor-pointer"
+                                                                style={{
+                                                                    backgroundColor:
+                                                                        track.color || "#4f8ef7",
+                                                                }}
+                                                                title={t("track_change_color")}
+                                                                onPointerDown={(e) =>
+                                                                    e.stopPropagation()
+                                                                }
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setColorPickerTrackId(
+                                                                        colorPickerTrackId ===
+                                                                            track.id
+                                                                            ? null
+                                                                            : track.id,
+                                                                    );
+                                                                }}
+                                                            />
+                                                            {colorPickerTrackId === track.id && (
+                                                                <div
+                                                                    className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
+                                                                    style={{
+                                                                        width: 120,
+                                                                    }}
+                                                                    data-track-color-picker
+                                                                >
+                                                                    {TRACK_COLOR_PALETTE_KEYS.map(
+                                                                        (opt) => (
+                                                                            <button
+                                                                                key={opt.value}
+                                                                                title={t(opt.key)}
+                                                                                className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
+                                                                                    (track.color ||
+                                                                                        "#4f8ef7") ===
+                                                                                    opt.value
+                                                                                        ? "ring-2 ring-white/80 scale-110"
+                                                                                        : ""
+                                                                                }`}
+                                                                                style={{
+                                                                                    backgroundColor:
+                                                                                        opt.value,
+                                                                                }}
+                                                                                onPointerDown={(
+                                                                                    e,
+                                                                                ) =>
+                                                                                    e.stopPropagation()
+                                                                                }
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    onTrackColorChange?.(
+                                                                                        track.id,
+                                                                                        opt.value,
+                                                                                    );
+                                                                                    setColorPickerTrackId(
+                                                                                        null,
+                                                                                    );
+                                                                                }}
+                                                                            />
+                                                                        ),
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        {editingTrackId === track.id ? (
+                                                            <input
+                                                                ref={nameInputRef}
+                                                                value={editingName}
+                                                                className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
+                                                                onChange={(e) =>
+                                                                    setEditingName(e.target.value)
+                                                                }
+                                                                onBlur={commitTrackName}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === "Enter") {
+                                                                        commitTrackName();
+                                                                    } else if (e.key === "Escape") {
+                                                                        setEditingTrackId(null);
+                                                                    }
+                                                                }}
+                                                                onPointerDown={(e) =>
+                                                                    e.stopPropagation()
+                                                                }
+                                                                onClick={(e) => e.stopPropagation()}
+                                                                autoFocus
+                                                            />
+                                                        ) : (
+                                                            <Text
+                                                                size="2"
+                                                                weight="medium"
+                                                                className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""} cursor-text select-none`}
+                                                                onPointerDown={(e) =>
+                                                                    e.stopPropagation()
+                                                                }
+                                                                onDoubleClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    setEditingTrackId(track.id);
+                                                                    setEditingName(track.name);
+                                                                    setTimeout(() => {
+                                                                        nameInputRef.current?.select();
+                                                                    }, 0);
+                                                                }}
+                                                            >
+                                                                {track.name}
+                                                            </Text>
+                                                        )}
+                                                    </Flex>
+                                                    {isRoot && composeEnabled && onAlgoChange ? (
+                                                        <div
+                                                            className="shrink-0"
+                                                            onPointerDown={(e) =>
+                                                                e.stopPropagation()
+                                                            }
+                                                        >
+                                                            <Select.Root
+                                                                size="1"
+                                                                value={
+                                                                    PITCH_ANALYSIS_ALGO_OPTIONS.includes(
+                                                                        track.pitchAnalysisAlgo as
+                                                                            | "world_dll"
+                                                                            | "nsf_hifigan_onnx"
+                                                                            | "vslib"
+                                                                            | "none",
+                                                                    )
+                                                                        ? track.pitchAnalysisAlgo
+                                                                        : "nsf_hifigan_onnx"
+                                                                }
+                                                                onValueChange={(v) => {
+                                                                    onAlgoChange(track.id, v);
+                                                                }}
+                                                            >
+                                                                <Select.Trigger
+                                                                    style={{
+                                                                        minWidth: 80,
+                                                                    }}
+                                                                />
+                                                                <Select.Content>
+                                                                    <Select.Item value="world_dll">
+                                                                        world
+                                                                    </Select.Item>
+                                                                    <Select.Item value="nsf_hifigan_onnx">
+                                                                        nsf-hifigan
+                                                                    </Select.Item>
+                                                                    <Select.Item value="vslib">
+                                                                        vslib
+                                                                    </Select.Item>
+                                                                    <Select.Item value="none">
+                                                                        {t("none")}
+                                                                    </Select.Item>
+                                                                </Select.Content>
+                                                            </Select.Root>
+                                                        </div>
+                                                    ) : null}
+                                                    <IconButton
+                                                        size="1"
+                                                        variant="ghost"
+                                                        color="gray"
+                                                        className="opacity-0 group-hover:opacity-100"
+                                                        disabled={isLastRootTrack(track.id)}
                                                         onPointerDown={(e) => e.stopPropagation()}
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            setColorPickerTrackId(
-                                                                colorPickerTrackId === track.id
-                                                                    ? null
-                                                                    : track.id,
+                                                            onRemoveTrack(track.id);
+                                                        }}
+                                                    >
+                                                        <Cross2Icon />
+                                                    </IconButton>
+                                                </Flex>
+
+                                                <div
+                                                    className="min-w-0 pt-1"
+                                                    data-track-volume-control
+                                                    data-track-id={track.id}
+                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    onDoubleClick={(e) => {
+                                                        e.stopPropagation();
+                                                        clearPendingVolumeCommit(track.id);
+                                                        onVolumeUiChange(track.id, 1);
+                                                        onVolumeCommit(track.id, 1);
+                                                    }}
+                                                >
+                                                    <Flex align="center" gap="2">
+                                                        <button
+                                                            type="button"
+                                                            className="relative w-8 h-8 rounded-full border border-qt-border bg-qt-window hover:bg-qt-surface transition-colors shrink-0"
+                                                            title={formatGainLabel(volume)}
+                                                            data-track-volume-knob
+                                                            data-track-id={track.id}
+                                                            onPointerDown={(e) =>
+                                                                beginVolumeKnobDrag(
+                                                                    e,
+                                                                    track.id,
+                                                                    volume,
+                                                                )
+                                                            }
+                                                        >
+                                                            <span
+                                                                className="absolute left-1/2 top-1/2 w-[2px] h-3 -translate-x-1/2 -translate-y-full rounded-full bg-qt-highlight"
+                                                                style={{
+                                                                    transform: `translate(-50%, -100%) rotate(${knobDeg}deg)`,
+                                                                    transformOrigin: "50% 100%",
+                                                                }}
+                                                            />
+                                                        </button>
+                                                        <Text
+                                                            size="1"
+                                                            color={
+                                                                Math.abs(gainToDb(volume)) < 0.05
+                                                                    ? "blue"
+                                                                    : "gray"
+                                                            }
+                                                            className="leading-none tabular-nums"
+                                                        >
+                                                            {formatGainLabel(volume)}
+                                                        </Text>
+                                                    </Flex>
+                                                </div>
+                                            </Flex>
+
+                                            <Flex
+                                                direction="column"
+                                                gap="1"
+                                                align="center"
+                                                justify="center"
+                                                className="w-[22px] shrink-0"
+                                            >
+                                                {isRoot ? (
+                                                    <IconButton
+                                                        size="1"
+                                                        variant={composeEnabled ? "solid" : "ghost"}
+                                                        color={composeEnabled ? "blue" : "gray"}
+                                                        title={t("compose")}
+                                                        onPointerDown={(e) => e.stopPropagation()}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            onToggleCompose(
+                                                                track.id,
+                                                                !composeEnabled,
                                                             );
                                                         }}
-                                                    />
-                                                    {colorPickerTrackId === track.id && (
-                                                        <div
-                                                            className="absolute left-0 top-full mt-1 z-50 p-1.5 rounded border border-qt-border bg-qt-window shadow-lg flex gap-1 flex-wrap"
-                                                            style={{
-                                                                width: 120,
-                                                            }}
-                                                            data-track-color-picker
-                                                        >
-                                                            {TRACK_COLOR_PALETTE_KEYS.map((opt) => (
-                                                                <button
-                                                                    key={opt.value}
-                                                                    title={t(opt.key)}
-                                                                    className={`w-4 h-4 rounded-full transition-transform hover:scale-125 ${
-                                                                        (track.color ||
-                                                                            "#4f8ef7") === opt.value
-                                                                            ? "ring-2 ring-white/80 scale-110"
-                                                                            : ""
-                                                                    }`}
-                                                                    style={{
-                                                                        backgroundColor: opt.value,
-                                                                    }}
-                                                                    onPointerDown={(e) =>
-                                                                        e.stopPropagation()
-                                                                    }
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        onTrackColorChange?.(
-                                                                            track.id,
-                                                                            opt.value,
-                                                                        );
-                                                                        setColorPickerTrackId(null);
-                                                                    }}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {editingTrackId === track.id ? (
-                                                    <input
-                                                        ref={nameInputRef}
-                                                        value={editingName}
-                                                        className="bg-transparent outline outline-1 outline-qt-highlight rounded px-0.5 flex-1 min-w-0 text-qt-text text-sm font-medium pr-2"
-                                                        onChange={(e) =>
-                                                            setEditingName(e.target.value)
-                                                        }
-                                                        onBlur={commitTrackName}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === "Enter") {
-                                                                commitTrackName();
-                                                            } else if (e.key === "Escape") {
-                                                                setEditingTrackId(null);
-                                                            }
+                                                        style={{
+                                                            fontWeight: 700,
+                                                            fontSize: 11,
+                                                            width: 20,
+                                                            height: 20,
                                                         }}
-                                                        onPointerDown={(e) => e.stopPropagation()}
-                                                        onClick={(e) => e.stopPropagation()}
-                                                        autoFocus
-                                                    />
+                                                    >
+                                                        C
+                                                    </IconButton>
                                                 ) : (
-                                                    <Text
-                                                        size="2"
-                                                        weight="medium"
-                                                        className={`text-qt-text truncate pr-2 ${depth > 0 ? "opacity-90" : ""} cursor-text select-none`}
-                                                        onPointerDown={(e) => e.stopPropagation()}
-                                                        onDoubleClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setEditingTrackId(track.id);
-                                                            setEditingName(track.name);
-                                                            setTimeout(() => {
-                                                                nameInputRef.current?.select();
-                                                            }, 0);
-                                                        }}
-                                                    >
-                                                        {track.name}
-                                                    </Text>
+                                                    <div className="w-5 h-5" />
                                                 )}
-                                            </Flex>
-                                            {isRoot && composeEnabled && onAlgoChange ? (
-                                                <div
-                                                    className="shrink-0"
+                                                <IconButton
+                                                    size="1"
+                                                    variant={muted ? "solid" : "ghost"}
+                                                    color={muted ? "red" : "gray"}
+                                                    title={
+                                                        muted ? t("clip_unmute") : t("clip_mute")
+                                                    }
                                                     onPointerDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onToggleMute(track.id, !muted);
+                                                    }}
+                                                    style={{
+                                                        fontWeight: 700,
+                                                        fontSize: 11,
+                                                        width: 20,
+                                                        height: 20,
+                                                    }}
                                                 >
-                                                    <Select.Root
+                                                    M
+                                                </IconButton>
+                                                <IconButton
+                                                    size="1"
+                                                    variant={solo ? "solid" : "ghost"}
+                                                    color={solo ? "amber" : "gray"}
+                                                    title={t("solo")}
+                                                    onPointerDown={(e) => e.stopPropagation()}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        onToggleSolo(track.id, !solo);
+                                                    }}
+                                                    style={{
+                                                        fontWeight: 700,
+                                                        fontSize: 11,
+                                                        width: 20,
+                                                        height: 20,
+                                                    }}
+                                                >
+                                                    S
+                                                </IconButton>
+                                            </Flex>
+
+                                            <div
+                                                className="w-[11.25%] min-w-[28px] max-w-[34px] shrink-0"
+                                                style={{
+                                                    background: "var(--qt-meter-rail)",
+                                                }}
+                                            >
+                                                <Flex
+                                                    direction="column"
+                                                    align="center"
+                                                    justify="between"
+                                                    className="h-full pt-1 pb-0"
+                                                >
+                                                    <Text
                                                         size="1"
-                                                        value={
-                                                            PITCH_ANALYSIS_ALGO_OPTIONS.includes(
-                                                                track.pitchAnalysisAlgo as
-                                                                    | "world_dll"
-                                                                    | "nsf_hifigan_onnx"
-                                                                    | "vslib"
-                                                                    | "none",
-                                                            )
-                                                                ? track.pitchAnalysisAlgo
-                                                                : "nsf_hifigan_onnx"
-                                                        }
-                                                        onValueChange={(v) => {
-                                                            onAlgoChange(track.id, v);
+                                                        color={clipped ? "red" : "gray"}
+                                                        className="leading-none tabular-nums"
+                                                    >
+                                                        {formatPeakLabel(maxPeakLinear, clipped)}
+                                                    </Text>
+                                                    <div
+                                                        className="relative h-full w-full"
+                                                        style={{
+                                                            background: "var(--qt-meter-well)",
                                                         }}
                                                     >
-                                                        <Select.Trigger
+                                                        <div
+                                                            className={`absolute inset-x-0 bottom-0 transition-[height] duration-75 ${meterFillClass(
+                                                                peakLinear,
+                                                                clipped,
+                                                            )}`}
                                                             style={{
-                                                                minWidth: 80,
+                                                                height: `${meterHeightPercent(peakLinear)}%`,
+                                                                maxHeight: "100%",
                                                             }}
                                                         />
-                                                        <Select.Content>
-                                                            <Select.Item value="world_dll">
-                                                                world
-                                                            </Select.Item>
-                                                            <Select.Item value="nsf_hifigan_onnx">
-                                                                nsf-hifigan
-                                                            </Select.Item>
-                                                            <Select.Item value="vslib">
-                                                                vslib
-                                                            </Select.Item>
-                                                            <Select.Item value="none">
-                                                                {t("none")}
-                                                            </Select.Item>
-                                                        </Select.Content>
-                                                    </Select.Root>
-                                                </div>
-                                            ) : null}
-                                            <IconButton
-                                                size="1"
-                                                variant="ghost"
-                                                color="gray"
-                                                className="opacity-0 group-hover:opacity-100"
-                                                disabled={isLastRootTrack(track.id)}
-                                                onPointerDown={(e) => e.stopPropagation()}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onRemoveTrack(track.id);
-                                                }}
-                                            >
-                                                <Cross2Icon />
-                                            </IconButton>
-                                        </Flex>
-
-                                        <div
-                                            className="min-w-0 pt-1"
-                                            data-track-volume-control
-                                            data-track-id={track.id}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                            onClick={(e) => e.stopPropagation()}
-                                            onDoubleClick={(e) => {
-                                                e.stopPropagation();
-                                                clearPendingVolumeCommit(track.id);
-                                                onVolumeUiChange(track.id, 1);
-                                                onVolumeCommit(track.id, 1);
-                                            }}
-                                        >
-                                            <Flex align="center" gap="2">
-                                                <button
-                                                    type="button"
-                                                    className="relative w-8 h-8 rounded-full border border-qt-border bg-qt-window hover:bg-qt-surface transition-colors shrink-0"
-                                                    title={formatGainLabel(volume)}
-                                                    data-track-volume-knob
-                                                    data-track-id={track.id}
-                                                    onPointerDown={(e) =>
-                                                        beginVolumeKnobDrag(e, track.id, volume)
-                                                    }
-                                                >
-                                                    <span
-                                                        className="absolute left-1/2 top-1/2 w-[2px] h-3 -translate-x-1/2 -translate-y-full rounded-full bg-qt-highlight"
-                                                        style={{
-                                                            transform: `translate(-50%, -100%) rotate(${knobDeg}deg)`,
-                                                            transformOrigin: "50% 100%",
-                                                        }}
-                                                    />
-                                                </button>
-                                                <Text
-                                                    size="1"
-                                                    color={
-                                                        Math.abs(gainToDb(volume)) < 0.05
-                                                            ? "blue"
-                                                            : "gray"
-                                                    }
-                                                    className="leading-none tabular-nums"
-                                                >
-                                                    {formatGainLabel(volume)}
-                                                </Text>
-                                            </Flex>
-                                        </div>
-                                    </Flex>
-
-                                    <Flex
-                                        direction="column"
-                                        gap="1"
-                                        align="center"
-                                        justify="center"
-                                        className="w-[22px] shrink-0"
-                                    >
-                                        {isRoot ? (
-                                            <IconButton
-                                                size="1"
-                                                variant={composeEnabled ? "solid" : "ghost"}
-                                                color={composeEnabled ? "blue" : "gray"}
-                                                title={t("compose")}
-                                                onPointerDown={(e) => e.stopPropagation()}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    onToggleCompose(track.id, !composeEnabled);
-                                                }}
-                                                style={{
-                                                    fontWeight: 700,
-                                                    fontSize: 11,
-                                                    width: 20,
-                                                    height: 20,
-                                                }}
-                                            >
-                                                C
-                                            </IconButton>
-                                        ) : (
-                                            <div className="w-5 h-5" />
-                                        )}
-                                        <IconButton
-                                            size="1"
-                                            variant={muted ? "solid" : "ghost"}
-                                            color={muted ? "red" : "gray"}
-                                            title={muted ? t("clip_unmute") : t("clip_mute")}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onToggleMute(track.id, !muted);
-                                            }}
-                                            style={{
-                                                fontWeight: 700,
-                                                fontSize: 11,
-                                                width: 20,
-                                                height: 20,
-                                            }}
-                                        >
-                                            M
-                                        </IconButton>
-                                        <IconButton
-                                            size="1"
-                                            variant={solo ? "solid" : "ghost"}
-                                            color={solo ? "amber" : "gray"}
-                                            title={t("solo")}
-                                            onPointerDown={(e) => e.stopPropagation()}
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                onToggleSolo(track.id, !solo);
-                                            }}
-                                            style={{
-                                                fontWeight: 700,
-                                                fontSize: 11,
-                                                width: 20,
-                                                height: 20,
-                                            }}
-                                        >
-                                            S
-                                        </IconButton>
-                                    </Flex>
-
-                                    <div
-                                        className="w-[11.25%] min-w-[28px] max-w-[34px] shrink-0"
-                                        style={{
-                                            background: "var(--qt-meter-rail)",
-                                        }}
-                                    >
-                                        <Flex
-                                            direction="column"
-                                            align="center"
-                                            justify="between"
-                                            className="h-full pt-1 pb-0"
-                                        >
-                                            <Text
-                                                size="1"
-                                                color={clipped ? "red" : "gray"}
-                                                className="leading-none tabular-nums"
-                                            >
-                                                {formatPeakLabel(maxPeakLinear, clipped)}
-                                            </Text>
-                                            <div
-                                                className="relative h-full w-full"
-                                                style={{
-                                                    background: "var(--qt-meter-well)",
-                                                }}
-                                            >
-                                                <div
-                                                    className={`absolute inset-x-0 bottom-0 transition-[height] duration-75 ${meterFillClass(
-                                                        peakLinear,
-                                                        clipped,
-                                                    )}`}
-                                                    style={{
-                                                        height: `${meterHeightPercent(peakLinear)}%`,
-                                                        maxHeight: "100%",
-                                                    }}
-                                                />
+                                                    </div>
+                                                </Flex>
                                             </div>
                                         </Flex>
-                                    </div>
-                                </Flex>
-                            </Box>
-                        </div>
-                    );
-                })}
+                                    </Box>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
 

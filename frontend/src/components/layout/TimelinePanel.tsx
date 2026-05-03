@@ -26,6 +26,7 @@ import {
     setClipMuted,
     importAudioAtPosition,
     importAudioFileAtPosition,
+    importMidiAsClip,
     importMultipleAudioAtPosition,
     setClipStateRemote,
     setClipFades,
@@ -42,6 +43,7 @@ import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement"
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
+import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 
 import {
     BackgroundGrid,
@@ -151,6 +153,12 @@ export const TimelinePanel: React.FC = () => {
         open: boolean;
         clipIds: string[];
     }>({ open: false, clipIds: [] });
+
+    // MIDI clip drag-drop dialog state
+    const [midiClipDialogOpen, setMidiClipDialogOpen] = React.useState(false);
+    const [midiClipPath, setMidiClipPath] = React.useState<string | null>(null);
+    const [midiClipStartSec, setMidiClipStartSec] = React.useState(0);
+    const [midiClipTrackId, setMidiClipTrackId] = React.useState<string | null>(null);
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -289,6 +297,21 @@ export const TimelinePanel: React.FC = () => {
         [s.clipFormantToolWindow.clipId, s.clips],
     );
 
+    // ── MIDI clip drag-drop handler ──────────────────────
+    const handleMidiClipImport = React.useCallback(
+        (result: { trackIndex?: number; notesCount: number; midiPath: string }) => {
+            void dispatch(
+                importMidiAsClip({
+                    midiPath: result.midiPath,
+                    trackIndex: result.trackIndex,
+                    trackId: midiClipTrackId,
+                    startSec: midiClipStartSec,
+                }),
+            );
+        },
+        [dispatch, midiClipTrackId, midiClipStartSec],
+    );
+
     // ── 3. DragDrop (Tauri + 文件浏览器) ─────────────────────
     const { tauriDraggedPathRef, tauriLastDropPathRef, tauriDropHandledAtRef } =
         useTimelineDragDrop({
@@ -308,6 +331,12 @@ export const TimelinePanel: React.FC = () => {
             setImportModeMenu,
             pxPerSec,
             rowHeight,
+            onMidiDrop: (payload) => {
+                setMidiClipPath(payload.midiPath);
+                setMidiClipStartSec(payload.startSec);
+                setMidiClipTrackId(payload.trackId);
+                setMidiClipDialogOpen(true);
+            },
         });
 
     // ── 4. 全局事件监听 ─────────────────────────────────────
@@ -860,20 +889,32 @@ export const TimelinePanel: React.FC = () => {
                                 : hasDomFile
                                   ? String(dt?.files?.[0]?.name ?? "Audio")
                                   : "Audio");
-                        if (path && detectExternalPathAction(path) !== "importAudio") {
+                        const dragAction = detectExternalPathAction(path);
+                        if (path && dragAction !== "importAudio" && dragAction !== "importMidi") {
                             setDropPreview(null);
                             return;
                         }
-                        if (path) {
-                            ensureDropPreviewDuration(path);
+                        if (dragAction === "importMidi") {
+                            // MIDI 文件使用默认时长显示 drop preview
+                            setDropPreview({
+                                path,
+                                fileName,
+                                trackId,
+                                startSec: beat,
+                                durationSec: 2,
+                            });
+                        } else {
+                            if (path) {
+                                ensureDropPreviewDuration(path);
+                            }
+                            setDropPreview({
+                                path,
+                                fileName,
+                                trackId,
+                                startSec: beat,
+                                durationSec: 0,
+                            });
                         }
-                        setDropPreview({
-                            path,
-                            fileName,
-                            trackId,
-                            startSec: beat,
-                            durationSec: 0,
-                        });
                     }}
                     onDragLeave={(e) => {
                         const related = e.relatedTarget as Node | null;
@@ -908,6 +949,13 @@ export const TimelinePanel: React.FC = () => {
                             tauriDraggedPathRef.current = null;
                             tauriLastDropPathRef.current = null;
                             const actionKind = detectExternalPathAction(resolvedPath);
+                            if (actionKind === "importMidi") {
+                                setMidiClipPath(resolvedPath);
+                                setMidiClipStartSec(beat);
+                                setMidiClipTrackId(trackId);
+                                setMidiClipDialogOpen(true);
+                                return;
+                            }
                             if (actionKind && actionKind !== "importAudio") {
                                 emitExternalFileAction(actionKind, resolvedPath);
                                 return;
@@ -930,6 +978,13 @@ export const TimelinePanel: React.FC = () => {
                                 tauriDraggedPathRef.current = null;
                                 tauriLastDropPathRef.current = null;
                                 const actionKind = detectExternalPathAction(p);
+                                if (actionKind === "importMidi") {
+                                    setMidiClipPath(p);
+                                    setMidiClipStartSec(beat);
+                                    setMidiClipTrackId(trackId);
+                                    setMidiClipDialogOpen(true);
+                                    return;
+                                }
                                 if (actionKind && actionKind !== "importAudio") {
                                     emitExternalFileAction(actionKind, p);
                                     return;
@@ -1583,6 +1638,14 @@ export const TimelinePanel: React.FC = () => {
                     onOpenChange={(open) =>
                         setQuickExportDialog((prev) => (open ? prev : { open: false, clipIds: [] }))
                     }
+                />
+
+                <MidiTrackSelectDialog
+                    open={midiClipDialogOpen}
+                    onOpenChange={setMidiClipDialogOpen}
+                    midiPath={midiClipPath}
+                    mode="clip"
+                    onImportAsClip={handleMidiClipImport}
                 />
 
                 <Dialog.Root

@@ -27,11 +27,7 @@ import {
     scaleClipFadesForStretch,
     type StretchGroupState,
 } from "./stretchGroup";
-import {
-    applyBulkFadeValue,
-    applyBulkGainDeltaDb,
-    getBulkEditableClipIds,
-} from "./bulkClipEdit";
+import { applyBulkFadeValue, applyBulkGainDeltaDb, getBulkEditableClipIds } from "./bulkClipEdit";
 import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 export function resolveStretchParamTypes(

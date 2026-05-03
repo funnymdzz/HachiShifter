@@ -1,7 +1,4 @@
-export function buildTimelinePerfScenario(args: {
-    trackCount: number;
-    clipsPerTrack: number;
-}): {
+export function buildTimelinePerfScenario(args: { trackCount: number; clipsPerTrack: number }): {
     tracks: Array<{
         id: string;
         name: string;

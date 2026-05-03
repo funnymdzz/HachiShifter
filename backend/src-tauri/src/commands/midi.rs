@@ -11,6 +11,22 @@ fn midi_log(message: impl AsRef<str>) {
     eprintln!("[midi_import] {}", message.as_ref());
 }
 
+fn error_payload(error: &str) -> crate::models::TimelineStatePayload {
+    crate::models::TimelineStatePayload {
+        ok: false,
+        tracks: vec![],
+        clips: vec![],
+        created_clip_ids: None,
+        selected_track_id: None,
+        selected_clip_id: None,
+        bpm: 120.0,
+        playhead_sec: 0.0,
+        project_sec: None,
+        project: None,
+        missing_files: Some(vec![error.to_string()]),
+    }
+}
+
 fn validate_midi_import_target(track: &Track) -> Result<(), &'static str> {
     if !track.compose_enabled {
         return Err("pitch_requires_compose");
@@ -192,6 +208,13 @@ pub(super) fn import_midi_to_pitch(
             "import_midi_to_pitch: selection mode offset_sec={:.3} align_offset={:.3} clamp_len={}",
             offset_sec, align_offset, clamp_len
         ));
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &notes,
+            frame_period_ms,
+            &mut entry.pitch_edit[..clamp_len],
+            align_offset,
+        );
         midi_import::write_notes_to_pitch_edit(
             &notes,
             frame_period_ms,
@@ -209,6 +232,13 @@ pub(super) fn import_midi_to_pitch(
             "import_midi_to_pitch: playhead mode offset_sec={:.3} align_offset={:.3}",
             playhead_sec, align_offset
         ));
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &notes,
+            frame_period_ms,
+            &mut entry.pitch_edit,
+            align_offset,
+        );
         midi_import::write_notes_to_pitch_edit(
             &notes,
             frame_period_ms,
@@ -239,4 +269,136 @@ pub(super) fn import_midi_to_pitch(
         "notes_imported": notes.len(),
         "frames_touched": touched,
     })
+}
+
+/// 导入 MIDI 文件为时间线上的 MIDI clip（无音频源）。
+///
+/// 创建一���特殊的 clip，其中 `source_path` 为 None，`midi_note_data` 包含
+/// 从 MIDI 文件提取的音符事件。clip 的长度由 MIDI 中最后一个音符的结束时间决定。
+///
+/// 返回完整的 timeline state payload，以便前端更新 Redux store。
+pub(super) fn import_midi_as_clip(
+    state: &AppState,
+    midi_path: String,
+    track_index: Option<usize>,
+    track_id: Option<String>,
+    start_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    midi_log(format!(
+        "import_midi_as_clip: path={} track_index={:?} track_id={:?} start_sec={:.3}",
+        midi_path, track_index, track_id, start_sec
+    ));
+
+    let path = std::path::Path::new(&midi_path);
+    if !path.exists() {
+        midi_log("import_midi_as_clip: file_not_found");
+        return error_payload("file_not_found");
+    }
+
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let bpm = tl.bpm;
+
+    let parse_result = match midi_import::parse_midi_file(path, Some(bpm)) {
+        Ok(r) => r,
+        Err(e) => {
+            midi_log(format!("import_midi_as_clip: parse_error={}", e));
+            return error_payload(&e);
+        }
+    };
+
+    // 收集指定轨道（或合并所有轨道）的音符
+    let notes: Vec<midi_import::MidiNoteEvent> = match track_index {
+        Some(idx) => {
+            if idx >= parse_result.track_notes.len() {
+                midi_log(format!("import_midi_as_clip: track_index_out_of_range idx={}", idx));
+                return error_payload("track_index_out_of_range");
+            }
+            parse_result.track_notes[idx].clone()
+        }
+        None => {
+            let mut all: Vec<_> = parse_result.track_notes.into_iter().flatten().collect();
+            all.sort_by(|a, b| {
+                a.start_sec
+                    .partial_cmp(&b.start_sec)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            all
+        }
+    };
+
+    if notes.is_empty() {
+        midi_log("import_midi_as_clip: no_notes");
+        return error_payload("no_notes_in_track");
+    }
+
+    // 计算 clip 时长 = 最后一个音符的结束时间
+    let last_end = notes.iter().map(|n| n.end_sec).fold(0.0f64, f64::max);
+    let length_sec = last_end.max(0.1);
+
+    // 音符时间归一化：使第一个音符从时间 0 开始
+    let first_start = notes
+        .iter()
+        .map(|n| n.start_sec)
+        .fold(f64::INFINITY, f64::min);
+    let normalized_notes: Vec<midi_import::MidiNoteEvent> = notes
+        .into_iter()
+        .map(|n| midi_import::MidiNoteEvent {
+            start_sec: n.start_sec - first_start,
+            end_sec: n.end_sec - first_start,
+            note: n.note,
+            velocity: n.velocity,
+        })
+        .collect();
+
+    // 计算音高范围
+    let pitch_range = {
+        let min_note = normalized_notes.iter().map(|n| n.note).fold(127u8, u8::min);
+        let max_note = normalized_notes.iter().map(|n| n.note).fold(0u8, u8::max);
+        Some(crate::models::PitchRange {
+            min: min_note as f32,
+            max: max_note as f32,
+        })
+    };
+
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("MIDI")
+        .to_string();
+
+    state.checkpoint_timeline(&tl);
+
+    let clip_id = tl.add_clip(
+        track_id,
+        Some(name.clone()),
+        Some(start_sec),
+        Some(length_sec),
+        None, // MIDI clip 无 source_path
+    );
+
+    // 设置 MIDI 专属字段
+    if let Some(clip) = tl.clips.iter_mut().find(|c| c.id == clip_id) {
+        clip.midi_note_data = Some(normalized_notes);
+        clip.pitch_range = pitch_range;
+        clip.color = "cyan".to_string();
+        clip.source_path = None;
+        clip.source_path_relative = None;
+    }
+
+    midi_log(format!(
+        "import_midi_as_clip: created clip_id={} length_sec={:.3} notes={}",
+        clip_id,
+        length_sec,
+        tl.clips
+            .iter()
+            .find(|c| c.id == clip_id)
+            .and_then(|c| c.midi_note_data.as_ref())
+            .map(|n| n.len())
+            .unwrap_or(0)
+    ));
+
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
 }

@@ -1,4 +1,8 @@
-import { beginClipDrag, resolveWheelZoom, updateClipDrag } from "./timelineInteractionController.js";
+import {
+    beginClipDrag,
+    resolveWheelZoom,
+    updateClipDrag,
+} from "./timelineInteractionController.js";
 
 function assertNear(actual: number, expected: number, label: string): void {
     if (Math.abs(actual - expected) > 1e-6) {

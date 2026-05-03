@@ -84,6 +84,7 @@ export const webApi = {
     getTimelineState: timelineApi.getTimelineState,
     importAudioItem: timelineApi.importAudioItem,
     importAudioBytes: timelineApi.importAudioBytes,
+    importMidiAsClip: paramsApi.importMidiAsClip,
 
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,

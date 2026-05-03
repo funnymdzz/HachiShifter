@@ -23,6 +23,14 @@ interface MidiTrackSelectDialogProps {
     selectionMaxFrames?: number;
     /** 导入完成后的回调 */
     onImported?: (result: { notes_imported: number; frames_touched: number }) => void;
+    /** 导入模式：pitchEdit（默认，写入 pitch_edit）或 clip（创建 MIDI clip） */
+    mode?: "pitchEdit" | "clip";
+    /** clip 模式下的确认回调 */
+    onImportAsClip?: (result: {
+        trackIndex?: number;
+        notesCount: number;
+        midiPath: string;
+    }) => void;
 }
 
 /** MIDI note number → 音名 */
@@ -44,6 +52,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     selectionStartFrame,
     selectionMaxFrames,
     onImported,
+    mode = "pitchEdit",
+    onImportAsClip,
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
@@ -101,6 +111,17 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         setImporting(true);
         try {
             const trackIndex = selectedTrack === "all" ? undefined : parseInt(selectedTrack, 10);
+
+            if (mode === "clip") {
+                const notesCount =
+                    selectedTrack === "all"
+                        ? tracks.reduce((sum, t) => sum + t.note_count, 0)
+                        : (tracks.find((t) => t.index === trackIndex)?.note_count ?? 0);
+                onImportAsClip?.({ trackIndex, notesCount, midiPath });
+                onOpenChange(false);
+                return;
+            }
+
             console.info("[midi_import_ui] import:start", {
                 midiPath,
                 trackIndex,
@@ -146,16 +167,21 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         selectionMaxFrames,
         selectedTrack,
         onImported,
+        onImportAsClip,
         onOpenChange,
         tAny,
+        mode,
+        tracks,
     ]);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Content maxWidth="480px">
-                <Dialog.Title>{tAny("midi_import_title")}</Dialog.Title>
+                <Dialog.Title>
+                    {mode === "clip" ? tAny("midi_import_clip_title") : tAny("midi_import_title")}
+                </Dialog.Title>
                 <Dialog.Description size="2" color="gray">
-                    {tAny("midi_import_desc")}
+                    {mode === "clip" ? tAny("midi_import_clip_desc") : tAny("midi_import_desc")}
                 </Dialog.Description>
 
                 {loading && (
@@ -263,7 +289,11 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                         onClick={handleImport}
                         disabled={importing || loading || tracks.length === 0 || !!error}
                     >
-                        {importing ? tAny("midi_importing") : tAny("midi_import")}
+                        {importing
+                            ? tAny("midi_importing")
+                            : mode === "clip"
+                              ? tAny("midi_create_clip")
+                              : tAny("midi_import")}
                     </Button>
                 </Flex>
             </Dialog.Content>

@@ -211,7 +211,9 @@ export const importAudioAtPosition = createAsyncThunk(
                     }>;
                 };
                 for (const clipId of newClipIds) {
-                    const clip = timelineForNormalization.clips?.find((entry) => entry.id === clipId);
+                    const clip = timelineForNormalization.clips?.find(
+                        (entry) => entry.id === clipId,
+                    );
                     if (!clip) continue;
                     const gain = computeClipNormalizationGain(
                         {
@@ -223,7 +225,12 @@ export const importAudioAtPosition = createAsyncThunk(
                             playbackRate: Number(clip.playback_rate ?? 1) || 1,
                         },
                         {
-                            getInterleavedSlice: (sourcePath, _channel, sourceStartSec, sourceSpanSec) =>
+                            getInterleavedSlice: (
+                                sourcePath,
+                                _channel,
+                                sourceStartSec,
+                                sourceSpanSec,
+                            ) =>
                                 waveformMipmapStore.getInterleavedSlice(
                                     sourcePath,
                                     0,
@@ -721,6 +728,56 @@ export const importMultipleAudioFilesAtPosition = createAsyncThunk(
             }
 
             return { ok: true, imported: importedResult, newClipIds };
+        } finally {
+            void webApi.endUndoGroup();
+        }
+    },
+);
+
+export const importMidiAsClip = createAsyncThunk(
+    "session/importMidiAsClip",
+    async (
+        payload: {
+            midiPath: string;
+            trackIndex?: number;
+            trackId?: string | null;
+            startSec?: number;
+        },
+        { dispatch, rejectWithValue, getState },
+    ) => {
+        await webApi.beginUndoGroup();
+        try {
+            let targetTrackId: string | undefined;
+            if (payload.trackId === null || payload.trackId === undefined) {
+                const state = getState() as { session: SessionState };
+                const beforeIds = new Set(state.session.tracks.map((t) => t.id));
+                const added = await dispatch(
+                    addTrackRemote({ name: undefined, parentTrackId: null }),
+                ).unwrap();
+                targetTrackId =
+                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
+                    added.selected_track_id ??
+                    added.tracks[added.tracks.length - 1]?.id ??
+                    undefined;
+            } else {
+                targetTrackId = payload.trackId;
+            }
+
+            const imported = await webApi.importMidiAsClip(
+                payload.midiPath,
+                payload.trackIndex,
+                targetTrackId,
+                payload.startSec ?? 0,
+            );
+            if (!(imported as { ok?: boolean }).ok) {
+                const errMsg =
+                    (imported as { missing_files?: string[] }).missing_files?.[0] ??
+                    "import_midi_clip_failed";
+                return rejectWithValue(errMsg);
+            }
+            return { ok: true, imported };
+        } catch (err) {
+            return rejectWithValue(err instanceof Error ? err.message : "import_midi_clip_failed");
         } finally {
             void webApi.endUndoGroup();
         }

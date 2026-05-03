@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use midly::{MetaMessage, MidiMessage, Smf, TrackEventKind};
+use serde::{Deserialize, Serialize};
 
 /// 单个 MIDI 轨道的摘要信息
 #[derive(Debug, Clone, serde::Serialize)]
@@ -24,7 +25,7 @@ pub struct MidiTrackInfo {
 }
 
 /// 单个音符事件
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MidiNoteEvent {
     /// 起始时间（秒）
     pub start_sec: f64,
@@ -221,6 +222,44 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         tracks: all_tracks,
         track_notes: all_track_notes,
     })
+}
+
+/// 在写入 MIDI 音符之前，清除 pitch_edit 中将被音符覆盖的帧范围。
+///
+/// 这确保已有的 pitch 编辑不会阻止新导入的 MIDI 音符（例如旧的高音不会阻挡新的低音）。
+/// "最高音优先"规则仍然适用于同一批次内重叠的音符。
+pub fn clear_pitch_edit_range_for_notes(
+    notes: &[MidiNoteEvent],
+    frame_period_ms: f64,
+    pitch_edit: &mut [f32],
+    offset_sec: f64,
+) {
+    if frame_period_ms <= 0.0 || !frame_period_ms.is_finite() || notes.is_empty() {
+        return;
+    }
+    let total_frames = pitch_edit.len();
+    let mut min_frame = usize::MAX;
+    let mut max_frame = 0usize;
+
+    for note in notes {
+        let start_sec = note.start_sec + offset_sec;
+        let end_sec = note.end_sec + offset_sec;
+        if start_sec < 0.0 || !start_sec.is_finite() || !end_sec.is_finite() {
+            continue;
+        }
+        let sf = ((start_sec * 1000.0) / frame_period_ms).round() as usize;
+        let ef = (((end_sec * 1000.0) / frame_period_ms).round() as usize).min(total_frames);
+        if sf < total_frames {
+            min_frame = min_frame.min(sf);
+            max_frame = max_frame.max(ef);
+        }
+    }
+
+    if min_frame < max_frame && max_frame <= total_frames {
+        for frame in min_frame..max_frame {
+            pitch_edit[frame] = 0.0;
+        }
+    }
 }
 
 /// 将 MIDI 音符事件写入 pitch_edit 帧数组。

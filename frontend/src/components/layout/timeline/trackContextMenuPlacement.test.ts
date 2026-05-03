@@ -7,10 +7,7 @@ function assertEqual(actual: unknown, expected: unknown, label: string): void {
 }
 
 assertEqual(
-    getInsertBelowTargetIndex(
-        [{ id: "track-1" }, { id: "track-2" }, { id: "track-3" }],
-        "track-2",
-    ),
+    getInsertBelowTargetIndex([{ id: "track-1" }, { id: "track-2" }, { id: "track-3" }], "track-2"),
     2,
     "insert below selected track",
 );

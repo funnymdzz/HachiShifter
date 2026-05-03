@@ -579,7 +579,11 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             </DropdownMenu.Sub>
                             <DropdownMenu.Sub>
                                 <DropdownMenu.SubTrigger>
-                                    `${tAny("stretch_hifigan_mel")}: ${effectiveProjectHifiganMelStretch ? tAny("stretch_toggle_on") : tAny("stretch_toggle_off")}`
+                                    `${tAny("stretch_hifigan_mel")}: $
+                                    {effectiveProjectHifiganMelStretch
+                                        ? tAny("stretch_toggle_on")
+                                        : tAny("stretch_toggle_off")}
+                                    `
                                 </DropdownMenu.SubTrigger>
                                 <DropdownMenu.SubContent>
                                     <DropdownMenu.Item
@@ -638,7 +642,9 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <DropdownMenu.Separator />
 
                     <DropdownMenu.Sub>
-                        <DropdownMenu.SubTrigger>{tAny("stretch_global_default")}</DropdownMenu.SubTrigger>
+                        <DropdownMenu.SubTrigger>
+                            {tAny("stretch_global_default")}
+                        </DropdownMenu.SubTrigger>
                         <DropdownMenu.SubContent>
                             <DropdownMenu.Sub>
                                 <DropdownMenu.SubTrigger>
@@ -674,7 +680,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                             void dispatch(persistUiSettings());
                                         }}
                                     >
-                                        {withCheck(s.defaultHifiganMelStretch, tAny("stretch_toggle_on"))}
+                                        {withCheck(
+                                            s.defaultHifiganMelStretch,
+                                            tAny("stretch_toggle_on"),
+                                        )}
                                     </DropdownMenu.Item>
                                     <DropdownMenu.Item
                                         onSelect={() => {
@@ -682,7 +691,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                             void dispatch(persistUiSettings());
                                         }}
                                     >
-                                        {withCheck(!s.defaultHifiganMelStretch, tAny("stretch_toggle_off"))}
+                                        {withCheck(
+                                            !s.defaultHifiganMelStretch,
+                                            tAny("stretch_toggle_off"),
+                                        )}
                                     </DropdownMenu.Item>
                                 </DropdownMenu.SubContent>
                             </DropdownMenu.Sub>

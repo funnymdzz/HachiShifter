@@ -321,7 +321,9 @@ export const ClipItem = React.memo(function ClipItem({
                 }
                 startClipDrag(e, clip.id, clip.startSec, alt);
             }}
-            title={clip.sourcePath ?? clip.name}
+            title={
+                clip.midiNoteCount != null ? `[MIDI] ${clip.name}` : (clip.sourcePath ?? clip.name)
+            }
         >
             <ClipEdgeHandles
                 clipId={clip.id}

@@ -103,10 +103,8 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
-    createClipsBulk: (payload: {
-        templates: ClipTemplate[];
-        selectCreatedClips?: boolean;
-    }) => invoke<TimelineResult>("create_clips_bulk", payload),
+    createClipsBulk: (payload: { templates: ClipTemplate[]; selectCreatedClips?: boolean }) =>
+        invoke<TimelineResult>("create_clips_bulk", payload),
 
     removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
 

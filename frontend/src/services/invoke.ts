@@ -431,6 +431,14 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[3] !== undefined ? { selectionMaxFrames: args[3] } : {}),
             };
 
+        case "import_midi_as_clip":
+            return {
+                midiPath: args[0],
+                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[2] !== undefined ? { trackId: args[2] } : {}),
+                ...(args[3] !== undefined ? { startSec: args[3] } : {}),
+            };
+
         case "save_ui_settings":
             return args[0] as Record<string, unknown>;
 

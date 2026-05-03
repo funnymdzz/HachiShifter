@@ -27,11 +27,7 @@ assertNear(
     "normalize gain is clamped to +12 dB",
 );
 
-assertEqual(
-    computeNormalizationGainFromInterleaved([0, 0, 0, 0]),
-    null,
-    "silent data is ignored",
-);
+assertEqual(computeNormalizationGainFromInterleaved([0, 0, 0, 0]), null, "silent data is ignored");
 
 let released = false;
 assertNear(

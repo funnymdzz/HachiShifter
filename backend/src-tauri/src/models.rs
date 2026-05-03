@@ -80,6 +80,8 @@ pub struct TimelineClip {
     pub fade_out_curve: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formant_morph: Option<ClipFormantMorphPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_note_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -60,7 +60,7 @@ export interface ClipInfo {
     name: string;
     startSec: number;
     lengthSec: number;
-    color: "blue" | "violet" | "emerald" | "amber";
+    color: "blue" | "violet" | "emerald" | "amber" | "cyan";
     sourcePath?: string;
     durationSec?: number;
     durationFrames?: number; // 精确frame总数
@@ -76,6 +76,7 @@ export interface ClipInfo {
     fadeInCurve: FadeCurveType;
     fadeOutCurve: FadeCurveType;
     formantMorph?: ClipFormantMorph;
+    midiNoteCount?: number;
 }
 
 export interface ClipFormantMorph {

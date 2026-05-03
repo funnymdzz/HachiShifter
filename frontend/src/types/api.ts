@@ -64,6 +64,7 @@ export interface TimelineClip {
         target_f2_hz: number;
         strength: number;
     };
+    midi_note_count?: number;
 }
 
 export interface ProjectMeta {

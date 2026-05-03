@@ -104,4 +104,18 @@ export const paramsApi = {
             notes_imported?: number;
             frames_touched?: number;
         }>("import_midi_to_pitch", midiPath, trackIndex, selectionStartFrame, selectionMaxFrames),
+
+    importMidiAsClip: (
+        midiPath: string,
+        trackIndex?: number,
+        trackId?: string,
+        startSec?: number,
+    ) =>
+        invoke<TimelineResult & { ok: boolean; error?: string }>(
+            "import_midi_as_clip",
+            midiPath,
+            trackIndex,
+            trackId,
+            startSec,
+        ),
 };

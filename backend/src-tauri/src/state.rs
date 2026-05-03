@@ -1,6 +1,7 @@
 use crate::audio_engine::AudioEngine;
 use crate::audio_utils::try_read_wav_info;
 use crate::clip_pitch_cache::ClipPitchCache;
+use crate::midi_import::MidiNoteEvent;
 use crate::models::{
     ModelConfig, ModelConfigPayload, PitchRange, ProjectMetaPayload, RuntimeInfoPayload,
     TimelineClip, TimelineStatePayload, TimelineTrack,
@@ -283,6 +284,12 @@ pub struct Clip {
     pub extra_params: Option<HashMap<String, f64>>,
     #[serde(default)]
     pub formant_morph: Option<ClipFormantMorph>,
+
+    /// MIDI 音符数据（仅用于 MIDI clip，无音频源）。
+    /// 音符时间相对于 clip 起点（0 = clip 起点）。
+    /// 当 Some 时，source_path 应为 None。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_note_data: Option<Vec<MidiNoteEvent>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1730,6 +1737,7 @@ impl TimelineState {
                     .formant_morph
                     .as_ref()
                     .map(crate::models::ClipFormantMorphPayload::from),
+                midi_note_count: c.midi_note_data.as_ref().map(|n| n.len()),
             })
             .collect::<Vec<_>>();
 
@@ -2157,6 +2165,7 @@ impl TimelineState {
             extra_curves: None,
             extra_params: None,
             formant_morph: None,
+            midi_note_data: None,
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());

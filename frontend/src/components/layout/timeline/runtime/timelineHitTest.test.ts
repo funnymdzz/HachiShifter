@@ -50,7 +50,10 @@ const overlappingIndex = buildTimelineHitTestIndex({
 });
 
 assertEqual(
-    hitTestTimeline({ screenX: 250, screenY: 16, scrollLeftPx: 0, scrollTopPx: 0 }, overlappingIndex),
+    hitTestTimeline(
+        { screenX: 250, screenY: 16, scrollLeftPx: 0, scrollTopPx: 0 },
+        overlappingIndex,
+    ),
     { trackId: "track-a", clipId: "clip-front", zone: "body" },
     "top-most overlapping clip wins",
 );

@@ -11,11 +11,7 @@ interface QuickClipExportDialogProps {
     onOpenChange: (open: boolean) => void;
 }
 
-export function QuickClipExportDialog({
-    open,
-    clipIds,
-    onOpenChange,
-}: QuickClipExportDialogProps) {
+export function QuickClipExportDialog({ open, clipIds, onOpenChange }: QuickClipExportDialogProps) {
     const { t } = useI18n();
     const [outputDir, setOutputDir] = useState("");
     const [fileName, setFileName] = useState("");
@@ -92,7 +88,9 @@ export function QuickClipExportDialog({
                         : result.error === "quick_export_file_name_required"
                           ? "quick_export_error_missing_file_name"
                           : null;
-                setErrorText(errorKey ? t(errorKey as any) : String(result.error ?? "Export failed"));
+                setErrorText(
+                    errorKey ? t(errorKey as any) : String(result.error ?? "Export failed"),
+                );
                 return;
             }
             onOpenChange(false);

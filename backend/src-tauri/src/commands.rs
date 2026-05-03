@@ -912,6 +912,17 @@ pub fn import_midi_to_pitch(
     )
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_midi_as_clip(
+    state: State<'_, AppState>,
+    midi_path: String,
+    track_index: Option<usize>,
+    track_id: Option<String>,
+    start_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    midi::import_midi_as_clip(state.inner(), midi_path, track_index, track_id, start_sec)
+}
+
 // ===================== ui_settings =====================
 
 #[tauri::command(rename_all = "camelCase")]
