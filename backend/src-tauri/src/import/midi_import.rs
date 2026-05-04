@@ -319,6 +319,49 @@ pub fn write_notes_to_pitch_edit(
     touched
 }
 
+/// 填充 pitch_edit 中音符之间的空隙。
+///
+/// 从第一个非零帧到最后一个非零帧，将值为 0 的帧用前一个非零值填充。
+/// 不填充第一个音符之前和最后一个音符之后的区域。
+/// 返回填充的帧数量。
+pub fn fill_gaps_in_pitch_edit(pitch_edit: &mut [f32]) -> usize {
+    let total_frames = pitch_edit.len();
+    if total_frames == 0 {
+        return 0;
+    }
+
+    // 找到第一个非零帧
+    let first_nonzero = match pitch_edit.iter().position(|&v| v > 0.0) {
+        Some(pos) => pos,
+        None => return 0, // 没有音符，不需要填充
+    };
+
+    // 找到最后一个非零帧
+    let last_nonzero = match pitch_edit.iter().rposition(|&v| v > 0.0) {
+        Some(pos) => pos,
+        None => return 0,
+    };
+
+    if first_nonzero >= last_nonzero {
+        return 0;
+    }
+
+    let mut filled = 0usize;
+    let mut last_pitch: f32 = 0.0;
+
+    for frame in first_nonzero..=last_nonzero {
+        let current = pitch_edit[frame];
+        if current > 0.0 {
+            last_pitch = current;
+        } else if last_pitch > 0.0 {
+            pitch_edit[frame] = last_pitch;
+            filled += 1;
+        }
+    }
+
+    filled
+}
+
 /// 将 MIDI tick 转换为秒。
 fn tick_to_sec(tick: u64, ticks_per_beat: f64, tempo_events: &[(u64, f64)], is_smpte: bool) -> f64 {
     if is_smpte {

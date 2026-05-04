@@ -837,6 +837,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     extra_params: None,
                     formant_morph: None,
                     midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -940,6 +941,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 extra_params: None,
                 formant_morph: None,
                 midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             // 写入 pitch 数据
@@ -1522,6 +1524,7 @@ pub fn import_vsp_clipboard(
                     extra_params: None,
                     formant_morph: None,
                     midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -1624,6 +1627,7 @@ pub fn import_vsp_clipboard(
                 extra_params: None,
                 formant_morph: None,
                 midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             write_pitch_data_for_segment(
@@ -2028,6 +2032,7 @@ fn import_vsp_clipboard_selected_tracks(
                     extra_params: None,
                     formant_morph: None,
                     midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -2128,6 +2133,7 @@ fn import_vsp_clipboard_selected_tracks(
                 extra_params: None,
                 formant_morph: None,
                 midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             write_pitch_data_for_segment(

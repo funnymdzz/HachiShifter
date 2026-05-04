@@ -44,6 +44,7 @@ import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
+import { settingsApi } from "../../services/api/settings";
 
 import {
     BackgroundGrid,
@@ -159,6 +160,19 @@ export const TimelinePanel: React.FC = () => {
     const [midiClipPath, setMidiClipPath] = React.useState<string | null>(null);
     const [midiClipStartSec, setMidiClipStartSec] = React.useState(0);
     const [midiClipTrackId, setMidiClipTrackId] = React.useState<string | null>(null);
+    // 填补空隙选项（从设置加载）
+    const [fillGaps, setFillGaps] = React.useState(false);
+
+    // 加载设置
+    React.useEffect(() => {
+        import("../../services/api/settings").then(({ settingsApi }) => {
+            settingsApi.getUiSettings().then((s) => {
+                if (s?.midiFillGaps != null) {
+                    setFillGaps(s.midiFillGaps);
+                }
+            });
+        });
+    }, []);
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -299,13 +313,19 @@ export const TimelinePanel: React.FC = () => {
 
     // ── MIDI clip drag-drop handler ──────────────────────
     const handleMidiClipImport = React.useCallback(
-        (result: { trackIndex?: number; notesCount: number; midiPath: string }) => {
+        (result: {
+            trackIndex?: number;
+            notesCount: number;
+            midiPath: string;
+            fillGaps: boolean;
+        }) => {
             void dispatch(
                 importMidiAsClip({
                     midiPath: result.midiPath,
                     trackIndex: result.trackIndex,
                     trackId: midiClipTrackId,
                     startSec: midiClipStartSec,
+                    fillGaps: result.fillGaps || undefined,
                 }),
             );
         },
@@ -1646,6 +1666,11 @@ export const TimelinePanel: React.FC = () => {
                     midiPath={midiClipPath}
                     mode="clip"
                     onImportAsClip={handleMidiClipImport}
+                    fillGaps={fillGaps}
+                    onFillGapsChange={(v) => {
+                        setFillGaps(v);
+                        void settingsApi.saveUiSettings({ midiFillGaps: v } as any);
+                    }}
                 />
 
                 <Dialog.Root

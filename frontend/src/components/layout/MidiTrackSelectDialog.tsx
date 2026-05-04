@@ -30,7 +30,18 @@ interface MidiTrackSelectDialogProps {
         trackIndex?: number;
         notesCount: number;
         midiPath: string;
+        fillGaps: boolean;
     }) => void;
+    /** 导入位置模���：projectStart / playhead / selection */
+    importPosition?: string;
+    /** 导入位置变更回调（用于持久化） */
+    onImportPositionChange?: (position: string) => void;
+    /** selection 模式是否可用（有选区且当前为选择工具） */
+    selectionAvailable?: boolean;
+    /** 是否填补音符之间的空隙 */
+    fillGaps?: boolean;
+    /** 填补空隙选项变更回调（用于持久化） */
+    onFillGapsChange?: (fillGaps: boolean) => void;
 }
 
 /** MIDI note number → 音名 */
@@ -54,6 +65,11 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     onImported,
     mode = "pitchEdit",
     onImportAsClip,
+    importPosition = "playhead",
+    onImportPositionChange,
+    selectionAvailable = false,
+    fillGaps = false,
+    onFillGapsChange,
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
@@ -117,23 +133,41 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     selectedTrack === "all"
                         ? tracks.reduce((sum, t) => sum + t.note_count, 0)
                         : (tracks.find((t) => t.index === trackIndex)?.note_count ?? 0);
-                onImportAsClip?.({ trackIndex, notesCount, midiPath });
+                onImportAsClip?.({ trackIndex, notesCount, midiPath, fillGaps });
                 onOpenChange(false);
                 return;
             }
 
+            // 根据导入位置模式计算帧偏移
+            let effectivePosition = importPosition;
+            if (effectivePosition === "selection") {
+                if (selectionStartFrame == null || !selectionAvailable) {
+                    effectivePosition = "playhead"; // 回退
+                }
+            }
+            const startFrame =
+                effectivePosition === "projectStart"
+                    ? 0
+                    : effectivePosition === "selection"
+                      ? selectionStartFrame
+                      : undefined;
+            const maxFrames = effectivePosition === "selection" ? selectionMaxFrames : undefined;
+
             console.info("[midi_import_ui] import:start", {
                 midiPath,
                 trackIndex,
-                selectionStartFrame,
-                selectionMaxFrames,
+                importPosition,
+                effectivePosition,
+                startFrame,
+                maxFrames,
                 selectedTrack,
             });
             const res = await paramsApi.importMidiToPitch(
                 midiPath,
                 trackIndex,
-                selectionStartFrame,
-                selectionMaxFrames,
+                startFrame,
+                maxFrames,
+                fillGaps || undefined,
             );
             console.info("[midi_import_ui] import:response", res);
             if (res.ok) {
@@ -172,6 +206,9 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         tAny,
         mode,
         tracks,
+        importPosition,
+        selectionAvailable,
+        fillGaps,
     ]);
 
     return (
@@ -275,6 +312,54 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                         </RadioGroup.Root>
                     </ScrollArea>
                 )}
+
+                {/* 导入位置选项（仅在 pitchEdit 模式下显示） */}
+                {mode === "pitchEdit" && (
+                    <Flex direction="column" gap="1" mt="3">
+                        <Text size="2" weight="medium">
+                            {tAny("midi_import_position")}
+                        </Text>
+                        <RadioGroup.Root
+                            value={
+                                importPosition === "selection" && !selectionAvailable
+                                    ? "playhead"
+                                    : importPosition
+                            }
+                            onValueChange={(v) => onImportPositionChange?.(v)}
+                        >
+                            <Flex gap="3">
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                    <RadioGroup.Item value="projectStart" />
+                                    <Text size="1">{tAny("midi_import_position_start")}</Text>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                    <RadioGroup.Item value="playhead" />
+                                    <Text size="1">{tAny("midi_import_position_playhead")}</Text>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                    <RadioGroup.Item
+                                        value="selection"
+                                        disabled={!selectionAvailable}
+                                    />
+                                    <Text size="1" color={selectionAvailable ? undefined : "gray"}>
+                                        {tAny("midi_import_position_selection")}
+                                    </Text>
+                                </label>
+                            </Flex>
+                        </RadioGroup.Root>
+                    </Flex>
+                )}
+
+                {/* 填补空隙选项 */}
+                <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                    <input
+                        type="checkbox"
+                        checked={fillGaps}
+                        onChange={(e) => onFillGapsChange?.(e.target.checked)}
+                        className="w-4 h-4"
+                    />
+                    <Text size="1">{tAny("midi_fill_gaps")}</Text>
+                </label>
 
                 <Flex justify="end" gap="2" mt="4">
                     <Button

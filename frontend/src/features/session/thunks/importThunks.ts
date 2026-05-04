@@ -742,6 +742,7 @@ export const importMidiAsClip = createAsyncThunk(
             trackIndex?: number;
             trackId?: string | null;
             startSec?: number;
+            fillGaps?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -768,6 +769,7 @@ export const importMidiAsClip = createAsyncThunk(
                 payload.trackIndex,
                 targetTrackId,
                 payload.startSec ?? 0,
+                payload.fillGaps,
             );
             if (!(imported as { ok?: boolean }).ok) {
                 const errMsg =

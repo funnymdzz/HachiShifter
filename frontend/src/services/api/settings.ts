@@ -25,6 +25,8 @@ export interface UiSettings {
     drawDragDirection?: string;
     lineVibratoDragDirection?: string;
     smoothnessPercent?: number;
+    midiImportPosition?: string;
+    midiFillGaps?: boolean;
     customScalePresets?: Array<{
         id: string;
         name: string;

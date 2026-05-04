@@ -168,3 +168,4 @@ run_gui.bat
 build_and_run.bat
 
 .claude/settings.json
+.claude/settings.local.json

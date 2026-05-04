@@ -51,6 +51,8 @@ fn assemble_pitch_orig_from_cache(
 
         // ── MIDI clip 路径：直接从 midi_note_data 生成音高帧 ──
         if let Some(ref notes) = clip.midi_note_data {
+            let pr = clip.playback_rate as f64;
+            let pr_valid = if pr.is_finite() && pr > 0.0 { pr } else { 1.0 };
             let src_start = clip.source_start_sec.max(0.0);
             let src_end = if clip.source_end_sec > 0.0 {
                 clip.source_end_sec
@@ -66,8 +68,11 @@ fn assemble_pitch_orig_from_cache(
                 if rel_end <= rel_start {
                     continue;
                 }
-                let note_start_frame = ((rel_start * 1000.0) / fp).round() as usize;
-                let note_end_frame = ((rel_end * 1000.0) / fp).round() as usize;
+                // 通过 playback_rate 缩放以支持拉伸/压缩
+                let note_start_frame =
+                    ((rel_start / pr_valid * 1000.0) / fp).round() as usize;
+                let note_end_frame =
+                    ((rel_end / pr_valid * 1000.0) / fp).round() as usize;
                 let write_start = clip_start_frame.saturating_add(note_start_frame);
                 let write_end = clip_start_frame
                     .saturating_add(note_end_frame)
@@ -82,6 +87,32 @@ fn assemble_pitch_orig_from_cache(
                     }
                 }
             }
+
+            // 填补音符之间的空隙（仅在 clip 区间内）
+            if clip.midi_fill_gaps {
+                let fill_start = clip_start_frame;
+                let fill_end = (clip_start_frame + clip_len_frames).min(target_frames);
+                if fill_start < fill_end {
+                    let slice = &mut out[fill_start..fill_end];
+                    // 找到 slice 内第一个和最后一个非零帧
+                    let first = slice.iter().position(|&v| v > 0.0);
+                    let last = slice.iter().rposition(|&v| v > 0.0);
+                    if let (Some(f), Some(l)) = (first, last) {
+                        if f < l {
+                            let mut last_pitch: f32 = 0.0;
+                            for i in f..=l {
+                                let current = slice[i];
+                                if current > 0.0 {
+                                    last_pitch = current;
+                                } else if last_pitch > 0.0 {
+                                    slice[i] = last_pitch;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             continue; // 跳过音频缓存路径
         }
 

@@ -290,6 +290,10 @@ pub struct Clip {
     /// 当 Some 时，source_path 应为 None。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub midi_note_data: Option<Vec<MidiNoteEvent>>,
+
+    /// 是否在 pitch_orig 组装时填补 MIDI 音符之间的空隙。
+    #[serde(default)]
+    pub midi_fill_gaps: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2166,6 +2170,7 @@ impl TimelineState {
             extra_params: None,
             formant_morph: None,
             midi_note_data: None,
+            midi_fill_gaps: false,
         };
         self.clips.push(clip);
         self.selected_clip_id = Some(id.clone());

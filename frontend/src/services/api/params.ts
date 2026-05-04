@@ -97,19 +97,28 @@ export const paramsApi = {
         trackIndex?: number,
         selectionStartFrame?: number,
         selectionMaxFrames?: number,
+        fillGaps?: boolean,
     ) =>
         invoke<{
             ok: boolean;
             error?: string;
             notes_imported?: number;
             frames_touched?: number;
-        }>("import_midi_to_pitch", midiPath, trackIndex, selectionStartFrame, selectionMaxFrames),
+        }>(
+            "import_midi_to_pitch",
+            midiPath,
+            trackIndex,
+            selectionStartFrame,
+            selectionMaxFrames,
+            fillGaps,
+        ),
 
     importMidiAsClip: (
         midiPath: string,
         trackIndex?: number,
         trackId?: string,
         startSec?: number,
+        fillGaps?: boolean,
     ) =>
         invoke<TimelineResult & { ok: boolean; error?: string }>(
             "import_midi_as_clip",
@@ -117,5 +126,6 @@ export const paramsApi = {
             trackIndex,
             trackId,
             startSec,
+            fillGaps,
         ),
 };

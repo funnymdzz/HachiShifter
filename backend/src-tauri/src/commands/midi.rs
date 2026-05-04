@@ -85,11 +85,12 @@ pub(super) fn import_midi_to_pitch(
     track_index: Option<usize>,
     selection_start_frame: Option<usize>,
     selection_max_frames: Option<usize>,
+    fill_gaps: Option<bool>,
 ) -> serde_json::Value {
     let path = std::path::Path::new(&midi_path);
     midi_log(format!(
-        "import_midi_to_pitch: path={} track_index={:?} sel_start={:?} sel_max={:?}",
-        midi_path, track_index, selection_start_frame, selection_max_frames
+        "import_midi_to_pitch: path={} track_index={:?} sel_start={:?} sel_max={:?} fill_gaps={:?}",
+        midi_path, track_index, selection_start_frame, selection_max_frames, fill_gaps
     ));
 
     if !path.exists() {
@@ -247,6 +248,14 @@ pub(super) fn import_midi_to_pitch(
         )
     };
 
+    // 填补音符之间的空隙
+    if fill_gaps.unwrap_or(false) {
+        let filled = midi_import::fill_gaps_in_pitch_edit(&mut entry.pitch_edit);
+        if filled > 0 {
+            midi_log(format!("import_midi_to_pitch: fill_gaps filled={}", filled));
+        }
+    }
+
     if touched > 0 {
         entry.pitch_edit_user_modified = true;
         midi_log(format!(
@@ -283,10 +292,11 @@ pub(super) fn import_midi_as_clip(
     track_index: Option<usize>,
     track_id: Option<String>,
     start_sec: f64,
+    fill_gaps: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi_log(format!(
-        "import_midi_as_clip: path={} track_index={:?} track_id={:?} start_sec={:.3}",
-        midi_path, track_index, track_id, start_sec
+        "import_midi_as_clip: path={} track_index={:?} track_id={:?} start_sec={:.3} fill_gaps={:?}",
+        midi_path, track_index, track_id, start_sec, fill_gaps
     ));
 
     let path = std::path::Path::new(&midi_path);
@@ -379,6 +389,7 @@ pub(super) fn import_midi_as_clip(
     // 设置 MIDI 专属字段
     if let Some(clip) = tl.clips.iter_mut().find(|c| c.id == clip_id) {
         clip.midi_note_data = Some(normalized_notes);
+        clip.midi_fill_gaps = fill_gaps.unwrap_or(false);
         clip.pitch_range = pitch_range;
         clip.color = "cyan".to_string();
         clip.source_path = None;

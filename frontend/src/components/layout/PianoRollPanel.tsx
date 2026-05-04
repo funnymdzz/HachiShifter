@@ -122,6 +122,7 @@ import { ProgressBar } from "../ProgressBar";
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 import { coreApi } from "../../services/api/core";
+import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
 import { applySelectWheelChange } from "../../utils/selectWheel";
@@ -266,6 +267,21 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    // 导入位置选项（持久化到软件设置）
+    const [importPosition, setImportPosition] = useState<string>("playhead");
+    // 填补空隙选项（持久化到软件设置）
+    const [fillGaps, setFillGaps] = useState<boolean>(false);
+    // 启动时从设置加载
+    useEffect(() => {
+        settingsApi.getUiSettings().then((s) => {
+            if (s?.midiImportPosition) {
+                setImportPosition(s.midiImportPosition);
+            }
+            if (s?.midiFillGaps != null) {
+                setFillGaps(s.midiFillGaps);
+            }
+        });
+    }, []);
     // 记录打开弹窗时的选区（拍数），用于后续计算帧偏移
     const [midiDialogSelection, setMidiDialogSelection] = useState<{
         aBeat: number;
@@ -1384,6 +1400,18 @@ export const PianoRollPanel: React.FC = () => {
         [refreshNow],
     );
 
+    // 导入位置变更时持久化保存
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void settingsApi.saveUiSettings({ midiImportPosition: position } as any);
+    }, []);
+
+    // 填补空隙选项变更时持久化保存
+    const handleFillGapsChange = useCallback((value: boolean) => {
+        setFillGaps(value);
+        void settingsApi.saveUiSettings({ midiFillGaps: value } as any);
+    }, []);
+
     // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
     const midiSelArgs = useMemo(() => {
         if (!midiDialogSelection) return {};
@@ -1394,6 +1422,12 @@ export const PianoRollPanel: React.FC = () => {
         const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
     }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
+
+    // selection 导入模式是否可用
+    const midiSelectionAvailable = useMemo(
+        () => s.toolMode === "select" && midiDialogSelection != null,
+        [s.toolMode, midiDialogSelection],
+    );
 
     // 获取当前 track 下的所 ?clips，用 ?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
@@ -3798,6 +3832,11 @@ export const PianoRollPanel: React.FC = () => {
                 selectionStartFrame={midiSelArgs.selectionStartFrame}
                 selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
+                importPosition={importPosition}
+                onImportPositionChange={handleImportPositionChange}
+                selectionAvailable={midiSelectionAvailable}
+                fillGaps={fillGaps}
+                onFillGapsChange={handleFillGapsChange}
             />
             {ctxMenu && s.toolMode === "select" && (
                 <EditContextMenu

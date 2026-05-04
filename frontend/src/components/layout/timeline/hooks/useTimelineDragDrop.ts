@@ -153,7 +153,9 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                     if (type === "enter" || type === "over") {
                         if (primaryPath) {
                             tauriDraggedPathRef.current = primaryPath;
-                            if (detectExternalPathAction(primaryPath) === "importAudio") {
+                            // MIDI 文件不需要预加载时长，使用默认值
+                            const primaryAction = detectExternalPathAction(primaryPath);
+                            if (primaryAction === "importAudio") {
                                 ensureDropPreviewDuration(primaryPath);
                             }
                         }
@@ -161,7 +163,8 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                             const path =
                                 primaryPath ?? tauriDraggedPathRef.current ?? prev?.path ?? null;
                             if (!path) return prev;
-                            if (detectExternalPathAction(path) !== "importAudio") {
+                            const action = detectExternalPathAction(path);
+                            if (action !== "importAudio" && action !== "importMidi") {
                                 return null;
                             }
 
@@ -178,7 +181,8 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                                     fileName: prev?.fileName ?? fileNameFromPath(path),
                                     trackId,
                                     startSec: beat,
-                                    durationSec: prev?.durationSec ?? 0,
+                                    durationSec:
+                                        action === "importMidi" ? 2 : (prev?.durationSec ?? 0),
                                 };
                             }
                             return prev;
