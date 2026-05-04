@@ -44,7 +44,6 @@ import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
-import { settingsApi } from "../../services/api/settings";
 
 import {
     BackgroundGrid,
@@ -145,7 +144,35 @@ const TimelineTransportBridge = React.memo(function TimelineTransportBridge(prop
     return null;
 });
 
-export const TimelinePanel: React.FC = () => {
+interface TimelinePanelProps {
+    midiClipDialogOpen: boolean;
+    midiClipPath: string | null;
+    midiClipStartSec: number;
+    midiClipTrackId: string | null;
+    fillGaps: boolean;
+    multiTrackMerge: boolean;
+    onMidiClipDialogOpenChange: (open: boolean) => void;
+    onMidiClipPathChange: (path: string | null) => void;
+    onMidiClipStartSecChange: (sec: number) => void;
+    onMidiClipTrackIdChange: (trackId: string | null) => void;
+    onFillGapsChange: (v: boolean) => void;
+    onMultiTrackMergeChange: (v: boolean) => void;
+}
+
+export const TimelinePanel: React.FC<TimelinePanelProps> = ({
+    midiClipDialogOpen,
+    midiClipPath,
+    midiClipStartSec,
+    midiClipTrackId,
+    fillGaps,
+    multiTrackMerge,
+    onMidiClipDialogOpenChange,
+    onMidiClipPathChange,
+    onMidiClipStartSecChange,
+    onMidiClipTrackIdChange,
+    onFillGapsChange,
+    onMultiTrackMergeChange,
+}) => {
     const { t } = useI18n();
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
@@ -154,25 +181,6 @@ export const TimelinePanel: React.FC = () => {
         open: boolean;
         clipIds: string[];
     }>({ open: false, clipIds: [] });
-
-    // MIDI clip drag-drop dialog state
-    const [midiClipDialogOpen, setMidiClipDialogOpen] = React.useState(false);
-    const [midiClipPath, setMidiClipPath] = React.useState<string | null>(null);
-    const [midiClipStartSec, setMidiClipStartSec] = React.useState(0);
-    const [midiClipTrackId, setMidiClipTrackId] = React.useState<string | null>(null);
-    // 填补空隙选项（从设置加载）
-    const [fillGaps, setFillGaps] = React.useState(false);
-
-    // 加载设置
-    React.useEffect(() => {
-        import("../../services/api/settings").then(({ settingsApi }) => {
-            settingsApi.getUiSettings().then((s) => {
-                if (s?.midiFillGaps != null) {
-                    setFillGaps(s.midiFillGaps);
-                }
-            });
-        });
-    }, []);
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -314,18 +322,20 @@ export const TimelinePanel: React.FC = () => {
     // ── MIDI clip drag-drop handler ──────────────────────
     const handleMidiClipImport = React.useCallback(
         (result: {
-            trackIndex?: number;
+            trackIndices: number[];
             notesCount: number;
             midiPath: string;
             fillGaps: boolean;
+            multiTrackMerge?: boolean;
         }) => {
             void dispatch(
                 importMidiAsClip({
                     midiPath: result.midiPath,
-                    trackIndex: result.trackIndex,
+                    trackIndices: result.trackIndices,
                     trackId: midiClipTrackId,
                     startSec: midiClipStartSec,
                     fillGaps: result.fillGaps || undefined,
+                    multiTrackMerge: result.multiTrackMerge,
                 }),
             );
         },
@@ -352,10 +362,10 @@ export const TimelinePanel: React.FC = () => {
             pxPerSec,
             rowHeight,
             onMidiDrop: (payload) => {
-                setMidiClipPath(payload.midiPath);
-                setMidiClipStartSec(payload.startSec);
-                setMidiClipTrackId(payload.trackId);
-                setMidiClipDialogOpen(true);
+                onMidiClipPathChange(payload.midiPath);
+                onMidiClipStartSecChange(payload.startSec);
+                onMidiClipTrackIdChange(payload.trackId);
+                onMidiClipDialogOpenChange(true);
             },
         });
 
@@ -970,10 +980,10 @@ export const TimelinePanel: React.FC = () => {
                             tauriLastDropPathRef.current = null;
                             const actionKind = detectExternalPathAction(resolvedPath);
                             if (actionKind === "importMidi") {
-                                setMidiClipPath(resolvedPath);
-                                setMidiClipStartSec(beat);
-                                setMidiClipTrackId(trackId);
-                                setMidiClipDialogOpen(true);
+                                onMidiClipPathChange(resolvedPath);
+                                onMidiClipStartSecChange(beat);
+                                onMidiClipTrackIdChange(trackId);
+                                onMidiClipDialogOpenChange(true);
                                 return;
                             }
                             if (actionKind && actionKind !== "importAudio") {
@@ -999,10 +1009,10 @@ export const TimelinePanel: React.FC = () => {
                                 tauriLastDropPathRef.current = null;
                                 const actionKind = detectExternalPathAction(p);
                                 if (actionKind === "importMidi") {
-                                    setMidiClipPath(p);
-                                    setMidiClipStartSec(beat);
-                                    setMidiClipTrackId(trackId);
-                                    setMidiClipDialogOpen(true);
+                                    onMidiClipPathChange(p);
+                                    onMidiClipStartSecChange(beat);
+                                    onMidiClipTrackIdChange(trackId);
+                                    onMidiClipDialogOpenChange(true);
                                     return;
                                 }
                                 if (actionKind && actionKind !== "importAudio") {
@@ -1662,15 +1672,14 @@ export const TimelinePanel: React.FC = () => {
 
                 <MidiTrackSelectDialog
                     open={midiClipDialogOpen}
-                    onOpenChange={setMidiClipDialogOpen}
+                    onOpenChange={onMidiClipDialogOpenChange}
                     midiPath={midiClipPath}
                     mode="clip"
                     onImportAsClip={handleMidiClipImport}
                     fillGaps={fillGaps}
-                    onFillGapsChange={(v) => {
-                        setFillGaps(v);
-                        void settingsApi.saveUiSettings({ midiFillGaps: v } as any);
-                    }}
+                    onFillGapsChange={onFillGapsChange}
+                    multiTrackMerge={multiTrackMerge}
+                    onMultiTrackMergeChange={onMultiTrackMergeChange}
                 />
 
                 <Dialog.Root

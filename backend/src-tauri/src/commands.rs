@@ -899,7 +899,7 @@ pub fn get_midi_tracks(midi_path: String) -> serde_json::Value {
 pub fn import_midi_to_pitch(
     state: State<'_, AppState>,
     midi_path: String,
-    track_index: Option<usize>,
+    track_indices: Vec<usize>,
     selection_start_frame: Option<usize>,
     selection_max_frames: Option<usize>,
     fill_gaps: Option<bool>,
@@ -907,7 +907,7 @@ pub fn import_midi_to_pitch(
     midi::import_midi_to_pitch(
         state.inner(),
         midi_path,
-        track_index,
+        track_indices,
         selection_start_frame,
         selection_max_frames,
         fill_gaps,
@@ -918,12 +918,21 @@ pub fn import_midi_to_pitch(
 pub fn import_midi_as_clip(
     state: State<'_, AppState>,
     midi_path: String,
-    track_index: Option<usize>,
+    track_indices: Vec<usize>,
     track_id: Option<String>,
     start_sec: f64,
     fill_gaps: Option<bool>,
+    multi_track_merge: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
-    midi::import_midi_as_clip(state.inner(), midi_path, track_index, track_id, start_sec, fill_gaps)
+    midi::import_midi_as_clip(
+        state.inner(),
+        midi_path,
+        track_indices,
+        track_id,
+        start_sec,
+        fill_gaps,
+        multi_track_merge,
+    )
 }
 
 // ===================== ui_settings =====================

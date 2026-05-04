@@ -59,6 +59,7 @@ fn assemble_pitch_orig_from_cache(
             } else {
                 clip_len_sec
             };
+            let src_total_len = src_end - src_start;
             for note in notes {
                 if note.end_sec <= src_start || note.start_sec >= src_end {
                     continue; // 音符在可见范围之外
@@ -68,11 +69,23 @@ fn assemble_pitch_orig_from_cache(
                 if rel_end <= rel_start {
                     continue;
                 }
+                // 倒放时镜像音符在 source range 内的位置
+                let (effective_rel_start, effective_rel_end) = if clip.reversed {
+                    (
+                        (src_total_len - rel_end).max(0.0),
+                        (src_total_len - rel_start).min(src_total_len),
+                    )
+                } else {
+                    (rel_start, rel_end)
+                };
+                if effective_rel_end <= effective_rel_start {
+                    continue;
+                }
                 // 通过 playback_rate 缩放以支持拉伸/压缩
                 let note_start_frame =
-                    ((rel_start / pr_valid * 1000.0) / fp).round() as usize;
+                    ((effective_rel_start / pr_valid * 1000.0) / fp).round() as usize;
                 let note_end_frame =
-                    ((rel_end / pr_valid * 1000.0) / fp).round() as usize;
+                    ((effective_rel_end / pr_valid * 1000.0) / fp).round() as usize;
                 let write_start = clip_start_frame.saturating_add(note_start_frame);
                 let write_end = clip_start_frame
                     .saturating_add(note_end_frame)

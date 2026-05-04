@@ -739,10 +739,11 @@ export const importMidiAsClip = createAsyncThunk(
     async (
         payload: {
             midiPath: string;
-            trackIndex?: number;
+            trackIndices: number[];
             trackId?: string | null;
             startSec?: number;
             fillGaps?: boolean;
+            multiTrackMerge?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -766,10 +767,11 @@ export const importMidiAsClip = createAsyncThunk(
 
             const imported = await webApi.importMidiAsClip(
                 payload.midiPath,
-                payload.trackIndex,
+                payload.trackIndices,
                 targetTrackId,
                 payload.startSec ?? 0,
                 payload.fillGaps,
+                payload.multiTrackMerge,
             );
             if (!(imported as { ok?: boolean }).ok) {
                 const errMsg =

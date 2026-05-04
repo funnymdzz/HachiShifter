@@ -391,3 +391,50 @@ fn tick_to_sec(tick: u64, ticks_per_beat: f64, tempo_events: &[(u64, f64)], is_s
 
     sec
 }
+
+/// 将 MIDI 轨道的音符按音高拆分为不重叠的组。
+///
+/// 检测在时间上重叠的音符，将其拆分到不同的组中，
+/// 使得每个组内部的音符在时间轴上互不重叠。
+/// 音高高的音符优先分配到编号较小的组。
+///
+/// 返回一个 Vec，每个元素是一组不重叠的音符。
+pub fn split_notes_into_non_overlapping_groups(
+    notes: &[MidiNoteEvent],
+) -> Vec<Vec<MidiNoteEvent>> {
+    if notes.is_empty() {
+        return vec![];
+    }
+
+    // 按起始时间排序，起始时间相同时按音高降序（高音在前）
+    let mut sorted: Vec<&MidiNoteEvent> = notes.iter().collect();
+    sorted.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.note.cmp(&a.note))
+    });
+
+    let mut groups: Vec<Vec<MidiNoteEvent>> = vec![];
+    let mut group_end_times: Vec<f64> = vec![];
+
+    for note in sorted {
+        let mut placed = false;
+        // 尝试放入已有的组（不重叠即可放入）
+        for (gi, &end_time) in group_end_times.iter().enumerate() {
+            if note.start_sec >= end_time - 1e-9 {
+                groups[gi].push(*note);
+                group_end_times[gi] = group_end_times[gi].max(note.end_sec);
+                placed = true;
+                break;
+            }
+        }
+        if !placed {
+            // 创建新组
+            groups.push(vec![*note]);
+            group_end_times.push(note.end_sec);
+        }
+    }
+
+    groups
+}

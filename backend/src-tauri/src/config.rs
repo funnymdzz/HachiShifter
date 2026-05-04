@@ -68,6 +68,8 @@ pub struct UiSettings {
     pub midi_import_position: String,
     #[serde(default)]
     pub midi_fill_gaps: bool,
+    #[serde(default = "default_true")]
+    pub midi_multi_track_merge: bool,
 }
 
 /// 导出音频设置（持久化到 app_config.json）
@@ -226,6 +228,7 @@ impl Default for UiSettings {
             custom_scale_presets: Vec::new(),
             midi_import_position: default_midi_import_position(),
             midi_fill_gaps: false,
+            midi_multi_track_merge: true,
         }
     }
 }

@@ -715,6 +715,15 @@ function applyTimelineState(
                   }
                 : undefined,
             midiNoteCount: clip.midi_note_count,
+            midiNoteData: clip.midi_note_data?.map(
+                (n: { start_sec: number; end_sec: number; note: number; velocity: number }) => ({
+                    startSec: n.start_sec,
+                    endSec: n.end_sec,
+                    note: n.note,
+                    velocity: n.velocity,
+                }),
+            ),
+            midiFillGaps: clip.midi_fill_gaps ?? false,
         };
 
         return parsed;

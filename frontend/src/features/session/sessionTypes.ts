@@ -77,6 +77,8 @@ export interface ClipInfo {
     fadeOutCurve: FadeCurveType;
     formantMorph?: ClipFormantMorph;
     midiNoteCount?: number;
+    midiNoteData?: MidiNoteEvent[];
+    midiFillGaps?: boolean;
 }
 
 export interface ClipFormantMorph {
@@ -87,6 +89,13 @@ export interface ClipFormantMorph {
 }
 
 export type WaveformPreview = number[] | { l: number[]; r: number[] };
+
+export interface MidiNoteEvent {
+    startSec: number;
+    endSec: number;
+    note: number;
+    velocity: number;
+}
 
 export interface LinkedParamCurves {
     framePeriodMs: number;

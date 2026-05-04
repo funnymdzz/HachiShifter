@@ -131,6 +131,8 @@ function AppInner() {
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
+    const playheadSec = useAppSelector((state) => state.session.playheadSec);
+    const selectedTrackId = useAppSelector((state) => state.session.selectedTrackId);
     const paramsEpoch = useAppSelector((state) => state.session.paramsEpoch);
     // 使用 ref 桥接最新的工程修改状态
     const projectDirtyRef = useRef(projectDirty);
@@ -169,6 +171,54 @@ function AppInner() {
     const allowWindowCloseRef = useRef(false);
     const missingFileResolverRef = useRef<((shouldPick: boolean) => void) | null>(null);
     const processorParamCacheRef = useRef(new Map<string, ProcessorParamDescriptor[]>());
+
+    // MIDI clip import dialog state (lifted from TimelinePanel)
+    const [midiClipDialogOpen, setMidiClipDialogOpen] = useState(false);
+    const [midiClipPath, setMidiClipPath] = useState<string | null>(null);
+    const [midiClipStartSec, setMidiClipStartSec] = useState(0);
+    const [midiClipTrackId, setMidiClipTrackId] = useState<string | null>(null);
+    const [fillGaps, setFillGaps] = useState(false);
+    const [multiTrackMerge, setMultiTrackMerge] = useState(true);
+
+    // 加载 MIDI 相关设置
+    useEffect(() => {
+        import("./services/api/settings").then(({ settingsApi }) => {
+            settingsApi.getUiSettings().then((s) => {
+                if (s?.midiFillGaps != null) {
+                    setFillGaps(s.midiFillGaps);
+                }
+                if (s?.midiMultiTrackMerge != null) {
+                    setMultiTrackMerge(s.midiMultiTrackMerge);
+                }
+            });
+        });
+    }, []);
+
+    const handleImportMidiFromMenu = useCallback(async () => {
+        const coreApi = (await import("./services/api/core")).coreApi;
+        const picked = await coreApi.openMidiDialog();
+        if (!(picked as { ok?: boolean }).ok) return;
+        if ((picked as { canceled?: boolean }).canceled || !(picked as { path?: string }).path)
+            return;
+        setMidiClipPath((picked as { path: string }).path);
+        setMidiClipStartSec(playheadSec ?? 0);
+        setMidiClipTrackId(selectedTrackId ?? null);
+        setMidiClipDialogOpen(true);
+    }, [playheadSec, selectedTrackId]);
+
+    const handleFillGapsChange = useCallback((v: boolean) => {
+        setFillGaps(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiFillGaps: v } as any),
+        );
+    }, []);
+
+    const handleMultiTrackMergeChange = useCallback((v: boolean) => {
+        setMultiTrackMerge(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiMultiTrackMerge: v } as any),
+        );
+    }, []);
 
     const splitter = useMemo(() => {
         const minTopPx = 200;
@@ -1423,6 +1473,7 @@ function AppInner() {
                 onOpenProject={handleOpenProject}
                 onOpenRecentProject={handleOpenRecentProject}
                 onExit={handleExitApp}
+                onImportMidiFromMenu={handleImportMidiFromMenu}
                 autoBackupSettings={autoBackupSettings}
                 onAutoBackupSettingsSaved={handleAutoBackupSettingsSaved}
             />
@@ -1437,7 +1488,20 @@ function AppInner() {
                         className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
                         style={{ flexGrow: splitRatio, flexBasis: 0 }}
                     >
-                        <TimelinePanel />
+                        <TimelinePanel
+                            midiClipDialogOpen={midiClipDialogOpen}
+                            midiClipPath={midiClipPath}
+                            midiClipStartSec={midiClipStartSec}
+                            midiClipTrackId={midiClipTrackId}
+                            fillGaps={fillGaps}
+                            multiTrackMerge={multiTrackMerge}
+                            onMidiClipDialogOpenChange={setMidiClipDialogOpen}
+                            onMidiClipPathChange={setMidiClipPath}
+                            onMidiClipStartSecChange={setMidiClipStartSec}
+                            onMidiClipTrackIdChange={setMidiClipTrackId}
+                            onFillGapsChange={handleFillGapsChange}
+                            onMultiTrackMergeChange={handleMultiTrackMergeChange}
+                        />
                     </Box>
 
                     {/* Splitter */}

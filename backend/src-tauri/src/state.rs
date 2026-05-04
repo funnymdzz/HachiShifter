@@ -1742,6 +1742,12 @@ impl TimelineState {
                     .as_ref()
                     .map(crate::models::ClipFormantMorphPayload::from),
                 midi_note_count: c.midi_note_data.as_ref().map(|n| n.len()),
+                midi_note_data: c.midi_note_data.clone(),
+                midi_fill_gaps: if c.midi_note_data.is_some() {
+                    Some(c.midi_fill_gaps)
+                } else {
+                    None
+                },
             })
             .collect::<Vec<_>>();
 
@@ -1750,6 +1756,7 @@ impl TimelineState {
             tracks: tracks_payload,
             clips: clips_payload,
             created_clip_ids: None,
+            created_track_ids: None,
             selected_track_id: self.selected_track_id.clone(),
             selected_clip_id: self.selected_clip_id.clone(),
             bpm: self.bpm,

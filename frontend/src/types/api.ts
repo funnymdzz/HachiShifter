@@ -65,6 +65,13 @@ export interface TimelineClip {
         strength: number;
     };
     midi_note_count?: number;
+    midi_note_data?: Array<{
+        start_sec: number;
+        end_sec: number;
+        note: number;
+        velocity: number;
+    }>;
+    midi_fill_gaps?: boolean;
 }
 
 export interface ProjectMeta {

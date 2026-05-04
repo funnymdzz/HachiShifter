@@ -58,6 +58,7 @@ interface MenuBarProps {
     onOpenProject: () => void;
     onOpenRecentProject: (projectPath: string) => void;
     onExit: () => void;
+    onImportMidiFromMenu: () => void;
     autoBackupSettings: AutoBackupSettings;
     onAutoBackupSettingsSaved: (settings: AutoBackupSettings) => void;
 }
@@ -67,6 +68,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     onOpenProject,
     onOpenRecentProject,
     onExit,
+    onImportMidiFromMenu,
     autoBackupSettings,
     onAutoBackupSettingsSaved,
 }) => {
@@ -233,6 +235,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         }
     }, [dispatch, s.playheadSec, s.selectedTrackId]);
 
+    const handleImportMidiFromMenu = useCallback(() => {
+        onImportMidiFromMenu();
+    }, [onImportMidiFromMenu]);
+
     return (
         <Flex
             align="center"
@@ -306,6 +312,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         }}
                     >
                         {t("menu_import_audio")}{" "}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() => {
+                            void handleImportMidiFromMenu();
+                        }}
+                    >
+                        {t("menu_import_midi")}{" "}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={() => void dispatch(openReaperFromDialog())}>
                         {t("menu_import_reaper")}

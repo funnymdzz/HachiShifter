@@ -28,6 +28,7 @@ export const webApi = {
     getPlaybackState: coreApi.getPlaybackState,
     openAudioDialog: coreApi.openAudioDialog,
     openAudioDialogMultiple: coreApi.openAudioDialogMultiple,
+    openMidiDialog: coreApi.openMidiDialog,
     pickOutputPath: coreApi.pickOutputPath,
     closeWindow: coreApi.closeWindow,
 
@@ -85,6 +86,7 @@ export const webApi = {
     importAudioItem: timelineApi.importAudioItem,
     importAudioBytes: timelineApi.importAudioBytes,
     importMidiAsClip: paramsApi.importMidiAsClip,
+    getMidiTracks: paramsApi.getMidiTracks,
 
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,

@@ -27,11 +27,16 @@ interface MidiTrackSelectDialogProps {
     mode?: "pitchEdit" | "clip";
     /** clip 模式下的确认回调 */
     onImportAsClip?: (result: {
-        trackIndex?: number;
+        trackIndices: number[];
         notesCount: number;
         midiPath: string;
         fillGaps: boolean;
+        multiTrackMerge?: boolean;
     }) => void;
+    /** 多轨合并选项（仅 clip 模式下生效） */
+    multiTrackMerge?: boolean;
+    /** 多轨合并选项变更回调 */
+    onMultiTrackMergeChange?: (v: boolean) => void;
     /** 导入位置模���：projectStart / playhead / selection */
     importPosition?: string;
     /** 导入位置变更回调（用于持久化） */
@@ -70,6 +75,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     selectionAvailable = false,
     fillGaps = false,
     onFillGapsChange,
+    multiTrackMerge,
+    onMultiTrackMergeChange,
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
@@ -78,15 +85,15 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     const [loading, setLoading] = useState(false);
     const [importing, setImporting] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    // "all" 表示合并所有轨道，否则为轨道索引字符串
-    const [selectedTrack, setSelectedTrack] = useState<string>("all");
+    // 多选轨道：存储被选中的轨道 index 数组
+    const [selectedTracks, setSelectedTracks] = useState<number[]>([]);
 
     // 当弹窗打开且有 midiPath 时，加载轨道列表
     useEffect(() => {
         if (!open || !midiPath) {
             setTracks([]);
             setError(null);
-            setSelectedTrack("all");
+            setSelectedTracks([]);
             return;
         }
 
@@ -103,11 +110,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 console.info("[midi_import_ui] load_tracks:response", res);
                 if (res.ok && res.tracks) {
                     setTracks(res.tracks);
-                    if (res.tracks.length === 1) {
-                        setSelectedTrack(String(res.tracks[0].index));
-                    } else {
-                        setSelectedTrack("all");
-                    }
+                    // 默认全选
+                    setSelectedTracks(res.tracks.map((t) => t.index));
                 } else {
                     setError(res.error ?? tAny("midi_import_failed"));
                     setTracks([]);
@@ -122,18 +126,23 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     }, [open, midiPath]);
 
     const handleImport = useCallback(async () => {
-        if (!midiPath) return;
+        if (!midiPath || selectedTracks.length === 0) return;
 
         setImporting(true);
         try {
-            const trackIndex = selectedTrack === "all" ? undefined : parseInt(selectedTrack, 10);
+            const trackIndices = selectedTracks;
 
             if (mode === "clip") {
-                const notesCount =
-                    selectedTrack === "all"
-                        ? tracks.reduce((sum, t) => sum + t.note_count, 0)
-                        : (tracks.find((t) => t.index === trackIndex)?.note_count ?? 0);
-                onImportAsClip?.({ trackIndex, notesCount, midiPath, fillGaps });
+                const notesCount = tracks
+                    .filter((t) => selectedTracks.includes(t.index))
+                    .reduce((sum, t) => sum + t.note_count, 0);
+                onImportAsClip?.({
+                    trackIndices,
+                    notesCount,
+                    midiPath,
+                    fillGaps,
+                    multiTrackMerge,
+                });
                 onOpenChange(false);
                 return;
             }
@@ -155,16 +164,15 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
 
             console.info("[midi_import_ui] import:start", {
                 midiPath,
-                trackIndex,
+                trackIndices,
                 importPosition,
                 effectivePosition,
                 startFrame,
                 maxFrames,
-                selectedTrack,
             });
             const res = await paramsApi.importMidiToPitch(
                 midiPath,
-                trackIndex,
+                trackIndices,
                 startFrame,
                 maxFrames,
                 fillGaps || undefined,
@@ -199,7 +207,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         midiPath,
         selectionStartFrame,
         selectionMaxFrames,
-        selectedTrack,
+        selectedTracks,
         onImported,
         onImportAsClip,
         onOpenChange,
@@ -209,6 +217,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         importPosition,
         selectionAvailable,
         fillGaps,
+        multiTrackMerge,
     ]);
 
     return (
@@ -246,42 +255,57 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 )}
 
                 {!loading && tracks.length > 0 && (
-                    <ScrollArea
-                        style={{ maxHeight: 300 }}
-                        className="mt-3 rounded border border-qt-border"
-                    >
-                        <RadioGroup.Root value={selectedTrack} onValueChange={setSelectedTrack}>
-                            <Flex direction="column" gap="0">
-                                {/* 合并所有轨道选项（仅多轨时显示） */}
-                                {tracks.length > 1 && (
-                                    <label className="flex items-center gap-2 px-3 py-2 hover:bg-qt-highlight cursor-pointer border-b border-qt-border">
-                                        <RadioGroup.Item value="all" />
-                                        <Flex direction="column" gap="0">
-                                            <Text size="2" weight="medium">
-                                                {tAny("midi_all_tracks")}
-                                            </Text>
-                                            <Text size="1" color="gray">
-                                                {tAny("midi_track_notes").replace(
-                                                    "{count}",
-                                                    String(
-                                                        tracks.reduce(
-                                                            (sum, t) => sum + t.note_count,
-                                                            0,
-                                                        ),
-                                                    ),
-                                                )}
-                                            </Text>
-                                        </Flex>
-                                    </label>
-                                )}
+                    <>
+                        {/* 全选 / 全不选 快捷按钮 */}
+                        <Flex gap="2" mt="3">
+                            <Button
+                                variant="soft"
+                                color="gray"
+                                size="1"
+                                onClick={() => setSelectedTracks(tracks.map((t) => t.index))}
+                            >
+                                {tAny("midi_select_all")}
+                            </Button>
+                            <Button
+                                variant="soft"
+                                color="gray"
+                                size="1"
+                                onClick={() => setSelectedTracks([])}
+                            >
+                                {tAny("midi_deselect_all")}
+                            </Button>
+                        </Flex>
 
-                                {/* 各个轨道选项 */}
+                        <ScrollArea
+                            style={{ maxHeight: 300 }}
+                            className="mt-2 rounded border border-qt-border"
+                        >
+                            <Flex direction="column" gap="0">
+                                {/* 各个轨道选项（多选） */}
                                 {tracks.map((track) => (
                                     <label
                                         key={track.index}
                                         className="flex items-center gap-2 px-3 py-2 hover:bg-qt-highlight cursor-pointer border-b border-qt-border last:border-b-0"
                                     >
-                                        <RadioGroup.Item value={String(track.index)} />
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4"
+                                            checked={selectedTracks.includes(track.index)}
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setSelectedTracks([
+                                                        ...selectedTracks,
+                                                        track.index,
+                                                    ]);
+                                                } else {
+                                                    setSelectedTracks(
+                                                        selectedTracks.filter(
+                                                            (i) => i !== track.index,
+                                                        ),
+                                                    );
+                                                }
+                                            }}
+                                        />
                                         <Flex direction="column" gap="0" className="flex-1 min-w-0">
                                             <Text size="2" weight="medium" className="truncate">
                                                 {track.name || `Track ${track.index + 1}`}
@@ -309,8 +333,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                     </label>
                                 ))}
                             </Flex>
-                        </RadioGroup.Root>
-                    </ScrollArea>
+                        </ScrollArea>
+                    </>
                 )}
 
                 {/* 导入位置选项（仅在 pitchEdit 模式下显示） */}
@@ -350,6 +374,19 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     </Flex>
                 )}
 
+                {/* 多轨合并选项（仅在 clip 模式下显示） */}
+                {mode === "clip" && (
+                    <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                        <input
+                            type="checkbox"
+                            checked={multiTrackMerge ?? true}
+                            onChange={(e) => onMultiTrackMergeChange?.(e.target.checked)}
+                            className="w-4 h-4"
+                        />
+                        <Text size="1">{tAny("midi_multi_track_merge")}</Text>
+                    </label>
+                )}
+
                 {/* 填补空隙选项 */}
                 <label className="flex items-center gap-2 mt-3 cursor-pointer">
                     <input
@@ -372,7 +409,13 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     </Button>
                     <Button
                         onClick={handleImport}
-                        disabled={importing || loading || tracks.length === 0 || !!error}
+                        disabled={
+                            importing ||
+                            loading ||
+                            tracks.length === 0 ||
+                            selectedTracks.length === 0 ||
+                            !!error
+                        }
                     >
                         {importing
                             ? tAny("midi_importing")

@@ -9,6 +9,7 @@ import { ClipItem } from "./ClipItem";
 import { CLIP_HEADER_HEIGHT, CLIP_BODY_PADDING_Y } from "./constants";
 import { buildTimelineHitTestIndex, hitTestTimeline } from "./runtime/timelineHitTest";
 import { WaveformTrackCanvas } from "../../waveform/WaveformTrackCanvas";
+import { MidiPitchTrackCanvas } from "../../waveform/MidiPitchTrackCanvas";
 import { useAppTheme } from "../../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../../theme/waveformColors";
 
@@ -512,6 +513,18 @@ export const TrackLane = React.memo(
                     viewportEndSec={viewportEndSec}
                     strokeColor={waveformColors.stroke}
                     strokeWidth={1}
+                />
+                {/* MIDI 音高预览 Canvas：绘制 MIDI clip 的音高线 */}
+                <MidiPitchTrackCanvas
+                    clips={trackClips}
+                    trackHeight={rowHeight}
+                    waveformTop={CLIP_HEADER_HEIGHT}
+                    waveformHeight={waveformHeight}
+                    pxPerSec={pxPerSec}
+                    viewportWidthPx={viewportWidthPx}
+                    viewportStartSec={viewportStartSec}
+                    viewportEndSec={viewportEndSec}
+                    strokeWidth={1.5}
                 />
                 {overlayTrackClips.map((clip) => {
                     const selected =

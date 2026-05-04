@@ -426,7 +426,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "import_midi_to_pitch":
             return {
                 midiPath: args[0],
-                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[1] !== undefined ? { trackIndices: args[1] } : {}),
                 ...(args[2] !== undefined ? { selectionStartFrame: args[2] } : {}),
                 ...(args[3] !== undefined ? { selectionMaxFrames: args[3] } : {}),
                 ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
@@ -435,10 +435,11 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "import_midi_as_clip":
             return {
                 midiPath: args[0],
-                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[1] !== undefined ? { trackIndices: args[1] } : {}),
                 ...(args[2] !== undefined ? { trackId: args[2] } : {}),
                 ...(args[3] !== undefined ? { startSec: args[3] } : {}),
                 ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
+                ...(args[5] !== undefined ? { multiTrackMerge: args[5] } : {}),
             };
 
         case "save_ui_settings":

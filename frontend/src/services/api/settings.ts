@@ -27,6 +27,7 @@ export interface UiSettings {
     smoothnessPercent?: number;
     midiImportPosition?: string;
     midiFillGaps?: boolean;
+    midiMultiTrackMerge?: boolean;
     customScalePresets?: Array<{
         id: string;
         name: string;
