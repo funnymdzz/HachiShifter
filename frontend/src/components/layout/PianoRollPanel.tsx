@@ -121,7 +121,6 @@ import { ProgressBar } from "../ProgressBar";
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
-import { coreApi } from "../../services/api/core";
 import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
@@ -271,6 +270,10 @@ export const PianoRollPanel: React.FC = () => {
     const [importPosition, setImportPosition] = useState<string>("playhead");
     // 填补空隙选项（持久化到软件设置）
     const [fillGaps, setFillGaps] = useState<boolean>(false);
+    // BPM 选项（持久化到软件设置）
+    const [importBpmAsProject, setImportBpmAsProject] = useState(false);
+    const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
+    const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
     // 启动时从设置加载
     useEffect(() => {
         settingsApi.getUiSettings().then((s) => {
@@ -279,6 +282,15 @@ export const PianoRollPanel: React.FC = () => {
             }
             if (s?.midiFillGaps != null) {
                 setFillGaps(s.midiFillGaps);
+            }
+            if (s?.midiImportBpmAsProject != null) {
+                setImportBpmAsProject(s.midiImportBpmAsProject);
+            }
+            if (s?.midiNoteBpmMode != null) {
+                setNoteBpmMode(s.midiNoteBpmMode);
+            }
+            if (s?.midiSpecifiedBpm != null) {
+                setSpecifiedBpm(s.midiSpecifiedBpm);
             }
         });
     }, []);
@@ -360,19 +372,12 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [drawToolMenuOpen]);
 
-    const handleOpenMidiDialog = useCallback(async () => {
-        try {
-            const res = await coreApi.openMidiDialog();
-            if (res.ok && !res.canceled && res.path) {
-                // 快照当前选区（拍为单位）
-                const sel = selectionRef.current;
-                setMidiDialogSelection(sel ? { ...sel } : null);
-                setMidiPath(res.path);
-                setMidiDialogOpen(true);
-            }
-        } catch {
-            // 静默忽略
-        }
+    const handleOpenMidiDialog = useCallback(() => {
+        // 快照当前选区（拍为单位）
+        const sel = selectionRef.current;
+        setMidiDialogSelection(sel ? { ...sel } : null);
+        setMidiPath(null);
+        setMidiDialogOpen(true);
     }, []);
 
     const effectiveSelectedTrackId = useMemo(() => {
@@ -1410,6 +1415,22 @@ export const PianoRollPanel: React.FC = () => {
     const handleFillGapsChange = useCallback((value: boolean) => {
         setFillGaps(value);
         void settingsApi.saveUiSettings({ midiFillGaps: value } as any);
+    }, []);
+
+    // BPM 选项变更时持久化保存
+    const handleImportBpmAsProjectChange = useCallback((v: boolean) => {
+        setImportBpmAsProject(v);
+        void settingsApi.saveUiSettings({ midiImportBpmAsProject: v } as any);
+    }, []);
+
+    const handleNoteBpmModeChange = useCallback((v: string) => {
+        setNoteBpmMode(v);
+        void settingsApi.saveUiSettings({ midiNoteBpmMode: v } as any);
+    }, []);
+
+    const handleSpecifiedBpmChange = useCallback((v: number) => {
+        setSpecifiedBpm(v);
+        void settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any);
     }, []);
 
     // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
@@ -3837,6 +3858,13 @@ export const PianoRollPanel: React.FC = () => {
                 selectionAvailable={midiSelectionAvailable}
                 fillGaps={fillGaps}
                 onFillGapsChange={handleFillGapsChange}
+                projectBpm={s.bpm}
+                importBpmAsProject={importBpmAsProject}
+                onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
+                noteBpmMode={noteBpmMode}
+                onNoteBpmModeChange={handleNoteBpmModeChange}
+                specifiedBpm={specifiedBpm}
+                onSpecifiedBpmChange={handleSpecifiedBpmChange}
             />
             {ctxMenu && s.toolMode === "select" && (
                 <EditContextMenu

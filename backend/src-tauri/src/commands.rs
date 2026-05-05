@@ -896,6 +896,11 @@ pub fn get_midi_tracks(midi_path: String) -> serde_json::Value {
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn read_midi_clipboard_as_temp() -> serde_json::Value {
+    midi::read_midi_clipboard_as_temp()
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn import_midi_to_pitch(
     state: State<'_, AppState>,
     midi_path: String,
@@ -903,6 +908,9 @@ pub fn import_midi_to_pitch(
     selection_start_frame: Option<usize>,
     selection_max_frames: Option<usize>,
     fill_gaps: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
 ) -> serde_json::Value {
     midi::import_midi_to_pitch(
         state.inner(),
@@ -911,6 +919,9 @@ pub fn import_midi_to_pitch(
         selection_start_frame,
         selection_max_frames,
         fill_gaps,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
     )
 }
 
@@ -923,6 +934,9 @@ pub fn import_midi_as_clip(
     start_sec: f64,
     fill_gaps: Option<bool>,
     multi_track_merge: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi::import_midi_as_clip(
         state.inner(),
@@ -932,6 +946,32 @@ pub fn import_midi_as_clip(
         start_sec,
         fill_gaps,
         multi_track_merge,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn replace_midi_clip_data(
+    state: State<'_, AppState>,
+    clip_id: String,
+    midi_path: String,
+    track_indices: Vec<usize>,
+    fill_gaps: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    midi::replace_midi_clip_data(
+        state.inner(),
+        clip_id,
+        midi_path,
+        track_indices,
+        fill_gaps,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
     )
 }
 

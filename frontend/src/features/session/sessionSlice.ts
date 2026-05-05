@@ -33,6 +33,7 @@ import {
     removeClipsRemote,
     removeTrackRemote,
     replaceClipSourceRemote,
+    replaceMidiClipDataRemote,
     selectClipRemote,
     selectTrackRemote,
     setClipStateRemote,
@@ -716,11 +717,18 @@ function applyTimelineState(
                 : undefined,
             midiNoteCount: clip.midi_note_count,
             midiNoteData: clip.midi_note_data?.map(
-                (n: { start_sec: number; end_sec: number; note: number; velocity: number }) => ({
+                (n: {
+                    start_sec: number;
+                    end_sec: number;
+                    note: number;
+                    velocity: number;
+                    channel?: number;
+                }) => ({
                     startSec: n.start_sec,
                     endSec: n.end_sec,
                     note: n.note,
                     velocity: n.velocity,
+                    channel: n.channel ?? 0,
                 }),
             ),
             midiFillGaps: clip.midi_fill_gaps ?? false,
@@ -1086,6 +1094,7 @@ export {
     setClipStateRemote,
     setClipsStateBulkRemote,
     replaceClipSourceRemote,
+    replaceMidiClipDataRemote,
     splitClipRemote,
     glueClipsRemote,
     selectClipRemote,
@@ -2896,6 +2905,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(replaceClipSourceRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(replaceMidiClipDataRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

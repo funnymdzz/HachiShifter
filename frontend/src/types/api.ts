@@ -70,6 +70,7 @@ export interface TimelineClip {
         end_sec: number;
         note: number;
         velocity: number;
+        channel?: number;
     }>;
     midi_fill_gaps?: boolean;
 }

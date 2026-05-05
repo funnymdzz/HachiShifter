@@ -28,6 +28,9 @@ export interface UiSettings {
     midiImportPosition?: string;
     midiFillGaps?: boolean;
     midiMultiTrackMerge?: boolean;
+    midiImportBpmAsProject?: boolean;
+    midiNoteBpmMode?: string;
+    midiSpecifiedBpm?: number;
     customScalePresets?: Array<{
         id: string;
         name: string;

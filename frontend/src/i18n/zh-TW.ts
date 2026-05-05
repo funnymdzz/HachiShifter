@@ -299,6 +299,8 @@ export const zhTW = {
     ctx_copy: "複製",
     ctx_cut: "剪下",
     ctx_replace: "取代",
+    ctx_replace_midi: "取代 MIDI",
+    ctx_replace_midi_all: "取代全部 MIDI",
     ctx_split_at_playhead: "在播放頭處分割",
     ctx_normalize: "正規化",
     ctx_reverse: "倒放",
@@ -465,6 +467,26 @@ export const zhTW = {
     midi_file_not_found: "MIDI 檔案未找到",
     midi_no_notes: "選取的軌道沒有音符",
     midi_no_frames_touched: "MIDI 匯入沒有寫入任何幀，請檢查播放頭位置和專案長度",
+
+    // MIDI import dialog — file source
+    midi_browse: "瀏覽...",
+    midi_read_clipboard: "從剪貼簿讀取",
+    midi_file_path: "MIDI 檔案",
+    midi_no_file_selected: "（未選擇檔案）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "將 MIDI BPM 匯入為專案 BPM",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "音符 BPM",
+    midi_note_bpm_midi: "MIDI 自身 BPM",
+    midi_note_bpm_project: "目前專案 BPM",
+    midi_note_bpm_specified: "指定 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "從剪貼簿讀取 MIDI 失敗",
+    midi_clipboard_empty: "剪貼簿中未找到 Standard MIDI File 資料",
+    midi_clipboard_parse_failed: "解析剪貼簿中的 MIDI 資料失敗",
 
     // 工具列切換按鈕
     auto_crossfade: "自動交叉淡化",

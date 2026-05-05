@@ -381,6 +381,8 @@ export const koKR = {
     ctx_copy: "복사",
     ctx_cut: "잘라내기",
     ctx_replace: "교체",
+    ctx_replace_midi: "MIDI 교체",
+    ctx_replace_midi_all: "모든 MIDI 교체",
     ctx_split_at_playhead: "재생 위치에서 분할",
     ctx_normalize: "노멀라이즈",
     ctx_reverse: "역재생",
@@ -550,6 +552,26 @@ export const koKR = {
     midi_no_notes: "선택한 트랙에 노트가 없습니다",
     midi_no_frames_touched:
         "MIDI 가져오기로 프레임이 기록되지 않았습니다. 재생 헤드 위치와 프로젝트 길이를 확인하세요.",
+
+    // MIDI import dialog — file source
+    midi_browse: "찾아보기...",
+    midi_read_clipboard: "클립보드에서 읽기",
+    midi_file_path: "MIDI 파일",
+    midi_no_file_selected: "（파일을 선택하지 않음）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "MIDI BPM을 프로젝트 BPM으로 가져오기",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "노트 BPM",
+    midi_note_bpm_midi: "MIDI 자체 BPM",
+    midi_note_bpm_project: "현재 프로젝트 BPM",
+    midi_note_bpm_specified: "지정 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "클립보드에서 MIDI를 읽지 못했습니다",
+    midi_clipboard_empty: "클립보드에서 Standard MIDI File을 찾을 수 없습니다",
+    midi_clipboard_parse_failed: "클립보드의 MIDI 데이터를 해석하지 못했습니다",
 
     // 도구 모음 토글 버튼
     auto_crossfade: "자동 크로스페이드",

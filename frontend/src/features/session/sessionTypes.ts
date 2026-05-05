@@ -95,6 +95,7 @@ export interface MidiNoteEvent {
     endSec: number;
     note: number;
     velocity: number;
+    channel: number;
 }
 
 export interface LinkedParamCurves {

@@ -309,6 +309,8 @@ export const enUS = {
     ctx_copy: "Copy",
     ctx_cut: "Cut",
     ctx_replace: "Replace",
+    ctx_replace_midi: "Replace MIDI",
+    ctx_replace_midi_all: "Replace MIDI All",
     ctx_split_at_playhead: "Split at Playhead",
     ctx_normalize: "Normalize",
     ctx_reverse: "Reverse",
@@ -473,6 +475,26 @@ export const enUS = {
     midi_no_notes: "No notes in selected track",
     midi_no_frames_touched:
         "MIDI import did not write any frames. Check the playhead position and project length.",
+
+    // MIDI import dialog — file source
+    midi_browse: "Browse...",
+    midi_read_clipboard: "Read from Clipboard",
+    midi_file_path: "MIDI File",
+    midi_no_file_selected: "(No file selected)",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "Import MIDI BPM as project BPM",
+    midi_midi_bpm_label: "MIDI BPM: {bpm}",
+    midi_note_bpm: "Note BPM",
+    midi_note_bpm_midi: "MIDI own BPM",
+    midi_note_bpm_project: "Current project BPM",
+    midi_note_bpm_specified: "Specified BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "Failed to read MIDI from clipboard",
+    midi_clipboard_empty: "No Standard MIDI File found in clipboard",
+    midi_clipboard_parse_failed: "Failed to parse MIDI data from clipboard",
 
     // Toolbar toggle buttons
     auto_crossfade: "Auto Crossfade",

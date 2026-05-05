@@ -90,7 +90,23 @@ export const paramsApi = {
                 min_note: number;
                 max_note: number;
             }>;
+            initial_bpm?: number;
         }>("get_midi_tracks", midiPath),
+
+    readMidiClipboardAsTemp: () =>
+        invoke<{
+            ok: boolean;
+            error?: string;
+            temp_path?: string;
+            tracks?: Array<{
+                index: number;
+                name: string;
+                note_count: number;
+                min_note: number;
+                max_note: number;
+            }>;
+            initial_bpm?: number;
+        }>("read_midi_clipboard_as_temp"),
 
     importMidiToPitch: (
         midiPath: string,
@@ -98,6 +114,9 @@ export const paramsApi = {
         selectionStartFrame?: number,
         selectionMaxFrames?: number,
         fillGaps?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
     ) =>
         invoke<{
             ok: boolean;
@@ -111,6 +130,9 @@ export const paramsApi = {
             selectionStartFrame,
             selectionMaxFrames,
             fillGaps,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
         ),
 
     importMidiAsClip: (
@@ -120,6 +142,9 @@ export const paramsApi = {
         startSec?: number,
         fillGaps?: boolean,
         multiTrackMerge?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
     ) =>
         invoke<TimelineResult & { ok: boolean; error?: string }>(
             "import_midi_as_clip",
@@ -129,5 +154,28 @@ export const paramsApi = {
             startSec,
             fillGaps,
             multiTrackMerge,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
+        ),
+
+    replaceMidiClipData: (
+        clipId: string,
+        midiPath: string,
+        trackIndices: number[],
+        fillGaps?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
+    ) =>
+        invoke<TimelineResult & { ok: boolean; error?: string }>(
+            "replace_midi_clip_data",
+            clipId,
+            midiPath,
+            trackIndices,
+            fillGaps,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
         ),
 };

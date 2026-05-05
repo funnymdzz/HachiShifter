@@ -96,6 +96,7 @@ export const ClipContextMenu: React.FC<{
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
     onReplace: (ids: string[]) => void;
+    onReplaceMidi?: (ids: string[]) => void;
     onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
@@ -117,6 +118,7 @@ export const ClipContextMenu: React.FC<{
     onCopy,
     onCut,
     onReplace,
+    onReplaceMidi,
     onQuickExport,
     onSplit,
     onGlue,
@@ -129,6 +131,13 @@ export const ClipContextMenu: React.FC<{
     const ids = selectedClips.length >= 2 ? selectedClips.map((c) => c.id) : [clip.id];
     const isMulti = ids.length >= 2;
     const isSingle = !isMulti;
+
+    // 音高调整块判断
+    const isPitch = (c: ClipInfo) => c.midiNoteCount != null;
+    const allPitchAdjustment = selectedClips.length > 0 && selectedClips.every(isPitch);
+    const hasPitchAdjustment = selectedClips.some(isPitch);
+    const audioOnlyIds = selectedClips.filter((c) => !isPitch(c)).map((c) => c.id);
+    const pitchOnlyIds = selectedClips.filter(isPitch).map((c) => c.id);
 
     const normalizeKb = useAppSelector((state) => selectKeybinding(state, "clip.normalize"));
     const normalizeShortcut = normalizeKb ? formatKeybinding(normalizeKb, "") : undefined;
@@ -238,20 +247,33 @@ export const ClipContextMenu: React.FC<{
                     close();
                 }}
             />
-            <MenuItem
-                label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
-                onClick={() => {
-                    onReplace(ids);
-                    close();
-                }}
-            />
-            <MenuItem
-                label={t("ctx_quick_export")}
-                onClick={() => {
-                    onQuickExport(ids);
-                    close();
-                }}
-            />
+            {!allPitchAdjustment && (
+                <MenuItem
+                    label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
+                    onClick={() => {
+                        onReplace(hasPitchAdjustment ? audioOnlyIds : ids);
+                        close();
+                    }}
+                />
+            )}
+            {hasPitchAdjustment && onReplaceMidi && (
+                <MenuItem
+                    label={isMulti ? t("ctx_replace_midi_all") : t("ctx_replace_midi")}
+                    onClick={() => {
+                        onReplaceMidi(pitchOnlyIds);
+                        close();
+                    }}
+                />
+            )}
+            {!allPitchAdjustment && (
+                <MenuItem
+                    label={t("ctx_quick_export")}
+                    onClick={() => {
+                        onQuickExport(hasPitchAdjustment ? audioOnlyIds : ids);
+                        close();
+                    }}
+                />
+            )}
             <MenuItem
                 label={t("ctx_split_at_playhead")}
                 disabled={isMulti ? !canSplitSelected : !playheadInClip}

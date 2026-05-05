@@ -298,6 +298,8 @@ export const zhCN = {
     ctx_copy: "复制",
     ctx_cut: "剪切",
     ctx_replace: "替换",
+    ctx_replace_midi: "替换 MIDI",
+    ctx_replace_midi_all: "替换全部 MIDI",
     ctx_split_at_playhead: "在播放头处分割",
     ctx_normalize: "规格化",
     ctx_reverse: "倒放",
@@ -464,6 +466,26 @@ export const zhCN = {
     midi_file_not_found: "MIDI 文件未找到",
     midi_no_notes: "选中的轨道没有音符",
     midi_no_frames_touched: "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
+
+    // MIDI import dialog — file source
+    midi_browse: "浏览...",
+    midi_read_clipboard: "从剪贴板读取",
+    midi_file_path: "MIDI 文件",
+    midi_no_file_selected: "（未选择文件）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "将 MIDI BPM 导入为工程 BPM",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "音符 BPM",
+    midi_note_bpm_midi: "MIDI 自身 BPM",
+    midi_note_bpm_project: "当前工程 BPM",
+    midi_note_bpm_specified: "指定 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "从剪贴板读取 MIDI 失败",
+    midi_clipboard_empty: "剪贴板中未找到 Standard MIDI File 数据",
+    midi_clipboard_parse_failed: "解析剪贴板中的 MIDI 数据失败",
 
     // Toolbar toggle buttons
     auto_crossfade: "自动交叉淡化",

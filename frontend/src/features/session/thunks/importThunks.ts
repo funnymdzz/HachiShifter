@@ -744,6 +744,9 @@ export const importMidiAsClip = createAsyncThunk(
             startSec?: number;
             fillGaps?: boolean;
             multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -772,6 +775,9 @@ export const importMidiAsClip = createAsyncThunk(
                 payload.startSec ?? 0,
                 payload.fillGaps,
                 payload.multiTrackMerge,
+                payload.noteBpmMode,
+                payload.specifiedBpm,
+                payload.importBpmAsProject,
             );
             if (!(imported as { ok?: boolean }).ok) {
                 const errMsg =

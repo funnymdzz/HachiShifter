@@ -179,6 +179,9 @@ function AppInner() {
     const [midiClipTrackId, setMidiClipTrackId] = useState<string | null>(null);
     const [fillGaps, setFillGaps] = useState(false);
     const [multiTrackMerge, setMultiTrackMerge] = useState(true);
+    const [importBpmAsProject, setImportBpmAsProject] = useState(false);
+    const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
+    const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
 
     // 加载 MIDI 相关设置
     useEffect(() => {
@@ -190,17 +193,21 @@ function AppInner() {
                 if (s?.midiMultiTrackMerge != null) {
                     setMultiTrackMerge(s.midiMultiTrackMerge);
                 }
+                if (s?.midiImportBpmAsProject != null) {
+                    setImportBpmAsProject(s.midiImportBpmAsProject);
+                }
+                if (s?.midiNoteBpmMode != null) {
+                    setNoteBpmMode(s.midiNoteBpmMode);
+                }
+                if (s?.midiSpecifiedBpm != null) {
+                    setSpecifiedBpm(s.midiSpecifiedBpm);
+                }
             });
         });
     }, []);
 
-    const handleImportMidiFromMenu = useCallback(async () => {
-        const coreApi = (await import("./services/api/core")).coreApi;
-        const picked = await coreApi.openMidiDialog();
-        if (!(picked as { ok?: boolean }).ok) return;
-        if ((picked as { canceled?: boolean }).canceled || !(picked as { path?: string }).path)
-            return;
-        setMidiClipPath((picked as { path: string }).path);
+    const handleImportMidiFromMenu = useCallback(() => {
+        setMidiClipPath(null);
         setMidiClipStartSec(playheadSec ?? 0);
         setMidiClipTrackId(selectedTrackId ?? null);
         setMidiClipDialogOpen(true);
@@ -217,6 +224,27 @@ function AppInner() {
         setMultiTrackMerge(v);
         void import("./services/api/settings").then(({ settingsApi }) =>
             settingsApi.saveUiSettings({ midiMultiTrackMerge: v } as any),
+        );
+    }, []);
+
+    const handleImportBpmAsProjectChange = useCallback((v: boolean) => {
+        setImportBpmAsProject(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportBpmAsProject: v } as any),
+        );
+    }, []);
+
+    const handleNoteBpmModeChange = useCallback((v: string) => {
+        setNoteBpmMode(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiNoteBpmMode: v } as any),
+        );
+    }, []);
+
+    const handleSpecifiedBpmChange = useCallback((v: number) => {
+        setSpecifiedBpm(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any),
         );
     }, []);
 
@@ -1495,12 +1523,18 @@ function AppInner() {
                             midiClipTrackId={midiClipTrackId}
                             fillGaps={fillGaps}
                             multiTrackMerge={multiTrackMerge}
+                            importBpmAsProject={importBpmAsProject}
+                            noteBpmMode={noteBpmMode}
+                            specifiedBpm={specifiedBpm}
                             onMidiClipDialogOpenChange={setMidiClipDialogOpen}
                             onMidiClipPathChange={setMidiClipPath}
                             onMidiClipStartSecChange={setMidiClipStartSec}
                             onMidiClipTrackIdChange={setMidiClipTrackId}
                             onFillGapsChange={handleFillGapsChange}
                             onMultiTrackMergeChange={handleMultiTrackMergeChange}
+                            onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
+                            onNoteBpmModeChange={handleNoteBpmModeChange}
+                            onSpecifiedBpmChange={handleSpecifiedBpmChange}
                         />
                     </Box>
 

@@ -31,11 +31,13 @@ pub struct MidiNoteEvent {
     pub start_sec: f64,
     /// 结束时间（秒）
     pub end_sec: f64,
-    /// MIDI note number (0-127)
-    pub note: u8,
+    /// MIDI note number (0.0-127.0)，已包含弯音轮偏移
+    pub note: f32,
     /// 力度 (0-127)
     #[allow(dead_code)]
     pub velocity: u8,
+    /// MIDI 通道 (0-15)
+    pub channel: u8,
 }
 
 /// MIDI 文件解析结果
@@ -43,6 +45,8 @@ pub struct MidiParseResult {
     pub tracks: Vec<MidiTrackInfo>,
     /// 每个轨道的音符事件列表
     pub track_notes: Vec<Vec<MidiNoteEvent>>,
+    /// MIDI 初始 BPM（第一个 Tempo 事件的 BPM，或回退默认值）
+    pub initial_bpm: f64,
 }
 
 /// 解析 MIDI 文件，返回轨道信息和音符事件。
@@ -106,6 +110,16 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     }
     tempo_events.sort_by_key(|&(tick, _)| tick);
 
+    // 提取初始 BPM（第一个 tempo 事件的 BPM）
+    let initial_bpm = {
+        let first_us = tempo_events.first().map(|&(_, us)| us).unwrap_or(500_000.0);
+        if first_us > 0.0 && first_us.is_finite() {
+            60_000_000.0 / first_us
+        } else {
+            120.0
+        }
+    };
+
     let is_smpte = matches!(smf.header.timing, midly::Timing::Timecode(_, _));
 
     let track_count = smf.tracks.len();
@@ -115,9 +129,11 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     for (track_idx, track) in smf.tracks.iter().enumerate() {
         let mut track_name = String::new();
         let mut notes: Vec<MidiNoteEvent> = Vec::new();
-        // 记录正在发声的音符: 索引即 key -> (start_sec, velocity)
-        let mut active_notes: [Option<(f64, u8)>; 128] = [None; 128];
+        // 记录正在发声的音符: 索引即 key -> (start_sec, velocity, channel)
+        let mut active_notes: [Option<(f64, u8, u8)>; 128] = [None; 128];
         let mut abs_tick: u64 = 0;
+        // 各通道当前的弯音轮值（8192 = 中心 = 无弯音）
+        let mut channel_pb: [i16; 16] = [8192; 16];
 
         for event in track {
             abs_tick += event.delta.as_int() as u64;
@@ -128,53 +144,75 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
                         track_name = String::from_utf8_lossy(name_bytes).into_owned();
                     }
                 }
-                TrackEventKind::Midi { message, .. } => match message {
-                    MidiMessage::NoteOn { key, vel } => {
-                        let note = key.as_int();
-                        let velocity = vel.as_int();
-                        let current_sec =
-                            tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
-
-                        if velocity == 0 {
-                            // NoteOn with velocity 0 等同于 NoteOff
-                            if let Some((start_sec, start_vel)) = active_notes[note as usize].take()
-                            {
-                                notes.push(MidiNoteEvent {
-                                    start_sec,
-                                    end_sec: current_sec,
-                                    note,
-                                    velocity: start_vel,
-                                });
-                            }
-                        } else {
-                            // 如果已有同音高的音符在发声，先关闭它
-                            if let Some((start_sec, start_vel)) = active_notes[note as usize].take()
-                            {
-                                notes.push(MidiNoteEvent {
-                                    start_sec,
-                                    end_sec: current_sec,
-                                    note,
-                                    velocity: start_vel,
-                                });
-                            }
-                            active_notes[note as usize] = Some((current_sec, velocity));
-                        }
-                    }
-                    MidiMessage::NoteOff { key, .. } => {
-                        let note = key.as_int();
-                        if let Some((start_sec, start_vel)) = active_notes[note as usize].take() {
-                            let end_sec =
+                TrackEventKind::Midi { channel, message } => {
+                    let ch = channel.as_int();
+                    match message {
+                        MidiMessage::NoteOn { key, vel } => {
+                            let raw_note = key.as_int() as f32;
+                            let velocity = vel.as_int();
+                            let current_sec =
                                 tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
-                            notes.push(MidiNoteEvent {
-                                start_sec,
-                                end_sec,
-                                note,
-                                velocity: start_vel,
-                            });
+                            // 将弯音轮偏移直接写入音高
+                            let pb_semitones =
+                                (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
+                            let adjusted_note = (raw_note + pb_semitones).clamp(0.0, 127.0);
+
+                            if velocity == 0 {
+                                // NoteOn with velocity 0 等同于 NoteOff
+                                if let Some((start_sec, start_vel, _)) =
+                                    active_notes[raw_note as usize].take()
+                                {
+                                    notes.push(MidiNoteEvent {
+                                        start_sec,
+                                        end_sec: current_sec,
+                                        note: adjusted_note,
+                                        velocity: start_vel,
+                                        channel: ch,
+                                    });
+                                }
+                            } else {
+                                // 如果已有同音高的音符在发声，先关闭它
+                                if let Some((start_sec, start_vel, _)) =
+                                    active_notes[raw_note as usize].take()
+                                {
+                                    notes.push(MidiNoteEvent {
+                                        start_sec,
+                                        end_sec: current_sec,
+                                        note: adjusted_note,
+                                        velocity: start_vel,
+                                        channel: ch,
+                                    });
+                                }
+                                active_notes[raw_note as usize] =
+                                    Some((current_sec, velocity, ch));
+                            }
                         }
+                        MidiMessage::NoteOff { key, .. } => {
+                            let note = key.as_int();
+                            if let Some((start_sec, start_vel, _)) =
+                                active_notes[note as usize].take()
+                            {
+                                let end_sec =
+                                    tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
+                                // NoteOff 时使用 NoteOn 时记录的通道查弯音轮值
+                                let pb_semitones =
+                                    (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
+                                let adjusted_note = (note as f32 + pb_semitones).clamp(0.0, 127.0);
+                                notes.push(MidiNoteEvent {
+                                    start_sec,
+                                    end_sec,
+                                    note: adjusted_note,
+                                    velocity: start_vel,
+                                    channel: ch,
+                                });
+                            }
+                        }
+                        MidiMessage::PitchBend { bend } => {
+                            channel_pb[ch as usize] = bend.0.as_int() as i16;
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                },
+                }
                 _ => {}
             }
         }
@@ -182,12 +220,16 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         // 关闭所有未结束的音符（在轨道末尾）
         let end_sec = tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
         for (note_idx, note_data) in active_notes.iter().enumerate() {
-            if let Some((start_sec, velocity)) = *note_data {
+            if let Some((start_sec, velocity, ch)) = *note_data {
+                let pb_semitones =
+                    (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
+                let adjusted_note = (note_idx as f32 + pb_semitones).clamp(0.0, 127.0);
                 notes.push(MidiNoteEvent {
                     start_sec,
                     end_sec,
-                    note: note_idx as u8,
+                    note: adjusted_note,
                     velocity,
+                    channel: ch,
                 });
             }
         }
@@ -201,9 +243,9 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
 
         let note_count = notes.len();
         let (min_note, max_note) = if notes.is_empty() {
-            (0, 0)
+            (0.0f32, 0.0f32)
         } else {
-            notes.iter().fold((127, 0), |(curr_min, curr_max), n| {
+            notes.iter().fold((127.0f32, 0.0f32), |(curr_min, curr_max), n| {
                 (curr_min.min(n.note), curr_max.max(n.note))
             })
         };
@@ -212,8 +254,8 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
             index: track_idx,
             name: track_name,
             note_count,
-            min_note,
-            max_note,
+            min_note: min_note as u8,
+            max_note: max_note as u8,
         });
         all_track_notes.push(notes);
     }
@@ -221,6 +263,7 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     Ok(MidiParseResult {
         tracks: all_tracks,
         track_notes: all_track_notes,
+        initial_bpm,
     })
 }
 
@@ -272,6 +315,7 @@ pub fn clear_pitch_edit_range_for_notes(
 /// 采用阶梯式写入：音符持续期间内所有帧直接设为该音符的 note number。
 /// 音符之间的间隙保持原有值不变。
 /// 重叠音符时取最高音。
+/// 弯音轮偏移已在解析阶段直接写入 note 值中。
 ///
 /// 返回写入的帧数量。
 pub fn write_notes_to_pitch_edit(
@@ -304,7 +348,7 @@ pub fn write_notes_to_pitch_edit(
         }
 
         let end_frame = end_frame.min(total_frames);
-        let note_value = note.note as f32;
+        let note_value = note.note;
 
         for frame in start_frame..end_frame {
             // 重叠音符时取最高音
@@ -412,7 +456,7 @@ pub fn split_notes_into_non_overlapping_groups(
         a.start_sec
             .partial_cmp(&b.start_sec)
             .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| b.note.cmp(&a.note))
+            .then_with(|| b.note.partial_cmp(&a.note).unwrap_or(std::cmp::Ordering::Equal))
     });
 
     let mut groups: Vec<Vec<MidiNoteEvent>> = vec![];

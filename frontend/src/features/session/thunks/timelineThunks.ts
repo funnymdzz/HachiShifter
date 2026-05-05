@@ -327,6 +327,29 @@ export const replaceClipSourceRemote = createAsyncThunk(
     },
 );
 
+export const replaceMidiClipDataRemote = createAsyncThunk(
+    "session/replaceMidiClipDataRemote",
+    async (payload: {
+        clipId: string;
+        midiPath: string;
+        trackIndices: number[];
+        fillGaps?: boolean;
+        noteBpmMode?: string;
+        specifiedBpm?: number;
+        importMidiBpmAsProject?: boolean;
+    }) => {
+        return webApi.replaceMidiClipData(
+            payload.clipId,
+            payload.midiPath,
+            payload.trackIndices,
+            payload.fillGaps,
+            payload.noteBpmMode,
+            payload.specifiedBpm,
+            payload.importMidiBpmAsProject,
+        );
+    },
+);
+
 export const splitClipRemote = createAsyncThunk(
     "session/splitClipRemote",
     async (payload: { clipId: string; splitSec: number }) => {

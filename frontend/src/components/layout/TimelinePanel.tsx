@@ -27,6 +27,7 @@ import {
     importAudioAtPosition,
     importAudioFileAtPosition,
     importMidiAsClip,
+    replaceMidiClipDataRemote,
     importMultipleAudioAtPosition,
     setClipStateRemote,
     setClipFades,
@@ -42,6 +43,7 @@ import { useSlipDrag } from "./timeline/hooks/useSlipDrag";
 import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement";
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
+import { webApi } from "../../services/webviewApi";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 
@@ -151,12 +153,18 @@ interface TimelinePanelProps {
     midiClipTrackId: string | null;
     fillGaps: boolean;
     multiTrackMerge: boolean;
+    importBpmAsProject: boolean;
+    noteBpmMode: string;
+    specifiedBpm: number;
     onMidiClipDialogOpenChange: (open: boolean) => void;
     onMidiClipPathChange: (path: string | null) => void;
     onMidiClipStartSecChange: (sec: number) => void;
     onMidiClipTrackIdChange: (trackId: string | null) => void;
     onFillGapsChange: (v: boolean) => void;
     onMultiTrackMergeChange: (v: boolean) => void;
+    onImportBpmAsProjectChange: (v: boolean) => void;
+    onNoteBpmModeChange: (v: string) => void;
+    onSpecifiedBpmChange: (v: number) => void;
 }
 
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({
@@ -166,12 +174,18 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     midiClipTrackId,
     fillGaps,
     multiTrackMerge,
+    importBpmAsProject,
+    noteBpmMode,
+    specifiedBpm,
     onMidiClipDialogOpenChange,
     onMidiClipPathChange,
     onMidiClipStartSecChange,
     onMidiClipTrackIdChange,
     onFillGapsChange,
     onMultiTrackMergeChange,
+    onImportBpmAsProjectChange,
+    onNoteBpmModeChange,
+    onSpecifiedBpmChange,
 }) => {
     const { t } = useI18n();
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
@@ -181,6 +195,12 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         open: boolean;
         clipIds: string[];
     }>({ open: false, clipIds: [] });
+
+    const [replaceMidiDialog, setReplaceMidiDialog] = React.useState<{
+        open: boolean;
+        clipId: string | null;
+        midiPath: string | null;
+    }>({ open: false, clipId: null, midiPath: null });
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -327,6 +347,9 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             midiPath: string;
             fillGaps: boolean;
             multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
         }) => {
             void dispatch(
                 importMidiAsClip({
@@ -336,11 +359,50 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     startSec: midiClipStartSec,
                     fillGaps: result.fillGaps || undefined,
                     multiTrackMerge: result.multiTrackMerge,
+                    noteBpmMode: result.noteBpmMode,
+                    specifiedBpm: result.specifiedBpm,
+                    importBpmAsProject: result.importBpmAsProject,
                 }),
             );
         },
         [dispatch, midiClipTrackId, midiClipStartSec],
     );
+
+    // ── Replace MIDI ──
+    const handleReplaceMidiImport = React.useCallback(
+        (result: {
+            trackIndices: number[];
+            notesCount: number;
+            midiPath: string;
+            fillGaps: boolean;
+            multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
+        }) => {
+            const clipId = replaceMidiDialog.clipId;
+            if (!clipId) return;
+            void dispatch(
+                replaceMidiClipDataRemote({
+                    clipId,
+                    midiPath: result.midiPath,
+                    trackIndices: result.trackIndices,
+                    fillGaps: result.fillGaps || undefined,
+                    noteBpmMode: result.noteBpmMode,
+                    specifiedBpm: result.specifiedBpm,
+                    importMidiBpmAsProject: result.importBpmAsProject,
+                }),
+            );
+            setReplaceMidiDialog({ open: false, clipId: null, midiPath: null });
+        },
+        [dispatch, replaceMidiDialog.clipId],
+    );
+
+    const openReplaceMidiForClip = React.useCallback(async (clipId: string) => {
+        const picked = await webApi.openMidiDialog();
+        if (!picked.ok || picked.canceled || !picked.path) return;
+        setReplaceMidiDialog({ open: true, clipId, midiPath: picked.path });
+    }, []);
 
     // ── 3. DragDrop (Tauri + 文件浏览器) ─────────────────────
     const { tauriDraggedPathRef, tauriLastDropPathRef, tauriDropHandledAtRef } =
@@ -1572,6 +1634,11 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   onReplace={(ids) => {
                                       void replaceClipSources(ids);
                                   }}
+                                  onReplaceMidi={(ids) => {
+                                      if (ids.length > 0) {
+                                          void openReplaceMidiForClip(ids[0]);
+                                      }
+                                  }}
                                   onQuickExport={(ids) => {
                                       setQuickExportDialog({
                                           open: true,
@@ -1680,6 +1747,33 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onFillGapsChange={onFillGapsChange}
                     multiTrackMerge={multiTrackMerge}
                     onMultiTrackMergeChange={onMultiTrackMergeChange}
+                    projectBpm={s.bpm}
+                    importBpmAsProject={importBpmAsProject}
+                    onImportBpmAsProjectChange={onImportBpmAsProjectChange}
+                    noteBpmMode={noteBpmMode}
+                    onNoteBpmModeChange={onNoteBpmModeChange}
+                    specifiedBpm={specifiedBpm}
+                    onSpecifiedBpmChange={onSpecifiedBpmChange}
+                />
+
+                <MidiTrackSelectDialog
+                    open={replaceMidiDialog.open}
+                    onOpenChange={(open) => {
+                        if (!open)
+                            setReplaceMidiDialog({ open: false, clipId: null, midiPath: null });
+                    }}
+                    midiPath={replaceMidiDialog.midiPath}
+                    mode="clip"
+                    onImportAsClip={handleReplaceMidiImport}
+                    fillGaps={fillGaps}
+                    onFillGapsChange={onFillGapsChange}
+                    projectBpm={s.bpm}
+                    importBpmAsProject={importBpmAsProject}
+                    onImportBpmAsProjectChange={onImportBpmAsProjectChange}
+                    noteBpmMode={noteBpmMode}
+                    onNoteBpmModeChange={onNoteBpmModeChange}
+                    specifiedBpm={specifiedBpm}
+                    onSpecifiedBpmChange={onSpecifiedBpmChange}
                 />
 
                 <Dialog.Root

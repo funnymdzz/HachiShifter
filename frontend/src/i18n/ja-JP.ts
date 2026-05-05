@@ -310,6 +310,8 @@ export const jaJP = {
     ctx_copy: "コピー",
     ctx_cut: "カット",
     ctx_replace: "置換",
+    ctx_replace_midi: "MIDIを置換",
+    ctx_replace_midi_all: "すべてのMIDIを置換",
     ctx_split_at_playhead: "再生ヘッドで分割",
     ctx_normalize: "ノーマライズ",
     ctx_reverse: "逆再生",
@@ -481,6 +483,26 @@ export const jaJP = {
     midi_no_notes: "選択したトラックにノートがありません",
     midi_no_frames_touched:
         "MIDI インポートでフレームが書き込まれませんでした。再生ヘッドの位置とプロジェクトの長さを確認してください。",
+
+    // MIDI import dialog — file source
+    midi_browse: "参照...",
+    midi_read_clipboard: "クリップボードから読み取り",
+    midi_file_path: "MIDI ファイル",
+    midi_no_file_selected: "（ファイルが選択されていません）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "MIDI BPM をプロジェクト BPM としてインポート",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "ノート BPM",
+    midi_note_bpm_midi: "MIDI 自身の BPM",
+    midi_note_bpm_project: "現在のプロジェクト BPM",
+    midi_note_bpm_specified: "指定 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "クリップボードから MIDI を読み取れませんでした",
+    midi_clipboard_empty: "クリップボードに Standard MIDI File が見つかりません",
+    midi_clipboard_parse_failed: "クリップボードの MIDI データを解析できませんでした",
 
     // ツールバートグルボタン
     auto_crossfade: "自動クロスフェード",
