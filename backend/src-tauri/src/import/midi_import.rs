@@ -2,6 +2,12 @@
 //
 // 使用 midly crate 解析标准 MIDI 文件（.mid / .midi），
 // 提取轨道信息和音符事件，用于导入到 pitch_edit。
+//
+// 弯音轮支持（per MIDI 1.0 Specification）：
+// - Pitch Bend Change (EnH): 14-bit 分辨率，中心 8192 / 00H 40H，范围 0-16383
+// - Pitch Bend Sensitivity: RPN 00 00，默认 ±2 半音，可通过 CC 101/100 → CC 6/38 调整
+// - 弯音轮偏移在解析时直接烘焙到音符音高中：弯音轮事件会即时切分当前正在发声的音符，
+//   使每段音符携带正确的弯音轮偏移后的音高值，无需额外参数存储。
 
 use std::fs;
 use std::path::Path;
@@ -49,6 +55,44 @@ pub struct MidiParseResult {
     pub initial_bpm: f64,
 }
 
+/// 将弯音轮原始值和弯音灵敏度转换为半音偏移量。
+#[inline]
+fn raw_pb_to_semitones(raw: i16, range_semitones: f32) -> f32 {
+    (raw as f32 - 8192.0) / 8192.0 * range_semitones
+}
+
+/// 在弯音轮事件发生时，切分当前通道上所有正在发声的音符。
+///
+/// 对于每个在该通道上正在发声的音符，关闭当前段（用旧的弯音轮偏移写入音高），
+/// 并立即以当前时间开启新段。这样弯音轮的连续变化被正确地反映到音符数据中。
+fn split_active_notes_on_channel(
+    active_notes: &mut [Option<(f64, u8, u8)>; 128],
+    notes: &mut Vec<MidiNoteEvent>,
+    channel: u8,
+    split_time_sec: f64,
+    channel_pb: &[i16; 16],
+    channel_bend_range: &[f32; 16],
+) {
+    for note_idx in 0..128u8 {
+        if let Some((start_sec, velocity, note_ch)) = active_notes[note_idx as usize] {
+            if note_ch == channel && start_sec < split_time_sec {
+                let pb_semitones =
+                    raw_pb_to_semitones(channel_pb[channel as usize], channel_bend_range[channel as usize]);
+                let adjusted_note = (note_idx as f32 + pb_semitones).clamp(0.0, 127.0);
+                notes.push(MidiNoteEvent {
+                    start_sec,
+                    end_sec: split_time_sec,
+                    note: adjusted_note,
+                    velocity,
+                    channel: note_ch,
+                });
+                // 开启新段（从当前时间继续）
+                active_notes[note_idx as usize] = Some((split_time_sec, velocity, note_ch));
+            }
+        }
+    }
+}
+
 /// 解析 MIDI 文件，返回轨道信息和音符事件。
 ///
 /// `fallback_bpm`：当 MIDI 文件不包含 Tempo 事件时，使用此值作为
@@ -73,7 +117,6 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     let ticks_per_beat = match smf.header.timing {
         midly::Timing::Metrical(tpb) => tpb.as_int() as f64,
         midly::Timing::Timecode(fps, sub) => {
-            // 对于 SMPTE 时间码，按 fps * sub 转换
             let fps_val = match fps.as_int() {
                 24 => 24.0,
                 25 => 25.0,
@@ -85,11 +128,8 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         }
     };
 
-    // 收集全局 tempo 事件（主要在第一个轨道中，但也可能散布在任何轨道）
+    // 收集全局 tempo 事件
     let mut tempo_events: Vec<(u64, f64)> = Vec::new(); // (abs_tick, microseconds_per_beat)
-
-    // 对于 Format 0，所有事件都在第一个轨道中。
-    // 对于 Format 1，tempo 事件通常在第一个轨道。
     for track in &smf.tracks {
         let mut abs_tick: u64 = 0;
         for event in track {
@@ -110,7 +150,7 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     }
     tempo_events.sort_by_key(|&(tick, _)| tick);
 
-    // 提取初始 BPM（第一个 tempo 事件的 BPM）
+    // 提取初始 BPM
     let initial_bpm = {
         let first_us = tempo_events.first().map(|&(_, us)| us).unwrap_or(500_000.0);
         if first_us > 0.0 && first_us.is_finite() {
@@ -129,11 +169,21 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
     for (track_idx, track) in smf.tracks.iter().enumerate() {
         let mut track_name = String::new();
         let mut notes: Vec<MidiNoteEvent> = Vec::new();
+
         // 记录正在发声的音符: 索引即 key -> (start_sec, velocity, channel)
         let mut active_notes: [Option<(f64, u8, u8)>; 128] = [None; 128];
         let mut abs_tick: u64 = 0;
-        // 各通道当前的弯音轮值（8192 = 中心 = 无弯音）
+
+        // ── 每通道弯音轮状态 ──
+        // 当前弯音轮原始值 (0-16383, 8192=中心)
         let mut channel_pb: [i16; 16] = [8192; 16];
+        // 每通道弯音灵敏度（半音），默认 ±2 半音，可通过 RPN 00 00 修改
+        let mut channel_bend_range: [f32; 16] = [2.0; 16];
+        // RPN 参数号选择状态
+        let mut rpn_msb: [u8; 16] = [0x7F; 16];
+        let mut rpn_lsb: [u8; 16] = [0x7F; 16];
+        // 暂存的 Data Entry LSB（cents 部分）
+        let mut pending_bend_range_cents: [Option<f32>; 16] = [None; 16];
 
         for event in track {
             abs_tick += event.delta.as_int() as u64;
@@ -152,35 +202,43 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
                             let velocity = vel.as_int();
                             let current_sec =
                                 tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
-                            // 将弯音轮偏移直接写入音高
-                            let pb_semitones =
-                                (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
-                            let adjusted_note = (raw_note + pb_semitones).clamp(0.0, 127.0);
 
                             if velocity == 0 {
                                 // NoteOn with velocity 0 等同于 NoteOff
-                                if let Some((start_sec, start_vel, _)) =
+                                if let Some((start_sec, start_vel, note_ch)) =
                                     active_notes[raw_note as usize].take()
                                 {
+                                    let pb_semitones = raw_pb_to_semitones(
+                                        channel_pb[note_ch as usize],
+                                        channel_bend_range[note_ch as usize],
+                                    );
+                                    let adjusted_note =
+                                        (raw_note + pb_semitones).clamp(0.0, 127.0);
                                     notes.push(MidiNoteEvent {
                                         start_sec,
                                         end_sec: current_sec,
                                         note: adjusted_note,
                                         velocity: start_vel,
-                                        channel: ch,
+                                        channel: note_ch,
                                     });
                                 }
                             } else {
                                 // 如果已有同音高的音符在发声，先关闭它
-                                if let Some((start_sec, start_vel, _)) =
+                                if let Some((start_sec, start_vel, prev_ch)) =
                                     active_notes[raw_note as usize].take()
                                 {
+                                    let pb_semitones = raw_pb_to_semitones(
+                                        channel_pb[prev_ch as usize],
+                                        channel_bend_range[prev_ch as usize],
+                                    );
+                                    let adjusted_note =
+                                        (raw_note + pb_semitones).clamp(0.0, 127.0);
                                     notes.push(MidiNoteEvent {
                                         start_sec,
                                         end_sec: current_sec,
                                         note: adjusted_note,
                                         velocity: start_vel,
-                                        channel: ch,
+                                        channel: prev_ch,
                                     });
                                 }
                                 active_notes[raw_note as usize] =
@@ -189,26 +247,79 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
                         }
                         MidiMessage::NoteOff { key, .. } => {
                             let note = key.as_int();
-                            if let Some((start_sec, start_vel, _)) =
+                            if let Some((start_sec, start_vel, note_ch)) =
                                 active_notes[note as usize].take()
                             {
-                                let end_sec =
-                                    tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
-                                // NoteOff 时使用 NoteOn 时记录的通道查弯音轮值
-                                let pb_semitones =
-                                    (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
-                                let adjusted_note = (note as f32 + pb_semitones).clamp(0.0, 127.0);
+                                let end_sec = tick_to_sec(
+                                    abs_tick, ticks_per_beat, &tempo_events, is_smpte,
+                                );
+                                let pb_semitones = raw_pb_to_semitones(
+                                    channel_pb[note_ch as usize],
+                                    channel_bend_range[note_ch as usize],
+                                );
+                                let adjusted_note =
+                                    (note as f32 + pb_semitones).clamp(0.0, 127.0);
                                 notes.push(MidiNoteEvent {
                                     start_sec,
                                     end_sec,
                                     note: adjusted_note,
                                     velocity: start_vel,
-                                    channel: ch,
+                                    channel: note_ch,
                                 });
                             }
                         }
                         MidiMessage::PitchBend { bend } => {
-                            channel_pb[ch as usize] = bend.0.as_int() as i16;
+                            let current_sec =
+                                tick_to_sec(abs_tick, ticks_per_beat, &tempo_events, is_smpte);
+                            // 切分当前通道上所有正在发声的音符（让已发声的部分用旧弯音值关闭，
+                            // 并在当前时间开启新段）
+                            split_active_notes_on_channel(
+                                &mut active_notes,
+                                &mut notes,
+                                ch,
+                                current_sec,
+                                &channel_pb,
+                                &channel_bend_range,
+                            );
+                            // 更新弯音轮值
+                            let raw = bend.0.as_int() as i16;
+                            channel_pb[ch as usize] = raw;
+                        }
+                        MidiMessage::Controller { controller, value } => {
+                            let ctrl = controller.as_int();
+                            let val = value.as_int();
+                            match ctrl {
+                                // RPN MSB (CC 101)
+                                101 => {
+                                    rpn_msb[ch as usize] = val;
+                                }
+                                // RPN LSB (CC 100)
+                                100 => {
+                                    rpn_lsb[ch as usize] = val;
+                                }
+                                // Data Entry MSB (CC 6)
+                                6 => {
+                                    if rpn_msb[ch as usize] == 0 && rpn_lsb[ch as usize] == 0 {
+                                        let semitones = val as f32;
+                                        let cents =
+                                            pending_bend_range_cents[ch as usize].unwrap_or(0.0);
+                                        channel_bend_range[ch as usize] =
+                                            (semitones + cents / 100.0).max(0.0);
+                                        pending_bend_range_cents[ch as usize] = None;
+                                    }
+                                }
+                                // Data Entry LSB (CC 38)
+                                38 => {
+                                    if rpn_msb[ch as usize] == 0 && rpn_lsb[ch as usize] == 0 {
+                                        pending_bend_range_cents[ch as usize] = Some(val as f32);
+                                        let current_msb =
+                                            channel_bend_range[ch as usize].trunc();
+                                        channel_bend_range[ch as usize] =
+                                            (current_msb + val as f32 / 100.0).max(0.0);
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
                         _ => {}
                     }
@@ -222,7 +333,7 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         for (note_idx, note_data) in active_notes.iter().enumerate() {
             if let Some((start_sec, velocity, ch)) = *note_data {
                 let pb_semitones =
-                    (channel_pb[ch as usize] as f32 - 8192.0) / 8192.0 * 2.0;
+                    raw_pb_to_semitones(channel_pb[ch as usize], channel_bend_range[ch as usize]);
                 let adjusted_note = (note_idx as f32 + pb_semitones).clamp(0.0, 127.0);
                 notes.push(MidiNoteEvent {
                     start_sec,
@@ -324,7 +435,6 @@ pub fn write_notes_to_pitch_edit(
     pitch_edit: &mut [f32],
     offset_sec: f64,
 ) -> usize {
-    // 避免后续除 0 或无效浮点引发崩溃
     if frame_period_ms <= 0.0 || !frame_period_ms.is_finite() {
         return 0;
     }
@@ -351,7 +461,6 @@ pub fn write_notes_to_pitch_edit(
         let note_value = note.note;
 
         for frame in start_frame..end_frame {
-            // 重叠音符时取最高音
             let current = pitch_edit[frame];
             if note_value > current || current <= 0.0 {
                 pitch_edit[frame] = note_value;
@@ -377,7 +486,7 @@ pub fn fill_gaps_in_pitch_edit(pitch_edit: &mut [f32]) -> usize {
     // 找到第一个非零帧
     let first_nonzero = match pitch_edit.iter().position(|&v| v > 0.0) {
         Some(pos) => pos,
-        None => return 0, // 没有音符，不需要填充
+        None => return 0,
     };
 
     // 找到最后一个非零帧
@@ -409,11 +518,9 @@ pub fn fill_gaps_in_pitch_edit(pitch_edit: &mut [f32]) -> usize {
 /// 将 MIDI tick 转换为秒。
 fn tick_to_sec(tick: u64, ticks_per_beat: f64, tempo_events: &[(u64, f64)], is_smpte: bool) -> f64 {
     if is_smpte {
-        // SMPTE: tick 直接对应秒
         return tick as f64 / ticks_per_beat;
     }
 
-    // Metrical timing: 需要根据 tempo map 分段计算
     let mut sec = 0.0;
     let mut last_tick: u64 = 0;
     let mut current_tempo: f64 = 500_000.0; // 默认 120 BPM
@@ -422,14 +529,12 @@ fn tick_to_sec(tick: u64, ticks_per_beat: f64, tempo_events: &[(u64, f64)], is_s
         if tempo_tick >= tick {
             break;
         }
-        // 从 last_tick 到 tempo_tick 之间的时间
         let delta_ticks = tempo_tick.saturating_sub(last_tick) as f64;
         sec += (delta_ticks / ticks_per_beat) * (current_tempo / 1_000_000.0);
         last_tick = tempo_tick;
         current_tempo = tempo_us;
     }
 
-    // 从最后一个 tempo 变化点到目标 tick
     let delta_ticks = tick.saturating_sub(last_tick) as f64;
     sec += (delta_ticks / ticks_per_beat) * (current_tempo / 1_000_000.0);
 
