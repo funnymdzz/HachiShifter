@@ -83,6 +83,10 @@ pub struct TrackParamsState {
     #[serde(default)]
     pub pitch_edit_user_modified: bool,
 
+    /// 是否有活跃的音高调整块（非静音 MIDI clip）在此轨道组中
+    #[serde(skip)]
+    pub has_pitch_adjustment_active: bool,
+
     #[serde(default)]
     pub tension_orig: Vec<f32>,
     #[serde(default)]

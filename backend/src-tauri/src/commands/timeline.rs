@@ -633,9 +633,21 @@ pub(super) fn set_clips_state_bulk(
         state.checkpoint_timeline(&tl);
     }
     tl.patch_clips_state(&updates);
+    let mut root_track_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for update in &updates {
+        if let Some(clip) = tl.clips.iter().find(|c| c.id == update.clip_id) {
+            if let Some(root) = tl.resolve_root_track_id(&clip.track_id) {
+                root_track_ids.insert(root);
+            }
+        }
+    }
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root in &root_track_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, root);
+    }
     payload
 }
 

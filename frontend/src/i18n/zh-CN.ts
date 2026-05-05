@@ -443,9 +443,9 @@ export const zhCN = {
     midi_import: "导入 MIDI",
     midi_import_title: "导入 MIDI 到音高曲线",
     midi_import_desc: "选择 MIDI 轨道导入为音高曲线",
-    midi_import_clip_title: "导入 MIDI 为音频块",
-    midi_import_clip_desc: "选择 MIDI 轨道在时间线上创建 MIDI 音频块",
-    midi_create_clip: "创建音频块",
+    midi_import_clip_title: "导入 MIDI 为音高调整块",
+    midi_import_clip_desc: "选择 MIDI 轨道在时间线上创建音高调整块",
+    midi_create_clip: "创建音高调整块",
     midi_fill_gaps: "填补音符之间的空隙",
     midi_import_position: "导入位置",
     midi_import_position_start: "工程开头",
@@ -624,6 +624,8 @@ export const zhCN = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI 音符",
+    clip_type_midi: "音高调整块",
+    clip_type_midi_prefix: "[音高调整]",
     dlg_strength: "平滑度",
     dlg_smoothness: "平滑度",
     dlg_average_strength: "平均度",

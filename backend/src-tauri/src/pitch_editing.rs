@@ -935,7 +935,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     };
     let child_offset_cfg = active_child_pitch_offset_config(timeline, &clip.track_id);
     let has_child_pitch_offset = child_offset_cfg.is_some();
-    if !track.compose_enabled {
+    if !track.compose_enabled && !entry.has_pitch_adjustment_active {
         return Ok(false);
     }
 
@@ -954,7 +954,10 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
+        let compose_or_pitch_adjust =
+            track.compose_enabled || entry.has_pitch_adjustment_active;
+        let handles =
+            crate::renderer::processor_handles_time_stretch(kind, compose_or_pitch_adjust);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };
@@ -962,7 +965,10 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
     // 例外：needs_processor_stretch 时必须进入处理器以执行其内部拉伸。
+    // 例外：has_pitch_adjustment_active 时，音高调整块提供的 MIDI 音高数据已写入 pitch_edit，
+    //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
+        && !entry.has_pitch_adjustment_active
         && !extra_processing
         && !tension_processing
         && !formant_processing
@@ -1271,7 +1277,9 @@ pub fn does_clip_need_processor_render(
     let Some((track, entry)) = root_pitch_edit_state(timeline, &clip_root) else {
         return false;
     };
-    if !track.compose_enabled {
+    // 当存在非静音的音高调整块时，即使 compose_enabled 为 false，
+    // 也需要触发处理器预渲染，确保音高调整块的 MIDI 数据能应用到同组的音频块。
+    if !track.compose_enabled && !entry.has_pitch_adjustment_active {
         return false;
     }
     if !pitch_edit_backend_available_for_track(track) {
@@ -1293,7 +1301,10 @@ pub fn does_clip_need_processor_render(
     // 即使用户没有编辑音高，也需要触发处理器预渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
+        let compose_or_pitch_adjust =
+            track.compose_enabled || entry.has_pitch_adjustment_active;
+        let handles =
+            crate::renderer::processor_handles_time_stretch(kind, compose_or_pitch_adjust);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };
@@ -1302,7 +1313,10 @@ pub fn does_clip_need_processor_render(
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
     // 例外：needs_processor_stretch 时必须触发预渲染以执行其内部拉伸。
+    // 例外：has_pitch_adjustment_active 时，音高调整块提供的 MIDI 音高数据已写入 pitch_edit，
+    //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
+        && !entry.has_pitch_adjustment_active
         && !extra_processing
         && !tension_processing
         && !formant_processing

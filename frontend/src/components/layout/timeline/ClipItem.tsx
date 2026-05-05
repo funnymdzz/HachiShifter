@@ -322,7 +322,9 @@ export const ClipItem = React.memo(function ClipItem({
                 startClipDrag(e, clip.id, clip.startSec, alt);
             }}
             title={
-                clip.midiNoteCount != null ? `[MIDI] ${clip.name}` : (clip.sourcePath ?? clip.name)
+                clip.midiNoteCount != null
+                    ? `${t("clip_type_midi_prefix")} ${clip.name}`
+                    : (clip.sourcePath ?? clip.name)
             }
         >
             <ClipEdgeHandles
@@ -345,6 +347,7 @@ export const ClipItem = React.memo(function ClipItem({
                 clipWidthPx={width}
                 trackColor={trackColor}
                 transparentVisuals
+                isPitchAdjustment={clip.midiNoteCount != null}
                 ensureSelected={ensureSelected}
                 selectClipRemote={selectClipRemote}
                 startEditDrag={startEditDrag}

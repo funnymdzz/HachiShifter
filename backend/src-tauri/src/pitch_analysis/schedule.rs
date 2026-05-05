@@ -11,7 +11,7 @@ use super::{build_root_pitch_key, PitchOrigUpdatedEvent};
 fn assemble_pitch_orig_from_cache(
     tl: &crate::state::TimelineState,
     root_track_id: &str,
-) -> Option<(Vec<f32>, bool)> {
+) -> Option<(Vec<f32>, bool, bool)> {
     let fp = tl.frame_period_ms();
     let target_frames = tl.target_param_frames(fp);
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
@@ -21,28 +21,69 @@ fn assemble_pitch_orig_from_cache(
     };
     let _bs = 60.0 / bpm;
 
-    // 收集属于 root track 的所有 clip（保 tl.clips 原始顺序 = z-order）
-    // 同时包含有音频源的 clip 和带 midi_note_data 的 MIDI clip。
-    let clips: Vec<&crate::state::Clip> = tl
-        .clips
-        .iter()
-        .filter(|c| {
-            tl.resolve_root_track_id(&c.track_id).as_deref() == Some(root_track_id)
-                && !c.muted
-                && (c.source_path.is_some() || c.midi_note_data.is_some())
-        })
-        .collect();
+    // 收集属于 root track 的所有 clip（同时包含有音频源的 clip 和带 midi_note_data 的 MIDI clip）
+    // 按轨道由上至下的顺序排列：上方轨道的 clip 优先于下方轨道。
+    // 先收集整个轨道组内的所有轨道（任何深度），按 tl.tracks 顺序（即 UI 从上到下）排列。
+    let mut group_track_ids: Vec<&str> = Vec::new();
+    for track in &tl.tracks {
+        if tl.resolve_root_track_id(&track.id).as_deref() == Some(root_track_id) {
+            group_track_ids.push(track.id.as_str());
+        }
+    }
 
-    if clips.is_empty() {
-        // 没有 clip，直接返回全零曲线（视为全部命中?
-        return Some((vec![0.0f32; target_frames], true));
+    // 按 tl.tracks 中的顺序排列轨道（即 UI 中从上到下的顺序）
+    let mut ordered_track_ids: Vec<&str> = Vec::new();
+    for track in &tl.tracks {
+        if group_track_ids.contains(&track.id.as_str()) {
+            ordered_track_ids.push(track.id.as_str());
+        }
+    }
+
+    // 收集所有 clip，按轨道分组
+    let mut track_clips: std::collections::HashMap<&str, Vec<&crate::state::Clip>> =
+        std::collections::HashMap::new();
+    let mut has_pitch_adjustment = false;
+    for clip in &tl.clips {
+        let clip_root = tl.resolve_root_track_id(&clip.track_id);
+        if clip_root.as_deref() != Some(root_track_id) {
+            continue;
+        }
+        if clip.muted {
+            continue;
+        }
+        if clip.source_path.is_none() && clip.midi_note_data.is_none() {
+            continue;
+        }
+        if clip.midi_note_data.is_some() {
+            has_pitch_adjustment = true;
+        }
+        track_clips
+            .entry(clip.track_id.as_str())
+            .or_default()
+            .push(clip);
+    }
+
+    let all_empty = track_clips.is_empty();
+    if all_empty {
+        // 没有 clip，直接返回全零曲线（视为全部命中）
+        return Some((vec![0.0f32; target_frames], true, false));
     }
 
     let mut out = vec![0.0f32; target_frames];
     let mut all_cache_hit = true;
 
-    // 按 z-order 从低到高（tl.clips 顺序）写入，后面 clip 覆盖前面
-    for clip in &clips {
+    // 按轨道从下到上遍历（下方轨道先写入，上方轨道后写入以覆盖）
+    // 同一轨道内按 z-order 从低到高（tl.clips 顺序）写入
+    let mut processed_clips = Vec::new();
+    for track_id in ordered_track_ids.iter().rev() {
+        if let Some(clips) = track_clips.get(track_id) {
+            for clip in clips {
+                processed_clips.push(*clip);
+            }
+        }
+    }
+
+    for clip in &processed_clips {
         // 计算 clip 在 timeline 中的起始帧（MIDI clip 和音频 clip 共用）
         let clip_start_sec = clip.start_sec.max(0.0);
         let clip_start_frame = ((clip_start_sec * 1000.0) / fp).round().max(0.0) as usize;
@@ -60,6 +101,10 @@ fn assemble_pitch_orig_from_cache(
                 clip_len_sec
             };
             let src_total_len = src_end - src_start;
+
+            // 收集已写入音符的帧范围（用于后续填补空隙）和音高值
+            let mut note_ranges: Vec<(usize, usize, f32)> = Vec::new();
+
             for note in notes {
                 if note.end_sec <= src_start || note.start_sec >= src_end {
                     continue; // 音符在可见范围之外
@@ -98,29 +143,33 @@ fn assemble_pitch_orig_from_cache(
                             out[frame] = note_value;
                         }
                     }
+                    note_ranges.push((write_start, write_end, note_value));
                 }
             }
 
             // 填补音符之间的空隙（仅在 clip 区间内）
-            if clip.midi_fill_gaps {
-                let fill_start = clip_start_frame;
-                let fill_end = (clip_start_frame + clip_len_frames).min(target_frames);
-                if fill_start < fill_end {
-                    let slice = &mut out[fill_start..fill_end];
-                    // 找到 slice 内第一个和最后一个非零帧
-                    let first = slice.iter().position(|&v| v > 0.0);
-                    let last = slice.iter().rposition(|&v| v > 0.0);
-                    if let (Some(f), Some(l)) = (first, last) {
-                        if f < l {
-                            let mut last_pitch: f32 = 0.0;
-                            for i in f..=l {
-                                let current = slice[i];
-                                if current > 0.0 {
-                                    last_pitch = current;
-                                } else if last_pitch > 0.0 {
-                                    slice[i] = last_pitch;
-                                }
-                            }
+            // 使用已写入的音符帧范围精确填充，覆盖子轨音频块的原始音高值
+            if clip.midi_fill_gaps && !note_ranges.is_empty() {
+                note_ranges.sort_by_key(|&(s, _, _)| s);
+                // 合并时间上重叠的音符范围（保留最高音高，与写入逻辑一致）
+                let mut merged: Vec<(usize, usize, f32)> = Vec::new();
+                for (s, e, v) in note_ranges {
+                    if let Some(last) = merged.last_mut() {
+                        if s < last.1 {
+                            last.1 = last.1.max(e);
+                            last.2 = last.2.max(v);
+                            continue;
+                        }
+                    }
+                    merged.push((s, e, v));
+                }
+                // 在相邻的音符范围之间填充空隙
+                for w in merged.windows(2) {
+                    let (_, end_prev, pitch_prev) = w[0];
+                    let (start_next, _, _) = w[1];
+                    if end_prev < start_next {
+                        for frame in end_prev..start_next {
+                            out[frame] = pitch_prev;
                         }
                     }
                 }
@@ -198,7 +247,7 @@ fn assemble_pitch_orig_from_cache(
         }
     }
 
-    Some((out, all_cache_hit))
+    Some((out, all_cache_hit, has_pitch_adjustment))
 }
 
 /// Returns whether pitch analysis is currently pending (scheduled or already inflight).
@@ -216,14 +265,15 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
             None => return false,
         };
 
-        // 直接?per-clip 缓存同步组装整体音高线（不再重新分析音频?
-        let (curve, all_cache_hit) = match assemble_pitch_orig_from_cache(&tl, root_track_id) {
-            Some(v) => v,
-            None => {
-                // assemble_pitch_orig_from_cache 目前永远返回 Some，此分支保留作为安全兜底
-                return true;
-            }
-        };
+        // 直接 per-clip 缓存同步组装整体音高线（不再重新分析音频）
+        let (curve, all_cache_hit, has_pitch_adjustment) =
+            match assemble_pitch_orig_from_cache(&tl, root_track_id) {
+                Some(v) => v,
+                None => {
+                    // assemble_pitch_orig_from_cache 目前永远返回 Some，此分支保留作为安全兜底
+                    return true;
+                }
+            };
 
         // 将组装好的曲线写?state
         tl.ensure_params_for_root(&job.root_track_id);
@@ -234,6 +284,7 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                     // 全部命中：写入曲线、标记完成、通知前端
                     entry.pitch_orig = curve;
                     entry.pitch_orig_key = Some(job.key.clone());
+                    entry.has_pitch_adjustment_active = has_pitch_adjustment;
 
                     // 应用 Reaper 导入的待定音高偏移
                     if let Some(offsets) = entry.pending_pitch_offset.take() {
@@ -268,6 +319,7 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                     if entry.pitch_orig != curve {
                         entry.pitch_orig = curve;
                         entry.pitch_orig_key = None;
+                        entry.has_pitch_adjustment_active = has_pitch_adjustment;
                         if !entry.pitch_edit_user_modified {
                             // 复用已有内存，避免昂贵的重新分配
                             entry.pitch_edit.clone_from(&entry.pitch_orig);

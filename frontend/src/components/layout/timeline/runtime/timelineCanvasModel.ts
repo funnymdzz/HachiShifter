@@ -8,6 +8,7 @@ type SparseRenderClip = {
     lengthSec: number;
     gain: number;
     muted: boolean;
+    midiNoteCount?: number;
     fadeInSec: number;
     fadeOutSec: number;
     fadeInCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
@@ -30,6 +31,7 @@ export type TimelineCanvasClipModel = {
     selected: boolean;
     muted: boolean;
     gain: number;
+    isMidiClip: boolean;
     trackColor?: string;
 };
 
@@ -85,6 +87,7 @@ export function buildSparseClipRenderModel(args: {
                     : args.selectedClipId === clip.id,
             muted: clip.muted,
             gain: clip.gain,
+            isMidiClip: clip.midiNoteCount != null,
             trackColor: track.color,
         })),
     );

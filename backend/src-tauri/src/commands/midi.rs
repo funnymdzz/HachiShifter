@@ -189,65 +189,75 @@ pub(super) fn import_midi_to_pitch(
         return serde_json::json!({"ok": false, "error": "params_missing"});
     };
 
-    // 根据是否有选区约束决定偏移和写入范围（与 paste_midi_clipboard_inner 完全一致）
-    let touched = if let Some(sel_start) = selection_start_frame {
-        // 以选区起始帧对应秒作为目标偏移，所有音符整体平移使第一个音符对齐该偏移
+    // 计算对齐偏移量和写入范围
+    let first_start = notes
+        .iter()
+        .map(|n| n.start_sec)
+        .fold(f64::INFINITY, f64::min);
+    let (align_offset, clamp_range_end) = if let Some(sel_start) = selection_start_frame {
         let offset_sec = (sel_start as f64 * frame_period_ms_raw) / 1000.0;
-        let first_start = notes
-            .iter()
-            .map(|n| n.start_sec)
-            .fold(f64::INFINITY, f64::min);
-        let align_offset = offset_sec - first_start;
+        let ao = offset_sec - first_start;
         let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
-        let clamp_len = max_frame.min(entry.pitch_edit.len());
+        let cl = max_frame.min(entry.pitch_edit.len());
         midi_log(format!(
             "import_midi_to_pitch: selection mode offset_sec={:.3} align_offset={:.3} clamp_len={}",
-            offset_sec, align_offset, clamp_len
+            offset_sec, ao, cl
         ));
-        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
-        midi_import::clear_pitch_edit_range_for_notes(
-            &notes,
-            frame_period_ms,
-            &mut entry.pitch_edit[..clamp_len],
-            align_offset,
-        );
-        midi_import::write_notes_to_pitch_edit(
-            &notes,
-            frame_period_ms,
-            &mut entry.pitch_edit[..clamp_len],
-            align_offset,
-        )
+        (ao, Some(cl))
     } else {
-        // 以光标位置为目标偏移，所有音符整体平移使第一个音符对齐该偏移
-        let first_start = notes
-            .iter()
-            .map(|n| n.start_sec)
-            .fold(f64::INFINITY, f64::min);
-        let align_offset = playhead_sec - first_start;
+        let ao = playhead_sec - first_start;
         midi_log(format!(
             "import_midi_to_pitch: playhead mode offset_sec={:.3} align_offset={:.3}",
-            playhead_sec, align_offset
+            playhead_sec, ao
         ));
-        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
-        midi_import::clear_pitch_edit_range_for_notes(
-            &notes,
-            frame_period_ms,
-            &mut entry.pitch_edit,
-            align_offset,
-        );
-        midi_import::write_notes_to_pitch_edit(
-            &notes,
-            frame_period_ms,
-            &mut entry.pitch_edit,
-            align_offset,
-        )
+        (ao, None)
     };
 
-    // 填补音符之间的空隙
+    let target_slice = if let Some(clamp_len) = clamp_range_end {
+        &mut entry.pitch_edit[..clamp_len]
+    } else {
+        &mut entry.pitch_edit[..]
+    };
+
+    // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+    midi_import::clear_pitch_edit_range_for_notes(
+        &notes,
+        frame_period_ms,
+        target_slice,
+        align_offset,
+    );
+    let touched = midi_import::write_notes_to_pitch_edit(
+        &notes,
+        frame_period_ms,
+        target_slice,
+        align_offset,
+    );
+
+    // 填补音符之间的空隙（仅在导入的音符范围内）
     if fill_gaps.unwrap_or(false) {
-        let filled = midi_import::fill_gaps_in_pitch_edit(&mut entry.pitch_edit);
-        if filled > 0 {
-            midi_log(format!("import_midi_to_pitch: fill_gaps filled={}", filled));
+        // 计算导入音符的实际帧范围，避免 fill_gaps_in_pitch_edit
+        // 在已有非零音高值的历史编辑区域产生意外的填充
+        let mut min_frame = usize::MAX;
+        let mut max_frame = 0usize;
+        for note in &notes {
+            let start_sec = note.start_sec + align_offset;
+            let end_sec = note.end_sec + align_offset;
+            if start_sec < 0.0 || !start_sec.is_finite() || !end_sec.is_finite() {
+                continue;
+            }
+            let sf = ((start_sec * 1000.0) / frame_period_ms).round() as usize;
+            let ef = ((end_sec * 1000.0) / frame_period_ms).round() as usize;
+            if sf < entry.pitch_edit.len() {
+                min_frame = min_frame.min(sf);
+                max_frame = max_frame.max(ef.min(entry.pitch_edit.len()));
+            }
+        }
+        if min_frame < max_frame && max_frame <= entry.pitch_edit.len() {
+            let filled =
+                midi_import::fill_gaps_in_pitch_edit(&mut entry.pitch_edit[min_frame..max_frame]);
+            if filled > 0 {
+                midi_log(format!("import_midi_to_pitch: fill_gaps filled={}", filled));
+            }
         }
     }
 
@@ -404,10 +414,21 @@ pub(super) fn import_midi_as_clip(
                 .unwrap_or(0)
         ));
 
+        let root_track_id = tl.resolve_root_track_id(
+            &tl.clips
+                .iter()
+                .find(|c| c.id == clip_id)
+                .map(|c| c.track_id.clone())
+                .unwrap_or_default(),
+        );
         state.audio_engine.update_timeline(tl.clone());
         let mut payload = tl.to_payload();
         payload.created_clip_ids = Some(vec![clip_id]);
         payload.project = Some(state.project_meta_payload());
+        drop(tl);
+        if let Some(root) = root_track_id {
+            crate::pitch_analysis::maybe_schedule_pitch_orig(state, &root);
+        }
         payload
     } else {
         // ── 非合并模式：每条轨道独立处理，重叠音符拆分为不同 clip ──
@@ -543,11 +564,24 @@ pub(super) fn import_midi_as_clip(
             created_track_ids.len()
         ));
 
+        let mut root_track_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for clip_id in &created_clip_ids {
+            if let Some(clip) = tl.clips.iter().find(|c| c.id == *clip_id) {
+                if let Some(root) = tl.resolve_root_track_id(&clip.track_id) {
+                    root_track_ids.insert(root);
+                }
+            }
+        }
         state.audio_engine.update_timeline(tl.clone());
         let mut payload = tl.to_payload();
         payload.created_clip_ids = Some(created_clip_ids);
         payload.created_track_ids = Some(created_track_ids);
         payload.project = Some(state.project_meta_payload());
+        drop(tl);
+        for root in &root_track_ids {
+            crate::pitch_analysis::maybe_schedule_pitch_orig(state, root);
+        }
         payload
     }
 }

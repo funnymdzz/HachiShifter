@@ -641,6 +641,8 @@ export const jaJP = {
 
     // ダイアログフィールドラベル
     dlg_midi_note: "MIDI ノート",
+    clip_type_midi: "音高調整クリップ",
+    clip_type_midi_prefix: "[音高調整]",
     dlg_strength: "スムーズ度",
     dlg_smoothness: "スムーズ度",
     dlg_average_strength: "平均度",

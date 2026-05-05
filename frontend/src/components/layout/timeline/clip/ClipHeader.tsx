@@ -15,6 +15,7 @@ export const ClipHeader: React.FC<{
     clipWidthPx: number;
     trackColor?: string;
     transparentVisuals?: boolean;
+    isPitchAdjustment?: boolean;
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
@@ -33,6 +34,7 @@ export const ClipHeader: React.FC<{
     clipWidthPx,
     trackColor,
     transparentVisuals = false,
+    isPitchAdjustment = false,
     ensureSelected,
     selectClipRemote,
     startEditDrag,
@@ -79,7 +81,7 @@ export const ClipHeader: React.FC<{
         showPlaybackRate,
         showGainLabel: showGainVal,
         showName,
-    } = resolveTimelineClipHeaderVisibility(clipWidthPx);
+    } = resolveTimelineClipHeaderVisibility(clipWidthPx, isPitchAdjustment);
     const visualStyle = buildTimelineClipVisualStyle({
         widthPx: clipWidthPx,
         trackColor,
@@ -89,6 +91,7 @@ export const ClipHeader: React.FC<{
         playbackRate: clip.playbackRate,
         name: clip.name,
         fontFamily,
+        isPitchAdjustment,
     });
 
     // ── 增益双击输入框 ──────────────────────────────────────────────────────

@@ -444,9 +444,9 @@ export const zhTW = {
     midi_import: "匯入 MIDI",
     midi_import_title: "匯入 MIDI 到音高曲線",
     midi_import_desc: "選擇 MIDI 軌道匯入為音高曲線",
-    midi_import_clip_title: "匯入 MIDI 為音頻塊",
-    midi_import_clip_desc: "選擇 MIDI 軌道在時間線上創建 MIDI 音頻塊",
-    midi_create_clip: "創建音頻塊",
+    midi_import_clip_title: "匯入 MIDI 為音高調整塊",
+    midi_import_clip_desc: "選擇 MIDI 軌道在時間線上創建音高調整塊",
+    midi_create_clip: "創建音高調整塊",
     midi_fill_gaps: "填補音符之間的空隙",
     midi_import_position: "匯入位置",
     midi_import_position_start: "工程開頭",
@@ -625,6 +625,8 @@ export const zhTW = {
 
     // 對話框欄位標籤
     dlg_midi_note: "MIDI 音符",
+    clip_type_midi: "音高調整塊",
+    clip_type_midi_prefix: "[音高調整]",
     dlg_strength: "平滑度",
     dlg_smoothness: "平滑度",
     dlg_average_strength: "平均度",

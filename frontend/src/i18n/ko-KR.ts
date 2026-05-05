@@ -711,6 +711,8 @@ export const koKR = {
 
     // 다이얼로그 필드 라벨
     dlg_midi_note: "MIDI 노트",
+    clip_type_midi: "음높이 조정 클립",
+    clip_type_midi_prefix: "[음높이]",
     dlg_strength: "스무딩 강도",
     dlg_smoothness: "스무딩 강도",
     dlg_average_strength: "평균 강도",

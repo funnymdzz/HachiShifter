@@ -634,6 +634,8 @@ export const enUS = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI Note",
+    clip_type_midi: "Pitch Adjustment Clip",
+    clip_type_midi_prefix: "[Pitch]",
     dlg_strength: "Smoothness",
     dlg_smoothness: "Smoothness",
     dlg_average_strength: "Average Amount",

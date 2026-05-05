@@ -873,6 +873,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                     || (old.playback_rate - c.playback_rate).abs() > 1e-6
                     || old.reversed != c.reversed
                     || old.midi_fill_gaps != c.midi_fill_gaps
+                    || old.muted != c.muted
             })
         })
         .map(|c| c.id.clone())
@@ -969,6 +970,25 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                 .filter(|c| midi_clips_needing_emit.contains(c.id.as_str()))
             {
                 emit_clip_pitch_data_for_clip(app, &tl, clip);
+            }
+        }
+
+        // MIDI clip 的变更需要触发 pitch_orig 组装，设置 has_pitch_adjustment_active 标志，
+        // 确保渲染管线能正确地将音高调整块的 MIDI 数据应用到同组音频块的渲染中。
+        if let Some(app) = s.app_handle.as_ref() {
+            let state = app.state::<crate::state::AppState>();
+            let mut emitted_roots: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for clip in tl
+                .clips
+                .iter()
+                .filter(|c| midi_clips_needing_emit.contains(c.id.as_str()))
+            {
+                if let Some(root) = tl.resolve_root_track_id(&clip.track_id) {
+                    if emitted_roots.insert(root.clone()) {
+                        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root);
+                    }
+                }
             }
         }
     }
