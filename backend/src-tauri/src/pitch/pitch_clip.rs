@@ -738,8 +738,8 @@ pub fn compute_clip_pitch_midi(
 
     // f0
     let frame_period_tl_ms = ck.frame_period_ms.max(0.1);
-    let f0_floor = 40.0;
-    let f0_ceil = 1600.0;
+    let f0_floor = crate::fcpe_onnx::FCPE_F0_MIN_HZ;
+    let f0_ceil = crate::fcpe_onnx::FCPE_F0_MAX_HZ;
 
     let f0_hz = match crate::fcpe_onnx::infer_f0_hz(
         &mono,
