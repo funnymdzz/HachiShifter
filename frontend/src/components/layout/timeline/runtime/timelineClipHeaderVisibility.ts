@@ -1,4 +1,7 @@
-export function resolveTimelineClipHeaderVisibility(widthPx: number): {
+export function resolveTimelineClipHeaderVisibility(
+    widthPx: number,
+    isPitchAdjustment?: boolean,
+): {
     showAny: boolean;
     showMute: boolean;
     showFormant: boolean;
@@ -8,6 +11,18 @@ export function resolveTimelineClipHeaderVisibility(widthPx: number): {
     showName: boolean;
 } {
     const width = Math.max(0, widthPx);
+
+    if (isPitchAdjustment) {
+        return {
+            showAny: width >= 52,
+            showMute: width >= 52,
+            showFormant: false,
+            showGainKnob: false,
+            showGainLabel: width >= 96,
+            showPlaybackRate: width >= 116,
+            showName: width >= 152,
+        };
+    }
 
     return {
         showAny: width >= 32,

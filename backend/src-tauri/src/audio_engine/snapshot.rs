@@ -280,10 +280,18 @@ pub(crate) fn build_snapshot(
         };
         let processor_handles_stretch = timeline
             .resolve_root_track_id(&clip.track_id)
-            .and_then(|root| tracks_by_id.get(root.as_str()).copied())
-            .map(|t| {
+            .and_then(|root| {
+                let t = tracks_by_id.get(root.as_str()).copied()?;
                 let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
+                let has_adjustment = timeline
+                    .params_by_root_track
+                    .get(&root)
+                    .map(|e| e.has_pitch_adjustment_active)
+                    .unwrap_or(false);
+                Some(crate::renderer::processor_handles_time_stretch(
+                    kind,
+                    t.compose_enabled || has_adjustment,
+                ))
             })
             .unwrap_or(false);
 

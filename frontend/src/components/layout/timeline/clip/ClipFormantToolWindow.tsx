@@ -47,8 +47,16 @@ export const ClipFormantToolWindow: React.FC<{
     React.useEffect(() => {
         const onMovePointer = (event: PointerEvent) => {
             if (!draggingRef.current || !dragOffsetRef.current) return;
-            const nextX = clamp(event.clientX - dragOffsetRef.current.dx, 8, window.innerWidth - 72);
-            const nextY = clamp(event.clientY - dragOffsetRef.current.dy, 8, window.innerHeight - 48);
+            const nextX = clamp(
+                event.clientX - dragOffsetRef.current.dx,
+                8,
+                window.innerWidth - 72,
+            );
+            const nextY = clamp(
+                event.clientY - dragOffsetRef.current.dy,
+                8,
+                window.innerHeight - 48,
+            );
             setPosition({ x: nextX, y: nextY });
         };
 
@@ -159,12 +167,7 @@ export const ClipFormantToolWindow: React.FC<{
                         {clip.name}
                     </Text>
                 </Flex>
-                <Button
-                    size="1"
-                    variant="ghost"
-                    color="gray"
-                    onClick={onClose}
-                >
+                <Button size="1" variant="ghost" color="gray" onClick={onClose}>
                     {t("close")}
                 </Button>
             </Flex>

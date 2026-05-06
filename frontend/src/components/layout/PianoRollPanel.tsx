@@ -35,6 +35,8 @@ import {
     persistUiSettings,
     setVisibleReferenceRootTrackIds,
     toggleVisibleReferenceRootTrackId,
+    createClipsRemote,
+    addTrackRemote,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -121,7 +123,7 @@ import { ProgressBar } from "../ProgressBar";
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
-import { coreApi } from "../../services/api/core";
+import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
 import { applySelectWheelChange } from "../../utils/selectWheel";
@@ -266,6 +268,34 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    // 导入位置选项（持久化到软件设置）
+    const [importPosition, setImportPosition] = useState<string>("playhead");
+    // 填补空隙选项（持久化到软件设置）
+    const [fillGaps, setFillGaps] = useState<boolean>(false);
+    // BPM 选项（持久化到软件设置）
+    const [importBpmAsProject, setImportBpmAsProject] = useState(false);
+    const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
+    const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    // 启动时从设置加载
+    useEffect(() => {
+        settingsApi.getUiSettings().then((s) => {
+            if (s?.midiImportPosition) {
+                setImportPosition(s.midiImportPosition);
+            }
+            if (s?.midiFillGaps != null) {
+                setFillGaps(s.midiFillGaps);
+            }
+            if (s?.midiImportBpmAsProject != null) {
+                setImportBpmAsProject(s.midiImportBpmAsProject);
+            }
+            if (s?.midiNoteBpmMode != null) {
+                setNoteBpmMode(s.midiNoteBpmMode);
+            }
+            if (s?.midiSpecifiedBpm != null) {
+                setSpecifiedBpm(s.midiSpecifiedBpm);
+            }
+        });
+    }, []);
     // 记录打开弹窗时的选区（拍数），用于后续计算帧偏移
     const [midiDialogSelection, setMidiDialogSelection] = useState<{
         aBeat: number;
@@ -344,19 +374,12 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [drawToolMenuOpen]);
 
-    const handleOpenMidiDialog = useCallback(async () => {
-        try {
-            const res = await coreApi.openMidiDialog();
-            if (res.ok && !res.canceled && res.path) {
-                // 快照当前选区（拍为单位）
-                const sel = selectionRef.current;
-                setMidiDialogSelection(sel ? { ...sel } : null);
-                setMidiPath(res.path);
-                setMidiDialogOpen(true);
-            }
-        } catch {
-            // 静默忽略
-        }
+    const handleOpenMidiDialog = useCallback(() => {
+        // 快照当前选区（拍为单位）
+        const sel = selectionRef.current;
+        setMidiDialogSelection(sel ? { ...sel } : null);
+        setMidiPath(null);
+        setMidiDialogOpen(true);
     }, []);
 
     const effectiveSelectedTrackId = useMemo(() => {
@@ -1384,6 +1407,34 @@ export const PianoRollPanel: React.FC = () => {
         [refreshNow],
     );
 
+    // 导入位置变更时持久化保存
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void settingsApi.saveUiSettings({ midiImportPosition: position } as any);
+    }, []);
+
+    // 填补空隙选项变更时持久化保存
+    const handleFillGapsChange = useCallback((value: boolean) => {
+        setFillGaps(value);
+        void settingsApi.saveUiSettings({ midiFillGaps: value } as any);
+    }, []);
+
+    // BPM 选项变更时持久化保存
+    const handleImportBpmAsProjectChange = useCallback((v: boolean) => {
+        setImportBpmAsProject(v);
+        void settingsApi.saveUiSettings({ midiImportBpmAsProject: v } as any);
+    }, []);
+
+    const handleNoteBpmModeChange = useCallback((v: string) => {
+        setNoteBpmMode(v);
+        void settingsApi.saveUiSettings({ midiNoteBpmMode: v } as any);
+    }, []);
+
+    const handleSpecifiedBpmChange = useCallback((v: number) => {
+        setSpecifiedBpm(v);
+        void settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any);
+    }, []);
+
     // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
     const midiSelArgs = useMemo(() => {
         if (!midiDialogSelection) return {};
@@ -1394,6 +1445,12 @@ export const PianoRollPanel: React.FC = () => {
         const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
     }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
+
+    // selection 导入模式是否可用
+    const midiSelectionAvailable = useMemo(
+        () => s.toolMode === "select" && midiDialogSelection != null,
+        [s.toolMode, midiDialogSelection],
+    );
 
     // 获取当前 track 下的所 ?clips，用 ?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
@@ -2791,6 +2848,132 @@ export const PianoRollPanel: React.FC = () => {
         [editParam],
     );
 
+    const handleSaveAsPitchRef = useCallback(async () => {
+        const sel = selectionRef.current;
+        if (!sel || !rootTrackId) return;
+
+        const aBeat = Math.min(sel.aBeat, sel.bBeat);
+        const bBeat = Math.max(sel.aBeat, sel.bBeat);
+        const startSec = aBeat * secPerBeat;
+        const lengthSec = Math.max(0.01, (bBeat - aBeat) * secPerBeat);
+
+        const fp = paramView?.framePeriodMs ?? 5;
+        const startFrame = Math.max(0, Math.floor((startSec * 1000) / fp));
+        const frameCount = Math.max(1, Math.ceil((lengthSec * 1000) / fp));
+
+        const res = await paramsApi.getParamFrames(rootTrackId, "pitch", startFrame, frameCount, 1);
+        if (!res?.ok || !res.edit) return;
+
+        const pitchValues: number[] = (res.edit as number[]).map((v) => Number(v) || 0);
+
+        // Convert pitch values (semitones) to MIDI note events
+        // 保留原始浮点音高值，不进行半音量化
+        const fpSec = fp / 1000;
+        const midiNoteData: Array<{
+            startSec: number;
+            endSec: number;
+            note: number;
+            velocity: number;
+            channel: number;
+        }> = [];
+        if (pitchValues.length > 0) {
+            let segStartFrame = 0;
+            let currentNote = pitchValues[0];
+            for (let i = 1; i < pitchValues.length; i++) {
+                const note = pitchValues[i];
+                if (Math.abs(note - currentNote) > 0.001) {
+                    midiNoteData.push({
+                        startSec: segStartFrame * fpSec,
+                        endSec: i * fpSec,
+                        note: currentNote,
+                        velocity: 100,
+                        channel: 0,
+                    });
+                    segStartFrame = i;
+                    currentNote = note;
+                }
+            }
+            midiNoteData.push({
+                startSec: segStartFrame * fpSec,
+                endSec: pitchValues.length * fpSec,
+                note: currentNote,
+                velocity: 100,
+                channel: 0,
+            });
+        }
+
+        // Determine target track: try the track above the currently selected track.
+        // If no track above exists, or the above track has overlapping clips
+        // in the import time range, create a new track above the current track.
+        const orderedTrackIds = s.tracks.map((t) => t.id);
+        const trackIndexById: Record<string, number> = {};
+        orderedTrackIds.forEach((id, idx) => {
+            trackIndexById[id] = idx;
+        });
+
+        const currentIdx = s.selectedTrackId ? (trackIndexById[s.selectedTrackId] ?? -1) : -1;
+        let targetTrackId: string | null = null;
+
+        if (currentIdx > 0) {
+            const aboveTrackId = orderedTrackIds[currentIdx - 1];
+            const hasOverlap = s.clips.some(
+                (c) =>
+                    c.trackId === aboveTrackId &&
+                    c.startSec < startSec + lengthSec &&
+                    c.startSec + c.lengthSec > startSec,
+            );
+            if (!hasOverlap) {
+                targetTrackId = aboveTrackId;
+            }
+        }
+
+        if (!targetTrackId) {
+            // Create a new track above the current track
+            const newTrackPayload: Record<string, unknown> = {
+                name: undefined,
+                parentTrackId: null,
+            };
+            if (currentIdx >= 0) {
+                newTrackPayload.index = currentIdx;
+            }
+            const result = await dispatch(
+                addTrackRemote(newTrackPayload as { name?: string; parentTrackId?: string | null }),
+            ).unwrap();
+            const added = result as {
+                selected_track_id?: string;
+                tracks?: Array<{ id: string }>;
+            };
+            targetTrackId =
+                added.selected_track_id ?? added.tracks?.[added.tracks.length - 1]?.id ?? null;
+        }
+
+        if (!targetTrackId) return;
+
+        await dispatch(
+            createClipsRemote({
+                templates: [
+                    {
+                        trackId: targetTrackId,
+                        name: "Pitch Ref",
+                        startSec,
+                        lengthSec,
+                        midiNoteData,
+                        midiFillGaps: true,
+                    },
+                ],
+            }),
+        );
+    }, [
+        selectionRef,
+        rootTrackId,
+        secPerBeat,
+        paramView,
+        s.tracks,
+        s.selectedTrackId,
+        s.clips,
+        dispatch,
+    ]);
+
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
 
@@ -3798,6 +3981,18 @@ export const PianoRollPanel: React.FC = () => {
                 selectionStartFrame={midiSelArgs.selectionStartFrame}
                 selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
+                importPosition={importPosition}
+                onImportPositionChange={handleImportPositionChange}
+                selectionAvailable={midiSelectionAvailable}
+                fillGaps={fillGaps}
+                onFillGapsChange={handleFillGapsChange}
+                projectBpm={s.bpm}
+                importBpmAsProject={importBpmAsProject}
+                onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
+                noteBpmMode={noteBpmMode}
+                onNoteBpmModeChange={handleNoteBpmModeChange}
+                specifiedBpm={specifiedBpm}
+                onSpecifiedBpmChange={handleSpecifiedBpmChange}
             />
             {ctxMenu && s.toolMode === "select" && (
                 <EditContextMenu
@@ -3819,6 +4014,7 @@ export const PianoRollPanel: React.FC = () => {
                     onAddVibrato={() => openEditDialog("addVibrato")}
                     onQuantize={() => openEditDialog("quantize")}
                     onMeanQuantize={() => openEditDialog("meanQuantize")}
+                    onSaveAsPitchRef={() => void handleSaveAsPitchRef()}
                 />
             )}
         </Flex>

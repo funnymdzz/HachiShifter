@@ -105,6 +105,7 @@ export function buildTimelineClipVisualStyle(args: {
     playbackRate: number;
     name: string;
     fontFamily?: string;
+    isPitchAdjustment?: boolean;
 }): {
     headerFill: string;
     bodyFill: string;
@@ -157,8 +158,9 @@ export function buildTimelineClipVisualStyle(args: {
     const knobRgb = mixHexColor(trackColor, { r: 205, g: 212, b: 220 }, 0.24);
     const controlRgb = mixHexColor(trackColor, { r: 40, g: 46, b: 55 }, 0.52);
     const controlActiveRgb = mixHexColor(trackColor, { r: 120, g: 64, b: 69 }, 0.4);
+    const isPitchAdj = args.isPitchAdjustment === true;
     const { showMute, showFormant, showGainKnob, showPlaybackRate, showGainLabel, showName } =
-        resolveTimelineClipHeaderVisibility(args.widthPx);
+        resolveTimelineClipHeaderVisibility(args.widthPx, isPitchAdj);
 
     // Compute labels early so we can measure their widths with the correct font
     const gainDb = gainToDb(args.gain);

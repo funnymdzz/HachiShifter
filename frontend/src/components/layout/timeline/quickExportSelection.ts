@@ -3,10 +3,7 @@ export function resolveQuickExportClipIds(args: {
     multiSelectedClipIds: string[];
 }): string[] {
     const { contextClipId, multiSelectedClipIds } = args;
-    if (
-        multiSelectedClipIds.length >= 2 &&
-        multiSelectedClipIds.includes(contextClipId)
-    ) {
+    if (multiSelectedClipIds.length >= 2 && multiSelectedClipIds.includes(contextClipId)) {
         return [...multiSelectedClipIds];
     }
     return [contextClipId];

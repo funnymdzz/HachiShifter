@@ -64,6 +64,18 @@ pub struct UiSettings {
     pub scale_highlight_mode: String,
     #[serde(default)]
     pub custom_scale_presets: Vec<CustomScale>,
+    #[serde(default = "default_midi_import_position")]
+    pub midi_import_position: String,
+    #[serde(default)]
+    pub midi_fill_gaps: bool,
+    #[serde(default = "default_true")]
+    pub midi_multi_track_merge: bool,
+    #[serde(default)]
+    pub midi_import_bpm_as_project: bool,
+    #[serde(default = "default_midi_note_bpm_mode")]
+    pub midi_note_bpm_mode: String,
+    #[serde(default)]
+    pub midi_specified_bpm: Option<f64>,
 }
 
 /// 导出音频设置（持久化到 app_config.json）
@@ -190,6 +202,14 @@ fn default_scale_highlight_mode() -> String {
     "off".to_string()
 }
 
+fn default_midi_import_position() -> String {
+    "playhead".to_string()
+}
+
+fn default_midi_note_bpm_mode() -> String {
+    "midi".to_string()
+}
+
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
@@ -216,6 +236,12 @@ impl Default for UiSettings {
             smoothness_percent: 0,
             scale_highlight_mode: default_scale_highlight_mode(),
             custom_scale_presets: Vec::new(),
+            midi_import_position: default_midi_import_position(),
+            midi_fill_gaps: false,
+            midi_multi_track_merge: true,
+            midi_import_bpm_as_project: false,
+            midi_note_bpm_mode: default_midi_note_bpm_mode(),
+            midi_specified_bpm: None,
         }
     }
 }

@@ -56,6 +56,7 @@ export function drawTimelineCanvas(
             gain: number;
             playbackRate?: number;
             name: string;
+            isMidiClip?: boolean;
             trackColor?: string;
         }>;
         fontFamily?: string;
@@ -82,6 +83,7 @@ export function drawTimelineCanvas(
             playbackRate: clip.playbackRate ?? 1,
             name: clip.name,
             fontFamily,
+            isPitchAdjustment: clip.isMidiClip,
         });
         const fadeShadeRange = computeTimelineFadeShadeRange({
             widthPx: clipWidth,

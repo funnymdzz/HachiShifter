@@ -76,6 +76,7 @@ export const enUS = {
     menu_import_audio: "Import Audio...",
     menu_import_reaper: "Import Reaper Project...",
     menu_import_vocalshifter: "Import VocalShifter Project...",
+    menu_import_midi: "Import MIDI...",
     menu_paste_reaper_clipboard: "Paste Reaper Clipboard Data",
     menu_paste_vocalshifter_clipboard: "Paste VocalShifter Clipboard Data",
     ctx_quick_export: "Quick Export",
@@ -308,6 +309,8 @@ export const enUS = {
     ctx_copy: "Copy",
     ctx_cut: "Cut",
     ctx_replace: "Replace",
+    ctx_replace_midi: "Replace MIDI",
+    ctx_replace_midi_all: "Replace MIDI All",
     ctx_split_at_playhead: "Split at Playhead",
     ctx_normalize: "Normalize",
     ctx_reverse: "Reverse",
@@ -449,9 +452,19 @@ export const enUS = {
     // MIDI 导入
     midi_import: "Import MIDI",
     midi_import_title: "Import MIDI to Pitch",
-    midi_import_desc: "Select a MIDI track to import as pitch curve",
+    midi_import_desc: "Select MIDI tracks to import as pitch curve",
+    midi_import_clip_title: "Import MIDI as Clip",
+    midi_import_clip_desc: "Select MIDI tracks to create Pitch Reference Clips on the timeline",
+    midi_create_clip: "Create Pitch Reference Clip",
+    midi_fill_gaps: "Fill gaps between notes",
+    midi_import_position: "Import Position",
+    midi_import_position_start: "Project Start",
+    midi_import_position_playhead: "Playhead",
+    midi_import_position_selection: "Selection",
     midi_select_track: "Select Track",
-    midi_all_tracks: "Merge All Tracks",
+    midi_select_all: "Select All",
+    midi_deselect_all: "Deselect All",
+    midi_multi_track_merge: "Multi-track Merge",
     midi_track_notes: "{count} notes",
     midi_track_range: "Range: {min} – {max}",
     midi_no_tracks: "No tracks with notes found in MIDI file",
@@ -462,6 +475,31 @@ export const enUS = {
     midi_no_notes: "No notes in selected track",
     midi_no_frames_touched:
         "MIDI import did not write any frames. Check the playhead position and project length.",
+
+    // MIDI import dialog — file source
+    midi_browse: "Browse...",
+    midi_read_clipboard: "Read from Clipboard",
+    midi_file_path: "MIDI File",
+    midi_no_file_selected: "(No file selected)",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "Import MIDI BPM as project BPM",
+    midi_midi_bpm_label: "MIDI BPM: {bpm}",
+    midi_note_bpm: "Note BPM",
+    midi_note_bpm_midi: "MIDI own BPM",
+    midi_note_bpm_project: "Current project BPM",
+    midi_note_bpm_specified: "Specified BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "Failed to read MIDI from clipboard",
+    midi_clipboard_empty: "No Standard MIDI File found in clipboard",
+    midi_clipboard_parse_failed: "Failed to parse MIDI data from clipboard",
+
+    // MIDI replace dialog
+    midi_replace_title: "Replace MIDI",
+    midi_replace_desc: "Select MIDI tracks to replace the pitch adjustment block note data.",
+    midi_replace_button: "Replace",
 
     // Toolbar toggle buttons
     auto_crossfade: "Auto Crossfade",
@@ -623,6 +661,8 @@ export const enUS = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI Note",
+    clip_type_midi: "Pitch Reference Clip",
+    clip_type_midi_prefix: "[Pitch Ref]",
     dlg_strength: "Smoothness",
     dlg_smoothness: "Smoothness",
     dlg_average_strength: "Average Amount",
@@ -752,4 +792,8 @@ export const enUS = {
     appearance_color_subtle_3: "Subtle Layer 3",
     appearance_color_meter_rail: "Meter Rail",
     appearance_color_meter_well: "Meter Well",
+
+    // Pitch reference clip
+    ctx_convert_to_pitch_ref: "Convert to Pitch Reference Clip",
+    menu_save_as_pitch_ref: "Save as Pitch Reference Clip",
 } as const;

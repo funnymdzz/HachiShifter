@@ -73,6 +73,7 @@ export const jaJP = {
     menu_import_audio: "オーディオをインポート...",
     menu_import_reaper: "Reaper プロジェクトをインポート...",
     menu_import_vocalshifter: "VocalShifter プロジェクトをインポート...",
+    menu_import_midi: "MIDI をインポート...",
     menu_paste_reaper_clipboard: "Reaper クリップボードデータをペースト",
     menu_paste_vocalshifter_clipboard: "VocalShifter クリップボードデータをペースト",
     ctx_quick_export: "クイック書き出し",
@@ -309,6 +310,8 @@ export const jaJP = {
     ctx_copy: "コピー",
     ctx_cut: "カット",
     ctx_replace: "置換",
+    ctx_replace_midi: "MIDIを置換",
+    ctx_replace_midi_all: "すべてのMIDIを置換",
     ctx_split_at_playhead: "再生ヘッドで分割",
     ctx_normalize: "ノーマライズ",
     ctx_reverse: "逆再生",
@@ -458,8 +461,18 @@ export const jaJP = {
     midi_import: "MIDI をインポート",
     midi_import_title: "MIDI をピッチにインポート",
     midi_import_desc: "MIDI トラックを選択してピッチカーブとしてインポート",
+    midi_import_clip_title: "MIDI をクリップとしてインポート",
+    midi_import_clip_desc: "タイムラインに MIDI クリップを作成するトラックを選択",
+    midi_create_clip: "クリップを作成",
+    midi_fill_gaps: "音符間の隙間を埋める",
+    midi_import_position: "インポート位置",
+    midi_import_position_start: "プロジェクト先頭",
+    midi_import_position_playhead: "再生ヘッド",
+    midi_import_position_selection: "選択範囲",
     midi_select_track: "トラックを選択",
-    midi_all_tracks: "すべてのトラックを結合",
+    midi_select_all: "すべて選択",
+    midi_deselect_all: "すべて解除",
+    midi_multi_track_merge: "マルチトラック結合",
     midi_track_notes: "{count} 個のノート",
     midi_track_range: "範囲：{min} – {max}",
     midi_no_tracks: "MIDI ファイルにノートを含むトラックが見つかりません",
@@ -470,6 +483,31 @@ export const jaJP = {
     midi_no_notes: "選択したトラックにノートがありません",
     midi_no_frames_touched:
         "MIDI インポートでフレームが書き込まれませんでした。再生ヘッドの位置とプロジェクトの長さを確認してください。",
+
+    // MIDI import dialog — file source
+    midi_browse: "参照...",
+    midi_read_clipboard: "クリップボードから読み取り",
+    midi_file_path: "MIDI ファイル",
+    midi_no_file_selected: "（ファイルが選択されていません）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "MIDI BPM をプロジェクト BPM としてインポート",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "ノート BPM",
+    midi_note_bpm_midi: "MIDI 自身の BPM",
+    midi_note_bpm_project: "現在のプロジェクト BPM",
+    midi_note_bpm_specified: "指定 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "クリップボードから MIDI を読み取れませんでした",
+    midi_clipboard_empty: "クリップボードに Standard MIDI File が見つかりません",
+    midi_clipboard_parse_failed: "クリップボードの MIDI データを解析できませんでした",
+
+    // MIDI replace dialog
+    midi_replace_title: "MIDI を置換",
+    midi_replace_desc: "音高調整ブロックのノートデータを置換する MIDI トラックを選択してください。",
+    midi_replace_button: "置換",
 
     // ツールバートグルボタン
     auto_crossfade: "自動クロスフェード",
@@ -630,6 +668,8 @@ export const jaJP = {
 
     // ダイアログフィールドラベル
     dlg_midi_note: "MIDI ノート",
+    clip_type_midi: "音高リファレンスクリップ",
+    clip_type_midi_prefix: "[音高リファレンス]",
     dlg_strength: "スムーズ度",
     dlg_smoothness: "スムーズ度",
     dlg_average_strength: "平均度",
@@ -759,4 +799,8 @@ export const jaJP = {
     appearance_color_subtle_3: "微細レイヤー 3",
     appearance_color_meter_rail: "メーターレール",
     appearance_color_meter_well: "メーターウェル",
+
+    // 音高リファレンスクリップ
+    ctx_convert_to_pitch_ref: "音高リファレンスクリップに変換",
+    menu_save_as_pitch_ref: "音高リファレンスクリップとして保存",
 } as const;

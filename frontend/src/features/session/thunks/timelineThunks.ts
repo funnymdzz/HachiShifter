@@ -306,27 +306,47 @@ export const duplicateClipsBulkRemote = createAsyncThunk<
         placeOnSelectedTrack?: boolean;
         renameCopies?: boolean;
     }
->(
-    "session/duplicateClipsBulkRemote",
-    async (payload) => {
-        const result = await webApi.duplicateClipsBulk(payload);
-        if (result && typeof result === "object" && "clips" in result) {
-            const typed = result as TimelineState & { created_clip_ids?: string[] };
-            return {
-                ...typed,
-                createdClipIds: Array.isArray(typed.created_clip_ids)
-                    ? typed.created_clip_ids
-                    : undefined,
-            };
-        }
-        return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
-    },
-);
+>("session/duplicateClipsBulkRemote", async (payload) => {
+    const result = await webApi.duplicateClipsBulk(payload);
+    if (result && typeof result === "object" && "clips" in result) {
+        const typed = result as TimelineState & { created_clip_ids?: string[] };
+        return {
+            ...typed,
+            createdClipIds: Array.isArray(typed.created_clip_ids)
+                ? typed.created_clip_ids
+                : undefined,
+        };
+    }
+    return result as TimelineState & { createdClipIds?: string[]; created_clip_ids?: string[] };
+});
 
 export const replaceClipSourceRemote = createAsyncThunk(
     "session/replaceClipSourceRemote",
     async (payload: { clipIds: string[]; newSourcePath: string; replaceSameSource?: boolean }) => {
         return webApi.replaceClipSource(payload);
+    },
+);
+
+export const replaceMidiClipDataRemote = createAsyncThunk(
+    "session/replaceMidiClipDataRemote",
+    async (payload: {
+        clipId: string;
+        midiPath: string;
+        trackIndices: number[];
+        fillGaps?: boolean;
+        noteBpmMode?: string;
+        specifiedBpm?: number;
+        importMidiBpmAsProject?: boolean;
+    }) => {
+        return webApi.replaceMidiClipData(
+            payload.clipId,
+            payload.midiPath,
+            payload.trackIndices,
+            payload.fillGaps,
+            payload.noteBpmMode,
+            payload.specifiedBpm,
+            payload.importMidiBpmAsProject,
+        );
     },
 );
 
@@ -341,6 +361,13 @@ export const glueClipsRemote = createAsyncThunk(
     "session/glueClipsRemote",
     async (clipIds: string[]) => {
         return webApi.glueClips(clipIds);
+    },
+);
+
+export const convertClipsToPitchReferenceRemote = createAsyncThunk(
+    "session/convertClipsToPitchReferenceRemote",
+    async (clipIds: string[]) => {
+        return webApi.convertClipsToPitchReference(clipIds);
     },
 );
 

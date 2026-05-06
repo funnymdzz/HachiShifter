@@ -69,6 +69,7 @@ export const zhCN = {
     menu_import_audio: "导入音频...",
     menu_import_reaper: "导入 Reaper 工程...",
     menu_import_vocalshifter: "导入 VocalShifter 工程...",
+    menu_import_midi: "导入 MIDI...",
     menu_paste_reaper_clipboard: "粘贴 Reaper 剪贴板数据",
     menu_paste_vocalshifter_clipboard: "粘贴 VocalShifter 剪贴板数据",
     ctx_quick_export: "快速导出",
@@ -297,6 +298,8 @@ export const zhCN = {
     ctx_copy: "复制",
     ctx_cut: "剪切",
     ctx_replace: "替换",
+    ctx_replace_midi: "替换 MIDI",
+    ctx_replace_midi_all: "替换全部 MIDI",
     ctx_split_at_playhead: "在播放头处分割",
     ctx_normalize: "规格化",
     ctx_reverse: "倒放",
@@ -441,9 +444,19 @@ export const zhCN = {
     // MIDI 导入
     midi_import: "导入 MIDI",
     midi_import_title: "导入 MIDI 到音高曲线",
-    midi_import_desc: "选择一个 MIDI 轨道导入为音高曲线",
+    midi_import_desc: "选择 MIDI 轨道导入为音高曲线",
+    midi_import_clip_title: "导入 MIDI 为音高参考块",
+    midi_import_clip_desc: "选择 MIDI 轨道在时间线上创建音高参考块",
+    midi_create_clip: "创建音高参考块",
+    midi_fill_gaps: "填补音符之间的空隙",
+    midi_import_position: "导入位置",
+    midi_import_position_start: "工程开头",
+    midi_import_position_playhead: "播放头位置",
+    midi_import_position_selection: "选择区域范围",
     midi_select_track: "选择轨道",
-    midi_all_tracks: "合并所有轨道",
+    midi_select_all: "全选",
+    midi_deselect_all: "全不选",
+    midi_multi_track_merge: "多轨合并",
     midi_track_notes: "{count} 个音符",
     midi_track_range: "范围：{min} – {max}",
     midi_no_tracks: "MIDI 文件中没有包含音符的轨道",
@@ -453,6 +466,31 @@ export const zhCN = {
     midi_file_not_found: "MIDI 文件未找到",
     midi_no_notes: "选中的轨道没有音符",
     midi_no_frames_touched: "MIDI 导入没有写入任何帧，请检查播放头位置和工程长度",
+
+    // MIDI import dialog — file source
+    midi_browse: "浏览...",
+    midi_read_clipboard: "从剪贴板读取",
+    midi_file_path: "MIDI 文件",
+    midi_no_file_selected: "（未选择文件）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "将 MIDI BPM 导入为工程 BPM",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "音符 BPM",
+    midi_note_bpm_midi: "MIDI 自身 BPM",
+    midi_note_bpm_project: "当前工程 BPM",
+    midi_note_bpm_specified: "指定 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "从剪贴板读取 MIDI 失败",
+    midi_clipboard_empty: "剪贴板中未找到 Standard MIDI File 数据",
+    midi_clipboard_parse_failed: "解析剪贴板中的 MIDI 数据失败",
+
+    // MIDI replace dialog
+    midi_replace_title: "替换 MIDI",
+    midi_replace_desc: "选择要替换音高调整块音符数据的 MIDI 轨道。",
+    midi_replace_button: "替换",
 
     // Toolbar toggle buttons
     auto_crossfade: "自动交叉淡化",
@@ -613,6 +651,8 @@ export const zhCN = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI 音符",
+    clip_type_midi: "音高参考块",
+    clip_type_midi_prefix: "[音高参考]",
     dlg_strength: "平滑度",
     dlg_smoothness: "平滑度",
     dlg_average_strength: "平均度",
@@ -741,4 +781,8 @@ export const zhCN = {
     appearance_color_subtle_3: "细微层 3",
     appearance_color_meter_rail: "电平轨道",
     appearance_color_meter_well: "电平槽",
+
+    // 音高参考块
+    ctx_convert_to_pitch_ref: "转换为音高参考块",
+    menu_save_as_pitch_ref: "保存为音高参考块",
 } as const;

@@ -511,6 +511,7 @@ fn convert_reaper_items_to_existing_tracks(
                     pitch_orig: Vec::new(),
                     pitch_edit: Vec::new(),
                     pitch_edit_user_modified: false,
+                    has_pitch_adjustment_active: false,
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
@@ -678,6 +679,7 @@ fn convert_reaper_data(
                         pitch_orig: Vec::new(),
                         pitch_edit: Vec::new(),
                         pitch_edit_user_modified: false,
+                        has_pitch_adjustment_active: false,
                         tension_orig: Vec::new(),
                         tension_edit: Vec::new(),
                         pitch_orig_key: None,
@@ -908,6 +910,8 @@ fn process_item(
                 extra_curves: None,
                 extra_params: None,
                 formant_morph: None,
+                midi_note_data: None,
+                midi_fill_gaps: false,
             });
             segment_clip_indices.push(clip_index);
             segment_actual_pre_tl.push(actual_pre_tl);
@@ -1035,6 +1039,8 @@ fn process_item(
             extra_curves: None,
             extra_params: None,
             formant_morph: None,
+            midi_note_data: None,
+            midi_fill_gaps: false,
         });
 
         // 写入 pitch 偏移数据

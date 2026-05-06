@@ -14,6 +14,8 @@ export interface WaveformColors {
     fill: string;
     /** 波形描边颜色 */
     stroke: string;
+    /** MIDI 音高线颜色（timeline 上 MIDI clip 的音高预览） */
+    midiPitch?: string;
 }
 
 /**
@@ -22,6 +24,7 @@ export interface WaveformColors {
 const darkTimelineWaveformColors: WaveformColors = {
     fill: "rgba(228,234,240,0.62)",
     stroke: "rgba(246,250,255,0.92)",
+    midiPitch: "rgba(34,211,238,0.78)",
 };
 
 /**
@@ -30,6 +33,7 @@ const darkTimelineWaveformColors: WaveformColors = {
 const lightTimelineWaveformColors: WaveformColors = {
     fill: "rgba(92,106,122,0.52)",
     stroke: "rgba(56,70,86,0.86)",
+    midiPitch: "rgba(8,145,178,0.72)",
 };
 
 const darkPianoRollWaveformColors: WaveformColors = {

@@ -303,7 +303,14 @@ export function useTimelineClipActions(
     // ── replaceClipSources ───────────────────────────────────
     const replaceClipSources = React.useCallback(
         async (ids: string[]) => {
-            const selected = sessionRef.current.clips.filter((c) => ids.includes(c.id));
+            // 过滤掉音高参考块（没有音频源文件）
+            const audioOnlyIds = ids.filter((id) => {
+                const c = sessionRef.current.clips.find((clip) => clip.id === id);
+                return c && c.midiNoteCount == null;
+            });
+            if (audioOnlyIds.length === 0) return;
+
+            const selected = sessionRef.current.clips.filter((c) => audioOnlyIds.includes(c.id));
             if (selected.length === 0) return;
 
             const picked = await webApi.openAudioDialog();
@@ -319,7 +326,7 @@ export function useTimelineClipActions(
             if (selectedSourcePaths.size > 0) {
                 const hasOtherClipsWithSameSource = sessionRef.current.clips.some(
                     (clip) =>
-                        !ids.includes(clip.id) &&
+                        !audioOnlyIds.includes(clip.id) &&
                         Boolean(clip.sourcePath && selectedSourcePaths.has(clip.sourcePath)),
                 );
                 if (hasOtherClipsWithSameSource) {
@@ -332,7 +339,7 @@ export function useTimelineClipActions(
 
             await dispatch(
                 replaceClipSourceRemote({
-                    clipIds: ids,
+                    clipIds: audioOnlyIds,
                     newSourcePath: picked.path,
                     replaceSameSource,
                 }),

@@ -96,9 +96,11 @@ export const ClipContextMenu: React.FC<{
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
     onReplace: (ids: string[]) => void;
+    onReplaceMidi?: (ids: string[]) => void;
     onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
+    onConvertToPitchRef?: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
@@ -117,9 +119,11 @@ export const ClipContextMenu: React.FC<{
     onCopy,
     onCut,
     onReplace,
+    onReplaceMidi,
     onQuickExport,
     onSplit,
     onGlue,
+    onConvertToPitchRef,
     onNormalize,
     onToggleReverse,
     onFadeCurveChange,
@@ -130,12 +134,21 @@ export const ClipContextMenu: React.FC<{
     const isMulti = ids.length >= 2;
     const isSingle = !isMulti;
 
+    // 音高参考块判断
+    const isPitch = (c: ClipInfo) => c.midiNoteCount != null;
+    const allPitchAdjustment = selectedClips.length > 0 && selectedClips.every(isPitch);
+    const hasPitchAdjustment = selectedClips.some(isPitch);
+    const audioOnlyIds = selectedClips.filter((c) => !isPitch(c)).map((c) => c.id);
+    const pitchOnlyIds = selectedClips.filter(isPitch).map((c) => c.id);
+
     const normalizeKb = useAppSelector((state) => selectKeybinding(state, "clip.normalize"));
     const normalizeShortcut = normalizeKb ? formatKeybinding(normalizeKb, "") : undefined;
 
-    // 胶合：仅同轨且多选时可用
+    // 胶合：仅同轨且多选时可用，且不能混合音高参考块和常规音频块
+    const hasMixedTypes = hasPitchAdjustment && !allPitchAdjustment;
     const glueDisabled =
         !isMulti ||
+        hasMixedTypes ||
         (() => {
             const trackId = selectedClips[0]?.trackId;
             return !trackId || selectedClips.some((c) => c.trackId !== trackId);
@@ -238,20 +251,33 @@ export const ClipContextMenu: React.FC<{
                     close();
                 }}
             />
-            <MenuItem
-                label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
-                onClick={() => {
-                    onReplace(ids);
-                    close();
-                }}
-            />
-            <MenuItem
-                label={t("ctx_quick_export")}
-                onClick={() => {
-                    onQuickExport(ids);
-                    close();
-                }}
-            />
+            {!allPitchAdjustment && (
+                <MenuItem
+                    label={isMulti ? t("ctx_replace_all") : t("ctx_replace")}
+                    onClick={() => {
+                        onReplace(hasPitchAdjustment ? audioOnlyIds : ids);
+                        close();
+                    }}
+                />
+            )}
+            {hasPitchAdjustment && onReplaceMidi && (
+                <MenuItem
+                    label={isMulti ? t("ctx_replace_midi_all") : t("ctx_replace_midi")}
+                    onClick={() => {
+                        onReplaceMidi(pitchOnlyIds);
+                        close();
+                    }}
+                />
+            )}
+            {!allPitchAdjustment && (
+                <MenuItem
+                    label={t("ctx_quick_export")}
+                    onClick={() => {
+                        onQuickExport(hasPitchAdjustment ? audioOnlyIds : ids);
+                        close();
+                    }}
+                />
+            )}
             <MenuItem
                 label={t("ctx_split_at_playhead")}
                 disabled={isMulti ? !canSplitSelected : !playheadInClip}
@@ -346,6 +372,24 @@ export const ClipContextMenu: React.FC<{
                         </>
                     );
                 })()}
+
+            {!allPitchAdjustment && (
+                <>
+                    <Divider />
+                    <MenuItem
+                        label={t("ctx_convert_to_pitch_ref")}
+                        onClick={() => {
+                            const audioIds = selectedClips
+                                .filter((c) => !isPitch(c))
+                                .map((c) => c.id);
+                            if (audioIds.length > 0) {
+                                onConvertToPitchRef?.(audioIds);
+                            }
+                            close();
+                        }}
+                    />
+                </>
+            )}
         </div>
     );
 };

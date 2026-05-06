@@ -70,6 +70,7 @@ export const koKR = {
     menu_import_audio: "오디오 가져오기...",
     menu_import_reaper: "Reaper 프로젝트 가져오기...",
     menu_import_vocalshifter: "VocalShifter 프로젝트 가져오기...",
+    menu_import_midi: "MIDI 가져오기...",
     menu_paste_reaper_clipboard: "Reaper 클립보드 데이터 붙여넣기",
     menu_paste_vocalshifter_clipboard: "VocalShifter 클립보드 데이터 붙여넣기",
     ctx_quick_export: "빠른 내보내기",
@@ -380,6 +381,8 @@ export const koKR = {
     ctx_copy: "복사",
     ctx_cut: "잘라내기",
     ctx_replace: "교체",
+    ctx_replace_midi: "MIDI 교체",
+    ctx_replace_midi_all: "모든 MIDI 교체",
     ctx_split_at_playhead: "재생 위치에서 분할",
     ctx_normalize: "노멀라이즈",
     ctx_reverse: "역재생",
@@ -527,8 +530,18 @@ export const koKR = {
     midi_import: "MIDI 가져오기",
     midi_import_title: "MIDI를 피치로 가져오기",
     midi_import_desc: "MIDI 트랙을 선택하여 피치 커브로 가져오기",
+    midi_import_clip_title: "MIDI를 클립으로 가져오기",
+    midi_import_clip_desc: "타임라인에 MIDI 클립을 생성할 트랙을 선택하세요",
+    midi_create_clip: "클립 생성",
+    midi_fill_gaps: "음표 사이 간격 채우기",
+    midi_import_position: "가져오기 위치",
+    midi_import_position_start: "프로젝트 시작",
+    midi_import_position_playhead: "재생 헤드",
+    midi_import_position_selection: "선택 범위",
     midi_select_track: "트랙 선택",
-    midi_all_tracks: "모든 트랙 병합",
+    midi_select_all: "전체 선택",
+    midi_deselect_all: "전체 해제",
+    midi_multi_track_merge: "멀티트랙 병합",
     midi_track_notes: "{count}개 노트",
     midi_track_range: "범위: {min} – {max}",
     midi_no_tracks: "MIDI 파일에 노트가 있는 트랙이 없습니다",
@@ -539,6 +552,31 @@ export const koKR = {
     midi_no_notes: "선택한 트랙에 노트가 없습니다",
     midi_no_frames_touched:
         "MIDI 가져오기로 프레임이 기록되지 않았습니다. 재생 헤드 위치와 프로젝트 길이를 확인하세요.",
+
+    // MIDI import dialog — file source
+    midi_browse: "찾아보기...",
+    midi_read_clipboard: "클립보드에서 읽기",
+    midi_file_path: "MIDI 파일",
+    midi_no_file_selected: "（파일을 선택하지 않음）",
+
+    // MIDI import — BPM options
+    midi_import_bpm_as_project: "MIDI BPM을 프로젝트 BPM으로 가져오기",
+    midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_note_bpm: "노트 BPM",
+    midi_note_bpm_midi: "MIDI 자체 BPM",
+    midi_note_bpm_project: "현재 프로젝트 BPM",
+    midi_note_bpm_specified: "지정 BPM",
+    midi_specified_bpm_placeholder: "BPM",
+
+    // MIDI clipboard errors
+    midi_clipboard_read_failed: "클립보드에서 MIDI를 읽지 못했습니다",
+    midi_clipboard_empty: "클립보드에서 Standard MIDI File을 찾을 수 없습니다",
+    midi_clipboard_parse_failed: "클립보드의 MIDI 데이터를 해석하지 못했습니다",
+
+    // MIDI replace dialog
+    midi_replace_title: "MIDI 교체",
+    midi_replace_desc: "음높이 조정 블록의 노트 데이터를 교체할 MIDI 트랙을 선택하세요.",
+    midi_replace_button: "교체",
 
     // 도구 모음 토글 버튼
     auto_crossfade: "자동 크로스페이드",
@@ -700,6 +738,8 @@ export const koKR = {
 
     // 다이얼로그 필드 라벨
     dlg_midi_note: "MIDI 노트",
+    clip_type_midi: "음높이 참조 클립",
+    clip_type_midi_prefix: "[음높이 참조]",
     dlg_strength: "스무딩 강도",
     dlg_smoothness: "스무딩 강도",
     dlg_average_strength: "평균 강도",
@@ -771,4 +811,8 @@ export const koKR = {
     vst_no_scan_paths: "사용자 정의 스캔 경로가 아직 추가되지 않았습니다.",
     vst_scan_path_select_folder: "VST 플러그인 폴더 선택",
     vst_manage_scan_paths: "스캔 경로 관리",
+
+    // 음높이 참조 클립
+    ctx_convert_to_pitch_ref: "음높이 참조 클립으로 변환",
+    menu_save_as_pitch_ref: "음높이 참조 클립으로 저장",
 } as const;

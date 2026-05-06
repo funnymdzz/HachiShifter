@@ -111,7 +111,7 @@ fn read_reaper_clipboard() -> Result<Vec<u8>, String> {
 
 /// Windows: 通过 clipboard-win 读取自定义格式 "Standard MIDI File"。
 #[cfg(target_os = "windows")]
-fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+pub(crate) fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     use clipboard_win::{register_format, Clipboard};
 
     let _clipboard =
@@ -133,7 +133,7 @@ fn read_midi_clipboard() -> Result<Vec<u8>, String> {
 
 /// macOS: 通过 NSPasteboard 读取自定义类型 "Standard MIDI File"。
 #[cfg(target_os = "macos")]
-fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+pub(crate) fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     use objc2_app_kit::NSPasteboard;
     use objc2_foundation::NSString;
 
@@ -157,7 +157,7 @@ fn read_midi_clipboard() -> Result<Vec<u8>, String> {
 
 /// Linux: 通过 wl-paste (Wayland) 或 xclip (X11) 读取自定义目标 "Standard MIDI File"。
 #[cfg(target_os = "linux")]
-fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+pub(crate) fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     use std::process::Command;
 
     let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
@@ -196,7 +196,7 @@ fn read_midi_clipboard() -> Result<Vec<u8>, String> {
 
 /// 不支持的平台回退。
 #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
-fn read_midi_clipboard() -> Result<Vec<u8>, String> {
+pub(crate) fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     Err("clipboard_unsupported_platform".to_string())
 }
 
@@ -267,6 +267,13 @@ fn paste_midi_clipboard_inner(
         let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
         // 限制 pitch_edit 的写入范围
         let clamp_len = max_frame.min(entry.pitch_edit.len());
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit[..clamp_len],
+            offset_sec,
+        );
         midi_import::write_notes_to_pitch_edit(
             &all_notes,
             frame_period_ms,
@@ -275,6 +282,13 @@ fn paste_midi_clipboard_inner(
         )
     } else {
         // 默认以光标位置作为偏移写入 pitch_edit
+        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
+        midi_import::clear_pitch_edit_range_for_notes(
+            &all_notes,
+            frame_period_ms,
+            &mut entry.pitch_edit,
+            playhead_sec,
+        );
         midi_import::write_notes_to_pitch_edit(
             &all_notes,
             frame_period_ms,

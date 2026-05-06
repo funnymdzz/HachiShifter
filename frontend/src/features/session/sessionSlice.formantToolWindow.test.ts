@@ -2,7 +2,9 @@ import reducer from "./sessionSlice.ts";
 
 function assertEqual(actual: unknown, expected: unknown, label: string): void {
     if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-        throw new Error(`${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`);
+        throw new Error(
+            `${label}: expected ${JSON.stringify(expected)}, received ${JSON.stringify(actual)}`,
+        );
     }
 }
 

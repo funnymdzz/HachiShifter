@@ -108,7 +108,7 @@ export function useKeyboardShortcuts(deps: {
             );
             const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                    document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader",
             );
 
             // clip.paste 与 pianoRoll.paste 冲突时：参数编辑器 / 轨道头焦点优先参数粘贴

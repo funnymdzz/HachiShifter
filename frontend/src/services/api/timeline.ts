@@ -103,10 +103,8 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
-    createClipsBulk: (payload: {
-        templates: ClipTemplate[];
-        selectCreatedClips?: boolean;
-    }) => invoke<TimelineResult>("create_clips_bulk", payload),
+    createClipsBulk: (payload: { templates: ClipTemplate[]; selectCreatedClips?: boolean }) =>
+        invoke<TimelineResult>("create_clips_bulk", payload),
 
     removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
 
@@ -225,6 +223,9 @@ export const timelineApi = {
         invoke<TimelineResult>("split_clip", clipId, splitSec),
 
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
+
+    convertClipsToPitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
 
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
 };

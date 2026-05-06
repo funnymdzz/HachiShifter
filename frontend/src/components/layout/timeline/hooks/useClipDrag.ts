@@ -586,7 +586,7 @@ export function useClipDrag(deps: {
                                     buildDuplicateClipsBulkPayload({
                                         sourceClipIds,
                                         deltaSec: drag.lastDeltaBeat,
-                                        copyLinkedParams: true,
+                                        copyLinkedParams: sessionRef.current.lockParamLinesEnabled,
                                         applyAutoCrossfade: autoCrossfadeEnabled,
                                         trackMode,
                                         renameCopies: false,

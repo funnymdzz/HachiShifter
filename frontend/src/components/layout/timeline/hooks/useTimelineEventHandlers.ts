@@ -147,7 +147,7 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
             );
             const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                    document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader",
             );
             const deferToPianoRollForSelection =
                 inPianoRoll &&

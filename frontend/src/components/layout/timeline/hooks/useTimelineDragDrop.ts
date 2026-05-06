@@ -49,6 +49,8 @@ export interface UseTimelineDragDropArgs {
     >;
     pxPerSec: number;
     rowHeight: number;
+    /** MIDI 文件拖放回调（用于创建 MIDI clip） */
+    onMidiDrop?: (payload: { midiPath: string; trackId: string | null; startSec: number }) => void;
 }
 
 export interface UseTimelineDragDropResult {
@@ -73,6 +75,7 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
         setImportModeMenu,
         pxPerSec,
         rowHeight,
+        onMidiDrop,
     } = args;
 
     const tauriDraggedPathRef = useRef<string | null>(null);
@@ -150,7 +153,9 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                     if (type === "enter" || type === "over") {
                         if (primaryPath) {
                             tauriDraggedPathRef.current = primaryPath;
-                            if (detectExternalPathAction(primaryPath) === "importAudio") {
+                            // MIDI 文件不需要预加载时长，使用默认值
+                            const primaryAction = detectExternalPathAction(primaryPath);
+                            if (primaryAction === "importAudio") {
                                 ensureDropPreviewDuration(primaryPath);
                             }
                         }
@@ -158,7 +163,8 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                             const path =
                                 primaryPath ?? tauriDraggedPathRef.current ?? prev?.path ?? null;
                             if (!path) return prev;
-                            if (detectExternalPathAction(path) !== "importAudio") {
+                            const action = detectExternalPathAction(path);
+                            if (action !== "importAudio" && action !== "importMidi") {
                                 return null;
                             }
 
@@ -175,7 +181,8 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                                     fileName: prev?.fileName ?? fileNameFromPath(path),
                                     trackId,
                                     startSec: beat,
-                                    durationSec: prev?.durationSec ?? 0,
+                                    durationSec:
+                                        action === "importMidi" ? 2 : (prev?.durationSec ?? 0),
                                 };
                             }
                             return prev;
@@ -203,6 +210,18 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                         setDropPreview(null);
 
                         const externalAction = findFirstExternalPathAction(paths);
+                        if (externalAction?.kind === "importMidi") {
+                            tauriDropHandledAtRef.current = Date.now();
+                            tauriDraggedPathRef.current = null;
+                            tauriLastDropPathRef.current = null;
+                            setDropPreview(null);
+                            onMidiDrop?.({
+                                midiPath: externalAction.path,
+                                trackId,
+                                startSec: beat,
+                            });
+                            return;
+                        }
                         if (externalAction && externalAction.kind !== "importAudio") {
                             tauriDropHandledAtRef.current = Date.now();
                             tauriDraggedPathRef.current = null;
@@ -238,6 +257,15 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                             tauriDraggedPathRef.current = null;
                             tauriLastDropPathRef.current = null;
                             const actionKind = detectExternalPathAction(resolvedPath);
+                            if (actionKind === "importMidi") {
+                                setDropPreview(null);
+                                onMidiDrop?.({
+                                    midiPath: resolvedPath,
+                                    trackId,
+                                    startSec: beat,
+                                });
+                                return;
+                            }
                             if (actionKind && actionKind !== "importAudio") {
                                 emitExternalFileAction(actionKind, resolvedPath);
                                 return;
@@ -319,7 +347,8 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                     const path = detail.filePath;
                     const fileName = detail.fileName;
 
-                    if (detectExternalPathAction(path) !== "importAudio") {
+                    const moveAction = detectExternalPathAction(path);
+                    if (moveAction !== "importAudio" && moveAction !== "importMidi") {
                         setDropPreview(null);
                         return;
                     }
@@ -374,6 +403,14 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                         });
                     } else if (isMulti) {
                         const externalAction = findFirstExternalPathAction(filePaths);
+                        if (externalAction?.kind === "importMidi") {
+                            onMidiDrop?.({
+                                midiPath: externalAction.path,
+                                trackId,
+                                startSec: beat,
+                            });
+                            return;
+                        }
                         if (externalAction && externalAction.kind !== "importAudio") {
                             emitExternalFileAction(externalAction.kind, externalAction.path);
                             return;
@@ -388,6 +425,14 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                         );
                     } else {
                         const actionKind = detectExternalPathAction(detail.filePath);
+                        if (actionKind === "importMidi") {
+                            onMidiDrop?.({
+                                midiPath: detail.filePath,
+                                trackId,
+                                startSec: beat,
+                            });
+                            return;
+                        }
                         if (actionKind && actionKind !== "importAudio") {
                             emitExternalFileAction(actionKind, detail.filePath);
                             return;

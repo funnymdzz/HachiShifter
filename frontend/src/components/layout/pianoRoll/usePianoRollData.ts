@@ -318,7 +318,9 @@ export function usePianoRollData(args: {
         const referenceRequests =
             editParam === "pitch"
                 ? referenceRootTrackIds
-                      .filter((referenceTrackId) => referenceTrackId && referenceTrackId !== trackId)
+                      .filter(
+                          (referenceTrackId) => referenceTrackId && referenceTrackId !== trackId,
+                      )
                       .map((referenceTrackId) => {
                           const referenceFpKey = `${referenceTrackId}|pitch`;
                           const referenceCachedFp = paramFramePeriodCache.get(referenceFpKey);

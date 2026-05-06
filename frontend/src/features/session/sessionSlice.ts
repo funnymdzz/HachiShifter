@@ -25,6 +25,7 @@ import {
     duplicateClipsBulkRemote,
     duplicateTrackRemote,
     fetchSelectedTrackSummary,
+    convertClipsToPitchReferenceRemote,
     glueClipsRemote,
     moveClipRemote,
     moveClipsRemote,
@@ -33,6 +34,7 @@ import {
     removeClipsRemote,
     removeTrackRemote,
     replaceClipSourceRemote,
+    replaceMidiClipDataRemote,
     selectClipRemote,
     selectTrackRemote,
     setClipStateRemote,
@@ -92,6 +94,7 @@ import {
     importAudioFileAtPosition,
     importAudioFromDialog,
     importAudioFromPath,
+    importMidiAsClip,
     importMultipleAudioAtPosition,
     importMultipleAudioFilesAtPosition,
 } from "./thunks/importThunks";
@@ -383,6 +386,7 @@ function normalizeClipColor(color: string | undefined): ClipColor {
     if (color === "blue") return "blue";
     if (color === "violet") return "violet";
     if (color === "amber") return "amber";
+    if (color === "cyan") return "cyan";
     return "emerald";
 }
 
@@ -698,7 +702,7 @@ function applyTimelineState(
             playbackRate:
                 clip.playback_rate != null
                     ? clamp(Number(clip.playback_rate), 0.1, 10)
-                    : state.clips.find((c) => c.id === clip.id)?.playbackRate ?? 1,
+                    : (state.clips.find((c) => c.id === clip.id)?.playbackRate ?? 1),
             reversed: Boolean(clip.reversed),
             fadeInSec: Math.max(0, Number(clip.fade_in_sec ?? 0)),
             fadeOutSec: Math.max(0, Number(clip.fade_out_sec ?? 0)),
@@ -709,9 +713,26 @@ function applyTimelineState(
                       enabled: Boolean(clip.formant_morph.enabled),
                       targetF1Hz: Number(clip.formant_morph.target_f1_hz ?? 800),
                       targetF2Hz: Number(clip.formant_morph.target_f2_hz ?? 1400),
-                      strength: Number(clip.formant_morph.strength ?? 0.50),
+                      strength: Number(clip.formant_morph.strength ?? 0.5),
                   }
                 : undefined,
+            midiNoteCount: clip.midi_note_count,
+            midiNoteData: clip.midi_note_data?.map(
+                (n: {
+                    start_sec: number;
+                    end_sec: number;
+                    note: number;
+                    velocity: number;
+                    channel?: number;
+                }) => ({
+                    startSec: n.start_sec,
+                    endSec: n.end_sec,
+                    note: n.note,
+                    velocity: n.velocity,
+                    channel: n.channel ?? 0,
+                }),
+            ),
+            midiFillGaps: clip.midi_fill_gaps ?? false,
         };
 
         return parsed;
@@ -1074,7 +1095,9 @@ export {
     setClipStateRemote,
     setClipsStateBulkRemote,
     replaceClipSourceRemote,
+    replaceMidiClipDataRemote,
     splitClipRemote,
+    convertClipsToPitchReferenceRemote,
     glueClipsRemote,
     selectClipRemote,
 } from "./thunks/timelineThunks";
@@ -1107,6 +1130,7 @@ export {
     importAudioFromPath,
     importAudioAtPosition,
     importAudioFileAtPosition,
+    importMidiAsClip,
     importMultipleAudioAtPosition,
     importMultipleAudioFilesAtPosition,
 } from "./thunks/importThunks";
@@ -1245,7 +1269,8 @@ const sessionSlice = createSlice({
             if (!track || track.parentId) return;
             let currentRootId: string | null = state.selectedTrackId;
             if (currentRootId) {
-                let cursor: { id: string; parentId?: string | null } | undefined = state.tracks.find((t) => t.id === currentRootId);
+                let cursor: { id: string; parentId?: string | null } | undefined =
+                    state.tracks.find((t) => t.id === currentRootId);
                 while (cursor?.parentId) {
                     cursor = state.tracks.find((t) => t.id === cursor!.parentId);
                 }
@@ -1792,9 +1817,7 @@ const sessionSlice = createSlice({
                         defaultStretchAlgorithm as StretchAlgorithmOption;
                 }
                 if ((s as any).defaultHifiganMelStretch != null) {
-                    state.defaultHifiganMelStretch = Boolean(
-                        (s as any).defaultHifiganMelStretch,
-                    );
+                    state.defaultHifiganMelStretch = Boolean((s as any).defaultHifiganMelStretch);
                 }
                 const selectDir = (s as any).selectDragDirection;
                 if (selectDir != null && ["free", "x-only", "y-only"].includes(selectDir)) {
@@ -2011,6 +2034,24 @@ const sessionSlice = createSlice({
                 }
             })
             .addCase(importMultipleAudioFilesAtPosition.rejected, setRejected)
+
+            .addCase(importMidiAsClip.pending, (state) =>
+                setPending(state, "Importing MIDI clip..."),
+            )
+            .addCase(importMidiAsClip.fulfilled, (state, action) => {
+                state.busy = false;
+                state.lastResult = action.payload;
+                const payload = action.payload as {
+                    ok?: boolean;
+                    imported?: TimelineState;
+                };
+                const ok = Boolean(payload.ok);
+                state.status = ok ? "MIDI clip created" : "MIDI import failed";
+                if (ok && payload.imported && (payload.imported as any).tracks) {
+                    applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
+                }
+            })
+            .addCase(importMidiAsClip.rejected, setRejected)
 
             .addCase(pickOutputPath.pending, (state) =>
                 setPending(state, "Selecting output path..."),
@@ -2826,6 +2867,16 @@ const sessionSlice = createSlice({
                 state.status = "Glue done";
             })
 
+            .addCase(convertClipsToPitchReferenceRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
             .addCase(setClipStateRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2866,6 +2917,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(replaceClipSourceRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(replaceMidiClipDataRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

@@ -35,9 +35,7 @@ export function applyBulkFadeValue(args: {
         const lengthSec = Math.max(0, Number(clip.lengthSec ?? 0) || 0);
         const value = clamp(nextValue, 0, lengthSec);
         return [
-            target === "fadeInSec"
-                ? { clipId, fadeInSec: value }
-                : { clipId, fadeOutSec: value },
+            target === "fadeInSec" ? { clipId, fadeInSec: value } : { clipId, fadeOutSec: value },
         ];
     });
 }

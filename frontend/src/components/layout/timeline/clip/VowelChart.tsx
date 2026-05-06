@@ -147,7 +147,11 @@ export const VowelChart: React.FC<{
                         y1={y}
                         x2={WIDTH - PAD_RIGHT}
                         y2={y}
-                        stroke={idx === 0 || idx === 9 ? "var(--qt-graph-grid-strong)" : "var(--qt-graph-grid-weak)"}
+                        stroke={
+                            idx === 0 || idx === 9
+                                ? "var(--qt-graph-grid-strong)"
+                                : "var(--qt-graph-grid-weak)"
+                        }
                         strokeWidth="1"
                     />
                 );
@@ -161,7 +165,11 @@ export const VowelChart: React.FC<{
                         y1={PAD_TOP}
                         x2={x}
                         y2={HEIGHT - PAD_BOTTOM}
-                        stroke={idx === 0 || idx === 15 ? "var(--qt-graph-grid-strong)" : "var(--qt-graph-grid-weak)"}
+                        stroke={
+                            idx === 0 || idx === 15
+                                ? "var(--qt-graph-grid-strong)"
+                                : "var(--qt-graph-grid-weak)"
+                        }
                         strokeWidth="1"
                     />
                 );
@@ -235,19 +243,42 @@ export const VowelChart: React.FC<{
             <text x={WIDTH / 2 - 20} y={18} fontSize="11" fill="var(--qt-text)">
                 F2 (Hz)
             </text>
-            <text x={WIDTH - PAD_RIGHT - 12} y={18} fontSize="11" textAnchor="end" fill="var(--qt-text)">
+            <text
+                x={WIDTH - PAD_RIGHT - 12}
+                y={18}
+                fontSize="11"
+                textAnchor="end"
+                fill="var(--qt-text)"
+            >
                 {F2_MIN}
             </text>
             <text x={WIDTH - PAD_RIGHT + 12} y={PAD_TOP + 4} fontSize="11" fill="var(--qt-text)">
                 {F1_MIN}
             </text>
-            <text x={WIDTH - 6} y={HEIGHT / 2 - 4} fontSize="11" textAnchor="end" fill="var(--qt-text)">
+            <text
+                x={WIDTH - 6}
+                y={HEIGHT / 2 - 4}
+                fontSize="11"
+                textAnchor="end"
+                fill="var(--qt-text)"
+            >
                 F1
             </text>
-            <text x={WIDTH - 6} y={HEIGHT / 2 + 10} fontSize="11" textAnchor="end" fill="var(--qt-text)">
+            <text
+                x={WIDTH - 6}
+                y={HEIGHT / 2 + 10}
+                fontSize="11"
+                textAnchor="end"
+                fill="var(--qt-text)"
+            >
                 (Hz)
             </text>
-            <text x={WIDTH - PAD_RIGHT + 12} y={HEIGHT - PAD_BOTTOM} fontSize="11" fill="var(--qt-text)">
+            <text
+                x={WIDTH - PAD_RIGHT + 12}
+                y={HEIGHT - PAD_BOTTOM}
+                fontSize="11"
+                fill="var(--qt-text)"
+            >
                 {F1_MAX}
             </text>
             <circle

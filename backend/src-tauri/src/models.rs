@@ -1,3 +1,4 @@
+use crate::midi_import::MidiNoteEvent;
 use crate::project::CustomScale;
 use crate::state::ClipFormantMorph;
 use crate::time_stretch::UserStretchAlgorithm;
@@ -80,6 +81,12 @@ pub struct TimelineClip {
     pub fade_out_curve: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub formant_morph: Option<ClipFormantMorphPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_note_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_note_data: Option<Vec<MidiNoteEvent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_fill_gaps: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -110,6 +117,8 @@ pub struct TimelineStatePayload {
     pub clips: Vec<TimelineClip>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_clip_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_track_ids: Option<Vec<String>>,
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,

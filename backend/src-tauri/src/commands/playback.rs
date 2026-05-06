@@ -894,10 +894,19 @@ fn render_single_clip(
         let processor_handles_stretch = {
             let clip_root = timeline.resolve_root_track_id(&clip.track_id);
             clip_root
-                .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
-                .map(|t| {
-                    let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                    crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
+                .and_then(|root| {
+                    let t = timeline.tracks.iter().find(|t| t.id == root)?;
+                    let kind =
+                        crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                    let has_adjustment = timeline
+                        .params_by_root_track
+                        .get(&root)
+                        .map(|e| e.has_pitch_adjustment_active)
+                        .unwrap_or(false);
+                    Some(crate::renderer::processor_handles_time_stretch(
+                        kind,
+                        t.compose_enabled || has_adjustment,
+                    ))
                 })
                 .unwrap_or(false)
         };
