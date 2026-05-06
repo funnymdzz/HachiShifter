@@ -12,7 +12,10 @@ Download the HiFiShifter installer corresponding to your operating system and ar
   If you are a Windows user and do not know the difference between `x86_64` and `arm64`, choose `x86_64`. Only if you clearly understand `arm64` and have a Windows ARM device, you may download the `arm64` version.
 
 - For macOS, an unsigned dmg installer is provided. Since it is not signed, installation requires a few extra steps to allow the app to run.  
-  macOS users with M-series chips should install the `arm64` version. Only older Intel users need the `x86_64` version.
+  macOS users with M-series chips should install the `arm64` version. Only older Intel users need the `x86_64` version.  
+  If you see a "file is damaged" error after double-clicking the dmg, follow these steps:
+    1. Run `xattr -cr /Applications/HiFiShifter.app` in Terminal;
+    2. Allow the app to run via `System Settings` -> `Privacy & Security` -> click `Open Anyway`.
 
 - For Linux, an AppImage package is provided. You need to go to file `Properties -> Permissions` and check `Allow executing file as program`, then you can run it directly.
 
@@ -28,7 +31,7 @@ The general operation logic and shortcuts can be referenced from DAWs like Reape
 
 ### 2.1 Menu
 
-The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`*.rpp`), import VocalShifter projects (`*.vshp` or `*.vsp`), and export audio.
+The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`*.rpp`), import VocalShifter projects (`*.vshp` or `*.vsp`), import MIDI files, and export audio.
 
 HiFiShifter project files have the extensions `*.hshp` or `*.hsp`. Additionally, `Save As` supports saving the project as a plain text `json` file, or packaging the current project together with all used media files into an archive zip `*.zip`. Currently, HiFiShifter only supports importing regular audio files, not video files.
 
@@ -76,7 +79,7 @@ Common shortcuts:
 
 The small circle at the top-left of a clip is a volume adjustment knob, the `M` button can mute that clip individually, and the `F` button can open that clip's formant editing menu. The left and right edges of a clip allow adjusting fade-in/fade-out envelope lengths.
 
-Right-click a clip to open the context menu, which includes functions like `Reverse`, `Normalize`, `Fade Curve Type`. If you select multiple clips on the same track, the context menu allows `Glue` to merge them into a single audio clip.
+Right-click a clip to open the context menu, which includes functions like `Reverse`, `Normalize`, `Fade Curve Type`, `Convert to Pitch Reference Clip`. If you select multiple clips on the same track, the context menu allows `Glue` to merge them into a single audio clip.
 
 On the left side of the track view is the track header area, where you can add or delete tracks, adjust track parameters, etc. Right-click a track to clone it.
 
@@ -208,6 +211,37 @@ Alternatively, use the `Cents Offset` and `Degree Offset` parameters on child tr
 3. Switch the parameter editor to the `Degree Offset` parameter of the harmony track and draw the desired degree line. Both `Cents Offset` and `Degree Offset` support Pitch Snap, snapping to integer semitones and integer degrees respectively.
 
 This quickly creates harmonies by degree transposition.
+
+##### Pitch Reference Clip
+
+A Pitch Reference Clip on a track is a special type of audio clip that stores a pitch curve on the timeline.
+
+Pitch Reference Clips can be created through the following methods:
+
+- Import MIDI via the `File` menu or by dragging a file. This opens the MIDI Import dialog.
+    - MIDI File: Allows you to select a MIDI file to import. Also supports parsing MIDI data exported to the system clipboard by other DAWs. DAWs confirmed to support system clipboard MIDI data transfer include Reaper and FL Studio.
+        - Reaper: In Reaper's MIDI Editor, select notes and copy them to export the selected note data to the system clipboard for HiFiShifter to read. Note that since Reaper's clipboard note data does not include BPM information, when importing, do not select `MIDI own BPM` for `Note BPM`; instead, use the project BPM or specify one manually.
+        - FL Studio: In FL Studio's Piano Roll, click the small triangle in the top-left corner and select `File` -> `Copy to MIDI Clipboard` to export all notes of the current channel to the system clipboard for HiFiShifter to read.
+    - Track Selection: Allows you to select which MIDI tracks to import.
+    - Import MIDI BPM as Project BPM: When enabled, imports the MIDI's initial BPM as the project BPM. HiFiShifter still does not support variable BPM.
+    - Note BPM: Configures the BPM mapping for imported notes.
+        - MIDI own BPM: Import directly with the MIDI's own BPM without BPM mapping.
+        - Current Project BPM: Map note BPM to the current project BPM before importing.
+        - Specified BPM: Map note BPM to a manually specified BPM before importing.
+    - Multi-track Merge: When enabled, automatically merges all selected tracks and notes, using the highest pitch note as the pitch curve parameter, ultimately importing only 1 Pitch Reference Clip. When disabled, attempts to split tracks and notes so that all notes can be imported as pitch curve parameters, which may result in multiple Pitch Reference Clips stacked vertically.
+    - Fill Gaps Between Notes: When enabled, automatically fills the gaps between adjacent notes.
+- Import MIDI items from tracks via a Reaper project or Reaper clipboard.
+- Import MIDI audio clips from tracks via a VocalShifter project or VocalShifter clipboard.
+- Right-click a regular audio clip and select `Convert to Pitch Reference Clip` from the context menu. This converts the original pitch curve of that audio clip into the pitch curve of a new Pitch Reference Clip.
+- In the Parameter Editor, while editing pitch parameters, use the Select tool to select a region, right-click, and choose `Save as Pitch Reference Clip` from the context menu to save the pitch curve within the selection as a new Pitch Reference Clip.
+
+Pitch Reference Clips have the following common uses:
+
+- Placed on a track, they serve as a general audio clip for other tracks with regular audio clips to reference pitch. On other tracks, the `Reference Track Group` feature in the Parameter Editor can be used to view this track and display its pitch curve.
+- When a Pitch Reference Clip is placed on the root track of a track group, it can change the pitch processing logic of that track group, overwriting the original pitch curve of the covered segment with the Pitch Reference Clip's pitch curve. This affects the following scenarios:
+    - If a pitch curve segment within the track group has never been edited, its pitch parameters will be directly overwritten by the Pitch Reference Clip's pitch curve, triggering re-rendering of the audio pitch.
+    - When using `Initialize`-related functions — for example, right-dragging with the Draw tool in the Parameter Editor — the initialized pitch curve uses the Pitch Reference Clip's pitch curve data rather than the original pitch of the audio clips within the track group's child tracks.
+    - If the Pitch Reference Clip is muted, the track group will not reference that Pitch Reference Clip when processing pitch.
 
 ##### Other Features
 
