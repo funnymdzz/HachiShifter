@@ -1282,9 +1282,9 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
     // root curve by choosing the dominant (highest-weight) voiced clip each frame.
     // This avoids WORLD instability on overlap regions.
 
-    // Match python demo defaults (utils/wav2F0.py): f0_min=40, f0_max=1600.
-    let f0_floor = 40.0;
-    let f0_ceil = 1600.0;
+    // Match FCPE model training range (HachiTune: F0_MIN=32.7, F0_MAX=1975.5).
+    let f0_floor = crate::fcpe_onnx::FCPE_F0_MIN_HZ;
+    let f0_ceil = crate::fcpe_onnx::FCPE_F0_MAX_HZ;
     let frame_period_tl_ms = job.frame_period_ms.max(0.1);
 
     // Track gains (mute/solo already cleared in build_root_mix_timeline).
