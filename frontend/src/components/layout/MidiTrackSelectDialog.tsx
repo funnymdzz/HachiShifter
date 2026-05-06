@@ -529,7 +529,26 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                                 value={specifiedBpm}
                                                 min={1}
                                                 max={999}
-                                                step={0.01}
+                                                step={1}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "ArrowUp") {
+                                                        e.preventDefault();
+                                                        const next = specifiedBpm + 1;
+                                                        if (next <= 999)
+                                                            onSpecifiedBpmChange?.(next);
+                                                    } else if (e.key === "ArrowDown") {
+                                                        e.preventDefault();
+                                                        const next = specifiedBpm - 1;
+                                                        if (next >= 1) onSpecifiedBpmChange?.(next);
+                                                    }
+                                                }}
+                                                onWheel={(e) => {
+                                                    e.preventDefault();
+                                                    const dir = e.deltaY < 0 ? 1 : -1;
+                                                    const next = specifiedBpm + dir;
+                                                    if (next >= 1 && next <= 999)
+                                                        onSpecifiedBpmChange?.(next);
+                                                }}
                                                 onChange={(e) => {
                                                     const v = parseFloat(e.target.value);
                                                     if (!isNaN(v) && v > 0) {

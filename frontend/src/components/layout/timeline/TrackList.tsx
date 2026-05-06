@@ -1323,7 +1323,6 @@ const TrackListInner: React.FC<TrackListProps> = ({
                                                     className="min-w-0 pt-1"
                                                     data-track-volume-control
                                                     data-track-id={track.id}
-                                                    onPointerDown={(e) => e.stopPropagation()}
                                                     onClick={(e) => e.stopPropagation()}
                                                     onDoubleClick={(e) => {
                                                         e.stopPropagation();
@@ -1362,7 +1361,7 @@ const TrackListInner: React.FC<TrackListProps> = ({
                                                                     ? "blue"
                                                                     : "gray"
                                                             }
-                                                            className="leading-none tabular-nums"
+                                                            className="leading-none tabular-nums select-none"
                                                         >
                                                             {formatGainLabel(volume)}
                                                         </Text>
