@@ -303,7 +303,7 @@ export function useTimelineClipActions(
     // ── replaceClipSources ───────────────────────────────────
     const replaceClipSources = React.useCallback(
         async (ids: string[]) => {
-            // 过滤掉音高调整块（没有音频源文件）
+            // 过滤掉音高参考块（没有音频源文件）
             const audioOnlyIds = ids.filter((id) => {
                 const c = sessionRef.current.clips.find((clip) => clip.id === id);
                 return c && c.midiNoteCount == null;

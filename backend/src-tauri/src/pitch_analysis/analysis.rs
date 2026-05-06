@@ -243,8 +243,8 @@ pub(crate) fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option
         .map(|t| (t.compose_enabled, t.pitch_analysis_algo.clone()))
         .unwrap_or((false, PitchAnalysisAlgo::Unknown));
 
-    // 检查是否存在非静音的音高调整块（MIDI clip），若存在则即使 compose_enabled 为 false
-    // 也需要触发 pitch_orig 组装，确保音高调整块的数据能写入 pitch_edit 并影响渲染。
+    // 检查是否存在非静音的音高参考块（MIDI clip），若存在则即使 compose_enabled 为 false
+    // 也需要触发 pitch_orig 组装，确保音高参考块的数据能写入 pitch_edit 并影响渲染。
     let has_active_midi_clip = tl.clips.iter().any(|c| {
         tl.resolve_root_track_id(&c.track_id).as_deref() == Some(root_track_id)
             && !c.muted

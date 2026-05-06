@@ -454,8 +454,8 @@ export const enUS = {
     midi_import_title: "Import MIDI to Pitch",
     midi_import_desc: "Select MIDI tracks to import as pitch curve",
     midi_import_clip_title: "Import MIDI as Clip",
-    midi_import_clip_desc: "Select MIDI tracks to create MIDI clips on the timeline",
-    midi_create_clip: "Create Clip",
+    midi_import_clip_desc: "Select MIDI tracks to create Pitch Reference Clips on the timeline",
+    midi_create_clip: "Create Pitch Reference Clip",
     midi_fill_gaps: "Fill gaps between notes",
     midi_import_position: "Import Position",
     midi_import_position_start: "Project Start",
@@ -656,8 +656,8 @@ export const enUS = {
 
     // Dialog field labels
     dlg_midi_note: "MIDI Note",
-    clip_type_midi: "Pitch Adjustment Clip",
-    clip_type_midi_prefix: "[Pitch]",
+    clip_type_midi: "Pitch Reference Clip",
+    clip_type_midi_prefix: "[Pitch Ref]",
     dlg_strength: "Smoothness",
     dlg_smoothness: "Smoothness",
     dlg_average_strength: "Average Amount",
@@ -787,4 +787,8 @@ export const enUS = {
     appearance_color_subtle_3: "Subtle Layer 3",
     appearance_color_meter_rail: "Meter Rail",
     appearance_color_meter_well: "Meter Well",
+
+    // Pitch reference clip
+    ctx_convert_to_pitch_ref: "Convert to Pitch Reference Clip",
+    menu_save_as_pitch_ref: "Save as Pitch Reference Clip",
 } as const;

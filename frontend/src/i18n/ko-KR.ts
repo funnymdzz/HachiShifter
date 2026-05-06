@@ -733,8 +733,8 @@ export const koKR = {
 
     // 다이얼로그 필드 라벨
     dlg_midi_note: "MIDI 노트",
-    clip_type_midi: "음높이 조정 클립",
-    clip_type_midi_prefix: "[음높이]",
+    clip_type_midi: "음높이 참조 클립",
+    clip_type_midi_prefix: "[음높이 참조]",
     dlg_strength: "스무딩 강도",
     dlg_smoothness: "스무딩 강도",
     dlg_average_strength: "평균 강도",
@@ -806,4 +806,8 @@ export const koKR = {
     vst_no_scan_paths: "사용자 정의 스캔 경로가 아직 추가되지 않았습니다.",
     vst_scan_path_select_folder: "VST 플러그인 폴더 선택",
     vst_manage_scan_paths: "스캔 경로 관리",
+
+    // 음높이 참조 클립
+    ctx_convert_to_pitch_ref: "음높이 참조 클립으로 변환",
+    menu_save_as_pitch_ref: "음높이 참조 클립으로 저장",
 } as const;

@@ -663,8 +663,8 @@ export const jaJP = {
 
     // ダイアログフィールドラベル
     dlg_midi_note: "MIDI ノート",
-    clip_type_midi: "音高調整クリップ",
-    clip_type_midi_prefix: "[音高調整]",
+    clip_type_midi: "音高リファレンスクリップ",
+    clip_type_midi_prefix: "[音高リファレンス]",
     dlg_strength: "スムーズ度",
     dlg_smoothness: "スムーズ度",
     dlg_average_strength: "平均度",
@@ -794,4 +794,8 @@ export const jaJP = {
     appearance_color_subtle_3: "微細レイヤー 3",
     appearance_color_meter_rail: "メーターレール",
     appearance_color_meter_well: "メーターウェル",
+
+    // 音高リファレンスクリップ
+    ctx_convert_to_pitch_ref: "音高リファレンスクリップに変換",
+    menu_save_as_pitch_ref: "音高リファレンスクリップとして保存",
 } as const;

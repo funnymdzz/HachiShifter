@@ -83,7 +83,7 @@ pub struct TrackParamsState {
     #[serde(default)]
     pub pitch_edit_user_modified: bool,
 
-    /// 是否有活跃的音高调整块（非静音 MIDI clip）在此轨道组中
+    /// 是否有活跃的音高参考块（非静音 MIDI clip）在此轨道组中
     #[serde(skip)]
     pub has_pitch_adjustment_active: bool,
 
@@ -212,6 +212,10 @@ pub struct CreateClipTemplatePayload {
     pub fade_in_curve: Option<String>,
     pub fade_out_curve: Option<String>,
     pub linked_params: Option<LinkedParamCurvesPayload>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_note_data: Option<Vec<MidiNoteEvent>>,
+    #[serde(default)]
+    pub midi_fill_gaps: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2513,6 +2517,24 @@ impl TimelineState {
                 self.apply_linked_params_to_clip(&created_id, linked_params);
             }
 
+            if template.midi_note_data.is_some() || template.midi_fill_gaps.is_some() {
+                if let Some(clip) = self.clips.iter_mut().find(|c| c.id == created_id) {
+                    if let Some(ref midi_data) = template.midi_note_data {
+                        clip.midi_note_data = Some(midi_data.clone());
+                        clip.source_path = None;
+                        clip.source_path_relative = None;
+                        clip.color = "cyan".to_string();
+                        clip.pitch_range = Some(PitchRange {
+                            min: 0.0,
+                            max: 127.0,
+                        });
+                    }
+                    if let Some(fill_gaps) = template.midi_fill_gaps {
+                        clip.midi_fill_gaps = fill_gaps;
+                    }
+                }
+            }
+
             created_clip_ids.push(created_id);
         }
 
@@ -2790,6 +2812,15 @@ impl TimelineState {
             return;
         }
         selected.sort_by(|a, b| a.start_sec.total_cmp(&b.start_sec));
+
+        // 针对音高参考块的胶合流程
+        let all_pitch = selected.iter().all(|c| c.midi_note_data.is_some());
+        if all_pitch {
+            let original_ids: Vec<String> = clip_ids.to_vec();
+            self.glue_pitch_clips(&selected, &original_ids);
+            return;
+        }
+
         let Some(first) = selected.first() else {
             return;
         };
@@ -2879,6 +2910,207 @@ impl TimelineState {
         }
 
         self.clips.retain(|c| !clip_ids.contains(&c.id));
+        self.clips.push(glued.clone());
+        self.selected_clip_id = Some(glued.id);
+    }
+
+    /// 将指定的常规音频块转换为音高参考块。
+    /// 获取每个音频块的原始音高数据，转换为 midi_note_data，
+    /// 并清除 source_path 使其成为纯音高参考块。
+    pub fn convert_clips_to_pitch_reference(&mut self, clip_ids: &[String]) {
+        let fp_ms = default_frame_period_ms();
+        let fp_sec = fp_ms / 1000.0;
+
+        for clip_id in clip_ids {
+            let clip = match self.clips.iter().find(|c| c.id == *clip_id) {
+                Some(c) => c,
+                None => continue,
+            };
+
+            // 跳过已经是音高块的 clip
+            if clip.midi_note_data.is_some() {
+                continue;
+            }
+
+            // 获取原始音高数据
+            let root_track_id = match self.resolve_root_track_id(&clip.track_id) {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let pitch_midi: Vec<f32> = match crate::pitch_clip::compute_clip_pitch_midi(
+                self,
+                clip,
+                &root_track_id,
+                fp_ms,
+            ) {
+                Some(curve) if !curve.is_empty() => curve,
+                _ => continue,
+            };
+
+            // 将 pitch 曲线转换为 midiNoteData（合并相邻的相同音符）
+            let midi_notes = Self::pitch_curve_to_midi_notes(&pitch_midi, fp_sec, clip.length_sec);
+
+            // 更新 clip
+            if let Some(clip) = self.clips.iter_mut().find(|c| c.id == *clip_id) {
+                clip.midi_note_data = Some(midi_notes);
+                clip.midi_fill_gaps = true;
+                clip.source_path = None;
+                clip.source_path_relative = None;
+                clip.duration_sec = None;
+                clip.duration_frames = None;
+                clip.waveform_preview = None;
+                clip.color = "cyan".to_string();
+                // 重置 source trim，使 midiNoteData 完整映射到 clip 时间轴
+                clip.source_start_sec = 0.0;
+                clip.source_end_sec = clip.length_sec;
+                clip.playback_rate = 1.0;
+                clip.reversed = false;
+                clip.pitch_range = Some(PitchRange {
+                    min: 0.0,
+                    max: 127.0,
+                });
+            }
+        }
+    }
+
+    /// 将 pitch 曲线（Vec<f32> of MIDI note numbers）转换为 MidiNoteEvent 列表。
+    /// 使用原始的浮点音高值，不进行半音量化。
+    /// 相邻帧中音高差异极小时合并为一个事件。
+    fn pitch_curve_to_midi_notes(
+        curve: &[f32],
+        frame_period_sec: f64,
+        _total_length_sec: f64,
+    ) -> Vec<MidiNoteEvent> {
+        if curve.is_empty() {
+            return vec![];
+        }
+
+        let mut notes: Vec<MidiNoteEvent> = Vec::new();
+        let mut seg_start_frame: usize = 0;
+        let mut current_note: f32 = curve[0];
+
+        for i in 1..curve.len() {
+            let note: f32 = curve[i];
+            // 仅当音高差异大于 0.001 半音时才分段
+            if (note - current_note).abs() > 0.001 {
+                let start_sec = seg_start_frame as f64 * frame_period_sec;
+                let end_sec = i as f64 * frame_period_sec;
+                notes.push(MidiNoteEvent {
+                    start_sec,
+                    end_sec,
+                    note: current_note,
+                    velocity: 100,
+                    channel: 0,
+                });
+                seg_start_frame = i;
+                current_note = note;
+            }
+        }
+
+        // 最后一段
+        let end_sec = curve.len() as f64 * frame_period_sec;
+        notes.push(MidiNoteEvent {
+            start_sec: seg_start_frame as f64 * frame_period_sec,
+            end_sec,
+            note: current_note,
+            velocity: 100,
+            channel: 0,
+        });
+
+        notes
+    }
+
+    /// 胶合音高参考块：合并多个同轨道音高参考块的 midi_note_data，
+    /// 用空音高填充间隙，生成新的音高参考块。
+    fn glue_pitch_clips(&mut self, selected: &[Clip], original_clip_ids: &[String]) {
+        let start = selected.first().map(|c| c.start_sec).unwrap_or(0.0);
+        let end = selected
+            .iter()
+            .map(|c| c.start_sec + c.length_sec)
+            .fold(start, f64::max);
+        let length = (end - start).max(0.01);
+
+        self.ensure_project_end_sec(end);
+
+        // 合并所有 midiNoteData，按时间偏移
+        let mut merged_notes: Vec<MidiNoteEvent> = Vec::new();
+        for clip in selected {
+            let offset = clip.start_sec - start;
+            if let Some(ref notes) = clip.midi_note_data {
+                for note in notes {
+                    merged_notes.push(MidiNoteEvent {
+                        start_sec: note.start_sec + offset,
+                        end_sec: note.end_sec + offset,
+                        note: note.note,
+                        velocity: note.velocity,
+                        channel: note.channel,
+                    });
+                }
+            }
+        }
+
+        // 按 start_sec 排序
+        merged_notes.sort_by(|a, b| {
+            a.start_sec
+                .partial_cmp(&b.start_sec)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // 填补间隙：如果两个连续音符之间存在空隙，插入 rest 音符
+        let mut filled_notes: Vec<MidiNoteEvent> = Vec::new();
+        let mut cursor = 0.0f64;
+        for note in &merged_notes {
+            if note.start_sec > cursor + 0.001 {
+                // 间隙 > 1ms，插入 rest 音符
+                filled_notes.push(MidiNoteEvent {
+                    start_sec: cursor,
+                    end_sec: note.start_sec,
+                    note: 0.0, // rest
+                    velocity: 0,
+                    channel: 0,
+                });
+            }
+            filled_notes.push(note.clone());
+            cursor = note.end_sec;
+        }
+
+        // 如果末尾有剩余空间，也插入 rest
+        if cursor < length - 0.001 {
+            filled_notes.push(MidiNoteEvent {
+                start_sec: cursor,
+                end_sec: length,
+                note: 0.0,
+                velocity: 0,
+                channel: 0,
+            });
+        }
+
+        // 创建新的胶合音高参考块
+        let mut glued = selected[0].clone();
+        glued.id = new_id("clip");
+        glued.name = "Glued".to_string();
+        glued.start_sec = start;
+        glued.length_sec = length;
+        glued.midi_note_data = Some(filled_notes);
+        glued.midi_fill_gaps = true;
+        glued.color = "cyan".to_string();
+        glued.source_path = None;
+        glued.source_path_relative = None;
+        // 重置 source trim 和播放参数，使 midiNoteData 完整映射到 clip 时间轴
+        glued.source_start_sec = 0.0;
+        glued.source_end_sec = length;
+        glued.playback_rate = 1.0;
+        glued.reversed = false;
+        glued.duration_sec = None;
+        glued.duration_frames = None;
+        glued.waveform_preview = None;
+        glued.pitch_range = Some(PitchRange {
+            min: 0.0,
+            max: 127.0,
+        });
+
+        self.clips.retain(|c| !original_clip_ids.contains(&c.id));
         self.clips.push(glued.clone());
         self.selected_clip_id = Some(glued.id);
     }

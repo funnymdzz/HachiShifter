@@ -965,7 +965,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
     // 例外：needs_processor_stretch 时必须进入处理器以执行其内部拉伸。
-    // 例外：has_pitch_adjustment_active 时，音高调整块提供的 MIDI 音高数据已写入 pitch_edit，
+    // 例外：has_pitch_adjustment_active 时，音高参考块提供的 MIDI 音高数据已写入 pitch_edit，
     //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
         && !entry.has_pitch_adjustment_active
@@ -1277,8 +1277,8 @@ pub fn does_clip_need_processor_render(
     let Some((track, entry)) = root_pitch_edit_state(timeline, &clip_root) else {
         return false;
     };
-    // 当存在非静音的音高调整块时，即使 compose_enabled 为 false，
-    // 也需要触发处理器预渲染，确保音高调整块的 MIDI 数据能应用到同组的音频块。
+    // 当存在非静音的音高参考块时，即使 compose_enabled 为 false，
+    // 也需要触发处理器预渲染，确保音高参考块的 MIDI 数据能应用到同组的音频块。
     if !track.compose_enabled && !entry.has_pitch_adjustment_active {
         return false;
     }
@@ -1313,7 +1313,7 @@ pub fn does_clip_need_processor_render(
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
     // 例外：needs_processor_stretch 时必须触发预渲染以执行其内部拉伸。
-    // 例外：has_pitch_adjustment_active 时，音高调整块提供的 MIDI 音高数据已写入 pitch_edit，
+    // 例外：has_pitch_adjustment_active 时，音高参考块提供的 MIDI 音高数据已写入 pitch_edit，
     //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
         && !entry.has_pitch_adjustment_active

@@ -573,6 +573,14 @@ pub fn glue_clips(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn convert_clips_to_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    timeline::convert_clips_to_pitch_reference(state, clip_ids)
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn select_clip(
     state: State<'_, AppState>,
     clip_id: Option<String>,

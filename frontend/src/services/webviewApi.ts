@@ -112,6 +112,7 @@ export const webApi = {
     replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
     glueClips: timelineApi.glueClips,
+    convertClipsToPitchReference: timelineApi.convertClipsToPitchReference,
     selectClip: timelineApi.selectClip,
 
     setTransport: timelineApi.setTransport,

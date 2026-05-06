@@ -364,6 +364,13 @@ export const glueClipsRemote = createAsyncThunk(
     },
 );
 
+export const convertClipsToPitchReferenceRemote = createAsyncThunk(
+    "session/convertClipsToPitchReferenceRemote",
+    async (clipIds: string[]) => {
+        return webApi.convertClipsToPitchReference(clipIds);
+    },
+);
+
 export const selectClipRemote = createAsyncThunk(
     "session/selectClipRemote",
     async (

@@ -224,5 +224,8 @@ export const timelineApi = {
 
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
 
+    convertClipsToPitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
+
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
 };

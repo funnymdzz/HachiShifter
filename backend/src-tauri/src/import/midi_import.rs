@@ -34,15 +34,19 @@ pub struct MidiTrackInfo {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct MidiNoteEvent {
     /// 起始时间（秒）
+    #[serde(alias = "startSec")]
     pub start_sec: f64,
     /// 结束时间（秒）
+    #[serde(alias = "endSec")]
     pub end_sec: f64,
     /// MIDI note number (0.0-127.0)，已包含弯音轮偏移
     pub note: f32,
     /// 力度 (0-127)
     #[allow(dead_code)]
+    #[serde(alias = "velocity")]
     pub velocity: u8,
     /// MIDI 通道 (0-15)
+    #[serde(alias = "channel")]
     pub channel: u8,
 }
 

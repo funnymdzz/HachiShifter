@@ -264,6 +264,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "glue_clips":
             return { clipIds: args[0] };
 
+        case "convert_clips_to_pitch_reference":
+            return { clipIds: args[0] };
+
         case "select_clip":
             return { clipId: args[0] };
 

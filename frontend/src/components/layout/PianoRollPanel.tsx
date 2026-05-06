@@ -35,6 +35,8 @@ import {
     persistUiSettings,
     setVisibleReferenceRootTrackIds,
     toggleVisibleReferenceRootTrackId,
+    createClipsRemote,
+    addTrackRemote,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -2846,6 +2848,132 @@ export const PianoRollPanel: React.FC = () => {
         [editParam],
     );
 
+    const handleSaveAsPitchRef = useCallback(async () => {
+        const sel = selectionRef.current;
+        if (!sel || !rootTrackId) return;
+
+        const aBeat = Math.min(sel.aBeat, sel.bBeat);
+        const bBeat = Math.max(sel.aBeat, sel.bBeat);
+        const startSec = aBeat * secPerBeat;
+        const lengthSec = Math.max(0.01, (bBeat - aBeat) * secPerBeat);
+
+        const fp = paramView?.framePeriodMs ?? 5;
+        const startFrame = Math.max(0, Math.floor((startSec * 1000) / fp));
+        const frameCount = Math.max(1, Math.ceil((lengthSec * 1000) / fp));
+
+        const res = await paramsApi.getParamFrames(rootTrackId, "pitch", startFrame, frameCount, 1);
+        if (!res?.ok || !res.edit) return;
+
+        const pitchValues: number[] = (res.edit as number[]).map((v) => Number(v) || 0);
+
+        // Convert pitch values (semitones) to MIDI note events
+        // 保留原始浮点音高值，不进行半音量化
+        const fpSec = fp / 1000;
+        const midiNoteData: Array<{
+            startSec: number;
+            endSec: number;
+            note: number;
+            velocity: number;
+            channel: number;
+        }> = [];
+        if (pitchValues.length > 0) {
+            let segStartFrame = 0;
+            let currentNote = pitchValues[0];
+            for (let i = 1; i < pitchValues.length; i++) {
+                const note = pitchValues[i];
+                if (Math.abs(note - currentNote) > 0.001) {
+                    midiNoteData.push({
+                        startSec: segStartFrame * fpSec,
+                        endSec: i * fpSec,
+                        note: currentNote,
+                        velocity: 100,
+                        channel: 0,
+                    });
+                    segStartFrame = i;
+                    currentNote = note;
+                }
+            }
+            midiNoteData.push({
+                startSec: segStartFrame * fpSec,
+                endSec: pitchValues.length * fpSec,
+                note: currentNote,
+                velocity: 100,
+                channel: 0,
+            });
+        }
+
+        // Determine target track: try the track above the currently selected track.
+        // If no track above exists, or the above track has overlapping clips
+        // in the import time range, create a new track above the current track.
+        const orderedTrackIds = s.tracks.map((t) => t.id);
+        const trackIndexById: Record<string, number> = {};
+        orderedTrackIds.forEach((id, idx) => {
+            trackIndexById[id] = idx;
+        });
+
+        const currentIdx = s.selectedTrackId ? (trackIndexById[s.selectedTrackId] ?? -1) : -1;
+        let targetTrackId: string | null = null;
+
+        if (currentIdx > 0) {
+            const aboveTrackId = orderedTrackIds[currentIdx - 1];
+            const hasOverlap = s.clips.some(
+                (c) =>
+                    c.trackId === aboveTrackId &&
+                    c.startSec < startSec + lengthSec &&
+                    c.startSec + c.lengthSec > startSec,
+            );
+            if (!hasOverlap) {
+                targetTrackId = aboveTrackId;
+            }
+        }
+
+        if (!targetTrackId) {
+            // Create a new track above the current track
+            const newTrackPayload: Record<string, unknown> = {
+                name: undefined,
+                parentTrackId: null,
+            };
+            if (currentIdx >= 0) {
+                newTrackPayload.index = currentIdx;
+            }
+            const result = await dispatch(
+                addTrackRemote(newTrackPayload as { name?: string; parentTrackId?: string | null }),
+            ).unwrap();
+            const added = result as {
+                selected_track_id?: string;
+                tracks?: Array<{ id: string }>;
+            };
+            targetTrackId =
+                added.selected_track_id ?? added.tracks?.[added.tracks.length - 1]?.id ?? null;
+        }
+
+        if (!targetTrackId) return;
+
+        await dispatch(
+            createClipsRemote({
+                templates: [
+                    {
+                        trackId: targetTrackId,
+                        name: "Pitch Ref",
+                        startSec,
+                        lengthSec,
+                        midiNoteData,
+                        midiFillGaps: true,
+                    },
+                ],
+            }),
+        );
+    }, [
+        selectionRef,
+        rootTrackId,
+        secPerBeat,
+        paramView,
+        s.tracks,
+        s.selectedTrackId,
+        s.clips,
+        dispatch,
+    ]);
+
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
 
@@ -3886,6 +4014,7 @@ export const PianoRollPanel: React.FC = () => {
                     onAddVibrato={() => openEditDialog("addVibrato")}
                     onQuantize={() => openEditDialog("quantize")}
                     onMeanQuantize={() => openEditDialog("meanQuantize")}
+                    onSaveAsPitchRef={() => void handleSaveAsPitchRef()}
                 />
             )}
         </Flex>

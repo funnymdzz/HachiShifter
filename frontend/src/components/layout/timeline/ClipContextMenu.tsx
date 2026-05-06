@@ -100,6 +100,7 @@ export const ClipContextMenu: React.FC<{
     onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
+    onConvertToPitchRef?: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
@@ -122,6 +123,7 @@ export const ClipContextMenu: React.FC<{
     onQuickExport,
     onSplit,
     onGlue,
+    onConvertToPitchRef,
     onNormalize,
     onToggleReverse,
     onFadeCurveChange,
@@ -132,7 +134,7 @@ export const ClipContextMenu: React.FC<{
     const isMulti = ids.length >= 2;
     const isSingle = !isMulti;
 
-    // 音高调整块判断
+    // 音高参考块判断
     const isPitch = (c: ClipInfo) => c.midiNoteCount != null;
     const allPitchAdjustment = selectedClips.length > 0 && selectedClips.every(isPitch);
     const hasPitchAdjustment = selectedClips.some(isPitch);
@@ -142,9 +144,11 @@ export const ClipContextMenu: React.FC<{
     const normalizeKb = useAppSelector((state) => selectKeybinding(state, "clip.normalize"));
     const normalizeShortcut = normalizeKb ? formatKeybinding(normalizeKb, "") : undefined;
 
-    // 胶合：仅同轨且多选时可用
+    // 胶合：仅同轨且多选时可用，且不能混合音高参考块和常规音频块
+    const hasMixedTypes = hasPitchAdjustment && !allPitchAdjustment;
     const glueDisabled =
         !isMulti ||
+        hasMixedTypes ||
         (() => {
             const trackId = selectedClips[0]?.trackId;
             return !trackId || selectedClips.some((c) => c.trackId !== trackId);
@@ -368,6 +372,24 @@ export const ClipContextMenu: React.FC<{
                         </>
                     );
                 })()}
+
+            {!allPitchAdjustment && (
+                <>
+                    <Divider />
+                    <MenuItem
+                        label={t("ctx_convert_to_pitch_ref")}
+                        onClick={() => {
+                            const audioIds = selectedClips
+                                .filter((c) => !isPitch(c))
+                                .map((c) => c.id);
+                            if (audioIds.length > 0) {
+                                onConvertToPitchRef?.(audioIds);
+                            }
+                            close();
+                        }}
+                    />
+                </>
+            )}
         </div>
     );
 };
