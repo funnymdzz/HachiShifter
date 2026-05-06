@@ -592,11 +592,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                             </DropdownMenu.Sub>
                             <DropdownMenu.Sub>
                                 <DropdownMenu.SubTrigger>
-                                    `${tAny("stretch_hifigan_mel")}: $
-                                    {effectiveProjectHifiganMelStretch
-                                        ? tAny("stretch_toggle_on")
-                                        : tAny("stretch_toggle_off")}
-                                    `
+                                    {`${tAny("stretch_hifigan_mel")}: ${effectiveProjectHifiganMelStretch ? tAny("stretch_toggle_on") : tAny("stretch_toggle_off")}`}
                                 </DropdownMenu.SubTrigger>
                                 <DropdownMenu.SubContent>
                                     <DropdownMenu.Item

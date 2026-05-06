@@ -40,7 +40,7 @@ interface MidiTrackSelectDialogProps {
     multiTrackMerge?: boolean;
     /** 多轨合并选项变更回调 */
     onMultiTrackMergeChange?: (v: boolean) => void;
-    /** 导入位置模���：projectStart / playhead / selection */
+    /** 导入位置模式：projectStart / playhead / selection */
     importPosition?: string;
     /** 导入位置变更回调（用于持久化） */
     onImportPositionChange?: (position: string) => void;
@@ -323,14 +323,14 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
             <Dialog.Content maxWidth="520px">
                 <Dialog.Title>
                     {mode === "replaceMidi"
-                        ? "Replace MIDI"
+                        ? tAny("midi_replace_title")
                         : mode === "clip"
                           ? tAny("midi_import_clip_title")
                           : tAny("midi_import_title")}
                 </Dialog.Title>
                 <Dialog.Description size="2" color="gray">
                     {mode === "replaceMidi"
-                        ? "Select MIDI tracks to replace the pitch adjustment block note data."
+                        ? tAny("midi_replace_desc")
                         : mode === "clip"
                           ? tAny("midi_import_clip_desc")
                           : tAny("midi_import_desc")}
@@ -659,7 +659,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                 {importing
                                     ? tAny("midi_importing")
                                     : mode === "replaceMidi"
-                                      ? "Replace"
+                                      ? tAny("midi_replace_button")
                                       : mode === "clip"
                                         ? tAny("midi_create_clip")
                                         : tAny("midi_import")}

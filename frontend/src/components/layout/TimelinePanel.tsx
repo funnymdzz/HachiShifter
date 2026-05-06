@@ -1769,7 +1769,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                             setReplaceMidiDialog({ open: false, clipId: null, midiPath: null });
                     }}
                     midiPath={replaceMidiDialog.midiPath}
-                    mode="clip"
+                    mode="replaceMidi"
                     onImportAsClip={handleReplaceMidiImport}
                     fillGaps={fillGaps}
                     onFillGapsChange={onFillGapsChange}

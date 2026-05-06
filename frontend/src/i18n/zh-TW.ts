@@ -488,6 +488,11 @@ export const zhTW = {
     midi_clipboard_empty: "剪貼簿中未找到 Standard MIDI File 資料",
     midi_clipboard_parse_failed: "解析剪貼簿中的 MIDI 資料失敗",
 
+    // MIDI replace dialog
+    midi_replace_title: "替換 MIDI",
+    midi_replace_desc: "選擇要替換音高調整塊音符數據的 MIDI 軌道。",
+    midi_replace_button: "替換",
+
     // 工具列切換按鈕
     auto_crossfade: "自動交叉淡化",
     grid_snap: "網格吸附",

@@ -487,6 +487,11 @@ export const zhCN = {
     midi_clipboard_empty: "剪贴板中未找到 Standard MIDI File 数据",
     midi_clipboard_parse_failed: "解析剪贴板中的 MIDI 数据失败",
 
+    // MIDI replace dialog
+    midi_replace_title: "替换 MIDI",
+    midi_replace_desc: "选择要替换音高调整块音符数据的 MIDI 轨道。",
+    midi_replace_button: "替换",
+
     // Toolbar toggle buttons
     auto_crossfade: "自动交叉淡化",
     grid_snap: "网格吸附",

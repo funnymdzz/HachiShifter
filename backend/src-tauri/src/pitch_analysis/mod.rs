@@ -126,8 +126,15 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
         hasher.update(&quantize_u32(c.source_end_sec, 1000.0).to_le_bytes());
         hasher.update(&[if c.muted { 1 } else { 0 }]);
         hasher.update(&[if c.midi_fill_gaps { 1 } else { 0 }]);
-        let note_count: u32 = c.midi_note_data.as_ref().map_or(0, |n| n.len() as u32);
-        hasher.update(&note_count.to_le_bytes());
+        if let Some(notes) = c.midi_note_data.as_ref() {
+            for note in notes {
+                hasher.update(&quantize_u32(note.start_sec, 1000.0).to_le_bytes());
+                hasher.update(&quantize_u32(note.end_sec, 1000.0).to_le_bytes());
+                hasher.update(&quantize_i64(note.note as f64, 10000.0).to_le_bytes());
+                hasher.update(&[note.velocity]);
+                hasher.update(&[note.channel]);
+            }
+        }
         if let Some(sp) = c.source_path.as_deref() {
             hasher.update(sp.as_bytes());
             let p = Path::new(sp);

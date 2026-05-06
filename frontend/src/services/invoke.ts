@@ -433,6 +433,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[2] !== undefined ? { selectionStartFrame: args[2] } : {}),
                 ...(args[3] !== undefined ? { selectionMaxFrames: args[3] } : {}),
                 ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
+                ...(args[5] !== undefined ? { noteBpmMode: args[5] } : {}),
+                ...(args[6] !== undefined ? { specifiedBpm: args[6] } : {}),
+                ...(args[7] !== undefined ? { importMidiBpmAsProject: args[7] } : {}),
             };
 
         case "import_midi_as_clip":
@@ -443,6 +446,20 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[3] !== undefined ? { startSec: args[3] } : {}),
                 ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
                 ...(args[5] !== undefined ? { multiTrackMerge: args[5] } : {}),
+                ...(args[6] !== undefined ? { noteBpmMode: args[6] } : {}),
+                ...(args[7] !== undefined ? { specifiedBpm: args[7] } : {}),
+                ...(args[8] !== undefined ? { importMidiBpmAsProject: args[8] } : {}),
+            };
+
+        case "replace_midi_clip_data":
+            return {
+                clipId: args[0],
+                midiPath: args[1],
+                ...(args[2] !== undefined ? { trackIndices: args[2] } : {}),
+                ...(args[3] !== undefined ? { fillGaps: args[3] } : {}),
+                ...(args[4] !== undefined ? { noteBpmMode: args[4] } : {}),
+                ...(args[5] !== undefined ? { specifiedBpm: args[5] } : {}),
+                ...(args[6] !== undefined ? { importMidiBpmAsProject: args[6] } : {}),
             };
 
         case "save_ui_settings":

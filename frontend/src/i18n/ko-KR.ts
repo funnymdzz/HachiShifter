@@ -573,6 +573,11 @@ export const koKR = {
     midi_clipboard_empty: "클립보드에서 Standard MIDI File을 찾을 수 없습니다",
     midi_clipboard_parse_failed: "클립보드의 MIDI 데이터를 해석하지 못했습니다",
 
+    // MIDI replace dialog
+    midi_replace_title: "MIDI 교체",
+    midi_replace_desc: "음높이 조정 블록의 노트 데이터를 교체할 MIDI 트랙을 선택하세요.",
+    midi_replace_button: "교체",
+
     // 도구 모음 토글 버튼
     auto_crossfade: "자동 크로스페이드",
     grid_snap: "그리드 스냅",

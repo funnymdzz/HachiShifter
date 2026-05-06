@@ -496,6 +496,11 @@ export const enUS = {
     midi_clipboard_empty: "No Standard MIDI File found in clipboard",
     midi_clipboard_parse_failed: "Failed to parse MIDI data from clipboard",
 
+    // MIDI replace dialog
+    midi_replace_title: "Replace MIDI",
+    midi_replace_desc: "Select MIDI tracks to replace the pitch adjustment block note data.",
+    midi_replace_button: "Replace",
+
     // Toolbar toggle buttons
     auto_crossfade: "Auto Crossfade",
     grid_snap: "Grid Snap",

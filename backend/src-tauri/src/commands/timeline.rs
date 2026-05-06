@@ -488,7 +488,12 @@ pub(super) fn move_clip(
         track_id,
         move_linked_params.unwrap_or(false),
     );
-    let new_root = tl.resolve_root_track_id(&clip_id);
+    let new_root = tl
+        .clips
+        .iter()
+        .find(|c| c.id == clip_id)
+        .map(|c| c.track_id.clone())
+        .and_then(|tid| tl.resolve_root_track_id(&tid));
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

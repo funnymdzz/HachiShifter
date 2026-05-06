@@ -504,6 +504,11 @@ export const jaJP = {
     midi_clipboard_empty: "クリップボードに Standard MIDI File が見つかりません",
     midi_clipboard_parse_failed: "クリップボードの MIDI データを解析できませんでした",
 
+    // MIDI replace dialog
+    midi_replace_title: "MIDI を置換",
+    midi_replace_desc: "音高調整ブロックのノートデータを置換する MIDI トラックを選択してください。",
+    midi_replace_button: "置換",
+
     // ツールバートグルボタン
     auto_crossfade: "自動クロスフェード",
     grid_snap: "グリッドスナップ",
