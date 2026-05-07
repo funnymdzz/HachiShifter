@@ -307,6 +307,7 @@ pub fn run() {
             commands::split_clip,
             commands::glue_clips,
             commands::convert_clips_to_pitch_reference,
+            commands::update_pitch_reference,
             commands::select_clip,
             commands::load_default_model,
             commands::load_model,

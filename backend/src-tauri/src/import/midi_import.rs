@@ -31,7 +31,7 @@ pub struct MidiTrackInfo {
 }
 
 /// 单个音符事件
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct MidiNoteEvent {
     /// 起始时间（秒）
     #[serde(alias = "startSec")]

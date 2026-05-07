@@ -371,6 +371,13 @@ export const convertClipsToPitchReferenceRemote = createAsyncThunk(
     },
 );
 
+export const updatePitchReferenceRemote = createAsyncThunk(
+    "session/updatePitchReferenceRemote",
+    async (clipIds: string[]) => {
+        return webApi.updatePitchReference(clipIds);
+    },
+);
+
 export const selectClipRemote = createAsyncThunk(
     "session/selectClipRemote",
     async (

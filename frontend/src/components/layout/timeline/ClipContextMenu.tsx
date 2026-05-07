@@ -101,6 +101,7 @@ export const ClipContextMenu: React.FC<{
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
     onConvertToPitchRef?: (ids: string[]) => void;
+    onUpdatePitchRef?: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
@@ -124,6 +125,7 @@ export const ClipContextMenu: React.FC<{
     onSplit,
     onGlue,
     onConvertToPitchRef,
+    onUpdatePitchRef,
     onNormalize,
     onToggleReverse,
     onFadeCurveChange,
@@ -309,6 +311,39 @@ export const ClipContextMenu: React.FC<{
                 </>
             )}
 
+            {!allPitchAdjustment && (
+                <>
+                    <Divider />
+                    <MenuItem
+                        label={t("ctx_convert_to_pitch_ref")}
+                        onClick={() => {
+                            const audioIds = selectedClips
+                                .filter((c) => !isPitch(c))
+                                .map((c) => c.id);
+                            if (audioIds.length > 0) {
+                                onConvertToPitchRef?.(audioIds);
+                            }
+                            close();
+                        }}
+                    />
+                </>
+            )}
+
+            {allPitchAdjustment && onUpdatePitchRef && (
+                <>
+                    <Divider />
+                    <MenuItem
+                        label={t("ctx_update_pitch_ref")}
+                        onClick={() => {
+                            if (pitchOnlyIds.length > 0) {
+                                onUpdatePitchRef(pitchOnlyIds);
+                            }
+                            close();
+                        }}
+                    />
+                </>
+            )}
+
             {onFadeCurveChange &&
                 (() => {
                     const fadedClips = isSingle
@@ -372,24 +407,6 @@ export const ClipContextMenu: React.FC<{
                         </>
                     );
                 })()}
-
-            {!allPitchAdjustment && (
-                <>
-                    <Divider />
-                    <MenuItem
-                        label={t("ctx_convert_to_pitch_ref")}
-                        onClick={() => {
-                            const audioIds = selectedClips
-                                .filter((c) => !isPitch(c))
-                                .map((c) => c.id);
-                            if (audioIds.length > 0) {
-                                onConvertToPitchRef?.(audioIds);
-                            }
-                            close();
-                        }}
-                    />
-                </>
-            )}
         </div>
     );
 };

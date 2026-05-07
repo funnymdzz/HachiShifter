@@ -874,6 +874,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                     || old.reversed != c.reversed
                     || old.midi_fill_gaps != c.midi_fill_gaps
                     || old.muted != c.muted
+                    || old.midi_note_data != c.midi_note_data
             })
         })
         .map(|c| c.id.clone())

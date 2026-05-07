@@ -2974,6 +2974,246 @@ impl TimelineState {
         }
     }
 
+    /// 将所选音高参考块的 midi_note_data 更新为轨道上对应范围内的 pitch_edit 曲线。
+    /// 对未编辑区域（pitch_edit 中为 0 的帧）回退到 clip 原有的 midi_note_data。
+    /// 正确处理 stretch（playback_rate）和倒放（reversed）的时间映射。
+    pub fn update_pitch_reference_from_track_params(&mut self, clip_ids: &[String]) {
+        let fp = self.frame_period_ms();
+        let fp_sec = fp / 1000.0;
+
+        // 先收集每个 clip 的必要信息，避免同时持有不可变借用和可变借用
+        struct ClipMeta {
+            clip_id: String,
+            root: String,
+            start_sec: f64,
+            length_sec: f64,
+            playback_rate: f32,
+            reversed: bool,
+            src_start: f64,
+            src_end: f64,
+            original_midi: Option<Vec<MidiNoteEvent>>,
+        }
+
+        let clip_infos: Vec<ClipMeta> = clip_ids
+            .iter()
+            .filter_map(|clip_id| {
+                let clip = self.clips.iter().find(|c| c.id == *clip_id)?;
+                if clip.midi_note_data.is_none() {
+                    return None;
+                }
+                let root = self.resolve_root_track_id(&clip.track_id)?;
+                let src_end = if clip.source_end_sec > 0.0 {
+                    clip.source_end_sec
+                } else {
+                    clip.length_sec
+                };
+                Some(ClipMeta {
+                    clip_id: clip_id.clone(),
+                    root,
+                    start_sec: clip.start_sec,
+                    length_sec: clip.length_sec,
+                    playback_rate: clip.playback_rate,
+                    reversed: clip.reversed,
+                    src_start: clip.source_start_sec.max(0.0),
+                    src_end,
+                    original_midi: clip.midi_note_data.clone(),
+                })
+            })
+            .collect();
+
+        for info in &clip_infos {
+            // Step 1: 从 clip 原有的 midi_note_data 构建回退音高曲线
+            let fallback_curve = Self::build_fallback_pitch_from_midi(
+                info.length_sec,
+                fp,
+                info.original_midi.as_deref().unwrap_or(&[]),
+                info.playback_rate,
+                info.reversed,
+                info.src_start,
+                info.src_end,
+            );
+
+            // Step 2: 同步 params 并读取 pitch_edit
+            self.ensure_params_for_root(&info.root);
+
+            let entry = match self.params_by_root_track.get(&info.root) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            let (start_frame, end_frame) =
+                self.clip_frame_bounds(info.start_sec, info.length_sec, fp);
+
+            let extracted: Vec<f32> = entry
+                .pitch_edit
+                .get(start_frame..end_frame)
+                .unwrap_or(&[])
+                .to_vec();
+
+            if extracted.is_empty() {
+                continue;
+            }
+
+            // Step 3: 合并 pitch_edit 与回退曲线 ——
+            // 帧中 pitch_edit 值 <= 0 表示未被编辑或无效，回退到原有 midi 数据
+            let merged: Vec<f32> = extracted
+                .iter()
+                .enumerate()
+                .map(|(i, &e)| {
+                    if e > 0.0 {
+                        e
+                    } else {
+                        fallback_curve.get(i).copied().unwrap_or(0.0)
+                    }
+                })
+                .collect();
+
+            // Step 4: 转换为 MIDI 音符事件
+            let mut midi_notes =
+                Self::pitch_curve_to_midi_notes(&merged, fp_sec, info.length_sec);
+
+            // Step 5: 根据 stretch / reverse 重映射音符时间
+            Self::remap_midi_note_times(
+                &mut midi_notes,
+                info.length_sec,
+                info.src_start,
+                info.src_end,
+                info.playback_rate,
+                info.reversed,
+            );
+
+            // Step 6: 写回 clip，同时重新计算 pitch_range
+            if let Some(clip) = self.clips.iter_mut().find(|c| c.id == info.clip_id) {
+                let min_note = midi_notes
+                    .iter()
+                    .fold(127.0f32, |m, n| m.min(n.note));
+                let max_note = midi_notes
+                    .iter()
+                    .fold(0.0f32, |m, n| m.max(n.note));
+                let padding = 2.0f32;
+                clip.pitch_range = Some(PitchRange {
+                    min: (min_note - padding).max(0.0),
+                    max: (max_note + padding).min(127.0),
+                });
+                clip.midi_note_data = Some(midi_notes);
+            }
+        }
+
+        // Step 7: 为每个受影响的 root track 立即重组 pitch_orig / pitch_edit
+        let roots: std::collections::HashSet<&str> =
+            clip_infos.iter().map(|info| info.root.as_str()).collect();
+        for root in &roots {
+            let (curve, _all_cache_hit, has_pitch_adjustment) =
+                match crate::pitch_analysis::schedule::assemble_pitch_orig_from_cache(self, root) {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+            self.ensure_params_for_root(root);
+            let key = crate::pitch_analysis::build_root_pitch_key(self, root);
+
+            if let Some(entry) = self.params_by_root_track.get_mut(*root) {
+                entry.pitch_orig = curve;
+                entry.pitch_orig_key = Some(key);
+                entry.has_pitch_adjustment_active = has_pitch_adjustment;
+                if !entry.pitch_edit_user_modified {
+                    entry.pitch_edit.clone_from(&entry.pitch_orig);
+                }
+            }
+        }
+    }
+
+    /// 从 midi_note_data 构建一段 clip 时长内的回退音高曲线（单位：MIDI note number）。
+    /// 时间映射与 `assemble_pitch_orig_from_cache` 中的 MIDI clip 路径保持一致。
+    fn build_fallback_pitch_from_midi(
+        length_sec: f64,
+        fp: f64,
+        midi_notes: &[MidiNoteEvent],
+        playback_rate: f32,
+        reversed: bool,
+        src_start: f64,
+        src_end: f64,
+    ) -> Vec<f32> {
+        let fp_sec = fp / 1000.0;
+        let total_frames = ((length_sec.max(0.0) * 1000.0) / fp).ceil().max(1.0) as usize;
+        let mut curve = vec![0.0f32; total_frames];
+        let pr = if playback_rate.is_finite() && playback_rate > 0.0 {
+            playback_rate as f64
+        } else {
+            1.0
+        };
+        let src_total = src_end - src_start;
+
+        for note in midi_notes {
+            let rel_start = (note.start_sec - src_start).max(0.0);
+            let rel_end = (note.end_sec - src_start).min(src_total);
+            if rel_end <= rel_start {
+                continue;
+            }
+
+            let (eff_start, eff_end) = if reversed {
+                (
+                    (src_total - rel_end).max(0.0),
+                    (src_total - rel_start).min(src_total),
+                )
+            } else {
+                (rel_start, rel_end)
+            };
+            if eff_end <= eff_start {
+                continue;
+            }
+
+            let frame_start = ((eff_start / pr) / fp_sec).round() as usize;
+            let frame_end = (((eff_end / pr) / fp_sec).round() as usize).min(total_frames);
+            if frame_start < frame_end {
+                let note_value = note.note as f32;
+                for f in frame_start..frame_end {
+                    if note_value > curve[f] || curve[f] <= 0.0 {
+                        curve[f] = note_value;
+                    }
+                }
+            }
+        }
+
+        curve
+    }
+
+    /// 将 pitch_curve_to_midi_notes 输出的"提取时间"坐标重映射为 source-time 坐标，
+    /// 以匹配 stretch（playback_rate）和倒放（reversed）参数。
+    fn remap_midi_note_times(
+        notes: &mut [MidiNoteEvent],
+        length_sec: f64,
+        src_start: f64,
+        src_end: f64,
+        playback_rate: f32,
+        reversed: bool,
+    ) {
+        let pr = if playback_rate.is_finite() && playback_rate > 0.0 {
+            playback_rate as f64
+        } else {
+            1.0
+        };
+        let src_total = src_end - src_start;
+
+        for note in notes.iter_mut() {
+            let proj_start = note.start_sec; // 当前为提取时间（相对 clip 起点的项目时间）
+            let proj_end = note.end_sec;
+
+            let (new_start, new_end) = if reversed {
+                let eff_start = (length_sec - proj_end) * pr;
+                let eff_end = (length_sec - proj_start) * pr;
+                let src_note_start = (src_total - eff_end).max(0.0);
+                let src_note_end = (src_total - eff_start).min(src_total);
+                (src_note_start + src_start, src_note_end + src_start)
+            } else {
+                (proj_start * pr + src_start, proj_end * pr + src_start)
+            };
+
+            note.start_sec = new_start;
+            note.end_sec = new_end;
+        }
+    }
+
     /// 将 pitch 曲线（Vec<f32> of MIDI note numbers）转换为 MidiNoteEvent 列表。
     /// 使用原始的浮点音高值，不进行半音量化。
     /// 相邻帧中音高差异极小时合并为一个事件。

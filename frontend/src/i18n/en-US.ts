@@ -795,5 +795,6 @@ export const enUS = {
 
     // Pitch reference clip
     ctx_convert_to_pitch_ref: "Convert to Pitch Reference Clip",
+    ctx_update_pitch_ref: "Update Pitch Reference",
     menu_save_as_pitch_ref: "Save as Pitch Reference Clip",
 } as const;

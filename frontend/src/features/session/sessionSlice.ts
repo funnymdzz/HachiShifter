@@ -26,6 +26,7 @@ import {
     duplicateTrackRemote,
     fetchSelectedTrackSummary,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     glueClipsRemote,
     moveClipRemote,
     moveClipsRemote,
@@ -1098,6 +1099,7 @@ export {
     replaceMidiClipDataRemote,
     splitClipRemote,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     glueClipsRemote,
     selectClipRemote,
 } from "./thunks/timelineThunks";
@@ -2868,6 +2870,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(convertClipsToPitchReferenceRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(updatePitchReferenceRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

@@ -2916,6 +2916,7 @@ export const PianoRollPanel: React.FC = () => {
 
         if (currentIdx > 0) {
             const aboveTrackId = orderedTrackIds[currentIdx - 1];
+
             const hasOverlap = s.clips.some(
                 (c) =>
                     c.trackId === aboveTrackId &&
@@ -2923,15 +2924,26 @@ export const PianoRollPanel: React.FC = () => {
                     c.startSec + c.lengthSec > startSec,
             );
             if (!hasOverlap) {
-                targetTrackId = aboveTrackId;
+                const currentTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
+                const aboveTrack = s.tracks.find((t) => t.id === aboveTrackId);
+                if (
+                    currentTrack &&
+                    aboveTrack &&
+                    currentTrack.depth != null &&
+                    aboveTrack.depth != null &&
+                    currentTrack.depth >= aboveTrack.depth
+                ) {
+                    targetTrackId = aboveTrackId;
+                }
             }
         }
 
         if (!targetTrackId) {
             // Create a new track above the current track
+            const currentTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
             const newTrackPayload: Record<string, unknown> = {
                 name: undefined,
-                parentTrackId: null,
+                parentTrackId: currentTrack?.parentId ?? null,
             };
             if (currentIdx >= 0) {
                 newTrackPayload.index = currentIdx;

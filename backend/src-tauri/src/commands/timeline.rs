@@ -773,6 +773,36 @@ pub(super) fn convert_clips_to_pitch_reference(
     payload
 }
 
+pub(super) fn update_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    // 收集 root track IDs 用于后续 pitch 分析调度
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.update_pitch_reference_from_track_params(&clip_ids);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
 pub(super) fn select_clip(
     state: State<'_, AppState>,
     clip_id: Option<String>,

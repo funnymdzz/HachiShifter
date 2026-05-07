@@ -33,6 +33,7 @@ import {
     setClipFades,
     glueClipsRemote,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     removeClipsRemote,
     setTrackName,
     setTrackVolume,
@@ -1660,6 +1661,11 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   onConvertToPitchRef={(ids) => {
                                       setContextMenu(null);
                                       void dispatch(convertClipsToPitchReferenceRemote(ids));
+                                      setMultiSelectedClipIds([]);
+                                  }}
+                                  onUpdatePitchRef={(ids) => {
+                                      setContextMenu(null);
+                                      void dispatch(updatePitchReferenceRemote(ids));
                                       setMultiSelectedClipIds([]);
                                   }}
                                   onFadeCurveChange={(clipId, target, curve) => {

@@ -227,5 +227,8 @@ export const timelineApi = {
     convertClipsToPitchReference: (clipIds: string[]) =>
         invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
 
+    updatePitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("update_pitch_reference", clipIds),
+
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
 };
