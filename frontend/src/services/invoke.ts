@@ -427,7 +427,10 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { algo: args[0] };
 
         case "get_midi_tracks":
-            return { midiPath: args[0] };
+            return {
+                midiPath: args[0],
+                ...(args[1] != null ? { clipboardGuid: args[1] } : {}),
+            };
 
         case "import_midi_to_pitch":
             return {
@@ -439,6 +442,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[5] !== undefined ? { noteBpmMode: args[5] } : {}),
                 ...(args[6] !== undefined ? { specifiedBpm: args[6] } : {}),
                 ...(args[7] !== undefined ? { importMidiBpmAsProject: args[7] } : {}),
+                ...(args[8] != null ? { clipboardGuid: args[8] } : {}),
+                ...(args[9] !== undefined ? { closeLeadingGap: args[9] } : {}),
             };
 
         case "import_midi_as_clip":
@@ -452,6 +457,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[6] !== undefined ? { noteBpmMode: args[6] } : {}),
                 ...(args[7] !== undefined ? { specifiedBpm: args[7] } : {}),
                 ...(args[8] !== undefined ? { importMidiBpmAsProject: args[8] } : {}),
+                ...(args[9] != null ? { clipboardGuid: args[9] } : {}),
+                ...(args[10] !== undefined ? { closeLeadingGap: args[10] } : {}),
             };
 
         case "replace_midi_clip_data":
@@ -463,6 +470,8 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[4] !== undefined ? { noteBpmMode: args[4] } : {}),
                 ...(args[5] !== undefined ? { specifiedBpm: args[5] } : {}),
                 ...(args[6] !== undefined ? { importMidiBpmAsProject: args[6] } : {}),
+                ...(args[7] != null ? { clipboardGuid: args[7] } : {}),
+                ...(args[8] !== undefined ? { closeLeadingGap: args[8] } : {}),
             };
 
         case "save_ui_settings":

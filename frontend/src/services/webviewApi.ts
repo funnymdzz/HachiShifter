@@ -88,6 +88,7 @@ export const webApi = {
     importMidiAsClip: paramsApi.importMidiAsClip,
     replaceMidiClipData: paramsApi.replaceMidiClipData,
     getMidiTracks: paramsApi.getMidiTracks,
+    readMidiClipboardToMemory: paramsApi.readMidiClipboardToMemory,
 
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,

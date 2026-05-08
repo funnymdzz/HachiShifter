@@ -256,6 +256,9 @@ export const koKR = {
     param_editor: "파라미터 에디터",
     pitch_requires_compose: "루트 트랙에서 Compose(C)를 활성화하여 피치 커브를 생성하세요",
     pitch_requires_algo: "피치 편집을 활성화하려면 '없음' 이외의 피치 알고리즘을 선택하세요",
+    midi_compose_required_title: "Compose가 비활성화됨",
+    midi_compose_required_message:
+        "루트 트랙에서 Compose가 활성화되어 있지 않습니다. 활성화하여 피치 커브 가져오기를 계속하시겠습니까?",
     pitch_backend_unavailable: "피치 백엔드 사용 불가 (WORLD DLL / ONNX 모델을 확인하세요)",
     pitch_edit_not_modified_hint: "아직 편집되지 않음: 커브가 원본 피치와 동일합니다",
     pitch_status_label: "피치",
@@ -542,6 +545,7 @@ export const koKR = {
     midi_select_all: "전체 선택",
     midi_deselect_all: "전체 해제",
     midi_multi_track_merge: "멀티트랙 병합",
+    midi_close_leading_gap: "시작 공백 닫기",
     midi_track_notes: "{count}개 노트",
     midi_track_range: "범위: {min} – {max}",
     midi_no_tracks: "MIDI 파일에 노트가 있는 트랙이 없습니다",
@@ -562,6 +566,7 @@ export const koKR = {
     // MIDI import — BPM options
     midi_import_bpm_as_project: "MIDI BPM을 프로젝트 BPM으로 가져오기",
     midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_no_bpm: "MIDI에 BPM 데이터가 없습니다!",
     midi_note_bpm: "노트 BPM",
     midi_note_bpm_midi: "MIDI 자체 BPM",
     midi_note_bpm_project: "현재 프로젝트 BPM",
@@ -572,6 +577,12 @@ export const koKR = {
     midi_clipboard_read_failed: "클립보드에서 MIDI를 읽지 못했습니다",
     midi_clipboard_empty: "클립보드에서 Standard MIDI File을 찾을 수 없습니다",
     midi_clipboard_parse_failed: "클립보드의 MIDI 데이터를 해석하지 못했습니다",
+
+    // MIDI 가져오기 대상 선택
+    midi_import_target: "가져오기 대상",
+    midi_import_target_pitch_block: "음높이 참조 블록",
+    midi_import_target_pitch_param: "음높이 파라미터",
+    midi_clipboard_midi_prefix: "클립보드 MIDI：",
 
     // MIDI replace dialog
     midi_replace_title: "MIDI 교체",

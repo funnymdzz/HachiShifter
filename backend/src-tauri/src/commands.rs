@@ -907,13 +907,17 @@ pub fn get_processor_params(algo: String) -> Vec<processor_caps::ParamDescriptor
 // ===================== midi =====================
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_midi_tracks(midi_path: String) -> serde_json::Value {
-    midi::get_midi_tracks(midi_path)
+pub fn get_midi_tracks(
+    state: State<'_, AppState>,
+    midi_path: String,
+    clipboard_guid: Option<String>,
+) -> serde_json::Value {
+    midi::get_midi_tracks(state.inner(), midi_path, clipboard_guid)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn read_midi_clipboard_as_temp() -> serde_json::Value {
-    midi::read_midi_clipboard_as_temp()
+pub fn read_midi_clipboard_to_memory(state: State<'_, AppState>) -> serde_json::Value {
+    midi::read_midi_clipboard_to_memory(state.inner())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -927,6 +931,8 @@ pub fn import_midi_to_pitch(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> serde_json::Value {
     midi::import_midi_to_pitch(
         state.inner(),
@@ -938,6 +944,8 @@ pub fn import_midi_to_pitch(
         note_bpm_mode,
         specified_bpm,
         import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
     )
 }
 
@@ -953,6 +961,8 @@ pub fn import_midi_as_clip(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi::import_midi_as_clip(
         state.inner(),
@@ -965,6 +975,8 @@ pub fn import_midi_as_clip(
         note_bpm_mode,
         specified_bpm,
         import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
     )
 }
 
@@ -978,6 +990,8 @@ pub fn replace_midi_clip_data(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi::replace_midi_clip_data(
         state.inner(),
@@ -988,6 +1002,8 @@ pub fn replace_midi_clip_data(
         note_bpm_mode,
         specified_bpm,
         import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
     )
 }
 

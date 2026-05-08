@@ -37,6 +37,7 @@ import {
     toggleVisibleReferenceRootTrackId,
     createClipsRemote,
     addTrackRemote,
+    importMidiAsClip,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -268,14 +269,18 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    const [clipboardGuid, setClipboardGuid] = useState<string | null>(null);
     // 导入位置选项（持久化到软件设置）
-    const [importPosition, setImportPosition] = useState<string>("playhead");
+    const [importPosition, setImportPosition] = useState<string>("selection");
     // 填补空隙选项（持久化到软件设置）
     const [fillGaps, setFillGaps] = useState<boolean>(false);
     // BPM 选项（持久化到软件设置）
     const [importBpmAsProject, setImportBpmAsProject] = useState(false);
     const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
     const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    const [multiTrackMerge, setMultiTrackMerge] = useState<boolean>(true);
+    const [closeLeadingGap, setCloseLeadingGap] = useState<boolean>(true);
+    const [importTarget, setImportTarget] = useState<string>("pitchParam");
     // 启动时从设置加载
     useEffect(() => {
         settingsApi.getUiSettings().then((s) => {
@@ -293,6 +298,15 @@ export const PianoRollPanel: React.FC = () => {
             }
             if (s?.midiSpecifiedBpm != null) {
                 setSpecifiedBpm(s.midiSpecifiedBpm);
+            }
+            if (s?.midiMultiTrackMerge != null) {
+                setMultiTrackMerge(s.midiMultiTrackMerge);
+            }
+            if (s?.midiCloseLeadingGap != null) {
+                setCloseLeadingGap(s.midiCloseLeadingGap);
+            }
+            if (s?.midiImportTarget != null) {
+                setImportTarget(s.midiImportTarget);
             }
         });
     }, []);
@@ -378,9 +392,15 @@ export const PianoRollPanel: React.FC = () => {
         // 快照当前选区（拍为单位）
         const sel = selectionRef.current;
         setMidiDialogSelection(sel ? { ...sel } : null);
+        // 快照当前的 editParam 和 toolMode，保证异步加载轨道期间 selectionAvailable 不变
+        midiDialogOpenParamsRef.current = {
+            editParam: s.editParam,
+            toolMode: s.toolMode,
+        };
         setMidiPath(null);
+        setClipboardGuid(null);
         setMidiDialogOpen(true);
-    }, []);
+    }, [s.editParam, s.toolMode]);
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -1315,6 +1335,11 @@ export const PianoRollPanel: React.FC = () => {
     }
 
     const selectionRef = useRef<{ aBeat: number; bBeat: number } | null>(null);
+    // 记录打开 MIDI 弹窗时的 editParam / toolMode 快照，避免异步加载轨道期间 Redux 状态变化导致 selectionAvailable 跳变
+    const midiDialogOpenParamsRef = useRef<{
+        editParam: string;
+        toolMode: string;
+    }>({ editParam: "pitch", toolMode: "select" });
     const [selectionUi, setSelectionUi] = useState<{
         aBeat: number;
         bBeat: number;
@@ -1401,10 +1426,41 @@ export const PianoRollPanel: React.FC = () => {
 
     const handleMidiImported = useCallback(
         (_result: { notes_imported: number; frames_touched: number }) => {
-            // 导入完成后刷新参数面板
             refreshNow();
         },
         [refreshNow],
+    );
+
+    const handleImportAsClip = useCallback(
+        (result: {
+            trackIndices: number[];
+            notesCount: number;
+            midiPath: string;
+            fillGaps: boolean;
+            multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
+        }) => {
+            void dispatch(
+                importMidiAsClip({
+                    midiPath: result.midiPath,
+                    trackIndices: result.trackIndices,
+                    trackId: s.selectedTrackId,
+                    startSec: s.playheadSec,
+                    fillGaps: result.fillGaps || undefined,
+                    multiTrackMerge: result.multiTrackMerge,
+                    noteBpmMode: result.noteBpmMode,
+                    specifiedBpm: result.specifiedBpm,
+                    importBpmAsProject: result.importBpmAsProject,
+                    clipboardGuid: result.clipboardGuid,
+                    closeLeadingGap: result.closeLeadingGap,
+                }),
+            );
+        },
+        [dispatch, s.selectedTrackId, s.playheadSec],
     );
 
     // 导入位置变更时持久化保存
@@ -1435,6 +1491,32 @@ export const PianoRollPanel: React.FC = () => {
         void settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any);
     }, []);
 
+    const handleMultiTrackMergeChange = useCallback((v: boolean) => {
+        setMultiTrackMerge(v);
+        void settingsApi.saveUiSettings({ midiMultiTrackMerge: v } as any);
+    }, []);
+
+    const handleCloseLeadingGapChange = useCallback((v: boolean) => {
+        setCloseLeadingGap(v);
+        void settingsApi.saveUiSettings({ midiCloseLeadingGap: v } as any);
+    }, []);
+
+    const handleImportTargetChange = useCallback((v: string) => {
+        setImportTarget(v);
+        void settingsApi.saveUiSettings({ midiImportTarget: v } as any);
+    }, []);
+
+    const handleRequestEnableCompose = useCallback(() => {
+        const rtId = rootTrackId;
+        if (!rtId) return;
+        dispatch(
+            setTrackStateRemote({
+                trackId: rtId,
+                composeEnabled: true,
+            }),
+        );
+    }, [dispatch, rootTrackId]);
+
     // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
     const midiSelArgs = useMemo(() => {
         if (!midiDialogSelection) return {};
@@ -1446,11 +1528,12 @@ export const PianoRollPanel: React.FC = () => {
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
     }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
 
-    // selection 导入模式是否可用
-    const midiSelectionAvailable = useMemo(
-        () => s.toolMode === "select" && midiDialogSelection != null,
-        [s.toolMode, midiDialogSelection],
-    );
+    // selection 导入模式是否可用（基于弹窗打开时的快照，避免异步加载轨道时状态变化）
+    const midiSelectionAvailable = useMemo(() => {
+        if (!midiDialogSelection) return false;
+        const p = midiDialogOpenParamsRef.current;
+        return p.editParam === "pitch" && p.toolMode === "select";
+    }, [midiDialogSelection]);
 
     // 获取当前 track 下的所 ?clips，用 ?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
@@ -2106,6 +2189,8 @@ export const PianoRollPanel: React.FC = () => {
             // External clipboard paste ops – work with or without selection
             if (op === "pasteReaper" || op === "pasteVocalShifter") {
                 const sel2 = selectionRef.current;
+                const capturedEditParam = s.editParam;
+                const capturedToolMode = s.toolMode;
                 let selArgs:
                     | {
                           selectionStartFrame?: number;
@@ -2123,7 +2208,26 @@ export const PianoRollPanel: React.FC = () => {
                     };
                 }
                 if (op === "pasteReaper") {
-                    void dispatch(pasteReaperClipboard(selArgs));
+                    // 检查剪贴板是否包含 Standard MIDI File，若有则弹出统一导入弹窗
+                    void (async () => {
+                        try {
+                            const midiCheck = await paramsApi.readMidiClipboardToMemory();
+                            if (midiCheck.ok && midiCheck.guid) {
+                                setClipboardGuid(midiCheck.guid);
+                                setMidiPath(null);
+                                setMidiDialogSelection(sel2 ? { ...sel2 } : null);
+                                midiDialogOpenParamsRef.current = {
+                                    editParam: capturedEditParam,
+                                    toolMode: capturedToolMode,
+                                };
+                                setMidiDialogOpen(true);
+                                return;
+                            }
+                        } catch {
+                            // 检查失败，回退到普通 Reaper 粘贴
+                        }
+                        void dispatch(pasteReaperClipboard(selArgs));
+                    })();
                 } else {
                     void dispatch(
                         pasteVocalShifterClipboard({
@@ -3990,9 +4094,15 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
+                importTarget={importTarget}
+                onImportTargetChange={handleImportTargetChange}
+                rootTrackComposeEnabled={rootTrack?.composeEnabled ?? true}
+                onRequestEnableCompose={handleRequestEnableCompose}
+                clipboardGuid={clipboardGuid}
                 selectionStartFrame={midiSelArgs.selectionStartFrame}
                 selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
+                onImportAsClip={handleImportAsClip}
                 importPosition={importPosition}
                 onImportPositionChange={handleImportPositionChange}
                 selectionAvailable={midiSelectionAvailable}
@@ -4005,6 +4115,10 @@ export const PianoRollPanel: React.FC = () => {
                 onNoteBpmModeChange={handleNoteBpmModeChange}
                 specifiedBpm={specifiedBpm}
                 onSpecifiedBpmChange={handleSpecifiedBpmChange}
+                multiTrackMerge={multiTrackMerge}
+                onMultiTrackMergeChange={handleMultiTrackMergeChange}
+                closeLeadingGap={closeLeadingGap}
+                onCloseLeadingGapChange={handleCloseLeadingGapChange}
             />
             {ctxMenu && s.toolMode === "select" && (
                 <EditContextMenu

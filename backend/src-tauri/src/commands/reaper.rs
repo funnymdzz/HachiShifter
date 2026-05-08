@@ -4,6 +4,7 @@
 // - open_reaper_dialog: 打开文件选择对话框（.rpp）
 // - import_reaper_project: 解析并导入 .rpp 工程
 
+use crate::pitch_analysis;
 use crate::reaper_import;
 use crate::state::AppState;
 use std::path::Path;
@@ -92,6 +93,20 @@ pub(super) fn import_reaper_project(
         tl.project_sec = max_end;
 
         state.audio_engine.update_timeline(tl.clone());
+
+        // 为导入的 MIDI 音高参考块触发 pitch 分析
+        let midi_root_tracks: Vec<String> = tl
+            .clips
+            .iter()
+            .filter(|c| c.midi_note_data.is_some())
+            .filter_map(|c| tl.resolve_root_track_id(&c.track_id))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        drop(tl);
+        for root_id in &midi_root_tracks {
+            pitch_analysis::maybe_schedule_pitch_orig(state, root_id);
+        }
     }
     let _ = state.end_undo_group();
 

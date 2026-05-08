@@ -176,6 +176,8 @@ export const zhCN = {
     param_editor: "参数编辑器",
     pitch_requires_compose: "请在根轨开启 Compose（C）以生成音高曲线",
     pitch_requires_algo: "请选择算法以启用编辑",
+    midi_compose_required_title: "根轨未开启合成",
+    midi_compose_required_message: "当前根轨未开启 Compose 合成，是否开启以继续导入音高曲线？",
     pitch_backend_unavailable: "音高后端不可用（请检查 WORLD DLL / ONNX 模型）",
     pitch_edit_not_modified_hint: "尚未修改曲线：当前等同原始音高",
     pitch_status_label: "音高",
@@ -457,6 +459,7 @@ export const zhCN = {
     midi_select_all: "全选",
     midi_deselect_all: "全不选",
     midi_multi_track_merge: "多轨合并",
+    midi_close_leading_gap: "关闭开头空隙",
     midi_track_notes: "{count} 个音符",
     midi_track_range: "范围：{min} – {max}",
     midi_no_tracks: "MIDI 文件中没有包含音符的轨道",
@@ -476,6 +479,7 @@ export const zhCN = {
     // MIDI import — BPM options
     midi_import_bpm_as_project: "将 MIDI BPM 导入为工程 BPM",
     midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_no_bpm: "MIDI 不存在 BPM！",
     midi_note_bpm: "音符 BPM",
     midi_note_bpm_midi: "MIDI 自身 BPM",
     midi_note_bpm_project: "当前工程 BPM",
@@ -486,6 +490,12 @@ export const zhCN = {
     midi_clipboard_read_failed: "从剪贴板读取 MIDI 失败",
     midi_clipboard_empty: "剪贴板中未找到 Standard MIDI File 数据",
     midi_clipboard_parse_failed: "解析剪贴板中的 MIDI 数据失败",
+
+    // MIDI 导入目标选择
+    midi_import_target: "导入目标",
+    midi_import_target_pitch_block: "音高参考块",
+    midi_import_target_pitch_param: "音高参数",
+    midi_clipboard_midi_prefix: "剪贴板 MIDI：",
 
     // MIDI replace dialog
     midi_replace_title: "替换 MIDI",

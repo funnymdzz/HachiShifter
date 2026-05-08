@@ -343,7 +343,7 @@ pub fn run() {
             commands::clear_cache,
             commands::get_processor_params,
             commands::get_midi_tracks,
-            commands::read_midi_clipboard_as_temp,
+            commands::read_midi_clipboard_to_memory,
             commands::import_midi_to_pitch,
             commands::import_midi_as_clip,
             commands::replace_midi_clip_data,

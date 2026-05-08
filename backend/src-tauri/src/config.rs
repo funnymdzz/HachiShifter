@@ -76,6 +76,10 @@ pub struct UiSettings {
     pub midi_note_bpm_mode: String,
     #[serde(default)]
     pub midi_specified_bpm: Option<f64>,
+    #[serde(default = "default_true")]
+    pub midi_close_leading_gap: bool,
+    #[serde(default = "default_midi_import_target")]
+    pub midi_import_target: String,
 }
 
 /// 导出音频设置（持久化到 app_config.json）
@@ -203,11 +207,15 @@ fn default_scale_highlight_mode() -> String {
 }
 
 fn default_midi_import_position() -> String {
-    "playhead".to_string()
+    "selection".to_string()
 }
 
 fn default_midi_note_bpm_mode() -> String {
     "midi".to_string()
+}
+
+fn default_midi_import_target() -> String {
+    "pitchParam".to_string()
 }
 
 impl Default for UiSettings {
@@ -242,6 +250,8 @@ impl Default for UiSettings {
             midi_import_bpm_as_project: false,
             midi_note_bpm_mode: default_midi_note_bpm_mode(),
             midi_specified_bpm: None,
+            midi_close_leading_gap: true,
+            midi_import_target: default_midi_import_target(),
         }
     }
 }

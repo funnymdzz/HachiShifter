@@ -873,6 +873,9 @@ pub struct AppState {
     pub waveform_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
     pub waveform_inflight_cv: std::sync::Condvar,
 
+    /// In-memory cache of clipboard MIDI bytes, keyed by GUID (first 8 bytes of blake3 hash as hex).
+    pub clipboard_midi_cache: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+
     // Set in Tauri setup. Used for async notifications.
     pub app_handle: OnceLock<tauri::AppHandle>,
 
@@ -920,6 +923,7 @@ impl Default for AppState {
 
             waveform_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
             waveform_inflight_cv: std::sync::Condvar::new(),
+            clipboard_midi_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -2961,11 +2965,6 @@ impl TimelineState {
                 clip.duration_frames = None;
                 clip.waveform_preview = None;
                 clip.color = "cyan".to_string();
-                // 重置 source trim，使 midiNoteData 完整映射到 clip 时间轴
-                clip.source_start_sec = 0.0;
-                clip.source_end_sec = clip.length_sec;
-                clip.playback_rate = 1.0;
-                clip.reversed = false;
                 clip.pitch_range = Some(PitchRange {
                     min: 0.0,
                     max: 127.0,

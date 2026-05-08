@@ -57,6 +57,8 @@ pub struct MidiParseResult {
     pub track_notes: Vec<Vec<MidiNoteEvent>>,
     /// MIDI 初始 BPM（第一个 Tempo 事件的 BPM，或回退默认值）
     pub initial_bpm: f64,
+    /// MIDI 文件是否包含实际的 Tempo 事件（非回退值）
+    pub has_tempo: bool,
 }
 
 /// 将弯音轮原始值和弯音灵敏度转换为半音偏移量。
@@ -144,8 +146,10 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         }
     }
 
+    let has_tempo = !tempo_events.is_empty();
+
     // 如果没有 tempo 事件，使用 fallback_bpm 或默认 120 BPM
-    if tempo_events.is_empty() {
+    if !has_tempo {
         let us_per_beat = match fallback_bpm {
             Some(bpm) if bpm > 0.0 && bpm.is_finite() => 60_000_000.0 / bpm,
             _ => 500_000.0, // 120 BPM
@@ -379,6 +383,7 @@ fn parse_midi_data(data: &[u8], fallback_bpm: Option<f64>) -> Result<MidiParseRe
         tracks: all_tracks,
         track_notes: all_track_notes,
         initial_bpm,
+        has_tempo,
     })
 }
 

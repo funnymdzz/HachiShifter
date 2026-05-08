@@ -6,6 +6,7 @@
 // 支持 Windows / macOS / Linux (X11 & Wayland)。
 
 use crate::midi_import;
+use crate::pitch_analysis;
 use crate::reaper_import;
 use crate::state::AppState;
 
@@ -314,23 +315,15 @@ fn paste_midi_clipboard_inner(
 }
 
 /// 粘贴 Reaper 剪贴板数据到当前选中的轨道。
-/// 优先检测 "Standard MIDI File" 格式，若存在则作为 MIDI 导入到当前轨道的 pitch_edit。
+///
+/// 不再自动处理 MIDI 剪贴板；前端应先通过 `read_midi_clipboard_to_memory` 检测
+/// Standard MIDI File 并弹出统一导入弹窗。
 pub(super) fn paste_reaper_clipboard(
     state: &AppState,
-    selection_start_frame: Option<usize>,
-    selection_max_frames: Option<usize>,
+    _selection_start_frame: Option<usize>,
+    _selection_max_frames: Option<usize>,
 ) -> serde_json::Value {
-    // 优先尝试 MIDI 剪贴板
-    if let Ok(midi_data) = read_midi_clipboard() {
-        return paste_midi_clipboard_inner(
-            state,
-            &midi_data,
-            selection_start_frame,
-            selection_max_frames,
-        );
-    }
-
-    // 回退到 REAPERMedia 剪贴板
+    // REAPERMedia 剪贴板
     let data = match read_reaper_clipboard() {
         Ok(d) => d,
         Err(e) => {
@@ -338,8 +331,8 @@ pub(super) fn paste_reaper_clipboard(
         }
     };
 
-    // 从当前 timeline 读取光标位置、选中轨道、轨道顺序
-    let (playhead_sec, selected_track_idx, ordered_track_ids) = {
+    // 从当前 timeline 读取光标位置、选中轨道、轨道顺序、BPM
+    let (playhead_sec, selected_track_idx, ordered_track_ids, project_bpm) = {
         let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
         // 按 order 排序的轨道 ID
@@ -354,7 +347,7 @@ pub(super) fn paste_reaper_clipboard(
             .and_then(|sel| ordered.iter().position(|id| id == sel))
             .unwrap_or(0);
 
-        (tl.playhead_sec, sel_idx, ordered)
+        (tl.playhead_sec, sel_idx, ordered, tl.bpm)
     };
 
     // 解析并转换
@@ -363,6 +356,7 @@ pub(super) fn paste_reaper_clipboard(
         playhead_sec,
         selected_track_idx,
         &ordered_track_ids,
+        project_bpm,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -436,6 +430,20 @@ pub(super) fn paste_reaper_clipboard(
         tl.project_sec = max_end;
 
         state.audio_engine.update_timeline(tl.clone());
+
+        // 为导入的 MIDI 音高参考块触发 pitch 分析
+        let midi_root_tracks: Vec<String> = tl
+            .clips
+            .iter()
+            .filter(|c| c.midi_note_data.is_some())
+            .filter_map(|c| tl.resolve_root_track_id(&c.track_id))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        drop(tl);
+        for root_id in &midi_root_tracks {
+            pitch_analysis::maybe_schedule_pitch_orig(state, root_id);
+        }
     }
     let _ = state.end_undo_group();
 

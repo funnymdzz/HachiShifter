@@ -337,6 +337,7 @@ export const replaceMidiClipDataRemote = createAsyncThunk(
         noteBpmMode?: string;
         specifiedBpm?: number;
         importMidiBpmAsProject?: boolean;
+        closeLeadingGap?: boolean;
     }) => {
         return webApi.replaceMidiClipData(
             payload.clipId,
@@ -346,6 +347,8 @@ export const replaceMidiClipDataRemote = createAsyncThunk(
             payload.noteBpmMode,
             payload.specifiedBpm,
             payload.importMidiBpmAsProject,
+            undefined,
+            payload.closeLeadingGap,
         );
     },
 );

@@ -177,11 +177,15 @@ function AppInner() {
     const [midiClipPath, setMidiClipPath] = useState<string | null>(null);
     const [midiClipStartSec, setMidiClipStartSec] = useState(0);
     const [midiClipTrackId, setMidiClipTrackId] = useState<string | null>(null);
+    const [midiClipClipboardGuid, setMidiClipClipboardGuid] = useState<string | null>(null);
     const [fillGaps, setFillGaps] = useState(false);
     const [multiTrackMerge, setMultiTrackMerge] = useState(true);
     const [importBpmAsProject, setImportBpmAsProject] = useState(false);
     const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
     const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    const [importPosition, setImportPosition] = useState<string>("selection");
+    const [closeLeadingGap, setCloseLeadingGap] = useState(true);
+    const [midiImportTarget, setMidiImportTarget] = useState<string>("pitchRef");
 
     // 加载 MIDI 相关设置
     useEffect(() => {
@@ -202,12 +206,22 @@ function AppInner() {
                 if (s?.midiSpecifiedBpm != null) {
                     setSpecifiedBpm(s.midiSpecifiedBpm);
                 }
+                if (s?.midiImportPosition != null) {
+                    setImportPosition(s.midiImportPosition);
+                }
+                if (s?.midiCloseLeadingGap != null) {
+                    setCloseLeadingGap(s.midiCloseLeadingGap);
+                }
+                if (s?.midiImportTarget != null) {
+                    setMidiImportTarget(s.midiImportTarget);
+                }
             });
         });
     }, []);
 
     const handleImportMidiFromMenu = useCallback(() => {
         setMidiClipPath(null);
+        setMidiClipClipboardGuid(null);
         setMidiClipStartSec(playheadSec ?? 0);
         setMidiClipTrackId(selectedTrackId ?? null);
         setMidiClipDialogOpen(true);
@@ -245,6 +259,27 @@ function AppInner() {
         setSpecifiedBpm(v);
         void import("./services/api/settings").then(({ settingsApi }) =>
             settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any),
+        );
+    }, []);
+
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportPosition: position } as any),
+        );
+    }, []);
+
+    const handleCloseLeadingGapChange = useCallback((v: boolean) => {
+        setCloseLeadingGap(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiCloseLeadingGap: v } as any),
+        );
+    }, []);
+
+    const handleImportTargetChange = useCallback((v: string) => {
+        setMidiImportTarget(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportTarget: v } as any),
         );
     }, []);
 
@@ -1521,11 +1556,14 @@ function AppInner() {
                             midiClipPath={midiClipPath}
                             midiClipStartSec={midiClipStartSec}
                             midiClipTrackId={midiClipTrackId}
+                            midiClipClipboardGuid={midiClipClipboardGuid}
                             fillGaps={fillGaps}
                             multiTrackMerge={multiTrackMerge}
                             importBpmAsProject={importBpmAsProject}
                             noteBpmMode={noteBpmMode}
                             specifiedBpm={specifiedBpm}
+                            importPosition={importPosition}
+                            closeLeadingGap={closeLeadingGap}
                             onMidiClipDialogOpenChange={setMidiClipDialogOpen}
                             onMidiClipPathChange={setMidiClipPath}
                             onMidiClipStartSecChange={setMidiClipStartSec}
@@ -1535,6 +1573,10 @@ function AppInner() {
                             onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
                             onNoteBpmModeChange={handleNoteBpmModeChange}
                             onSpecifiedBpmChange={handleSpecifiedBpmChange}
+                            onImportPositionChange={handleImportPositionChange}
+                            onCloseLeadingGapChange={handleCloseLeadingGapChange}
+                            importTarget={midiImportTarget}
+                            onImportTargetChange={handleImportTargetChange}
                         />
                     </Box>
 

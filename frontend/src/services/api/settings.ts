@@ -31,6 +31,8 @@ export interface UiSettings {
     midiImportBpmAsProject?: boolean;
     midiNoteBpmMode?: string;
     midiSpecifiedBpm?: number;
+    midiCloseLeadingGap?: boolean;
+    midiImportTarget?: string;
     customScalePresets?: Array<{
         id: string;
         name: string;

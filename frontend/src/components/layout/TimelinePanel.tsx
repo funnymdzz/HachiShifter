@@ -167,6 +167,13 @@ interface TimelinePanelProps {
     onImportBpmAsProjectChange: (v: boolean) => void;
     onNoteBpmModeChange: (v: string) => void;
     onSpecifiedBpmChange: (v: number) => void;
+    midiClipClipboardGuid?: string | null;
+    importPosition: string;
+    onImportPositionChange: (position: string) => void;
+    closeLeadingGap: boolean;
+    onCloseLeadingGapChange: (v: boolean) => void;
+    importTarget?: string;
+    onImportTargetChange?: (v: string) => void;
 }
 
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({
@@ -188,6 +195,13 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     onImportBpmAsProjectChange,
     onNoteBpmModeChange,
     onSpecifiedBpmChange,
+    midiClipClipboardGuid,
+    importPosition,
+    onImportPositionChange,
+    closeLeadingGap,
+    onCloseLeadingGapChange,
+    importTarget,
+    onImportTargetChange,
 }) => {
     const { t } = useI18n();
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
@@ -352,6 +366,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             noteBpmMode?: string;
             specifiedBpm?: number;
             importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
         }) => {
             void dispatch(
                 importMidiAsClip({
@@ -364,6 +380,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     noteBpmMode: result.noteBpmMode,
                     specifiedBpm: result.specifiedBpm,
                     importBpmAsProject: result.importBpmAsProject,
+                    clipboardGuid: result.clipboardGuid,
+                    closeLeadingGap: result.closeLeadingGap,
                 }),
             );
         },
@@ -381,6 +399,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             noteBpmMode?: string;
             specifiedBpm?: number;
             importBpmAsProject?: boolean;
+            closeLeadingGap?: boolean;
         }) => {
             const clipId = replaceMidiDialog.clipId;
             if (!clipId) return;
@@ -393,6 +412,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     noteBpmMode: result.noteBpmMode,
                     specifiedBpm: result.specifiedBpm,
                     importMidiBpmAsProject: result.importBpmAsProject,
+                    closeLeadingGap: result.closeLeadingGap,
                 }),
             );
             setReplaceMidiDialog({ open: false, clipId: null, midiPath: null });
@@ -1753,8 +1773,12 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     open={midiClipDialogOpen}
                     onOpenChange={onMidiClipDialogOpenChange}
                     midiPath={midiClipPath}
-                    mode="clip"
+                    importTarget={importTarget}
+                    onImportTargetChange={onImportTargetChange}
+                    clipboardGuid={midiClipClipboardGuid ?? null}
                     onImportAsClip={handleMidiClipImport}
+                    importPosition={importPosition}
+                    onImportPositionChange={onImportPositionChange}
                     fillGaps={fillGaps}
                     onFillGapsChange={onFillGapsChange}
                     multiTrackMerge={multiTrackMerge}
@@ -1766,6 +1790,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onNoteBpmModeChange={onNoteBpmModeChange}
                     specifiedBpm={specifiedBpm}
                     onSpecifiedBpmChange={onSpecifiedBpmChange}
+                    closeLeadingGap={closeLeadingGap}
+                    onCloseLeadingGapChange={onCloseLeadingGapChange}
                 />
 
                 <MidiTrackSelectDialog
@@ -1786,6 +1812,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onNoteBpmModeChange={onNoteBpmModeChange}
                     specifiedBpm={specifiedBpm}
                     onSpecifiedBpmChange={onSpecifiedBpmChange}
+                    closeLeadingGap={closeLeadingGap}
+                    onCloseLeadingGapChange={onCloseLeadingGapChange}
                 />
 
                 <Dialog.Root

@@ -79,7 +79,7 @@ export const paramsApi = {
     getProcessorParams: (algo: string) =>
         invoke<ProcessorParamDescriptor[]>("get_processor_params", algo),
 
-    getMidiTracks: (midiPath: string) =>
+    getMidiTracks: (midiPath: string, clipboardGuid?: string) =>
         invoke<{
             ok: boolean;
             error?: string;
@@ -91,13 +91,14 @@ export const paramsApi = {
                 max_note: number;
             }>;
             initial_bpm?: number;
-        }>("get_midi_tracks", midiPath),
+            has_bpm?: boolean;
+        }>("get_midi_tracks", midiPath, clipboardGuid ?? null),
 
-    readMidiClipboardAsTemp: () =>
+    readMidiClipboardToMemory: () =>
         invoke<{
             ok: boolean;
             error?: string;
-            temp_path?: string;
+            guid?: string;
             tracks?: Array<{
                 index: number;
                 name: string;
@@ -106,7 +107,8 @@ export const paramsApi = {
                 max_note: number;
             }>;
             initial_bpm?: number;
-        }>("read_midi_clipboard_as_temp"),
+            has_bpm?: boolean;
+        }>("read_midi_clipboard_to_memory"),
 
     importMidiToPitch: (
         midiPath: string,
@@ -117,6 +119,8 @@ export const paramsApi = {
         noteBpmMode?: string,
         specifiedBpm?: number,
         importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
     ) =>
         invoke<{
             ok: boolean;
@@ -133,6 +137,8 @@ export const paramsApi = {
             noteBpmMode,
             specifiedBpm,
             importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
         ),
 
     importMidiAsClip: (
@@ -145,6 +151,8 @@ export const paramsApi = {
         noteBpmMode?: string,
         specifiedBpm?: number,
         importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
     ) =>
         invoke<TimelineResult & { ok: boolean; error?: string }>(
             "import_midi_as_clip",
@@ -157,6 +165,8 @@ export const paramsApi = {
             noteBpmMode,
             specifiedBpm,
             importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
         ),
 
     replaceMidiClipData: (
@@ -167,6 +177,8 @@ export const paramsApi = {
         noteBpmMode?: string,
         specifiedBpm?: number,
         importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
     ) =>
         invoke<TimelineResult & { ok: boolean; error?: string }>(
             "replace_midi_clip_data",
@@ -177,5 +189,7 @@ export const paramsApi = {
             noteBpmMode,
             specifiedBpm,
             importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
         ),
 };
