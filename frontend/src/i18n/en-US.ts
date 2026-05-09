@@ -807,5 +807,7 @@ export const enUS = {
     // Pitch reference clip
     ctx_convert_to_pitch_ref: "Convert to Pitch Reference Clip",
     ctx_update_pitch_ref: "Update Pitch Reference",
+    ctx_export_midi: "Export as MIDI",
     menu_save_as_pitch_ref: "Save as Pitch Reference Clip",
+    menu_export_midi: "Export as MIDI",
 } as const;

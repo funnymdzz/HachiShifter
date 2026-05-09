@@ -192,4 +192,20 @@ export const paramsApi = {
             clipboardGuid ?? null,
             closeLeadingGap,
         ),
+
+    exportPitchToMidi: (request: {
+        outputPath: string;
+        tracks: Array<{
+            trackId: string;
+            rootTrackId: string;
+            name: string;
+            startSec: number;
+            endSec: number;
+            clipId?: string;
+        }>;
+        bpm: number;
+        beatsPerBar: number;
+        baseScale: string;
+        projectScaleNotes: number[];
+    }) => invoke<{ ok: boolean; error?: string }>("export_pitch_to_midi", request),
 };

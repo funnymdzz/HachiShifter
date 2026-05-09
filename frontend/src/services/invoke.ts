@@ -349,6 +349,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "open_midi_dialog":
             return {};
 
+        case "pick_midi_output_path":
+            return {};
+
+        case "export_pitch_to_midi":
+            return { request: args[0] };
+
         case "get_waveform_mipmap_binary":
             return { sourcePath: args[0], level: args[1] };
 

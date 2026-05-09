@@ -53,6 +53,20 @@ pub(super) fn pick_directory() -> serde_json::Value {
     }
 }
 
+pub(super) fn pick_midi_output_path() -> serde_json::Value {
+    let picked = rfd::FileDialog::new()
+        .add_filter("MIDI", &["mid"])
+        .set_file_name("export.mid")
+        .save_file();
+
+    match picked {
+        None => serde_json::json!({"ok": true, "canceled": true}),
+        Some(path) => {
+            serde_json::json!({"ok": true, "canceled": false, "path": path.display().to_string()})
+        }
+    }
+}
+
 pub(super) fn open_midi_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
         .add_filter("MIDI", &["mid", "midi"])

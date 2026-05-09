@@ -795,5 +795,7 @@ export const zhCN = {
     // 音高参考块
     ctx_convert_to_pitch_ref: "转换为音高参考块",
     ctx_update_pitch_ref: "更新音高",
+    ctx_export_midi: "导出为 MIDI",
     menu_save_as_pitch_ref: "保存为音高参考块",
+    menu_export_midi: "导出为 MIDI",
 } as const;

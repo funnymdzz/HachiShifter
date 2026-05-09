@@ -814,5 +814,7 @@ export const jaJP = {
     // 音高リファレンスクリップ
     ctx_convert_to_pitch_ref: "音高リファレンスクリップに変換",
     ctx_update_pitch_ref: "音高を更新",
+    ctx_export_midi: "MIDIとしてエクスポート",
     menu_save_as_pitch_ref: "音高リファレンスクリップとして保存",
+    menu_export_midi: "MIDIとしてエクスポート",
 } as const;

@@ -102,6 +102,7 @@ export const ClipContextMenu: React.FC<{
     onGlue: (ids: string[]) => void;
     onConvertToPitchRef?: (ids: string[]) => void;
     onUpdatePitchRef?: (ids: string[]) => void;
+    onExportMidi?: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
@@ -126,6 +127,7 @@ export const ClipContextMenu: React.FC<{
     onGlue,
     onConvertToPitchRef,
     onUpdatePitchRef,
+    onExportMidi,
     onNormalize,
     onToggleReverse,
     onFadeCurveChange,
@@ -342,6 +344,16 @@ export const ClipContextMenu: React.FC<{
                         }}
                     />
                 </>
+            )}
+
+            {onExportMidi && (
+                <MenuItem
+                    label={t("ctx_export_midi")}
+                    onClick={() => {
+                        onExportMidi(ids);
+                        close();
+                    }}
+                />
             )}
 
             {onFadeCurveChange &&

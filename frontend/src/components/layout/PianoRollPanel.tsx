@@ -44,10 +44,12 @@ import { useAppTheme } from "../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
+import { coreApi } from "../../services/api/core";
 import type { ParamFramesPayload } from "../../types/api";
 import {
     degreeInputToScaleSteps,
     isScaleKey,
+    SCALE_NOTES,
     snapToScale,
     snapToSemitone,
     transposePitchByScaleSteps,
@@ -280,7 +282,10 @@ export const PianoRollPanel: React.FC = () => {
     const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
     const [multiTrackMerge, setMultiTrackMerge] = useState<boolean>(true);
     const [closeLeadingGap, setCloseLeadingGap] = useState<boolean>(true);
-    const [importTarget, setImportTarget] = useState<string>("pitchParam");
+    const [importTargetReaperClipboard, setImportTargetReaperClipboard] =
+        useState<string>("pitchParam");
+    const [importTargetParamEditor, setImportTargetParamEditor] = useState<string>("pitchParam");
+    const midiDialogSourceRef = useRef<"reaperClipboard" | "paramEditor">("paramEditor");
     // 启动时从设置加载
     useEffect(() => {
         settingsApi.getUiSettings().then((s) => {
@@ -305,8 +310,15 @@ export const PianoRollPanel: React.FC = () => {
             if (s?.midiCloseLeadingGap != null) {
                 setCloseLeadingGap(s.midiCloseLeadingGap);
             }
-            if (s?.midiImportTarget != null) {
-                setImportTarget(s.midiImportTarget);
+            if (s?.midiImportTargetReaperClipboard != null) {
+                setImportTargetReaperClipboard(s.midiImportTargetReaperClipboard);
+            } else if ((s as any)?.midiImportTarget != null) {
+                setImportTargetReaperClipboard((s as any).midiImportTarget);
+            }
+            if (s?.midiImportTargetParamEditor != null) {
+                setImportTargetParamEditor(s.midiImportTargetParamEditor);
+            } else if ((s as any)?.midiImportTarget != null) {
+                setImportTargetParamEditor((s as any).midiImportTarget);
             }
         });
     }, []);
@@ -389,6 +401,7 @@ export const PianoRollPanel: React.FC = () => {
     }, [drawToolMenuOpen]);
 
     const handleOpenMidiDialog = useCallback(() => {
+        midiDialogSourceRef.current = "paramEditor";
         // 快照当前选区（拍为单位）
         const sel = selectionRef.current;
         setMidiDialogSelection(sel ? { ...sel } : null);
@@ -1502,8 +1515,13 @@ export const PianoRollPanel: React.FC = () => {
     }, []);
 
     const handleImportTargetChange = useCallback((v: string) => {
-        setImportTarget(v);
-        void settingsApi.saveUiSettings({ midiImportTarget: v } as any);
+        if (midiDialogSourceRef.current === "reaperClipboard") {
+            setImportTargetReaperClipboard(v);
+            void settingsApi.saveUiSettings({ midiImportTargetReaperClipboard: v } as any);
+        } else {
+            setImportTargetParamEditor(v);
+            void settingsApi.saveUiSettings({ midiImportTargetParamEditor: v } as any);
+        }
     }, []);
 
     const handleRequestEnableCompose = useCallback(() => {
@@ -2213,6 +2231,7 @@ export const PianoRollPanel: React.FC = () => {
                         try {
                             const midiCheck = await paramsApi.readMidiClipboardToMemory();
                             if (midiCheck.ok && midiCheck.guid) {
+                                midiDialogSourceRef.current = "reaperClipboard";
                                 setClipboardGuid(midiCheck.guid);
                                 setMidiPath(null);
                                 setMidiDialogSelection(sel2 ? { ...sel2 } : null);
@@ -3089,6 +3108,42 @@ export const PianoRollPanel: React.FC = () => {
         s.clips,
         dispatch,
     ]);
+
+    const handleExportMidiFromEditor = useCallback(async () => {
+        if (!rootTrackId) return;
+        const sel = selectionRef.current;
+        if (!sel) return;
+
+        const saveResult = await coreApi.pickMidiOutputPath();
+        if (!saveResult.ok || saveResult.canceled || !saveResult.path) return;
+
+        const aBeat = Math.min(sel.aBeat, sel.bBeat);
+        const bBeat = Math.max(sel.aBeat, sel.bBeat);
+        const startSec = aBeat * secPerBeat;
+        const endSec = Math.max(startSec + 0.01, bBeat * secPerBeat);
+
+        const selectedTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
+        const trackName = selectedTrack?.name ?? "Track";
+        const scaleNotes =
+            SCALE_NOTES[(s.project?.baseScale as keyof typeof SCALE_NOTES) ?? "C"] ?? SCALE_NOTES.C;
+
+        await paramsApi.exportPitchToMidi({
+            outputPath: saveResult.path,
+            tracks: [
+                {
+                    trackId: s.selectedTrackId ?? rootTrackId,
+                    rootTrackId,
+                    name: trackName,
+                    startSec,
+                    endSec,
+                },
+            ],
+            bpm: s.bpm,
+            beatsPerBar: s.project?.beatsPerBar ?? 4,
+            baseScale: s.project?.baseScale ?? "C",
+            projectScaleNotes: scaleNotes,
+        });
+    }, [rootTrackId, selectionRef, secPerBeat, s]);
 
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
@@ -4094,7 +4149,11 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
-                importTarget={importTarget}
+                importTarget={
+                    midiDialogSourceRef.current === "reaperClipboard"
+                        ? importTargetReaperClipboard
+                        : importTargetParamEditor
+                }
                 onImportTargetChange={handleImportTargetChange}
                 rootTrackComposeEnabled={rootTrack?.composeEnabled ?? true}
                 onRequestEnableCompose={handleRequestEnableCompose}
@@ -4141,6 +4200,7 @@ export const PianoRollPanel: React.FC = () => {
                     onQuantize={() => openEditDialog("quantize")}
                     onMeanQuantize={() => openEditDialog("meanQuantize")}
                     onSaveAsPitchRef={() => void handleSaveAsPitchRef()}
+                    onExportMidi={() => void handleExportMidiFromEditor()}
                 />
             )}
         </Flex>

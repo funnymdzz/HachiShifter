@@ -826,5 +826,7 @@ export const koKR = {
     // 음높이 참조 클립
     ctx_convert_to_pitch_ref: "음높이 참조 클립으로 변환",
     ctx_update_pitch_ref: "음높이 업데이트",
+    ctx_export_midi: "MIDI로 내보내기",
     menu_save_as_pitch_ref: "음높이 참조 클립으로 저장",
+    menu_export_midi: "MIDI로 내보내기",
 } as const;

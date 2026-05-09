@@ -796,5 +796,7 @@ export const zhTW = {
     // 音高參考塊
     ctx_convert_to_pitch_ref: "轉換為音高參考塊",
     ctx_update_pitch_ref: "更新音高",
+    ctx_export_midi: "匯出為 MIDI",
     menu_save_as_pitch_ref: "儲存為音高參考塊",
+    menu_export_midi: "匯出為 MIDI",
 } as const;

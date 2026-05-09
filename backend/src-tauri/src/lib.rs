@@ -347,6 +347,8 @@ pub fn run() {
             commands::import_midi_to_pitch,
             commands::import_midi_as_clip,
             commands::replace_midi_clip_data,
+            commands::pick_midi_output_path,
+            commands::export_pitch_to_midi,
             commands::get_ui_settings,
             commands::save_ui_settings, // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
                                        // commands::start_pitch_refresh_task,

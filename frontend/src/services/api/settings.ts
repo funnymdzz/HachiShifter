@@ -32,7 +32,10 @@ export interface UiSettings {
     midiNoteBpmMode?: string;
     midiSpecifiedBpm?: number;
     midiCloseLeadingGap?: boolean;
-    midiImportTarget?: string;
+    midiImportTargetMenu?: string;
+    midiImportTargetDragDrop?: string;
+    midiImportTargetReaperClipboard?: string;
+    midiImportTargetParamEditor?: string;
     customScalePresets?: Array<{
         id: string;
         name: string;

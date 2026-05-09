@@ -46,6 +46,10 @@ import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement"
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { webApi } from "../../services/webviewApi";
+import { coreApi } from "../../services/api/core";
+import { paramsApi } from "../../services/api/params";
+import { resolveRootTrackId } from "../../features/session/trackUtils";
+import { SCALE_NOTES } from "../../utils/musicalScales";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 
@@ -172,8 +176,12 @@ interface TimelinePanelProps {
     onImportPositionChange: (position: string) => void;
     closeLeadingGap: boolean;
     onCloseLeadingGapChange: (v: boolean) => void;
-    importTarget?: string;
-    onImportTargetChange?: (v: string) => void;
+    midiDialogSource: "menu" | "dragDrop";
+    onMidiDialogSourceChange: (v: "menu" | "dragDrop") => void;
+    importTargetMenu?: string;
+    onImportTargetMenuChange?: (v: string) => void;
+    importTargetDragDrop?: string;
+    onImportTargetDragDropChange?: (v: string) => void;
 }
 
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({
@@ -200,9 +208,16 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     onImportPositionChange,
     closeLeadingGap,
     onCloseLeadingGapChange,
-    importTarget,
-    onImportTargetChange,
+    midiDialogSource,
+    onMidiDialogSourceChange,
+    importTargetMenu,
+    onImportTargetMenuChange,
+    importTargetDragDrop,
+    onImportTargetDragDropChange,
 }) => {
+    const importTarget = midiDialogSource === "dragDrop" ? importTargetDragDrop : importTargetMenu;
+    const onImportTargetChange =
+        midiDialogSource === "dragDrop" ? onImportTargetDragDropChange : onImportTargetMenuChange;
     const { t } = useI18n();
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
@@ -426,6 +441,88 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         setReplaceMidiDialog({ open: true, clipId, midiPath: picked.path });
     }, []);
 
+    const midiClipRootTrackComposeEnabled = React.useMemo(() => {
+        if (!midiClipTrackId) return true;
+        const rootId = resolveRootTrackId(s.tracks, midiClipTrackId);
+        if (!rootId) return true;
+        const rootTrack = s.tracks.find((t) => t.id === rootId);
+        return rootTrack?.composeEnabled ?? true;
+    }, [midiClipTrackId, s.tracks]);
+
+    const handleRequestEnableCompose = React.useCallback(() => {
+        if (!midiClipTrackId) return;
+        const rootId = resolveRootTrackId(s.tracks, midiClipTrackId);
+        if (!rootId) return;
+        dispatch(
+            setTrackStateRemote({
+                trackId: rootId,
+                composeEnabled: true,
+            }),
+        );
+    }, [dispatch, midiClipTrackId, s.tracks]);
+
+    const handleExportMidi = React.useCallback(
+        async (clipIds: string[]) => {
+            const saveResult = await coreApi.pickMidiOutputPath();
+            if (!saveResult.ok || saveResult.canceled || !saveResult.path) return;
+
+            const s = sessionRef.current;
+            const clipsMap = new Map(s.clips.map((c) => [c.id, c]));
+            const trackMap = new Map(s.tracks.map((t) => [t.id, t]));
+
+            const entries: Array<{
+                trackId: string;
+                rootTrackId: string;
+                name: string;
+                startSec: number;
+                endSec: number;
+                clipId?: string;
+            }> = [];
+            const seenComposeRoots = new Set<string>();
+
+            for (const id of clipIds) {
+                const clip = clipsMap.get(id);
+                if (!clip) continue;
+                const rootId = resolveRootTrackId(s.tracks, clip.trackId);
+                if (!rootId) continue;
+                const rootTrack = trackMap.get(rootId);
+                const isComposeEnabled = rootTrack?.composeEnabled ?? false;
+
+                if (isComposeEnabled) {
+                    // Compose 轨道：按 rootTrackId 去重（共享 track 级音高数据）
+                    if (seenComposeRoots.has(rootId)) continue;
+                    seenComposeRoots.add(rootId);
+                }
+
+                const track = trackMap.get(clip.trackId);
+                entries.push({
+                    trackId: clip.trackId,
+                    rootTrackId: rootId,
+                    name: track?.name ?? clip.name,
+                    startSec: clip.startSec,
+                    endSec: clip.startSec + clip.lengthSec,
+                    ...(isComposeEnabled ? {} : { clipId: clip.id }),
+                });
+            }
+
+            if (entries.length === 0) return;
+
+            const scaleNotes =
+                SCALE_NOTES[(s.project?.baseScale as keyof typeof SCALE_NOTES) ?? "C"] ??
+                SCALE_NOTES.C;
+
+            await paramsApi.exportPitchToMidi({
+                outputPath: saveResult.path,
+                tracks: entries,
+                bpm: s.bpm,
+                beatsPerBar: s.project?.beatsPerBar ?? 4,
+                baseScale: s.project?.baseScale ?? "C",
+                projectScaleNotes: scaleNotes,
+            });
+        },
+        [sessionRef],
+    );
+
     // ── 3. DragDrop (Tauri + 文件浏览器) ─────────────────────
     const { tauriDraggedPathRef, tauriLastDropPathRef, tauriDropHandledAtRef } =
         useTimelineDragDrop({
@@ -446,6 +543,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             pxPerSec,
             rowHeight,
             onMidiDrop: (payload) => {
+                onMidiDialogSourceChange("dragDrop");
                 onMidiClipPathChange(payload.midiPath);
                 onMidiClipStartSecChange(payload.startSec);
                 onMidiClipTrackIdChange(payload.trackId);
@@ -1688,6 +1786,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                       void dispatch(updatePitchReferenceRemote(ids));
                                       setMultiSelectedClipIds([]);
                                   }}
+                                  onExportMidi={(ids) => {
+                                      setContextMenu(null);
+                                      void handleExportMidi(ids);
+                                  }}
                                   onFadeCurveChange={(clipId, target, curve) => {
                                       dispatch(
                                           setClipFades({
@@ -1776,6 +1878,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     importTarget={importTarget}
                     onImportTargetChange={onImportTargetChange}
                     clipboardGuid={midiClipClipboardGuid ?? null}
+                    rootTrackComposeEnabled={midiClipRootTrackComposeEnabled}
+                    onRequestEnableCompose={handleRequestEnableCompose}
                     onImportAsClip={handleMidiClipImport}
                     importPosition={importPosition}
                     onImportPositionChange={onImportPositionChange}

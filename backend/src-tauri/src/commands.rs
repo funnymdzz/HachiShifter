@@ -19,6 +19,8 @@ mod dialogs;
 mod file_browser;
 #[path = "commands/midi.rs"]
 mod midi;
+#[path = "commands/midi_export.rs"]
+mod midi_export;
 #[path = "commands/onnx_status.rs"]
 mod onnx_status;
 #[path = "commands/params.rs"]
@@ -247,6 +249,11 @@ pub fn pick_directory() -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn open_midi_dialog() -> serde_json::Value {
     dialogs::open_midi_dialog()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn pick_midi_output_path() -> serde_json::Value {
+    dialogs::pick_midi_output_path()
 }
 
 // ===================== waveform =====================
@@ -1005,6 +1012,16 @@ pub fn replace_midi_clip_data(
         clipboard_guid,
         close_leading_gap,
     )
+}
+
+// ===================== midi_export =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn export_pitch_to_midi(
+    state: State<'_, AppState>,
+    request: midi_export::MidiExportRequest,
+) -> serde_json::Value {
+    midi_export::export_pitch_to_midi(state.inner(), request)
 }
 
 // ===================== ui_settings =====================
