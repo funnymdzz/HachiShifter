@@ -250,6 +250,8 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Clip {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub track_id: String,
     pub name: String,
     pub start_sec: f64,
@@ -351,6 +353,9 @@ pub struct TimelineState {
     pub project_scale_notes: Vec<u8>,
 
     pub next_track_order: i32,
+
+    #[serde(default)]
+    pub disabled_group_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -424,6 +429,7 @@ impl Default for TimelineState {
             params_by_root_track: BTreeMap::new(),
             project_scale_notes: default_project_scale_notes(),
             next_track_order: 1,
+            disabled_group_ids: HashSet::new(),
         }
     }
 }
@@ -1727,6 +1733,7 @@ impl TimelineState {
             .iter()
             .map(|c| TimelineClip {
                 id: c.id.clone(),
+                group_id: c.group_id.clone(),
                 track_id: c.track_id.clone(),
                 name: c.name.clone(),
                 start_sec: c.start_sec,
@@ -1776,6 +1783,7 @@ impl TimelineState {
             project_sec: Some(self.project_sec),
             project: None,
             missing_files: None,
+            disabled_group_ids: self.disabled_group_ids.iter().cloned().collect(),
         }
     }
 
@@ -2157,6 +2165,7 @@ impl TimelineState {
 
         let clip = Clip {
             id: id.clone(),
+            group_id: None,
             track_id: track_id.clone(),
             name: name.unwrap_or_else(|| "Clip".to_string()),
             start_sec: ss,
@@ -2574,6 +2583,9 @@ impl TimelineState {
             return Vec::new();
         }
 
+        // Capture original group IDs before source_clips is consumed
+        let original_group_ids: Vec<Option<String>> = source_clips.iter().map(|c| c.group_id.clone()).collect();
+
         let source_track_order = self
             .tracks
             .iter()
@@ -2707,6 +2719,28 @@ impl TimelineState {
             }
         }
 
+        // Remap group IDs: each original group gets a new unique group ID
+        // so duplicates are in independent groups from the originals.
+        {
+            let mut group_remap: HashMap<String, String> = HashMap::new();
+            for gid_opt in &original_group_ids {
+                if let Some(ref gid) = gid_opt {
+                    group_remap.entry(gid.clone()).or_insert_with(|| Uuid::new_v4().to_string());
+                }
+            }
+            if !group_remap.is_empty() {
+                for clip in &mut self.clips {
+                    if created_clip_ids.contains(&clip.id) {
+                        if let Some(ref old_gid) = clip.group_id {
+                            if let Some(new_gid) = group_remap.get(old_gid) {
+                                clip.group_id = Some(new_gid.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if payload.select_created_clips {
             self.selected_clip_id = created_clip_ids.first().cloned();
             if let Some(first_created_clip) = created_clip_ids
@@ -2795,6 +2829,8 @@ impl TimelineState {
             right.source_start_sec =
                 (right.source_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
+        // Propagate group_id to the split-off right clip
+        right.group_id = self.clips[idx].group_id.clone();
         self.clips.push(right);
     }
 
@@ -2838,6 +2874,7 @@ impl TimelineState {
 
         let mut glued = first.clone();
         glued.id = new_id("clip");
+        glued.group_id = None; // Glued clip starts a new identity, not part of any group
         glued.name = "Glued".to_string();
         glued.start_sec = start;
         glued.length_sec = (end - start).max(0.01);
@@ -2916,6 +2953,72 @@ impl TimelineState {
         self.clips.retain(|c| !clip_ids.contains(&c.id));
         self.clips.push(glued.clone());
         self.selected_clip_id = Some(glued.id);
+    }
+
+    /// 将选中的音频块编入同一组。
+    pub fn group_clips(&mut self, clip_ids: &[String]) {
+        if clip_ids.len() < 2 {
+            return;
+        }
+        let group_id = Uuid::new_v4().to_string();
+        for c in &mut self.clips {
+            if clip_ids.contains(&c.id) {
+                c.group_id = Some(group_id.clone());
+            }
+        }
+    }
+
+    /// 将选中音频块从其所属组中移除（解组）。
+    /// 仅移除指定音频块的组关系，若某组剩余成员 ≤1 则自动解散该组。
+    pub fn ungroup_clips(&mut self, clip_ids: &[String]) {
+        let clip_id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
+
+        // 收集受影响的组 ID
+        let affected_groups: HashSet<String> = self
+            .clips
+            .iter()
+            .filter(|c| clip_id_set.contains(c.id.as_str()) && c.group_id.is_some())
+            .filter_map(|c| c.group_id.clone())
+            .collect();
+
+        if affected_groups.is_empty() {
+            return;
+        }
+
+        // 仅移除指定音频块的 group_id
+        for c in &mut self.clips {
+            if clip_id_set.contains(c.id.as_str()) {
+                c.group_id = None;
+            }
+        }
+
+        // 自动解散成员数 ≤1 的组
+        for gid in &affected_groups {
+            let count = self
+                .clips
+                .iter()
+                .filter(|c| c.group_id.as_deref() == Some(gid.as_str()))
+                .count();
+            if count <= 1 {
+                for c in &mut self.clips {
+                    if c.group_id.as_deref() == Some(gid.as_str()) {
+                        c.group_id = None;
+                    }
+                }
+                self.disabled_group_ids.remove(gid);
+            }
+        }
+    }
+
+    /// 切换编组的禁用状态。返回新的状态（true = 已禁用）。
+    pub fn toggle_group_disabled(&mut self, group_id: &str) -> bool {
+        if self.disabled_group_ids.contains(group_id) {
+            self.disabled_group_ids.remove(group_id);
+            false
+        } else {
+            self.disabled_group_ids.insert(group_id.to_string());
+            true
+        }
     }
 
     /// 将指定的常规音频块转换为音高参考块。

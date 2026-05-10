@@ -10,7 +10,7 @@ use crate::reaper_parser::{
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use crate::midi_import::MidiNoteEvent;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 /// HiFiShifter 支持的音频格式扩展名
@@ -541,6 +541,7 @@ fn convert_reaper_items_to_existing_tracks(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: next_order,
+        disabled_group_ids: HashSet::new(),
     };
 
     Ok(ReaperImportResult {
@@ -715,6 +716,7 @@ fn convert_reaper_data(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
+        disabled_group_ids: HashSet::new(),
     };
 
     Ok(ReaperImportResult {
@@ -898,7 +900,8 @@ fn process_item(
 
             clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.to_string(),
+            group_id: None,
+            track_id: track_id.to_string(),
                 name: if seg_count > 1 {
                     format!("{} ({})", clip_name, seg_idx + 1)
                 } else {
@@ -1031,6 +1034,7 @@ fn process_item(
 
         clips.push(Clip {
             id: clip_id.clone(),
+            group_id: None,
             track_id: track_id.to_string(),
             name: clip_name,
             start_sec: clip_start,
@@ -1414,7 +1418,8 @@ fn process_midi_item(
 
     clips.push(Clip {
         id: clip_id,
-        track_id: track_id.to_string(),
+            group_id: None,
+            track_id: track_id.to_string(),
         name: clip_name,
         start_sec: clip_start,
         length_sec: item_length.max(0.1),

@@ -580,6 +580,45 @@ pub fn glue_clips(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn group_clips(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.group_clips(&clip_ids);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn ungroup_clips(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.ungroup_clips(&clip_ids);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn toggle_group_disabled(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.toggle_group_disabled(&group_id);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn convert_clips_to_pitch_reference(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,

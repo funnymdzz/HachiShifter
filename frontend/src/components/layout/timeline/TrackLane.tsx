@@ -130,6 +130,10 @@ type TrackLaneProps = {
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
+    activeGroupIds?: Set<string>;
+    disabledGroupIds?: string[];
+    onUngroupClip?: (clipId: string) => void;
+    onToggleGroupDisabled?: (groupId: string) => void;
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
     ghostDrag?: GhostDragInfo | null;
@@ -174,6 +178,10 @@ export const TrackLane = React.memo(
             onRenameDone,
             onGainCommit,
             onFormantMorphCommit,
+            activeGroupIds,
+            disabledGroupIds,
+            onUngroupClip,
+            onToggleGroupDisabled,
             ghostDrag,
             verticalTrackLockTrackId,
             allClips,
@@ -278,7 +286,7 @@ export const TrackLane = React.memo(
                 if (!shouldPrimeSelection) {
                     return;
                 }
-                if (multiSelectedClipIds.length === 0 || !multiSelectedSet.has(clipId)) {
+                if (multiSelectedClipIds.length !== 1 || !multiSelectedSet.has(clipId)) {
                     ensureSelected(clipId);
                 }
                 selectClipRemote(clipId);
@@ -562,6 +570,10 @@ export const TrackLane = React.memo(
                             onRenameDone={onRenameDone}
                             onGainCommit={onGainCommit}
                             onFormantMorphCommit={onFormantMorphCommit}
+                            activeGroupIds={activeGroupIds}
+                            disabledGroupIds={disabledGroupIds}
+                            onUngroupClip={onUngroupClip}
+                            onToggleGroupDisabled={onToggleGroupDisabled}
                             hovered={hoveredClipId === clip.id}
                         />
                     );
@@ -642,7 +654,11 @@ export const TrackLane = React.memo(
             prev.ghostDrag === next.ghostDrag &&
             prev.verticalTrackLockTrackId === next.verticalTrackLockTrackId &&
             prev.allClips === next.allClips &&
-            sameStringArray(prev.overlayClipIds, next.overlayClipIds)
+            sameStringArray(prev.overlayClipIds, next.overlayClipIds) &&
+            prev.activeGroupIds === next.activeGroupIds &&
+            prev.disabledGroupIds === next.disabledGroupIds &&
+            prev.onUngroupClip === next.onUngroupClip &&
+            prev.onToggleGroupDisabled === next.onToggleGroupDisabled
             // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus
             // after mount, so pure horizontal scroll should not force a TrackLane rerender.
         );

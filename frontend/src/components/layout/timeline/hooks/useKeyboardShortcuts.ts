@@ -19,6 +19,8 @@ const CLIP_ACTIONS: ActionId[] = [
     "clip.paste",
     "clip.split",
     "clip.normalize",
+    "clip.group",
+    "clip.ungroup",
 ];
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -62,12 +64,19 @@ export function useKeyboardShortcuts(deps: {
     dispatch: AppDispatch;
     multiSelectedClipIds: string[];
     setMultiSelectedClipIds: (ids: string[]) => void;
-    clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.RefObject<{
+        templates: ClipTemplate[];
+        groupIds: Array<string | undefined>;
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     onNormalize: (ids: string[]) => void;
     onPaste: () => void;
     onSplitSelected: () => void;
+    onGroup: (ids: string[]) => void;
+    onUngroup: (ids: string[]) => void;
 }) {
     const {
         sessionRef,
@@ -80,6 +89,8 @@ export function useKeyboardShortcuts(deps: {
         onNormalize,
         onPaste,
         onSplitSelected,
+        onGroup,
+        onUngroup,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -155,16 +166,15 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(selectedIds);
-                        if (templates.length === 0) return;
-                        (
-                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
-                        ).current = templates;
+                        const result = await buildClipClipboardTemplates(selectedIds);
+                        if (result.templates.length === 0) return;
+                        clipClipboardRef.current = result;
                         try {
                             await writeSystemClipboardObject({
                                 version: 1,
                                 kind: "clip",
-                                templates,
+                                templates: result.templates,
+                                groupIds: result.groupIds,
                             });
                         } catch {
                             // ignore
@@ -178,16 +188,15 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(selectedIds);
-                        if (templates.length === 0) return;
-                        (
-                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
-                        ).current = templates;
+                        const result = await buildClipClipboardTemplates(selectedIds);
+                        if (result.templates.length === 0) return;
+                        clipClipboardRef.current = result;
                         try {
                             await writeSystemClipboardObject({
                                 version: 1,
                                 kind: "clip",
-                                templates,
+                                templates: result.templates,
+                                groupIds: result.groupIds,
                             });
                         } catch {
                             // ignore
@@ -219,6 +228,22 @@ export function useKeyboardShortcuts(deps: {
                     onNormalize(selectedIds);
                     return;
                 }
+
+                case "clip.group": {
+                    if (selectedIds.length < 2) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onGroup(selectedIds);
+                    return;
+                }
+
+                case "clip.ungroup": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onUngroup(selectedIds);
+                    return;
+                }
             }
         }
         window.addEventListener("keydown", onKeyDown, true);
@@ -235,5 +260,7 @@ export function useKeyboardShortcuts(deps: {
         onNormalize,
         onPaste,
         onSplitSelected,
+        onGroup,
+        onUngroup,
     ]);
 }

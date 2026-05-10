@@ -21,6 +21,7 @@ import {
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade, computeAutoCrossfadeFromPayload } from "./autoCrossfade";
+import { getGroupClipIds } from "./useGroupExpansion";
 import {
     buildBulkClipStateUpdates,
     buildDuplicateClipsBulkPayload,
@@ -100,6 +101,8 @@ export function useClipDrag(deps: {
     copyDragKb: Keybinding;
     /** 自动交叉淡入淡出 */
     autoCrossfadeEnabled: boolean;
+    /** 忽略编组 */
+    ignoreGrouping: boolean;
     /** Ctrl+点击（未拖动）时的多选切换回调 */
     onCtrlClick?: (clipId: string) => void;
 }) {
@@ -120,6 +123,7 @@ export function useClipDrag(deps: {
         gridSnapEnabled,
         copyDragKb,
         autoCrossfadeEnabled,
+        ignoreGrouping,
         onCtrlClick,
     } = deps;
     void gridSnapEnabled;
@@ -172,10 +176,19 @@ export function useClipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        const clipIds =
-            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
-                ? [...multiSelectedClipIds]
-                : [clipId];
+        // Group expansion takes priority over multi-select
+        const groupIds = ignoreGrouping
+            ? undefined
+            : getGroupClipIds(
+                  clipId,
+                  sessionRef.current.clips,
+                  sessionRef.current.disabledGroupIds,
+              );
+        const clipIds = groupIds
+            ? groupIds
+            : multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
+              ? [...multiSelectedClipIds]
+              : [clipId];
 
         const initialById: Record<string, { startSec: number; trackId: string }> = {};
         let minstartSec = Number.POSITIVE_INFINITY;

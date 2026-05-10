@@ -9,7 +9,7 @@ use crate::audio_utils::try_read_wav_info;
 use crate::midi_import::{self, MidiNoteEvent};
 use crate::models::PitchRange;
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 // ─── 块标识 (8 bytes each) ───
@@ -578,7 +578,8 @@ fn create_midi_clip_from_file(
 
     Ok(Clip {
         id: new_clip_id(),
-        track_id: track_id.to_string(),
+            group_id: None,
+            track_id: track_id.to_string(),
         name: clip_name,
         start_sec,
         length_sec: (last_end / rate).max(0.1),
@@ -961,7 +962,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -1065,7 +1067,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -1202,6 +1205,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: track_order,
     };
 
@@ -1681,7 +1685,8 @@ pub fn import_vsp_clipboard(
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: target_track_id.clone(),
+            group_id: None,
+            track_id: target_track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -1784,7 +1789,8 @@ pub fn import_vsp_clipboard(
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: target_track_id.clone(),
+            group_id: None,
+            track_id: target_track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -1916,6 +1922,7 @@ pub fn import_vsp_clipboard(
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: next_order,
     };
 
@@ -2222,7 +2229,8 @@ fn import_vsp_clipboard_selected_tracks(
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -2323,7 +2331,8 @@ fn import_vsp_clipboard_selected_tracks(
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -2452,6 +2461,7 @@ fn import_vsp_clipboard_selected_tracks(
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: track_order,
     };
 

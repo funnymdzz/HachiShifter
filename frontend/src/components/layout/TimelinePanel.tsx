@@ -219,6 +219,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     const onImportTargetChange =
         midiDialogSource === "dragDrop" ? onImportTargetDragDropChange : onImportTargetMenuChange;
     const { t } = useI18n();
+    const ignoreGrouping = useAppSelector((state) => state.session.ignoreGrouping);
+    const disabledGroupIds = useAppSelector((state) => state.session.disabledGroupIds);
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
     const [timelineScrollTop, setTimelineScrollTop] = React.useState(0);
@@ -310,6 +312,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         pxPerSec,
         pxPerBeat,
         rowHeight,
+        ignoreGrouping,
+        disabledGroupIds,
         dispatch,
         sameSourceConfirmResolverRef,
         setSameSourceConfirmOpen,
@@ -330,6 +334,9 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         onSelectionRectPointerDown,
         clipClipboardRef,
         buildClipClipboardTemplates,
+        groupClips,
+        ungroupClips,
+        toggleGroupDisabled,
         normalizeClips,
         replaceClipSources,
         splitClipIdsAtPlayhead,
@@ -570,6 +577,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         pasteClipsAtPlayhead,
         splitSelectedAtPlayhead,
         normalizeClips,
+        groupClips,
+        ungroupClips,
         isEditableTarget,
         contextMenu,
         trackAreaMenu,
@@ -590,6 +599,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         beatFromClientX,
         noSnapKb,
         gridSnapEnabled: s.gridSnapEnabled,
+        ignoreGrouping,
     });
 
     const { slipDragRef: _slipDragRef, startSlipDrag } = useSlipDrag({
@@ -599,6 +609,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         multiSelectedClipIds,
         multiSelectedSet,
         beatFromClientX,
+        ignoreGrouping,
     });
 
     const {
@@ -624,6 +635,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         gridSnapEnabled: s.gridSnapEnabled,
         copyDragKb,
         autoCrossfadeEnabled: s.autoCrossfadeEnabled,
+        ignoreGrouping,
         onCtrlClick: toggleTrackLaneCtrlSelection,
     });
 
@@ -890,6 +902,18 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         ? (clipById.get(s.selectedClipId)?.trackId ?? null)
         : null;
     const visibleTrackCanvasHeight = Math.max(1, visibleTracks.length * rowHeight);
+    const activeGroupIds = useMemo(() => {
+        const ids = new Set<string>();
+        for (const cid of multiSelectedClipIds) {
+            const gid = clipById.get(cid)?.groupId;
+            if (gid && !disabledGroupIds.includes(gid)) ids.add(gid);
+        }
+        if (s.selectedClipId) {
+            const gid = clipById.get(s.selectedClipId)?.groupId;
+            if (gid && !disabledGroupIds.includes(gid)) ids.add(gid);
+        }
+        return ids.size > 0 ? ids : undefined;
+    }, [multiSelectedClipIds, clipById, s.selectedClipId, disabledGroupIds]);
     const sparseClipRenderModel = useMemo(
         () =>
             buildSparseClipRenderModel({
@@ -901,6 +925,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                 selectedClipId: s.selectedClipId,
                 multiSelectedClipIds,
                 renamingClipId,
+                disabledGroupIds,
             }),
         [
             multiSelectedClipIds,
@@ -916,8 +941,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     const timelineCanvasModel = useMemo(
         () => ({
             drawClips: sparseClipRenderModel.drawClips,
+            activeGroupIds,
+            disabledGroupIds,
         }),
-        [sparseClipRenderModel.drawClips],
+        [sparseClipRenderModel.drawClips, activeGroupIds, disabledGroupIds],
     );
 
     // ═════════════════════════════════════════════════════════
@@ -1418,6 +1445,14 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                         onRenameDone={handleTrackLaneRenameDone}
                                         onGainCommit={commitTrackLaneGain}
                                         onFormantMorphCommit={commitTrackLaneFormantMorph}
+                                        activeGroupIds={activeGroupIds}
+                                        disabledGroupIds={disabledGroupIds}
+                                        onUngroupClip={(clipId) => {
+                                            ungroupClips([clipId]);
+                                        }}
+                                        onToggleGroupDisabled={(groupId) => {
+                                            toggleGroupDisabled(groupId);
+                                        }}
                                     />
                                 );
                             })}
@@ -1717,14 +1752,15 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCopy={(ids) => {
                                       void (async () => {
-                                          const templates = await buildClipClipboardTemplates(ids);
-                                          if (templates.length > 0) {
-                                              clipClipboardRef.current = templates;
+                                          const result = await buildClipClipboardTemplates(ids);
+                                          if (result.templates.length > 0) {
+                                              clipClipboardRef.current = result;
                                               try {
                                                   await writeSystemClipboardObject({
                                                       version: 1,
                                                       kind: "clip",
-                                                      templates,
+                                                      templates: result.templates,
+                                                      groupIds: result.groupIds,
                                                   });
                                               } catch {
                                                   // ignore clipboard write errors
@@ -1734,14 +1770,15 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCut={(ids) => {
                                       void (async () => {
-                                          const templates = await buildClipClipboardTemplates(ids);
-                                          if (templates.length === 0) return;
-                                          clipClipboardRef.current = templates;
+                                          const result = await buildClipClipboardTemplates(ids);
+                                          if (result.templates.length === 0) return;
+                                          clipClipboardRef.current = result;
                                           try {
                                               await writeSystemClipboardObject({
                                                   version: 1,
                                                   kind: "clip",
-                                                  templates,
+                                                  templates: result.templates,
+                                                  groupIds: result.groupIds,
                                               });
                                           } catch {
                                               // ignore clipboard write errors
@@ -1768,6 +1805,14 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   onSplit={(clipIds) => {
                                       setContextMenu(null);
                                       splitClipIdsAtPlayhead(clipIds);
+                                  }}
+                                  onGroup={(ids) => {
+                                      setContextMenu(null);
+                                      groupClips(ids);
+                                  }}
+                                  onUngroup={(ids) => {
+                                      setContextMenu(null);
+                                      ungroupClips(ids);
                                   }}
                                   onGlue={(ids) => {
                                       setContextMenu(null);
@@ -1838,7 +1883,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                         y={trackAreaMenu.y}
                         canPaste={
                             Boolean(clipClipboardRef.current) &&
-                            (clipClipboardRef.current?.length ?? 0) > 0
+                            (clipClipboardRef.current?.templates.length ?? 0) > 0
                         }
                         canSplit={(multiSelectedClipIds.length > 0
                             ? multiSelectedClipIds

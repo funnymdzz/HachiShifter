@@ -50,13 +50,20 @@ export interface UseTimelineEventHandlersArgs {
     setMultiSelectedClipIds: (ids: string[] | ((prev: string[]) => string[])) => void;
 
     // clipboard
-    clipClipboardRef: React.MutableRefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.MutableRefObject<{
+        templates: ClipTemplate[];
+        groupIds: Array<string | undefined>;
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
 
     // clip actions
     pasteClipsAtPlayhead: () => void;
     splitSelectedAtPlayhead: () => void;
     normalizeClips: (ids: string[]) => void;
+    groupClips: (ids: string[]) => void;
+    ungroupClips: (ids: string[]) => void;
     isEditableTarget: (target: EventTarget | null) => boolean;
 
     // context menu
@@ -113,6 +120,8 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         pasteClipsAtPlayhead,
         splitSelectedAtPlayhead,
         normalizeClips,
+        groupClips,
+        ungroupClips,
         isEditableTarget,
         contextMenu,
         trackAreaMenu,
@@ -134,6 +143,8 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         onNormalize: normalizeClips,
         onPaste: pasteClipsAtPlayhead,
         onSplitSelected: splitSelectedAtPlayhead,
+        onGroup: groupClips,
+        onUngroup: ungroupClips,
     });
 
     // ── hifi:editOp ──────────────────────────────────────────

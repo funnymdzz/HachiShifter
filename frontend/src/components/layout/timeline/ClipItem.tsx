@@ -49,6 +49,10 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameDone,
     onGainCommit,
     onFormantMorphCommit,
+    activeGroupIds,
+    disabledGroupIds,
+    onUngroupClip,
+    onToggleGroupDisabled,
     hovered = false,
 }: {
     clip: ClipInfo;
@@ -114,6 +118,10 @@ export const ClipItem = React.memo(function ClipItem({
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
+    activeGroupIds?: Set<string>;
+    disabledGroupIds?: string[];
+    onUngroupClip?: (clipId: string) => void;
+    onToggleGroupDisabled?: (groupId: string) => void;
     hovered?: boolean;
 }) {
     const { t } = useI18n();
@@ -129,11 +137,20 @@ export const ClipItem = React.memo(function ClipItem({
             ? `linear-gradient(to right, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) 0px, rgba(0,0,0,${LEADING_OVERLAP_ALPHA}) ${leadingOverlapPx}px, rgba(0,0,0,1) ${leadingOverlapPx}px, rgba(0,0,0,1) 100%)`
             : undefined;
 
-    const interactionHintBoxShadow = selected
-        ? "0 0 0 1px rgba(156, 196, 255, 0.68), 0 0 0 2px rgba(156, 196, 255, 0.16)"
-        : hovered
-          ? "0 0 0 1px rgba(255, 255, 255, 0.24)"
-          : undefined;
+    const isGroupHighlighted =
+        activeGroupIds != null && clip.groupId != null && activeGroupIds.has(clip.groupId);
+
+    const interactionHintBoxShadow =
+        selected && isGroupHighlighted
+            ? // blue inner ring (selected) + golden outer ring (grouped)
+              "0 0 0 1px rgba(156, 196, 255, 0.68), 0 0 0 2px rgba(156, 196, 255, 0.16), 0 0 0 3px rgba(255, 200, 50, 0.60), 0 0 0 4px rgba(255, 200, 50, 0.18)"
+            : selected
+              ? "0 0 0 1px rgba(156, 196, 255, 0.68), 0 0 0 2px rgba(156, 196, 255, 0.16)"
+              : isGroupHighlighted
+                ? "0 0 0 1px rgba(255, 200, 50, 0.60), 0 0 0 2px rgba(255, 200, 50, 0.18)"
+                : hovered && clip.groupId == null
+                  ? "0 0 0 1px rgba(255, 255, 255, 0.24)"
+                  : undefined;
 
     const startDeferredFadeEditDrag = React.useCallback(
         (e: React.PointerEvent<HTMLDivElement>, type: "fade_in" | "fade_out") => {
@@ -149,7 +166,7 @@ export const ClipItem = React.memo(function ClipItem({
             const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
 
             if (shouldPrimeSelection) {
-                if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
                     ensureSelected(clip.id);
                 }
                 selectClipRemote(clip.id);
@@ -313,7 +330,7 @@ export const ClipItem = React.memo(function ClipItem({
 
                 const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
                 if (shouldPrimeSelection) {
-                    if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                    if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
                         ensureSelected(clip.id);
                     }
                     selectClipRemote(clip.id);
@@ -359,6 +376,10 @@ export const ClipItem = React.memo(function ClipItem({
                 onRenameDone={onRenameDone}
                 onGainCommit={onGainCommit}
                 onFormantMorphCommit={onFormantMorphCommit}
+                onUngroupClip={onUngroupClip}
+                onToggleGroupDisabled={onToggleGroupDisabled}
+                activeGroupIds={activeGroupIds}
+                disabledGroupIds={disabledGroupIds}
             />
 
             {/* Body block (does not fill the entire track row; leaves header lane above) */}

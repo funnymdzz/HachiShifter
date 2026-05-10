@@ -224,6 +224,13 @@ export const timelineApi = {
 
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
 
+    groupClips: (clipIds: string[]) => invoke<TimelineResult>("group_clips", clipIds),
+
+    ungroupClips: (clipIds: string[]) => invoke<TimelineResult>("ungroup_clips", clipIds),
+
+    toggleGroupDisabled: (groupId: string) =>
+        invoke<TimelineResult>("toggle_group_disabled", groupId),
+
     convertClipsToPitchReference: (clipIds: string[]) =>
         invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
 

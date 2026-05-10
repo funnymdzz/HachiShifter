@@ -67,6 +67,8 @@ export interface ClipInfo {
     sourceSampleRate?: number; // 源文件采样率
     gain: number;
     muted: boolean;
+    /** When set, this clip belongs to a group of clips sharing the same UUID. */
+    groupId?: string;
     sourceStartSec: number;
     sourceEndSec: number;
     playbackRate: number;
@@ -105,7 +107,7 @@ export interface LinkedParamCurves {
     extraCurves: Record<string, number[]>;
 }
 
-export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
+export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color" | "groupId">> & {
     trackId: string;
     name: string;
     startSec: number;

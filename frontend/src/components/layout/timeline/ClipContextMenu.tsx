@@ -100,6 +100,8 @@ export const ClipContextMenu: React.FC<{
     onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
+    onGroup?: (ids: string[]) => void;
+    onUngroup?: (ids: string[]) => void;
     onConvertToPitchRef?: (ids: string[]) => void;
     onUpdatePitchRef?: (ids: string[]) => void;
     onExportMidi?: (ids: string[]) => void;
@@ -125,6 +127,8 @@ export const ClipContextMenu: React.FC<{
     onQuickExport,
     onSplit,
     onGlue,
+    onGroup,
+    onUngroup,
     onConvertToPitchRef,
     onUpdatePitchRef,
     onExportMidi,
@@ -161,6 +165,9 @@ export const ClipContextMenu: React.FC<{
     // 多选中是否全部静音
     const allMuted = isMulti ? selectedClips.every((c) => c.muted) : clip.muted;
     const allReversed = isMulti ? selectedClips.every((c) => c.reversed) : clip.reversed;
+
+    // 编组 / 解组
+    const hasGroup = selectedClips.some((c) => c.groupId != null);
 
     function close() {
         onClose();
@@ -299,18 +306,38 @@ export const ClipContextMenu: React.FC<{
                 }}
             />
 
-            {isMulti && (
+            {(isMulti || hasGroup) && (
                 <>
                     <Divider />
-                    <MenuItem
-                        label={t("glue")}
-                        disabled={glueDisabled}
-                        onClick={() => {
-                            onGlue(ids);
-                            close();
-                        }}
-                    />
+                    {isMulti && !hasGroup && (
+                        <MenuItem
+                            label={t("group")}
+                            onClick={() => {
+                                onGroup?.(ids);
+                                close();
+                            }}
+                        />
+                    )}
+                    {hasGroup && (
+                        <MenuItem
+                            label={t("ungroup")}
+                            onClick={() => {
+                                onUngroup?.(ids);
+                                close();
+                            }}
+                        />
+                    )}
                 </>
+            )}
+            {isMulti && (
+                <MenuItem
+                    label={t("glue")}
+                    disabled={glueDisabled}
+                    onClick={() => {
+                        onGlue(ids);
+                        close();
+                    }}
+                />
             )}
 
             {!allPitchAdjustment && (

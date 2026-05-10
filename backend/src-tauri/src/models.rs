@@ -55,6 +55,8 @@ pub struct TimelineTrack {
 #[serde(rename_all = "snake_case")]
 pub struct TimelineClip {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub track_id: String,
     pub name: String,
     pub start_sec: f64,
@@ -130,6 +132,9 @@ pub struct TimelineStatePayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missing_files: Option<Vec<String>>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -30,12 +30,18 @@ import {
     replaceClipSourceRemote,
     splitClipRemote,
 } from "../../../../features/session/sessionSlice";
+import {
+    groupClipsRemote,
+    ungroupClipsRemote,
+    toggleGroupDisabledRemote,
+} from "../../../../features/session/thunks/timelineThunks";
 import { webApi } from "../../../../services/webviewApi";
 import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
 import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
 import { getBulkEditableClipIds } from "./bulkClipEdit";
+import { getGroupClipIds } from "./useGroupExpansion";
 import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 import { computeClipNormalizationGain } from "../../../../features/session/clipNormalization";
 
@@ -49,6 +55,8 @@ export interface UseTimelineClipActionsArgs {
     pxPerSec: number;
     pxPerBeat: number;
     rowHeight: number;
+    ignoreGrouping: boolean;
+    disabledGroupIds: string[];
 }
 
 export interface UseTimelineClipActionsResult {
@@ -115,10 +123,18 @@ export interface UseTimelineClipActionsResult {
     onSelectionRectPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
 
     // Clipboard
-    clipClipboardRef: React.MutableRefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.MutableRefObject<{
+        templates: ClipTemplate[];
+        groupIds: Array<string | undefined>;
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
 
     // Clip operations
+    groupClips: (ids: string[]) => void;
+    ungroupClips: (ids: string[]) => void;
+    toggleGroupDisabled: (groupId: string) => void;
     normalizeClips: (ids: string[]) => void;
     replaceClipSources: (ids: string[]) => Promise<void>;
     splitClipIdsAtPlayhead: (clipIds: string[]) => string[];
@@ -175,6 +191,8 @@ export function useTimelineClipActions(
         sameSourceConfirmResolverRef,
         setSameSourceConfirmOpen,
         setPlayheadFromClientX,
+        ignoreGrouping,
+        disabledGroupIds,
     } = args;
 
     const { t } = useI18n();
@@ -237,6 +255,29 @@ export function useTimelineClipActions(
         setContextMenu(null);
     }, []);
 
+    // ── Group / Ungroup ───────────────────────────────────────
+    const groupClips = React.useCallback(
+        (ids: string[]) => {
+            if (ids.length < 2) return;
+            void dispatch(groupClipsRemote(ids));
+        },
+        [dispatch],
+    );
+
+    const ungroupClips = React.useCallback(
+        (ids: string[]) => {
+            void dispatch(ungroupClipsRemote(ids));
+        },
+        [dispatch],
+    );
+
+    const toggleGroupDisabled = React.useCallback(
+        (groupId: string) => {
+            void dispatch(toggleGroupDisabledRemote(groupId));
+        },
+        [dispatch],
+    );
+
     // ── Selection rect ───────────────────────────────────────
     const handleSelectionRectSingleSelect = React.useCallback(
         (clipId: string) => {
@@ -256,11 +297,15 @@ export function useTimelineClipActions(
     });
 
     // ── Clipboard ────────────────────────────────────────────
-    const clipClipboardRef = useRef<ClipTemplate[] | null>(null);
+    const clipClipboardRef = useRef<{
+        templates: ClipTemplate[];
+        groupIds: Array<string | undefined>;
+    } | null>(null);
 
     const buildClipClipboardTemplates = React.useCallback(async (ids: string[]) => {
         const clips = sessionRef.current.clips.filter((c) => ids.includes(c.id));
-        return Promise.all(
+        const groupIds = clips.map((c) => c.groupId);
+        const templates = await Promise.all(
             clips.map(async (clip) => {
                 const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
                 return {
@@ -273,6 +318,7 @@ export function useTimelineClipActions(
                 };
             }),
         );
+        return { templates, groupIds };
     }, []);
 
     // ── normalizeClips ───────────────────────────────────────
@@ -352,7 +398,23 @@ export function useTimelineClipActions(
     const splitClipIdsAtPlayhead = React.useCallback(
         (clipIds: string[]) => {
             const splitSec = Math.max(0, Number(sessionRef.current.playheadSec ?? 0) || 0);
-            const eligibleIds = clipIds.filter((id) => {
+
+            // Expand to include all group members of any input clip
+            const expandedIds = new Set(clipIds);
+            if (!ignoreGrouping) {
+                for (const id of clipIds) {
+                    const groupMembers = getGroupClipIds(
+                        id,
+                        sessionRef.current.clips,
+                        disabledGroupIds,
+                    );
+                    if (groupMembers) {
+                        for (const gid of groupMembers) expandedIds.add(gid);
+                    }
+                }
+            }
+
+            const eligibleIds = Array.from(expandedIds).filter((id) => {
                 const c = sessionRef.current.clips.find((clip) => clip.id === id);
                 if (!c) return false;
                 return splitSec >= c.startSec && splitSec <= c.startSec + c.lengthSec;
@@ -456,12 +518,19 @@ export function useTimelineClipActions(
     // ── pasteClipsAtPlayhead ─────────────────────────────────
     const pasteClipsAtPlayhead = React.useCallback(() => {
         void (async () => {
-            let tpl = clipClipboardRef.current;
+            let tpl: ClipTemplate[] | null = null;
+            let groupIds: Array<string | undefined> = [];
+            const internal = clipClipboardRef.current;
+            if (internal) {
+                tpl = internal.templates;
+                groupIds = internal.groupIds;
+            }
             try {
                 const fromSystem = await readSystemClipboardObject("clip");
                 if (fromSystem?.kind === "clip" && Array.isArray(fromSystem.templates)) {
                     tpl = fromSystem.templates;
-                    clipClipboardRef.current = fromSystem.templates;
+                    groupIds = (fromSystem as any).groupIds ?? [];
+                    clipClipboardRef.current = { templates: fromSystem.templates, groupIds };
                 }
             } catch {
                 // ignore and fallback to internal clipboard
@@ -534,6 +603,24 @@ export function useTimelineClipActions(
                         ).unwrap();
                     }
                 }
+
+                // Re-group pasted clips: original grouped clips get new independent groups
+                if (groupIds.length === created.length) {
+                    const groupMap = new Map<string, string[]>();
+                    for (let i = 0; i < groupIds.length; i++) {
+                        const gid = groupIds[i];
+                        if (gid && created[i]) {
+                            const list = groupMap.get(gid);
+                            if (list) list.push(created[i]);
+                            else groupMap.set(gid, [created[i]]);
+                        }
+                    }
+                    for (const newClipIds of groupMap.values()) {
+                        if (newClipIds.length >= 2) {
+                            await webApi.groupClips(newClipIds);
+                        }
+                    }
+                }
             } finally {
                 void webApi.endUndoGroup();
             }
@@ -546,7 +633,7 @@ export function useTimelineClipActions(
             lastClickedClipIdRef.current = clipId;
             const selectedIds = multiSelectedClipIdsRef.current;
             const selectedSet = multiSelectedSetRef.current;
-            if (selectedIds.length === 0 || !selectedSet.has(clipId)) {
+            if (selectedIds.length !== 1 || !selectedSet.has(clipId)) {
                 setMultiSelectedClipIds([clipId]);
             }
         },
@@ -756,6 +843,9 @@ export function useTimelineClipActions(
         clipClipboardRef,
         buildClipClipboardTemplates,
 
+        groupClips,
+        ungroupClips,
+        toggleGroupDisabled,
         normalizeClips,
         replaceClipSources,
         splitClipIdsAtPlayhead,

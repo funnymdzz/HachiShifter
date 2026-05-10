@@ -367,6 +367,27 @@ export const glueClipsRemote = createAsyncThunk(
     },
 );
 
+export const groupClipsRemote = createAsyncThunk(
+    "session/groupClipsRemote",
+    async (clipIds: string[]) => {
+        return webApi.groupClips(clipIds);
+    },
+);
+
+export const ungroupClipsRemote = createAsyncThunk(
+    "session/ungroupClipsRemote",
+    async (clipIds: string[]) => {
+        return webApi.ungroupClips(clipIds);
+    },
+);
+
+export const toggleGroupDisabledRemote = createAsyncThunk(
+    "session/toggleGroupDisabledRemote",
+    async (groupId: string) => {
+        return webApi.toggleGroupDisabled(groupId);
+    },
+);
+
 export const convertClipsToPitchReferenceRemote = createAsyncThunk(
     "session/convertClipsToPitchReferenceRemote",
     async (clipIds: string[]) => {

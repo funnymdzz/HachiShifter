@@ -66,7 +66,7 @@ export const ClipEdgeHandles: React.FC<{
                     const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
 
                     if (shouldPrimeSelection) {
-                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                        if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
                             ensureSelected(clipId);
                         }
                         selectClipRemote(clipId);
@@ -143,7 +143,7 @@ export const ClipEdgeHandles: React.FC<{
                     const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
 
                     if (shouldPrimeSelection) {
-                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
+                        if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
                             ensureSelected(clipId);
                         }
                         selectClipRemote(clipId);

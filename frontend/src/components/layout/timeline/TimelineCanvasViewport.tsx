@@ -9,6 +9,8 @@ export const TimelineCanvasViewport: React.FC<{
     height: number;
     model: {
         drawClips: TimelineCanvasClipModel[];
+        activeGroupIds?: Set<string>;
+        disabledGroupIds?: string[];
     };
 }> = ({ width, height, model }) => {
     const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -47,6 +49,8 @@ export const TimelineCanvasViewport: React.FC<{
                 height: displayHeight,
                 clips: modelRef.current.drawClips,
                 fontFamily: resolveFontFamily(),
+                activeGroupIds: modelRef.current.activeGroupIds,
+                disabledGroupIds: modelRef.current.disabledGroupIds,
             });
         });
     }, []);

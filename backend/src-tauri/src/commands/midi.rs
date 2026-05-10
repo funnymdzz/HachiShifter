@@ -25,6 +25,7 @@ fn error_payload(error: &str) -> crate::models::TimelineStatePayload {
         project_sec: None,
         project: None,
         missing_files: Some(vec![error.to_string()]),
+        disabled_group_ids: vec![],
     }
 }
 
@@ -792,6 +793,11 @@ pub(super) fn import_midi_as_clip(
             created_clip_ids.len(),
             created_track_ids.len()
         ));
+
+        // Auto-group all created pitch reference clips when multi_track_merge is disabled
+        if created_clip_ids.len() >= 2 {
+            tl.group_clips(&created_clip_ids);
+        }
 
         let mut root_track_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();

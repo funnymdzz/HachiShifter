@@ -9,6 +9,7 @@ type SparseRenderClip = {
     gain: number;
     muted: boolean;
     midiNoteCount?: number;
+    groupId?: string;
     fadeInSec: number;
     fadeOutSec: number;
     fadeInCurve: "linear" | "sine" | "exponential" | "logarithmic" | "scurve";
@@ -31,6 +32,7 @@ export type TimelineCanvasClipModel = {
     selected: boolean;
     muted: boolean;
     gain: number;
+    groupId?: string;
     isMidiClip: boolean;
     trackColor?: string;
 };
@@ -45,6 +47,7 @@ export function buildSparseClipRenderModel(args: {
     multiSelectedClipIds: string[];
     renamingClipId: string | null;
     hoveredClipId?: string | null;
+    disabledGroupIds?: string[];
 }): {
     drawClips: TimelineCanvasClipModel[];
     overlayClipIdsByTrackId: Record<string, string[]>;
@@ -62,6 +65,32 @@ export function buildSparseClipRenderModel(args: {
         }
     } else if (args.selectedClipId) {
         overlayClipIds.add(args.selectedClipId);
+    }
+
+    // Expand overlay to include all clips that share a group with any overlay clip,
+    // unless the group is disabled.
+    {
+        const activeGroupIds = new Set<string>();
+        for (const trackClips of Object.values(args.visibleTrackClipsById)) {
+            for (const clip of trackClips) {
+                if (
+                    clip.groupId != null &&
+                    overlayClipIds.has(clip.id) &&
+                    !args.disabledGroupIds?.includes(clip.groupId)
+                ) {
+                    activeGroupIds.add(clip.groupId);
+                }
+            }
+        }
+        if (activeGroupIds.size > 0) {
+            for (const trackClips of Object.values(args.visibleTrackClipsById)) {
+                for (const clip of trackClips) {
+                    if (clip.groupId != null && activeGroupIds.has(clip.groupId)) {
+                        overlayClipIds.add(clip.id);
+                    }
+                }
+            }
+        }
     }
 
     const multiSelectedSet =
@@ -87,6 +116,7 @@ export function buildSparseClipRenderModel(args: {
                     : args.selectedClipId === clip.id,
             muted: clip.muted,
             gain: clip.gain,
+            groupId: clip.groupId,
             isMidiClip: clip.midiNoteCount != null,
             trackColor: track.color,
         })),

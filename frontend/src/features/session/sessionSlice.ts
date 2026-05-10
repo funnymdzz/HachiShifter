@@ -28,6 +28,9 @@ import {
     convertClipsToPitchReferenceRemote,
     updatePitchReferenceRemote,
     glueClipsRemote,
+    groupClipsRemote,
+    ungroupClipsRemote,
+    toggleGroupDisabledRemote,
     moveClipRemote,
     moveClipsRemote,
     moveTrackRemote,
@@ -182,6 +185,10 @@ export interface SessionState {
     playheadZoomEnabled: boolean;
     /** 自动滚动（播放时跟随播放头） */
     autoScrollEnabled: boolean;
+    /** 忽略编组（启用后编组同步编辑操作不生效） */
+    ignoreGrouping: boolean;
+    /** 被禁用的编组 ID 列表（禁用后该编组内同步编辑不生效） */
+    disabledGroupIds: string[];
     /** 允许参数编辑器点击时调整播放头 */
     paramEditorSeekPlayheadEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
@@ -734,6 +741,7 @@ function applyTimelineState(
                 }),
             ),
             midiFillGaps: clip.midi_fill_gaps ?? false,
+            groupId: clip.group_id ?? undefined,
         };
 
         return parsed;
@@ -756,6 +764,9 @@ function applyTimelineState(
     state.bpm = clamp(Number(timeline.bpm ?? state.bpm), 10, 300);
     state.playheadSec = Math.max(0, Number(timeline.playhead_sec ?? 0));
     state.projectSec = Math.max(4, Number(timeline.project_sec ?? state.projectSec));
+    state.disabledGroupIds = Array.isArray(timeline.disabled_group_ids)
+        ? [...timeline.disabled_group_ids]
+        : [];
 
     const project = (timeline as any).project as
         | {
@@ -953,6 +964,8 @@ const initialState: SessionState = {
     scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
+    ignoreGrouping: false,
+    disabledGroupIds: [],
     paramEditorSeekPlayheadEnabled: true,
     showClipboardPreview: true,
     showParamValuePopup: true,
@@ -1284,6 +1297,17 @@ const sessionSlice = createSlice({
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
         },
+        toggleIgnoreGrouping(state) {
+            state.ignoreGrouping = !state.ignoreGrouping;
+        },
+        toggleGroupDisabledLocal(state, action: PayloadAction<string>) {
+            const idx = state.disabledGroupIds.indexOf(action.payload);
+            if (idx >= 0) {
+                state.disabledGroupIds.splice(idx, 1);
+            } else {
+                state.disabledGroupIds.push(action.payload);
+            }
+        },
         toggleParamEditorSeekPlayhead(state) {
             state.paramEditorSeekPlayheadEnabled = !state.paramEditorSeekPlayheadEnabled;
         },
@@ -1473,6 +1497,17 @@ const sessionSlice = createSlice({
             const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.muted = Boolean(action.payload.muted);
+        },
+        setClipsGroupId(
+            state,
+            action: PayloadAction<{ clipIds: string[]; groupId: string | null }>,
+        ) {
+            const ids = new Set(action.payload.clipIds);
+            for (const clip of state.clips) {
+                if (ids.has(clip.id)) {
+                    clip.groupId = action.payload.groupId ?? undefined;
+                }
+            }
         },
         /** 乐观更新 clip 颜色（立即反映到 UI，后端确认前先行生效�?*/
         optimisticUpdateClipColor(
@@ -2869,6 +2904,36 @@ const sessionSlice = createSlice({
                 state.status = "Glue done";
             })
 
+            .addCase(groupClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(ungroupClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(toggleGroupDisabledRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
             .addCase(convertClipsToPitchReferenceRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -3151,6 +3216,7 @@ export const {
     setPitchSnapScale,
     togglePlayheadZoom,
     toggleAutoScroll,
+    toggleIgnoreGrouping,
     toggleParamEditorSeekPlayhead,
     toggleClipboardPreview,
     toggleParamValuePopup,
@@ -3186,6 +3252,7 @@ export const {
     setClipFades,
     setClipGain,
     setClipMuted,
+    setClipsGroupId,
     optimisticUpdateClipColor,
     rollbackClipColor,
     addClip,

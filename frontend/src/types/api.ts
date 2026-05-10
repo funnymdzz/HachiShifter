@@ -33,6 +33,7 @@ export interface TimelineTrack {
 
 export interface TimelineClip {
     id: string;
+    group_id?: string;
     track_id: string;
     name: string;
     start_sec: number;
@@ -105,6 +106,7 @@ export interface TimelineState {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
+    disabled_group_ids: string[];
 }
 
 export interface TimelineResult {
@@ -119,6 +121,7 @@ export interface TimelineResult {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
+    disabled_group_ids: string[];
 }
 
 export interface TrackSummaryResult {
