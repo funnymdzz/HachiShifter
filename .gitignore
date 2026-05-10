@@ -169,3 +169,6 @@ build_and_run.bat
 
 .claude/settings.json
 .claude/settings.local.json
+
+hifigan_optimization.md
+tension_analysis.md
