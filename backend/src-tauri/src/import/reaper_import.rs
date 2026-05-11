@@ -10,7 +10,7 @@ use crate::reaper_parser::{
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
 use crate::midi_import::MidiNoteEvent;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 /// HiFiShifter 支持的音频格式扩展名
@@ -419,6 +419,7 @@ fn convert_reaper_items_to_existing_tracks(
 ) -> Result<ReaperImportResult, String> {
     let mut skipped_files: Vec<String> = Vec::new();
     let mut clips: Vec<Clip> = Vec::new();
+    let mut reaper_group_map: HashMap<i32, Vec<String>> = HashMap::new();
     let mut new_tracks: Vec<Track> = Vec::new();
     // 新建轨道映射：target_track_idx → track_id
     let mut created_track_ids: std::collections::HashMap<usize, String> =
@@ -491,6 +492,7 @@ fn convert_reaper_items_to_existing_tracks(
                 &mut skipped_files,
                 track_pitch_accum,
                 project_bpm,
+                &mut reaper_group_map,
             );
         }
     }
@@ -530,7 +532,7 @@ fn convert_reaper_items_to_existing_tracks(
         }
     }
 
-    let timeline = TimelineState {
+    let mut timeline = TimelineState {
         tracks: new_tracks,
         clips,
         selected_track_id: None,
@@ -543,6 +545,11 @@ fn convert_reaper_items_to_existing_tracks(
         next_track_order: next_order,
         disabled_group_ids: HashSet::new(),
     };
+
+    // 将相同 Reaper GROUP 编号的 clip 编组
+    for clip_ids in reaper_group_map.values() {
+        timeline.group_clips(clip_ids);
+    }
 
     Ok(ReaperImportResult {
         timeline,
@@ -603,6 +610,7 @@ fn convert_reaper_data(
     let mut hs_clips: Vec<Clip> = Vec::new();
     let mut skipped_files: Vec<String> = Vec::new();
     let mut track_order: i32 = 0;
+    let mut reaper_group_map: HashMap<i32, Vec<String>> = HashMap::new();
 
     // track_id → pitch accumulator
     let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
@@ -655,6 +663,7 @@ fn convert_reaper_data(
                 &mut skipped_files,
                 &mut track_pitch_accum,
                 bpm,
+                &mut reaper_group_map,
             );
         }
 
@@ -705,7 +714,7 @@ fn convert_reaper_data(
         }
     }
 
-    let timeline = TimelineState {
+    let mut timeline = TimelineState {
         tracks: hs_tracks,
         clips: hs_clips,
         selected_track_id: None,
@@ -718,6 +727,11 @@ fn convert_reaper_data(
         next_track_order: track_order,
         disabled_group_ids: HashSet::new(),
     };
+
+    // 将相同 Reaper GROUP 编号的 clip 编组
+    for clip_ids in reaper_group_map.values() {
+        timeline.group_clips(clip_ids);
+    }
 
     Ok(ReaperImportResult {
         timeline,
@@ -746,6 +760,7 @@ fn process_item(
     skipped_files: &mut Vec<String>,
     pitch_accum: &mut Vec<PitchFrameAccumulator>,
     project_bpm: f64,
+    reaper_group_map: &mut HashMap<i32, Vec<String>>,
 ) {
     let take = item.active_take();
 
@@ -753,7 +768,7 @@ fn process_item(
     if let Some(ref src) = take.source {
         if src.source_type.eq_ignore_ascii_case("MIDI") {
             if let Some(ref midi_data) = src.midi_source {
-                process_midi_item(item, take, track_id, time_offset, midi_data, project_bpm, clips);
+                process_midi_item(item, take, track_id, time_offset, midi_data, project_bpm, clips, reaper_group_map);
             }
             return; // MIDI item 已处理或跳过（空 MIDI）
         }
@@ -936,6 +951,9 @@ fn process_item(
                 midi_note_data: None,
                 midi_fill_gaps: false,
             });
+            if let Some(gid) = item.group_id {
+                reaper_group_map.entry(gid).or_default().push(clip_id);
+            }
             segment_clip_indices.push(clip_index);
             segment_actual_pre_tl.push(actual_pre_tl);
             segment_actual_post_tl.push(actual_post_tl);
@@ -1066,6 +1084,10 @@ fn process_item(
             midi_note_data: None,
             midi_fill_gaps: false,
         });
+
+        if let Some(gid) = item.group_id {
+            reaper_group_map.entry(gid).or_default().push(clip_id);
+        }
 
         // 写入 pitch 偏移数据
         write_pitch_for_clip(
@@ -1361,6 +1383,7 @@ fn process_midi_item(
     midi_source: &ReaperMidiSourceData,
     project_bpm: f64,
     clips: &mut Vec<Clip>,
+    reaper_group_map: &mut HashMap<i32, Vec<String>>,
 ) {
     let bpm = resolve_midi_bpm(midi_source, project_bpm);
 
@@ -1417,7 +1440,7 @@ fn process_midi_item(
     };
 
     clips.push(Clip {
-        id: clip_id,
+        id: clip_id.clone(),
             group_id: None,
             track_id: track_id.to_string(),
         name: clip_name,
@@ -1450,4 +1473,8 @@ fn process_midi_item(
         midi_note_data: Some(notes),
         midi_fill_gaps: false,
     });
+
+    if let Some(gid) = item.group_id {
+        reaper_group_map.entry(gid).or_default().push(clip_id);
+    }
 }

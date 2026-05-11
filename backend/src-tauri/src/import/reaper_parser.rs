@@ -72,6 +72,7 @@ pub struct ReaperItem {
     // 首个 take 的属性（item 自身也是一个隐式 take）
     pub default_take: ReaperTake,
     pub stretch_markers: Vec<ReaperStretchMarker>,
+    pub group_id: Option<i32>,
 }
 
 impl Default for ReaperItem {
@@ -90,6 +91,7 @@ impl Default for ReaperItem {
             takes: Vec::new(),
             default_take: ReaperTake::default(),
             stretch_markers: Vec::new(),
+            group_id: None,
         }
     }
 }
@@ -802,6 +804,12 @@ fn parse_item_block(block: &Block) -> ReaperItem {
                 let v = parse_int(&tokens[1]);
                 if let Some(take) = current_take_mut(&mut item, current_take_is_default) {
                     take.chan_mode = v;
+                }
+            }
+            "GROUP" if tokens.len() >= 2 => {
+                let gid = parse_int(&tokens[1]);
+                if gid > 0 {
+                    item.group_id = Some(gid);
                 }
             }
             _ => {}
