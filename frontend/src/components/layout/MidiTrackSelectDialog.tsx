@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog, Flex, Text, Button, ScrollArea, RadioGroup } from "@radix-ui/themes";
 import { useI18n } from "../../i18n/I18nProvider";
 import { paramsApi } from "../../services/api/params";
@@ -35,8 +35,22 @@ interface MidiTrackSelectDialogProps {
         noteBpmMode?: string;
         specifiedBpm?: number;
         importBpmAsProject?: boolean;
+        clipboardGuid?: string;
+        closeLeadingGap?: boolean;
     }) => void;
-    /** 多轨合并选项（仅 clip 模式下生效） */
+    /** 默认导入目标（弹窗首次打开时的选中项） */
+    defaultImportTarget?: "pitchRef" | "pitchParam";
+    /** 持久化的导入目标值（优先于 defaultImportTarget） */
+    importTarget?: string;
+    /** 导入目标变更回调（用于持久化） */
+    onImportTargetChange?: (v: string) => void;
+    /** 根轨是否已开启 Compose（用于 pitchEdit 模式的前置校验） */
+    rootTrackComposeEnabled?: boolean;
+    /** 请求开启 Compose 的回调（在 pitchEdit 模式下合成未开启时触发） */
+    onRequestEnableCompose?: () => void;
+    /** 剪贴板 GUID（从剪贴板读取的 MIDI 数据，非文件路径） */
+    clipboardGuid?: string | null;
+    /** 多轨合并选项（仅 clip / pitchRef 模式下生效） */
     multiTrackMerge?: boolean;
     /** 多轨合并选项变更回调 */
     onMultiTrackMergeChange?: (v: boolean) => void;
@@ -64,6 +78,10 @@ interface MidiTrackSelectDialogProps {
     specifiedBpm?: number;
     /** 指定 BPM 数值变更回调（用于持久化） */
     onSpecifiedBpmChange?: (v: number) => void;
+    /** 是否关闭开头空隙（将第一个音符对齐到导入位置） */
+    closeLeadingGap?: boolean;
+    /** 关闭开头空隙变更回调（用于持久化） */
+    onCloseLeadingGapChange?: (v: boolean) => void;
 }
 
 /** MIDI note number → 音名 */
@@ -87,7 +105,13 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     onImported,
     mode = "pitchEdit",
     onImportAsClip,
-    importPosition = "playhead",
+    defaultImportTarget,
+    importTarget,
+    onImportTargetChange,
+    rootTrackComposeEnabled,
+    onRequestEnableCompose,
+    clipboardGuid = null,
+    importPosition = "selection",
     onImportPositionChange,
     selectionAvailable = false,
     fillGaps = false,
@@ -101,9 +125,31 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     onNoteBpmModeChange,
     specifiedBpm = 120,
     onSpecifiedBpmChange,
+    closeLeadingGap = true,
+    onCloseLeadingGapChange,
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
+
+    // 导入目标（统一弹窗用）：pitchRef = 创建音高参考块，pitchParam = 导入到音高参数
+    const isReplaceMode = mode === "replaceMidi";
+    const resolveImportTarget = () =>
+        (importTarget as "pitchRef" | "pitchParam") ?? defaultImportTarget ?? "pitchParam";
+    const [currentTarget, setCurrentTarget] = useState<"pitchRef" | "pitchParam">(
+        resolveImportTarget(),
+    );
+    // 弹窗重新打开时重置目标
+    useEffect(() => {
+        if (open && !isReplaceMode) {
+            setCurrentTarget(resolveImportTarget());
+        }
+    }, [open, defaultImportTarget, isReplaceMode, importTarget]);
+    // 当 currentTarget 为 paramEditor 时，行为即 pitchEdit
+    const effectiveMode = isReplaceMode
+        ? "replaceMidi"
+        : currentTarget === "pitchParam"
+          ? "pitchEdit"
+          : "clip";
 
     const [tracks, setTracks] = useState<MidiTrackInfo[]>([]);
     const [loading, setLoading] = useState(false);
@@ -114,11 +160,18 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
 
     // 内部状态：用户通过 Browse / Clipboard 选择的路径
     const [localMidiPath, setLocalMidiPath] = useState<string | null>(null);
+    const [localClipboardGuid, setLocalClipboardGuid] = useState<string | null>(null);
     const [initialBpm, setInitialBpm] = useState<number | null>(null);
+    const [midiHasBpm, setMidiHasBpm] = useState<boolean>(true);
+    const [composeConfirmOpen, setComposeConfirmOpen] = useState(false);
     const [readingClipboard, setReadingClipboard] = useState(false);
+    const autoReadTriedRef = useRef(false);
+    const composePendingRef = useRef(false);
 
     // 当前有效的 MIDI 路径（内部选择优先）
     const effectivePath = localMidiPath ?? midiPath;
+    // 当前有效的剪贴板 GUID
+    const effectiveClipboardGuid = localClipboardGuid ?? clipboardGuid;
 
     // 加载轨道列表的函数
     const loadTracks = useCallback(
@@ -135,12 +188,14 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     if (res.ok && res.tracks) {
                         setTracks(res.tracks);
                         setInitialBpm(res.initial_bpm ?? null);
+                        setMidiHasBpm(res.has_bpm ?? true);
                         // 默认全选
                         setSelectedTracks(res.tracks.map((t) => t.index));
                     } else {
                         setError(res.error ?? tAny("midi_import_failed"));
                         setTracks([]);
                         setInitialBpm(null);
+                        setMidiHasBpm(true);
                     }
                 })
                 .catch((err) => {
@@ -148,15 +203,64 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     setError(tAny("midi_import_failed"));
                     setTracks([]);
                     setInitialBpm(null);
+                    setMidiHasBpm(true);
                 })
                 .finally(() => setLoading(false));
         },
         [tAny],
     );
 
-    // 当弹窗打开时有 effectivePath，加载轨道列表
+    // 从剪贴板 GUID 加载轨道（通过后端缓存查询，不重复读取剪贴板）
+    const loadTracksFromClipboard = useCallback(
+        (guid: string) => {
+            console.info("[midi_import_ui] loadTracksFromClipboard:start", { guid });
+            setLoading(true);
+            setError(null);
+            paramsApi
+                .getMidiTracks("", guid)
+                .then((res) => {
+                    console.info("[midi_import_ui] loadTracksFromClipboard:response", res);
+                    if (res.ok && res.tracks) {
+                        setTracks(res.tracks);
+                        setInitialBpm(res.initial_bpm ?? null);
+                        setMidiHasBpm(res.has_bpm ?? true);
+                        setSelectedTracks(res.tracks.map((t) => t.index));
+                    } else {
+                        setError(res.error ?? tAny("midi_clipboard_read_failed"));
+                        setTracks([]);
+                        setInitialBpm(null);
+                        setMidiHasBpm(true);
+                    }
+                })
+                .catch((err) => {
+                    console.error("[midi_import_ui] loadTracksFromClipboard:error", err);
+                    setError(tAny("midi_clipboard_read_failed"));
+                    setTracks([]);
+                    setInitialBpm(null);
+                    setMidiHasBpm(true);
+                })
+                .finally(() => setLoading(false));
+        },
+        [tAny],
+    );
+
+    // 当弹窗打开且有 effectivePath 或 effectiveClipboardGuid，加载轨道列表
     useEffect(() => {
-        if (!open || !effectivePath) {
+        if (!open) {
+            setTracks([]);
+            setError(null);
+            setSelectedTracks([]);
+            setInitialBpm(null);
+            return;
+        }
+        // 剪贴板来源：若 tracks 已从 readMidiClipboardToMemory 直接加载，则跳过 getMidiTracks
+        if (effectiveClipboardGuid) {
+            if (tracks.length === 0) {
+                loadTracksFromClipboard(effectiveClipboardGuid);
+            }
+            return;
+        }
+        if (!effectivePath) {
             setTracks([]);
             setError(null);
             setSelectedTracks([]);
@@ -165,16 +269,46 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         }
 
         loadTracks(effectivePath);
-    }, [open, effectivePath, loadTracks]);
+    }, [open, effectivePath, effectiveClipboardGuid, loadTracks]);
 
     // 弹窗关闭时重置内部状态
     useEffect(() => {
         if (!open) {
             setLocalMidiPath(null);
+            setLocalClipboardGuid(null);
             setInitialBpm(null);
+            setMidiHasBpm(true);
             setReadingClipboard(false);
+            autoReadTriedRef.current = false;
+            composePendingRef.current = false;
         }
     }, [open]);
+
+    // MIDI 不含 BPM 时，若当前选中 "MIDI 自身 BPM"，显示为 "当前工程 BPM"（不持久化）
+    const displayNoteBpmMode = !midiHasBpm && noteBpmMode === "midi" ? "project" : noteBpmMode;
+
+    // 弹窗打开时，若无预设来源，尝试自动读取剪贴板中的 Standard MIDI File 数据
+    useEffect(() => {
+        if (!open || isReplaceMode || effectivePath || effectiveClipboardGuid) return;
+        if (autoReadTriedRef.current) return;
+        autoReadTriedRef.current = true;
+        paramsApi
+            .readMidiClipboardToMemory()
+            .then((res) => {
+                if (res.ok && res.guid) {
+                    setLocalClipboardGuid(res.guid);
+                    if (res.tracks && res.tracks.length > 0) {
+                        setTracks(res.tracks);
+                        setInitialBpm(res.initial_bpm ?? null);
+                        setMidiHasBpm(res.has_bpm ?? true);
+                        setSelectedTracks(res.tracks.map((t) => t.index));
+                    }
+                }
+            })
+            .catch(() => {
+                // 剪贴板无可用的 MIDI 数据，静默忽略
+            });
+    }, [open, isReplaceMode, effectivePath, effectiveClipboardGuid]);
 
     // Browse 按钮：打开原生文件对话框
     const handleBrowse = useCallback(async () => {
@@ -185,6 +319,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
             if ((picked as { canceled?: boolean }).canceled || !(picked as { path?: string }).path)
                 return;
             setLocalMidiPath((picked as { path: string }).path);
+            setLocalClipboardGuid(null);
             setError(null);
         } catch {
             // 静默忽略
@@ -196,10 +331,17 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         setReadingClipboard(true);
         setError(null);
         try {
-            const res = await paramsApi.readMidiClipboardAsTemp();
-            if (res.ok && res.temp_path) {
-                setLocalMidiPath(res.temp_path);
-                // useEffect 会在 effectivePath 变化时自动加载轨道
+            const res = await paramsApi.readMidiClipboardToMemory();
+            if (res.ok && res.guid) {
+                setLocalMidiPath(null);
+                setLocalClipboardGuid(res.guid);
+                // 直接从返回结果设置轨道，避免再次请求
+                if (res.tracks && res.tracks.length > 0) {
+                    setTracks(res.tracks);
+                    setInitialBpm(res.initial_bpm ?? null);
+                    setMidiHasBpm(res.has_bpm ?? true);
+                    setSelectedTracks(res.tracks.map((t) => t.index));
+                }
             } else {
                 const errorKey = res.error ?? "midi_clipboard_read_failed";
                 setError(tAny(errorKey));
@@ -212,25 +354,35 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
     }, [tAny]);
 
     const handleImport = useCallback(async () => {
-        if (!effectivePath || selectedTracks.length === 0) return;
+        if ((!effectivePath && !effectiveClipboardGuid) || selectedTracks.length === 0) return;
+
+        // pitchEdit 模式下，若根轨未开启 Compose，先弹出确认对话框
+        if (effectiveMode === "pitchEdit" && rootTrackComposeEnabled === false) {
+            composePendingRef.current = true;
+            setComposeConfirmOpen(true);
+            return;
+        }
 
         setImporting(true);
         try {
             const trackIndices = selectedTracks;
+            const midiSrc = effectivePath ?? "";
 
-            if (mode === "clip" || mode === "replaceMidi") {
+            if (effectiveMode === "clip" || effectiveMode === "replaceMidi") {
                 const notesCount = tracks
                     .filter((t) => selectedTracks.includes(t.index))
                     .reduce((sum, t) => sum + t.note_count, 0);
                 onImportAsClip?.({
                     trackIndices,
                     notesCount,
-                    midiPath: effectivePath,
+                    midiPath: midiSrc,
                     fillGaps,
                     multiTrackMerge,
                     noteBpmMode,
                     specifiedBpm: noteBpmMode === "specified" ? specifiedBpm : undefined,
                     importBpmAsProject: importBpmAsProject || undefined,
+                    clipboardGuid: effectiveClipboardGuid ?? undefined,
+                    closeLeadingGap,
                 });
                 onOpenChange(false);
                 return;
@@ -252,7 +404,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
             const maxFrames = effectivePosition === "selection" ? selectionMaxFrames : undefined;
 
             console.info("[midi_import_ui] import:start", {
-                midiPath: effectivePath,
+                midiPath: midiSrc,
+                clipboardGuid: effectiveClipboardGuid,
                 trackIndices,
                 importPosition,
                 effectivePosition,
@@ -263,7 +416,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 importBpmAsProject,
             });
             const res = await paramsApi.importMidiToPitch(
-                effectivePath,
+                midiSrc,
                 trackIndices,
                 startFrame,
                 maxFrames,
@@ -271,6 +424,8 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                 noteBpmMode,
                 noteBpmMode === "specified" ? specifiedBpm : undefined,
                 importBpmAsProject || undefined,
+                effectiveClipboardGuid ?? undefined,
+                closeLeadingGap,
             );
             console.info("[midi_import_ui] import:response", res);
             if (res.ok) {
@@ -307,7 +462,7 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         onImportAsClip,
         onOpenChange,
         tAny,
-        mode,
+        effectiveMode,
         tracks,
         importPosition,
         selectionAvailable,
@@ -316,25 +471,142 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
         noteBpmMode,
         specifiedBpm,
         importBpmAsProject,
+        effectiveClipboardGuid,
+        closeLeadingGap,
+        rootTrackComposeEnabled,
     ]);
+
+    // Compose 确认回调：开启合成后继续导入
+    const handleComposeConfirm = useCallback(() => {
+        setComposeConfirmOpen(false);
+        composePendingRef.current = false;
+        onRequestEnableCompose?.();
+        // 重新触发导入（此时 rootTrackComposeEnabled 可能还未更新，但后端不会再报错）
+        setImporting(true);
+        const midiSrc = effectivePath ?? "";
+        const trackIndices = selectedTracks;
+        let effectivePosition = importPosition;
+        if (effectivePosition === "selection") {
+            if (selectionStartFrame == null || !selectionAvailable) {
+                effectivePosition = "playhead";
+            }
+        }
+        const startFrame =
+            effectivePosition === "projectStart"
+                ? 0
+                : effectivePosition === "selection"
+                  ? selectionStartFrame
+                  : undefined;
+        const maxFrames = effectivePosition === "selection" ? selectionMaxFrames : undefined;
+        paramsApi
+            .importMidiToPitch(
+                midiSrc,
+                trackIndices,
+                startFrame,
+                maxFrames,
+                fillGaps || undefined,
+                noteBpmMode,
+                noteBpmMode === "specified" ? specifiedBpm : undefined,
+                importBpmAsProject || undefined,
+                effectiveClipboardGuid ?? undefined,
+                closeLeadingGap,
+            )
+            .then((res) => {
+                if (res.ok) {
+                    onImported?.({
+                        notes_imported: res.notes_imported ?? 0,
+                        frames_touched: res.frames_touched ?? 0,
+                    });
+                    onOpenChange(false);
+                } else {
+                    const knownErrors: Record<string, string> = {
+                        file_not_found: tAny("midi_file_not_found"),
+                        no_notes_in_track: tAny("midi_no_notes"),
+                        no_frames_touched: tAny("midi_no_frames_touched"),
+                        no_pitch_line_selected: tAny("vs_paste_no_pitch_line"),
+                        pitch_requires_compose: tAny("pitch_requires_compose"),
+                        pitch_requires_algo: tAny("pitch_requires_algo"),
+                    };
+                    setError(
+                        knownErrors[res.error ?? ""] ?? res.error ?? tAny("midi_import_failed"),
+                    );
+                }
+            })
+            .catch(() => {
+                setError(tAny("midi_import_failed"));
+            })
+            .finally(() => {
+                setImporting(false);
+            });
+    }, [
+        effectivePath,
+        effectiveClipboardGuid,
+        selectedTracks,
+        importPosition,
+        selectionStartFrame,
+        selectionMaxFrames,
+        selectionAvailable,
+        fillGaps,
+        noteBpmMode,
+        specifiedBpm,
+        importBpmAsProject,
+        closeLeadingGap,
+        onRequestEnableCompose,
+        onImported,
+        onOpenChange,
+        tAny,
+    ]);
+
+    const handleComposeDecline = useCallback(() => {
+        setComposeConfirmOpen(false);
+        composePendingRef.current = false;
+    }, []);
 
     return (
         <Dialog.Root open={open} onOpenChange={onOpenChange}>
             <Dialog.Content maxWidth="520px">
                 <Dialog.Title>
-                    {mode === "replaceMidi"
+                    {effectiveMode === "replaceMidi"
                         ? tAny("midi_replace_title")
-                        : mode === "clip"
-                          ? tAny("midi_import_clip_title")
-                          : tAny("midi_import_title")}
+                        : currentTarget === "pitchParam"
+                          ? tAny("midi_import_title")
+                          : tAny("midi_import_clip_title")}
                 </Dialog.Title>
                 <Dialog.Description size="2" color="gray">
-                    {mode === "replaceMidi"
+                    {effectiveMode === "replaceMidi"
                         ? tAny("midi_replace_desc")
-                        : mode === "clip"
-                          ? tAny("midi_import_clip_desc")
-                          : tAny("midi_import_desc")}
+                        : currentTarget === "pitchParam"
+                          ? tAny("midi_import_desc")
+                          : tAny("midi_import_clip_desc")}
                 </Dialog.Description>
+
+                {/* ── 导入目标选择（replace 模式不显示） ── */}
+                {!isReplaceMode && (
+                    <Flex direction="column" gap="1" mt="3">
+                        <Text size="1" weight="medium">
+                            {tAny("midi_import_target")}
+                        </Text>
+                        <RadioGroup.Root
+                            value={currentTarget}
+                            onValueChange={(v) => {
+                                const target = v as "pitchRef" | "pitchParam";
+                                setCurrentTarget(target);
+                                onImportTargetChange?.(v);
+                            }}
+                        >
+                            <Flex gap="3">
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                    <RadioGroup.Item value="pitchParam" />
+                                    <Text size="1">{tAny("midi_import_target_pitch_param")}</Text>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                    <RadioGroup.Item value="pitchRef" />
+                                    <Text size="1">{tAny("midi_import_target_pitch_block")}</Text>
+                                </label>
+                            </Flex>
+                        </RadioGroup.Root>
+                    </Flex>
+                )}
 
                 {/* ── 文件选择区域（始终显示） ── */}
                 <Flex direction="column" gap="1" mt="3">
@@ -346,9 +618,17 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                             type="text"
                             className="flex-1 px-2 py-1 text-xs rounded border border-qt-border bg-qt-base text-qt-text"
                             readOnly
-                            value={effectivePath ? effectivePath : tAny("midi_no_file_selected")}
+                            value={
+                                effectiveClipboardGuid
+                                    ? tAny("midi_clipboard_midi_prefix") +
+                                      effectiveClipboardGuid +
+                                      ".mid"
+                                    : effectivePath
+                                      ? effectivePath
+                                      : tAny("midi_no_file_selected")
+                            }
                             style={{
-                                color: effectivePath ? undefined : "#888",
+                                color: effectivePath || effectiveClipboardGuid ? undefined : "#888",
                                 cursor: "default",
                                 minWidth: 0,
                             }}
@@ -414,11 +694,17 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                 {tAny("midi_deselect_all")}
                             </Button>
                             {initialBpm != null && (
-                                <Text size="1" color="gray" className="ml-auto self-center">
-                                    {tAny("midi_midi_bpm_label").replace(
-                                        "{bpm}",
-                                        initialBpm.toFixed(2),
-                                    )}
+                                <Text
+                                    size="1"
+                                    color={midiHasBpm ? "gray" : "red"}
+                                    className="ml-auto self-center"
+                                >
+                                    {midiHasBpm
+                                        ? tAny("midi_midi_bpm_label").replace(
+                                              "{bpm}",
+                                              initialBpm.toFixed(2),
+                                          )
+                                        : `${tAny("midi_no_bpm")}`}
                                 </Text>
                             )}
                         </Flex>
@@ -484,14 +770,21 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
 
                         {/* ── BPM 选项（在多轨合并和填补空隙上方） ── */}
                         {/* 将 MIDI BPM 导入为工程 BPM */}
-                        <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                        <label
+                            className={`flex items-center gap-2 mt-3 ${
+                                midiHasBpm ? "cursor-pointer" : "opacity-50"
+                            }`}
+                        >
                             <input
                                 type="checkbox"
                                 checked={importBpmAsProject}
                                 onChange={(e) => onImportBpmAsProjectChange?.(e.target.checked)}
+                                disabled={!midiHasBpm}
                                 className="w-4 h-4"
                             />
-                            <Text size="1">{tAny("midi_import_bpm_as_project")}</Text>
+                            <Text size="1" color={midiHasBpm ? undefined : "gray"}>
+                                {tAny("midi_import_bpm_as_project")}
+                            </Text>
                         </label>
 
                         {/* 音符 BPM 设置 */}
@@ -500,13 +793,19 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                                 {tAny("midi_note_bpm")}
                             </Text>
                             <RadioGroup.Root
-                                value={noteBpmMode}
+                                value={displayNoteBpmMode}
                                 onValueChange={(v) => onNoteBpmModeChange?.(v)}
                             >
                                 <Flex direction="column" gap="1">
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                        <RadioGroup.Item value="midi" />
-                                        <Text size="1">{tAny("midi_note_bpm_midi")}</Text>
+                                    <label
+                                        className={`flex items-center gap-1 ${
+                                            midiHasBpm ? "cursor-pointer" : "opacity-50"
+                                        }`}
+                                    >
+                                        <RadioGroup.Item value="midi" disabled={!midiHasBpm} />
+                                        <Text size="1" color={midiHasBpm ? undefined : "gray"}>
+                                            {tAny("midi_note_bpm_midi")}
+                                        </Text>
                                     </label>
                                     <label className="flex items-center gap-1 cursor-pointer">
                                         <RadioGroup.Item value="project" />
@@ -567,10 +866,10 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                     </>
                 )}
 
-                {effectivePath && (
+                {(effectivePath || effectiveClipboardGuid) && !loading && tracks.length > 0 && (
                     <>
-                        {/* 导入位置选项（仅在 pitchEdit 模式下显示） */}
-                        {mode === "pitchEdit" && (
+                        {/* 导入位置选项（仅在 paramEditor 目标下显示） */}
+                        {currentTarget === "pitchParam" && !isReplaceMode && (
                             <Flex direction="column" gap="1" mt="3">
                                 <Text size="2" weight="medium">
                                     {tAny("midi_import_position")}
@@ -613,18 +912,41 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                             </Flex>
                         )}
 
-                        {/* 多轨合并选项（仅在 clip / replaceMidi 模式下显示） */}
-                        {(mode === "clip" || mode === "replaceMidi") && (
-                            <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                        {/* 多轨合并选项 */}
+                        {!isReplaceMode && (
+                            <label
+                                className={`flex items-center gap-2 mt-3 ${
+                                    currentTarget === "pitchParam" ? "opacity-60" : "cursor-pointer"
+                                }`}
+                            >
                                 <input
                                     type="checkbox"
-                                    checked={multiTrackMerge ?? true}
-                                    onChange={(e) => onMultiTrackMergeChange?.(e.target.checked)}
+                                    checked={
+                                        currentTarget === "pitchParam"
+                                            ? true
+                                            : (multiTrackMerge ?? true)
+                                    }
+                                    onChange={(e) =>
+                                        currentTarget !== "pitchParam" &&
+                                        onMultiTrackMergeChange?.(e.target.checked)
+                                    }
+                                    disabled={currentTarget === "pitchParam"}
                                     className="w-4 h-4"
                                 />
                                 <Text size="1">{tAny("midi_multi_track_merge")}</Text>
                             </label>
                         )}
+
+                        {/* 关闭开头空隙选项 */}
+                        <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={closeLeadingGap ?? true}
+                                onChange={(e) => onCloseLeadingGapChange?.(e.target.checked)}
+                                className="w-4 h-4"
+                            />
+                            <Text size="1">{tAny("midi_close_leading_gap")}</Text>
+                        </label>
 
                         {/* 填补空隙选项 */}
                         <label className="flex items-center gap-2 mt-3 cursor-pointer">
@@ -658,16 +980,32 @@ export const MidiTrackSelectDialog: React.FC<MidiTrackSelectDialogProps> = ({
                             >
                                 {importing
                                     ? tAny("midi_importing")
-                                    : mode === "replaceMidi"
+                                    : effectiveMode === "replaceMidi"
                                       ? tAny("midi_replace_button")
-                                      : mode === "clip"
-                                        ? tAny("midi_create_clip")
-                                        : tAny("midi_import")}
+                                      : currentTarget === "pitchParam"
+                                        ? tAny("midi_import")
+                                        : tAny("midi_create_clip")}
                             </Button>
                         </Flex>
                     </>
                 )}
             </Dialog.Content>
+
+            {/* Compose 未开启确认对话框 */}
+            <Dialog.Root open={composeConfirmOpen} onOpenChange={setComposeConfirmOpen}>
+                <Dialog.Content maxWidth="400px">
+                    <Dialog.Title>{tAny("midi_compose_required_title")}</Dialog.Title>
+                    <Dialog.Description size="2" mt="2">
+                        {tAny("midi_compose_required_message")}
+                    </Dialog.Description>
+                    <Flex justify="end" gap="2" mt="4">
+                        <Button variant="soft" color="gray" onClick={handleComposeDecline}>
+                            {tAny("cancel")}
+                        </Button>
+                        <Button onClick={handleComposeConfirm}>{tAny("ok")}</Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
         </Dialog.Root>
     );
 };

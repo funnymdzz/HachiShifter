@@ -337,6 +337,7 @@ export const replaceMidiClipDataRemote = createAsyncThunk(
         noteBpmMode?: string;
         specifiedBpm?: number;
         importMidiBpmAsProject?: boolean;
+        closeLeadingGap?: boolean;
     }) => {
         return webApi.replaceMidiClipData(
             payload.clipId,
@@ -346,6 +347,8 @@ export const replaceMidiClipDataRemote = createAsyncThunk(
             payload.noteBpmMode,
             payload.specifiedBpm,
             payload.importMidiBpmAsProject,
+            undefined,
+            payload.closeLeadingGap,
         );
     },
 );
@@ -357,6 +360,13 @@ export const splitClipRemote = createAsyncThunk(
     },
 );
 
+export const splitClipsAtRemote = createAsyncThunk(
+    "session/splitClipsAtRemote",
+    async (payload: { clipIds: string[]; splitSec: number }) => {
+        return webApi.splitClipsAt(payload.clipIds, payload.splitSec);
+    },
+);
+
 export const glueClipsRemote = createAsyncThunk(
     "session/glueClipsRemote",
     async (clipIds: string[]) => {
@@ -364,10 +374,38 @@ export const glueClipsRemote = createAsyncThunk(
     },
 );
 
+export const groupClipsRemote = createAsyncThunk(
+    "session/groupClipsRemote",
+    async (clipIds: string[]) => {
+        return webApi.groupClips(clipIds);
+    },
+);
+
+export const ungroupClipsRemote = createAsyncThunk(
+    "session/ungroupClipsRemote",
+    async (clipIds: string[]) => {
+        return webApi.ungroupClips(clipIds);
+    },
+);
+
+export const toggleGroupDisabledRemote = createAsyncThunk(
+    "session/toggleGroupDisabledRemote",
+    async (groupId: string) => {
+        return webApi.toggleGroupDisabled(groupId);
+    },
+);
+
 export const convertClipsToPitchReferenceRemote = createAsyncThunk(
     "session/convertClipsToPitchReferenceRemote",
     async (clipIds: string[]) => {
         return webApi.convertClipsToPitchReference(clipIds);
+    },
+);
+
+export const updatePitchReferenceRemote = createAsyncThunk(
+    "session/updatePitchReferenceRemote",
+    async (clipIds: string[]) => {
+        return webApi.updatePitchReference(clipIds);
     },
 );
 

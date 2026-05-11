@@ -185,6 +185,9 @@ export const enUS = {
     param_editor: "Parameter Editor",
     pitch_requires_compose: "Enable Compose (C) on the root track to generate pitch curve",
     pitch_requires_algo: "Select a non-None pitch algorithm to enable pitch editing",
+    midi_compose_required_title: "Compose Not Enabled",
+    midi_compose_required_message:
+        "Compose is not enabled on the root track. Enable it to continue importing the pitch curve?",
     pitch_backend_unavailable: "Pitch backend unavailable (check WORLD DLL / ONNX model)",
     pitch_edit_not_modified_hint: "No edit yet: curve matches original pitch",
     pitch_status_label: "Pitch",
@@ -262,6 +265,11 @@ export const enUS = {
 
     menu_about: "About HiFiShifter",
     glue: "Glue",
+    group: "Group",
+    ungroup: "Ungroup",
+    ignore_grouping: "Ignore Grouping",
+    disable_group: "Disable Group",
+    enable_group: "Enable Group",
     none: "None",
     bpm: "BPM",
     repeat: "Repeat",
@@ -400,6 +408,8 @@ export const enUS = {
     kb_clip_paste: "Paste Clip",
     kb_clip_split: "Split Clip",
     kb_clip_normalize: "Normalize Clip",
+    kb_clip_group: "Group Clips",
+    kb_clip_ungroup: "Ungroup Clips",
     qs_auto_normalize: "Auto-normalize on place",
     kb_group_pianoroll: "Piano Roll",
     kb_group_modifier: "Modifier Keys",
@@ -465,6 +475,7 @@ export const enUS = {
     midi_select_all: "Select All",
     midi_deselect_all: "Deselect All",
     midi_multi_track_merge: "Multi-track Merge",
+    midi_close_leading_gap: "Close leading gap",
     midi_track_notes: "{count} notes",
     midi_track_range: "Range: {min} – {max}",
     midi_no_tracks: "No tracks with notes found in MIDI file",
@@ -485,6 +496,7 @@ export const enUS = {
     // MIDI import — BPM options
     midi_import_bpm_as_project: "Import MIDI BPM as project BPM",
     midi_midi_bpm_label: "MIDI BPM: {bpm}",
+    midi_no_bpm: "MIDI has no BPM data!",
     midi_note_bpm: "Note BPM",
     midi_note_bpm_midi: "MIDI own BPM",
     midi_note_bpm_project: "Current project BPM",
@@ -495,6 +507,12 @@ export const enUS = {
     midi_clipboard_read_failed: "Failed to read MIDI from clipboard",
     midi_clipboard_empty: "No Standard MIDI File found in clipboard",
     midi_clipboard_parse_failed: "Failed to parse MIDI data from clipboard",
+
+    // MIDI import target selector
+    midi_import_target: "Import Target",
+    midi_import_target_pitch_block: "Pitch Reference Block",
+    midi_import_target_pitch_param: "Pitch Parameter",
+    midi_clipboard_midi_prefix: "Clipboard MIDI: ",
 
     // MIDI replace dialog
     midi_replace_title: "Replace MIDI",
@@ -795,5 +813,8 @@ export const enUS = {
 
     // Pitch reference clip
     ctx_convert_to_pitch_ref: "Convert to Pitch Reference Clip",
+    ctx_update_pitch_ref: "Update Pitch Reference",
+    ctx_export_midi: "Export as MIDI",
     menu_save_as_pitch_ref: "Save as Pitch Reference Clip",
+    menu_export_midi: "Export as MIDI",
 } as const;

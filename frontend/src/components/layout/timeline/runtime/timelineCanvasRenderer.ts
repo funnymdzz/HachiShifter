@@ -54,12 +54,15 @@ export function drawTimelineCanvas(
             selected: boolean;
             muted: boolean;
             gain: number;
+            groupId?: string;
             playbackRate?: number;
             name: string;
             isMidiClip?: boolean;
             trackColor?: string;
         }>;
         fontFamily?: string;
+        activeGroupIds?: Set<string>;
+        disabledGroupIds?: string[];
     },
 ): void {
     const fontFamily = args.fontFamily || resolveFontFamily();
@@ -74,6 +77,10 @@ export function drawTimelineCanvas(
         const headerHeight = Math.max(1, Math.min(clip.heightPx, clip.headerHeightPx));
         const bodyTop = clipTop + headerHeight;
         const bodyHeight = Math.max(1, clipHeight - headerHeight);
+        const isGroupActive =
+            clip.groupId != null && args.activeGroupIds?.has(clip.groupId) === true;
+        const isGroupDisabled =
+            clip.groupId != null && (args.disabledGroupIds?.includes(clip.groupId) ?? false);
         const visualStyle = buildTimelineClipVisualStyle({
             widthPx: clipWidth,
             trackColor: clip.trackColor,
@@ -84,6 +91,9 @@ export function drawTimelineCanvas(
             name: clip.name,
             fontFamily,
             isPitchAdjustment: clip.isMidiClip,
+            groupId: clip.groupId,
+            isGroupActive,
+            isGroupDisabled,
         });
         const fadeShadeRange = computeTimelineFadeShadeRange({
             widthPx: clipWidth,
@@ -149,6 +159,55 @@ export function drawTimelineCanvas(
             ctx.moveTo(indicatorInnerX, indicatorInnerY);
             ctx.lineTo(indicatorOuterX, indicatorOuterY);
             ctx.stroke();
+        }
+
+        if (visualStyle.showChainBadge) {
+            const badgeX = clipLeft + visualStyle.chainBadgeOffsetX;
+            const badgeY = clipTop + visualStyle.chainBadgeOffsetY;
+            const badgeW = visualStyle.chainBadgeWidth;
+            const badgeH = visualStyle.chainBadgeHeight;
+            const badgeR = visualStyle.chainBadgeRadius;
+            const badgeCx = badgeX + badgeW / 2;
+            const badgeCy = badgeY + badgeH / 2;
+
+            ctx.beginPath();
+            ctx.roundRect(badgeX, badgeY, badgeW, badgeH, badgeR);
+            ctx.fillStyle = visualStyle.chainBadgeFill;
+            ctx.fill();
+            ctx.strokeStyle = visualStyle.chainBadgeStroke;
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Simple chain-link icon: two overlapping circles with a connecting bar
+            ctx.strokeStyle = visualStyle.chainBadgeTextFill;
+            ctx.lineWidth = 1.5;
+            ctx.lineCap = "round";
+            const leftCx = badgeCx - 3;
+            const rightCx = badgeCx + 3;
+            const linkR = 2.5;
+            // Left link
+            ctx.beginPath();
+            ctx.ellipse(leftCx, badgeCy - 0.5, linkR, linkR * 0.7, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            // Right link
+            ctx.beginPath();
+            ctx.ellipse(rightCx, badgeCy + 0.5, linkR, linkR * 0.7, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            // Connecting bar
+            ctx.beginPath();
+            ctx.moveTo(leftCx + linkR * 0.5, badgeCy - 1);
+            ctx.lineTo(rightCx - linkR * 0.5, badgeCy + 0);
+            ctx.stroke();
+
+            // Draw diagonal slash when group is disabled
+            if (isGroupDisabled) {
+                ctx.beginPath();
+                ctx.strokeStyle = visualStyle.chainBadgeStroke;
+                ctx.lineWidth = 1.5;
+                ctx.moveTo(badgeX + 3, badgeY + 2);
+                ctx.lineTo(badgeX + badgeW - 3, badgeY + badgeH - 2);
+                ctx.stroke();
+            }
         }
 
         if (visualStyle.showMuteBadge) {

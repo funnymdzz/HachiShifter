@@ -106,6 +106,9 @@ export function buildTimelineClipVisualStyle(args: {
     name: string;
     fontFamily?: string;
     isPitchAdjustment?: boolean;
+    groupId?: string;
+    isGroupActive?: boolean;
+    isGroupDisabled?: boolean;
 }): {
     headerFill: string;
     bodyFill: string;
@@ -120,6 +123,14 @@ export function buildTimelineClipVisualStyle(args: {
     muteBadgeRadius: number;
     muteBadgeOffsetX: number;
     muteBadgeOffsetY: number;
+    chainBadgeFill: string;
+    chainBadgeStroke: string;
+    chainBadgeTextFill: string;
+    chainBadgeWidth: number;
+    chainBadgeHeight: number;
+    chainBadgeRadius: number;
+    chainBadgeOffsetX: number;
+    chainBadgeOffsetY: number;
     formantBadgeFill: string;
     formantBadgeStroke: string;
     formantBadgeTextFill: string;
@@ -145,6 +156,7 @@ export function buildTimelineClipVisualStyle(args: {
     leadingControlsWidth: number;
     trailingReservePx: number;
     showMuteBadge: boolean;
+    showChainBadge: boolean;
     showFormantBadge: boolean;
     showGainKnob: boolean;
     showGainLabel: boolean;
@@ -159,8 +171,16 @@ export function buildTimelineClipVisualStyle(args: {
     const controlRgb = mixHexColor(trackColor, { r: 40, g: 46, b: 55 }, 0.52);
     const controlActiveRgb = mixHexColor(trackColor, { r: 120, g: 64, b: 69 }, 0.4);
     const isPitchAdj = args.isPitchAdjustment === true;
-    const { showMute, showFormant, showGainKnob, showPlaybackRate, showGainLabel, showName } =
-        resolveTimelineClipHeaderVisibility(args.widthPx, isPitchAdj);
+    const {
+        showChain,
+        showMute,
+        showFormant,
+        showGainKnob,
+        showPlaybackRate,
+        showGainLabel,
+        showName,
+    } = resolveTimelineClipHeaderVisibility(args.widthPx, isPitchAdj);
+    const showChainBadge = showChain && args.groupId != null;
 
     // Compute labels early so we can measure their widths with the correct font
     const gainDb = gainToDb(args.gain);
@@ -190,7 +210,57 @@ export function buildTimelineClipVisualStyle(args: {
           ? 26
           : 10;
 
-    const textStartPx = showGainKnob ? (showMute ? 58 : 28) : showMute ? 34 : 8;
+    const muteBadgeWidth = 20;
+    const muteBadgeHeight = 14;
+    const muteBadgeRadius = 4;
+    const chainBadgeWidth = 20;
+    const chainBadgeHeight = 14;
+    const chainBadgeRadius = 4;
+    const formantBadgeWidth = 20;
+    const formantBadgeHeight = 14;
+    const formantBadgeRadius = 4;
+    const gainKnobRadius = 7;
+    const gainKnobCenterOffsetX = 15;
+    const gainKnobCenterOffsetY = 10;
+    const chainBadgeOffsetX = showGainKnob ? 28 : 8;
+    const chainBadgeOffsetY = 3;
+    const muteBadgeOffsetX = showChainBadge
+        ? chainBadgeOffsetX + chainBadgeWidth + 2
+        : chainBadgeOffsetX;
+    const muteBadgeOffsetY = 3;
+    const formantBadgeOffsetX = muteBadgeOffsetX + muteBadgeWidth + 2;
+    const formantBadgeOffsetY = 3;
+
+    // Compute right edge of left-side controls dynamically (chain-aware)
+    const controlsRightEdge = showFormant
+        ? formantBadgeOffsetX + formantBadgeWidth
+        : showMute
+          ? muteBadgeOffsetX + muteBadgeWidth
+          : showChainBadge
+            ? chainBadgeOffsetX + chainBadgeWidth
+            : showGainKnob
+              ? gainKnobCenterOffsetX + gainKnobRadius + 2
+              : 8;
+    const leadingControlsWidth = controlsRightEdge + 10;
+
+    // Chain badge: red when group is disabled, golden when active, neutral otherwise
+    const chainBadgeFill = args.isGroupDisabled
+        ? "rgba(220, 70, 70, 0.45)"
+        : args.isGroupActive
+          ? "rgba(255, 200, 50, 0.55)"
+          : `rgba(${controlRgb.r}, ${controlRgb.g}, ${controlRgb.b}, 0.55)`;
+    const chainBadgeStroke = args.isGroupDisabled
+        ? "rgba(200, 50, 50, 0.80)"
+        : args.isGroupActive
+          ? "rgba(255, 200, 50, 0.90)"
+          : `rgba(${borderRgb.r}, ${borderRgb.g}, ${borderRgb.b}, 0.50)`;
+    const chainBadgeTextFill = args.isGroupDisabled
+        ? "rgba(180, 40, 40, 1)"
+        : args.isGroupActive
+          ? "rgba(180, 120, 10, 1)"
+          : "rgba(210, 215, 225, 0.85)";
+
+    const textStartPx = controlsRightEdge + 6;
 
     // Font-aware average char width for name truncation
     const avgCharWidth = Math.max(
@@ -201,31 +271,6 @@ export function buildTimelineClipVisualStyle(args: {
         1,
         Math.floor((args.widthPx - textStartPx - trailingReservePx) / avgCharWidth),
     );
-
-    const muteBadgeWidth = 20;
-    const muteBadgeHeight = 14;
-    const muteBadgeRadius = 4;
-    const formantBadgeWidth = 20;
-    const formantBadgeHeight = 14;
-    const formantBadgeRadius = 4;
-    const gainKnobRadius = 7;
-    const gainKnobCenterOffsetX = 15;
-    const gainKnobCenterOffsetY = 10;
-    const muteBadgeOffsetX = showGainKnob ? 28 : 8;
-    const muteBadgeOffsetY = 3;
-    const formantBadgeOffsetX = muteBadgeOffsetX + muteBadgeWidth + 2;
-    const formantBadgeOffsetY = 3;
-    const leadingControlsWidth = showGainKnob
-        ? showMute
-            ? showFormant
-                ? 80
-                : 60
-            : 28
-        : showMute
-          ? showFormant
-              ? 56
-              : 36
-          : 8;
 
     return {
         headerFill: rgba(headerRgb, 0.95),
@@ -246,6 +291,14 @@ export function buildTimelineClipVisualStyle(args: {
         muteBadgeRadius,
         muteBadgeOffsetX,
         muteBadgeOffsetY,
+        chainBadgeFill,
+        chainBadgeStroke,
+        chainBadgeTextFill,
+        chainBadgeWidth,
+        chainBadgeHeight,
+        chainBadgeRadius,
+        chainBadgeOffsetX,
+        chainBadgeOffsetY,
         formantBadgeFill: rgba(controlRgb, 0.9),
         formantBadgeStroke: rgba(mixHexColor(trackColor, { r: 182, g: 193, b: 206 }, 0.18), 0.66),
         formantBadgeTextFill: "rgba(244, 247, 250, 0.94)",
@@ -271,6 +324,7 @@ export function buildTimelineClipVisualStyle(args: {
         leadingControlsWidth,
         trailingReservePx,
         showMuteBadge: showMute,
+        showChainBadge,
         showFormantBadge: showFormant,
         showGainKnob,
         showGainLabel,

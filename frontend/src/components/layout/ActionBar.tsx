@@ -18,6 +18,7 @@ import {
     toggleGridSnap,
     togglePlayheadZoom,
     toggleAutoScroll,
+    toggleIgnoreGrouping,
     toggleParamEditorSeekPlayhead,
     persistUiSettings,
     setProjectBaseScaleRemote,
@@ -536,6 +537,42 @@ export function ActionBar() {
                         <path d="M3 6L1.5 7.5L3 9" stroke="currentColor" strokeWidth="1" />
                         <path d="M12 6L13.5 7.5L12 9" stroke="currentColor" strokeWidth="1" />
                         <path d="M2 7.5H13" stroke="currentColor" strokeWidth="0.8" opacity="0.5" />
+                    </svg>
+                </IconButton>
+
+                {/* Ignore Grouping (broken chain) */}
+                <IconButton
+                    size="1"
+                    variant={s.ignoreGrouping ? "solid" : "ghost"}
+                    color="gray"
+                    title={tAny("ignore_grouping")}
+                    tabIndex={-1}
+                    onClick={() => {
+                        dispatch(toggleIgnoreGrouping());
+                        void dispatch(persistUiSettings());
+                    }}
+                >
+                    <svg
+                        width="15"
+                        height="15"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                    >
+                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                        <line
+                            x1="2"
+                            y1="2"
+                            x2="22"
+                            y2="22"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            opacity="0.7"
+                        />
                     </svg>
                 </IconButton>
             </Flex>

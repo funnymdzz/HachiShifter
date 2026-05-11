@@ -130,6 +130,9 @@ type TrackLaneProps = {
     onRenameDone?: () => void;
     onGainCommit?: (clipId: string, db: number) => void;
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
+    activeGroupIds?: Set<string>;
+    disabledGroupIds?: string[];
+    onToggleGroupDisabled?: (groupId: string) => void;
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
     ghostDrag?: GhostDragInfo | null;
@@ -174,6 +177,9 @@ export const TrackLane = React.memo(
             onRenameDone,
             onGainCommit,
             onFormantMorphCommit,
+            activeGroupIds,
+            disabledGroupIds,
+            onToggleGroupDisabled,
             ghostDrag,
             verticalTrackLockTrackId,
             allClips,
@@ -278,7 +284,7 @@ export const TrackLane = React.memo(
                 if (!shouldPrimeSelection) {
                     return;
                 }
-                if (multiSelectedClipIds.length === 0 || !multiSelectedSet.has(clipId)) {
+                if (!multiSelectedSet.has(clipId) || multiSelectedClipIds.length > 1) {
                     ensureSelected(clipId);
                 }
                 selectClipRemote(clipId);
@@ -325,10 +331,15 @@ export const TrackLane = React.memo(
                     window.removeEventListener("pointermove", onMove, true);
                     window.removeEventListener("pointerup", onUp, true);
                     window.removeEventListener("pointercancel", onUp, true);
-                    if (doShiftRangeSelect && !moved) {
-                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
-                    } else if (!moved && allowSeek) {
-                        seekFromClientX(ev.clientX, true);
+                    if (!moved) {
+                        if (doShiftRangeSelect) {
+                            onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
+                        } else if (shouldPrimeSelection) {
+                            primeSelection(clip.id, true, event.clientX);
+                        }
+                        if (allowSeek) {
+                            seekFromClientX(ev.clientX, true);
+                        }
                     }
                 };
 
@@ -336,7 +347,6 @@ export const TrackLane = React.memo(
                 window.addEventListener("pointerup", onUp, true);
                 window.addEventListener("pointercancel", onUp, true);
 
-                primeSelection(clip.id, shouldPrimeSelection, event.clientX);
                 startClipDrag(event, clip.id, clip.startSec, alt);
             },
             [
@@ -381,7 +391,6 @@ export const TrackLane = React.memo(
                 event.preventDefault();
                 event.stopPropagation();
                 clearContextMenu();
-                primeSelection(clipId, shouldPrimeSelection, event.clientX);
 
                 const onMove = (ev: PointerEvent) => {
                     if (ev.pointerId !== pointerId || dragStarted) return;
@@ -405,6 +414,9 @@ export const TrackLane = React.memo(
                         if (doShiftRangeSelect) {
                             onShiftRangeSelect(clipId, shiftRangeAnchorClipId, startX);
                             return;
+                        }
+                        if (shouldPrimeSelection) {
+                            primeSelection(clipId, true, event.clientX);
                         }
                         seekFromClientX(ev.clientX, true);
                     }
@@ -562,6 +574,9 @@ export const TrackLane = React.memo(
                             onRenameDone={onRenameDone}
                             onGainCommit={onGainCommit}
                             onFormantMorphCommit={onFormantMorphCommit}
+                            activeGroupIds={activeGroupIds}
+                            disabledGroupIds={disabledGroupIds}
+                            onToggleGroupDisabled={onToggleGroupDisabled}
                             hovered={hoveredClipId === clip.id}
                         />
                     );
@@ -642,7 +657,10 @@ export const TrackLane = React.memo(
             prev.ghostDrag === next.ghostDrag &&
             prev.verticalTrackLockTrackId === next.verticalTrackLockTrackId &&
             prev.allClips === next.allClips &&
-            sameStringArray(prev.overlayClipIds, next.overlayClipIds)
+            sameStringArray(prev.overlayClipIds, next.overlayClipIds) &&
+            prev.activeGroupIds === next.activeGroupIds &&
+            prev.disabledGroupIds === next.disabledGroupIds &&
+            prev.onToggleGroupDisabled === next.onToggleGroupDisabled
             // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus
             // after mount, so pure horizontal scroll should not force a TrackLane rerender.
         );

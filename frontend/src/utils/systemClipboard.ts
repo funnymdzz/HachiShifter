@@ -16,6 +16,7 @@ export interface ClipClipboardObject {
     version: 1;
     kind: "clip";
     templates: ClipTemplate[];
+    groupIds?: string[];
 }
 
 export interface ParamClipboardObject {

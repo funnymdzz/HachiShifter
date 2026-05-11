@@ -874,6 +874,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                     || old.reversed != c.reversed
                     || old.midi_fill_gaps != c.midi_fill_gaps
                     || old.muted != c.muted
+                    || old.midi_note_data != c.midi_note_data
             })
         })
         .map(|c| c.id.clone())
@@ -1359,6 +1360,9 @@ mod tests {
             extra_curves: None,
             extra_params: None,
             formant_morph: None,
+            group_id: None,
+            midi_fill_gaps: false,
+            midi_note_data: None,
         });
         timeline
     }

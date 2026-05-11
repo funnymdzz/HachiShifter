@@ -8,7 +8,7 @@ use tauri::Emitter;
 use super::analysis::build_pitch_job;
 use super::{build_root_pitch_key, PitchOrigUpdatedEvent};
 
-fn assemble_pitch_orig_from_cache(
+pub(crate) fn assemble_pitch_orig_from_cache(
     tl: &crate::state::TimelineState,
     root_track_id: &str,
 ) -> Option<(Vec<f32>, bool, bool)> {
@@ -332,7 +332,7 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
             }
         }
     }
-    // lock 释放后再 emit，避免持锁时发事?
+    // lock 释放后再 emit，避免持锁时发事件
     if should_emit {
         if let Some(app) = state.app_handle.get() {
             let _ = app.emit(

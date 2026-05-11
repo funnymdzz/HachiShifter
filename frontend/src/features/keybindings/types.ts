@@ -45,6 +45,8 @@ export type ActionId =
     | "clip.paste" // 粘贴 clip
     | "clip.split" // 分割 clip
     | "clip.normalize" // 规格化选中 clip
+    | "clip.group" // 编组选中 clip
+    | "clip.ungroup" // 解组选中 clip
     // PianoRoll 操作
     | "pianoRoll.copy" // PianoRoll 内复制参数帧
     | "pianoRoll.paste" // PianoRoll 内粘贴参数帧

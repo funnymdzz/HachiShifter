@@ -100,7 +100,11 @@ export const ClipContextMenu: React.FC<{
     onQuickExport: (ids: string[]) => void;
     onSplit: (clipIds: string[]) => void;
     onGlue: (ids: string[]) => void;
+    onGroup?: (ids: string[]) => void;
+    onUngroup?: (ids: string[]) => void;
     onConvertToPitchRef?: (ids: string[]) => void;
+    onUpdatePitchRef?: (ids: string[]) => void;
+    onExportMidi?: (ids: string[]) => void;
     onNormalize: (ids: string[]) => void;
     onToggleReverse: (ids: string[], reversed: boolean) => void;
     onFadeCurveChange?: (clipId: string, target: "in" | "out", curve: FadeCurveType) => void;
@@ -123,7 +127,11 @@ export const ClipContextMenu: React.FC<{
     onQuickExport,
     onSplit,
     onGlue,
+    onGroup,
+    onUngroup,
     onConvertToPitchRef,
+    onUpdatePitchRef,
+    onExportMidi,
     onNormalize,
     onToggleReverse,
     onFadeCurveChange,
@@ -157,6 +165,9 @@ export const ClipContextMenu: React.FC<{
     // 多选中是否全部静音
     const allMuted = isMulti ? selectedClips.every((c) => c.muted) : clip.muted;
     const allReversed = isMulti ? selectedClips.every((c) => c.reversed) : clip.reversed;
+
+    // 编组 / 解组
+    const hasGroup = selectedClips.some((c) => c.groupId != null);
 
     function close() {
         onClose();
@@ -295,18 +306,81 @@ export const ClipContextMenu: React.FC<{
                 }}
             />
 
+            {(isMulti || hasGroup) && (
+                <>
+                    <Divider />
+                    {isMulti && !hasGroup && (
+                        <MenuItem
+                            label={t("group")}
+                            onClick={() => {
+                                onGroup?.(ids);
+                                close();
+                            }}
+                        />
+                    )}
+                    {hasGroup && (
+                        <MenuItem
+                            label={t("ungroup")}
+                            onClick={() => {
+                                onUngroup?.(ids);
+                                close();
+                            }}
+                        />
+                    )}
+                </>
+            )}
             {isMulti && (
+                <MenuItem
+                    label={t("glue")}
+                    disabled={glueDisabled}
+                    onClick={() => {
+                        onGlue(ids);
+                        close();
+                    }}
+                />
+            )}
+
+            {!allPitchAdjustment && (
                 <>
                     <Divider />
                     <MenuItem
-                        label={t("glue")}
-                        disabled={glueDisabled}
+                        label={t("ctx_convert_to_pitch_ref")}
                         onClick={() => {
-                            onGlue(ids);
+                            const audioIds = selectedClips
+                                .filter((c) => !isPitch(c))
+                                .map((c) => c.id);
+                            if (audioIds.length > 0) {
+                                onConvertToPitchRef?.(audioIds);
+                            }
                             close();
                         }}
                     />
                 </>
+            )}
+
+            {allPitchAdjustment && onUpdatePitchRef && (
+                <>
+                    <Divider />
+                    <MenuItem
+                        label={t("ctx_update_pitch_ref")}
+                        onClick={() => {
+                            if (pitchOnlyIds.length > 0) {
+                                onUpdatePitchRef(pitchOnlyIds);
+                            }
+                            close();
+                        }}
+                    />
+                </>
+            )}
+
+            {onExportMidi && (
+                <MenuItem
+                    label={t("ctx_export_midi")}
+                    onClick={() => {
+                        onExportMidi(ids);
+                        close();
+                    }}
+                />
             )}
 
             {onFadeCurveChange &&
@@ -372,24 +446,6 @@ export const ClipContextMenu: React.FC<{
                         </>
                     );
                 })()}
-
-            {!allPitchAdjustment && (
-                <>
-                    <Divider />
-                    <MenuItem
-                        label={t("ctx_convert_to_pitch_ref")}
-                        onClick={() => {
-                            const audioIds = selectedClips
-                                .filter((c) => !isPitch(c))
-                                .map((c) => c.id);
-                            if (audioIds.length > 0) {
-                                onConvertToPitchRef?.(audioIds);
-                            }
-                            close();
-                        }}
-                    />
-                </>
-            )}
         </div>
     );
 };
