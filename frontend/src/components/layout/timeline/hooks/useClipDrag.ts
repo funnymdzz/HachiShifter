@@ -21,7 +21,7 @@ import {
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade, computeAutoCrossfadeFromPayload } from "./autoCrossfade";
-import { getGroupClipIds } from "./useGroupExpansion";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 import {
     buildBulkClipStateUpdates,
     buildDuplicateClipsBulkPayload,
@@ -176,19 +176,19 @@ export function useClipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        // Group expansion takes priority over multi-select
-        const groupIds = ignoreGrouping
-            ? undefined
-            : getGroupClipIds(
-                  clipId,
+        // Expand to include selected clips and their group members
+        const initialIds =
+            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
+                ? [...multiSelectedClipIds]
+                : [clipId];
+        const clipIds = ignoreGrouping
+            ? initialIds
+            : expandClipIdsWithGroups(
+                  initialIds,
                   sessionRef.current.clips,
+                  false,
                   sessionRef.current.disabledGroupIds,
               );
-        const clipIds = groupIds
-            ? groupIds
-            : multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
-              ? [...multiSelectedClipIds]
-              : [clipId];
 
         const initialById: Record<string, { startSec: number; trackId: string }> = {};
         let minstartSec = Number.POSITIVE_INFINITY;

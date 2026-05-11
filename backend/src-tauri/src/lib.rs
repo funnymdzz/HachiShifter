@@ -305,6 +305,7 @@ pub fn run() {
             commands::duplicate_clips_bulk,
             commands::replace_clip_source,
             commands::split_clip,
+            commands::split_clips_at,
             commands::glue_clips,
             commands::group_clips,
             commands::ungroup_clips,

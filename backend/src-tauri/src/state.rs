@@ -2835,6 +2835,94 @@ impl TimelineState {
         self.clips.push(right);
     }
 
+    /// Split multiple clips at the same position.
+    /// - Left halves keep the original group_id.
+    /// - Right halves get a new group_id (per original group).
+    /// - Unsplit clips in affected groups are assigned to left or right side by position.
+    /// - Groups with fewer than 2 members after reassignment are dissolved.
+    pub fn split_clips_at(&mut self, clip_ids: &[String], split_sec: f64) {
+        // 1. Collect affected group IDs from input clips
+        let affected_groups: HashSet<Option<String>> = clip_ids
+            .iter()
+            .filter_map(|cid| {
+                self.clips
+                    .iter()
+                    .find(|c| c.id == *cid)
+                    .map(|c| c.group_id.clone())
+            })
+            .collect();
+
+        // 2. Record clip IDs before split
+        let before_ids: HashSet<String> = self.clips.iter().map(|c| c.id.clone()).collect();
+
+        // 3. Split each input clip
+        for cid in clip_ids {
+            self.split_clip(cid, split_sec);
+        }
+
+        // 4. Identify newly created clip IDs (right halves)
+        let new_ids: HashSet<String> = self
+            .clips
+            .iter()
+            .map(|c| c.id.clone())
+            .filter(|id| !before_ids.contains(id))
+            .collect();
+
+        if new_ids.is_empty() {
+            return;
+        }
+
+        // 5. For each affected group, generate a new group UUID for right-side clips
+        let mut right_group_map: HashMap<Option<String>, Option<String>> = HashMap::new();
+        for gid_opt in &affected_groups {
+            let new_gid = gid_opt
+                .as_ref()
+                .map(|_| Some(new_id("group")))
+                .unwrap_or(None);
+            right_group_map.insert(gid_opt.clone(), new_gid);
+        }
+
+        // 6. Assign new group_id to right-side clips (new clips and unsplit clips to the right)
+        for gid_opt in affected_groups.iter().filter(|g| g.is_some()) {
+            let Some(ref gid) = gid_opt else {
+                continue;
+            };
+            let new_gid = right_group_map
+                .get(gid_opt)
+                .and_then(|g| g.clone());
+
+            for clip in self.clips.iter_mut() {
+                if clip.group_id.as_ref() != Some(gid) {
+                    continue;
+                }
+                if new_ids.contains(&clip.id) {
+                    // Newly created right-half clip → assign new group
+                    clip.group_id = new_gid.clone();
+                } else if clip.start_sec >= split_sec - 1e-6 {
+                    // Unsplit clip entirely to the right → move to new group
+                    clip.group_id = new_gid.clone();
+                }
+                // else: unsplit clip to the left → keep original group
+            }
+        }
+
+        // 7. Dissolve single-member groups
+        let mut group_counts: HashMap<String, usize> = HashMap::new();
+        for clip in &self.clips {
+            if let Some(ref gid) = clip.group_id {
+                *group_counts.entry(gid.clone()).or_default() += 1;
+            }
+        }
+
+        for clip in &mut self.clips {
+            if let Some(ref gid) = clip.group_id {
+                if group_counts.get(gid).copied().unwrap_or(0) < 2 {
+                    clip.group_id = None;
+                }
+            }
+        }
+    }
+
     pub fn glue_clips(&mut self, clip_ids: &[String]) {
         if clip_ids.len() < 2 {
             return;

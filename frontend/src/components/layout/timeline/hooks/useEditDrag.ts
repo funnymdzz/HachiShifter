@@ -28,7 +28,7 @@ import {
     type StretchGroupState,
 } from "./stretchGroup";
 import { applyBulkFadeValue, applyBulkGainDeltaDb, getBulkEditableClipIds } from "./bulkClipEdit";
-import { getGroupClipIds } from "./useGroupExpansion";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 export function resolveStretchParamTypes(
@@ -224,22 +224,24 @@ export function useEditDrag(deps: {
         if (!scroller) return;
         const rightEdgeBeat = clip.startSec + clip.lengthSec;
 
-        // Group expansion takes priority for bulk edits (gain, trim, stretch)
-        const groupIds =
-            ignoreGrouping || type === "fade_in" || type === "fade_out"
-                ? undefined
-                : getGroupClipIds(
-                      clipId,
-                      sessionRef.current.clips,
-                      sessionRef.current.disabledGroupIds,
-                  );
-        const selectedClipIds = groupIds
-            ? groupIds
-            : getBulkEditableClipIds({
-                  activeClipId: clipId,
-                  multiSelectedClipIds,
-                  multiSelectedSet,
-              });
+        // Resolve which clips to operate on.
+        // Trim / stretch / slip expand to all selected + their group members.
+        // Gain / fades only apply to multi-selected clips (no group expansion).
+        const initialIds = getBulkEditableClipIds({
+            activeClipId: clipId,
+            multiSelectedClipIds,
+            multiSelectedSet,
+        });
+        const supportsGroupExpansion =
+            !ignoreGrouping && type !== "fade_in" && type !== "fade_out" && type !== "gain";
+        const selectedClipIds = supportsGroupExpansion
+            ? expandClipIdsWithGroups(
+                  initialIds,
+                  sessionRef.current.clips,
+                  false,
+                  sessionRef.current.disabledGroupIds,
+              )
+            : initialIds;
         const baseGainById = Object.fromEntries(
             selectedClipIds.map((id) => {
                 const selectedClip = sessionRef.current.clips.find((entry) => entry.id === id);
@@ -255,11 +257,6 @@ export function useEditDrag(deps: {
                       edge: type,
                   })
                 : null;
-
-        // 对于 gain 类型的拖动，使用 beginUndoGroup 将整个拖动操作包装为一个原子 undo entry
-        if (type === "gain") {
-            void webApi.beginUndoGroup();
-        }
 
         dispatch(checkpointHistory());
         dispatch(beginInteraction());
@@ -724,19 +721,12 @@ export function useEditDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             editDragRef.current = null;
 
-            // 如果是 gain 类型的拖动，确保 undo group 被正确结束
-            const wasGainType = drag.type === "gain";
-
             const isGroupStretch =
                 drag.stretchGroup != null &&
                 (drag.type === "stretch_left" || drag.type === "stretch_right");
 
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!isGroupStretch && !clipNow) {
-                // 即使 clip 不存在也要结束 undo group
-                if (wasGainType) {
-                    void webApi.endUndoGroup();
-                }
                 dispatch(endInteraction());
                 return;
             }
@@ -1078,10 +1068,6 @@ export function useEditDrag(deps: {
                         }),
                     }),
                 ).unwrap();
-                // 结束 gain 拖动时调用 endUndoGroup，结束 undo group
-                void Promise.resolve(persistPromise).finally(() => {
-                    void webApi.endUndoGroup();
-                });
             }
 
             // 两阶段播放速率更新：后端响应后重新应用前端计算的值

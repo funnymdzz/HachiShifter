@@ -45,6 +45,7 @@ import {
     setClipsStateBulkRemote,
     setProjectLengthRemote,
     splitClipRemote,
+    splitClipsAtRemote,
 } from "./thunks/timelineThunks";
 
 import {
@@ -1111,6 +1112,7 @@ export {
     replaceClipSourceRemote,
     replaceMidiClipDataRemote,
     splitClipRemote,
+    splitClipsAtRemote,
     convertClipsToPitchReferenceRemote,
     updatePitchReferenceRemote,
     glueClipsRemote,
@@ -2934,6 +2936,16 @@ const sessionSlice = createSlice({
             })
 
             .addCase(splitClipRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(splitClipsAtRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;

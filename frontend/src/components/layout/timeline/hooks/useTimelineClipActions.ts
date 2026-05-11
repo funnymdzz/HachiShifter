@@ -28,7 +28,7 @@ import {
     setSelectedClip,
     setSelectedClipPreservingTrack,
     replaceClipSourceRemote,
-    splitClipRemote,
+    splitClipsAtRemote,
 } from "../../../../features/session/sessionSlice";
 import {
     groupClipsRemote,
@@ -417,10 +417,10 @@ export function useTimelineClipActions(
             const eligibleIds = Array.from(expandedIds).filter((id) => {
                 const c = sessionRef.current.clips.find((clip) => clip.id === id);
                 if (!c) return false;
-                return splitSec >= c.startSec && splitSec <= c.startSec + c.lengthSec;
+                return splitSec > c.startSec + 1e-6 && splitSec < c.startSec + c.lengthSec - 1e-6;
             });
-            for (const clipId of eligibleIds) {
-                void dispatch(splitClipRemote({ clipId, splitSec }));
+            if (eligibleIds.length > 0) {
+                void dispatch(splitClipsAtRemote({ clipIds: eligibleIds, splitSec }));
             }
             return eligibleIds;
         },

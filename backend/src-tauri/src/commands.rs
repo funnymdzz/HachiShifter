@@ -572,6 +572,14 @@ pub fn split_clip(
     timeline::split_clip(state, clip_id, split_sec)
 }
 #[tauri::command(rename_all = "camelCase")]
+pub fn split_clips_at(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    split_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    timeline::split_clips_at(state, clip_ids, split_sec)
+}
+#[tauri::command(rename_all = "camelCase")]
 pub fn glue_clips(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,

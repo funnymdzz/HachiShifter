@@ -112,6 +112,7 @@ export const webApi = {
     duplicateClipsBulk: timelineApi.duplicateClipsBulk,
     replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
+    splitClipsAt: timelineApi.splitClipsAt,
     glueClips: timelineApi.glueClips,
     groupClips: timelineApi.groupClips,
     ungroupClips: timelineApi.ungroupClips,

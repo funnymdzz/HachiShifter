@@ -261,6 +261,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "split_clip":
             return { clipId: args[0], splitSec: args[1] };
 
+        case "split_clips_at":
+            return { clipIds: args[0], splitSec: args[1] };
+
         case "glue_clips":
             return { clipIds: args[0] };
 

@@ -222,6 +222,9 @@ export const timelineApi = {
     splitClip: (clipId: string, splitSec: number) =>
         invoke<TimelineResult>("split_clip", clipId, splitSec),
 
+    splitClipsAt: (clipIds: string[], splitSec: number) =>
+        invoke<TimelineResult>("split_clips_at", clipIds, splitSec),
+
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
 
     groupClips: (clipIds: string[]) => invoke<TimelineResult>("group_clips", clipIds),

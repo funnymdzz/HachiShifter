@@ -360,6 +360,13 @@ export const splitClipRemote = createAsyncThunk(
     },
 );
 
+export const splitClipsAtRemote = createAsyncThunk(
+    "session/splitClipsAtRemote",
+    async (payload: { clipIds: string[]; splitSec: number }) => {
+        return webApi.splitClipsAt(payload.clipIds, payload.splitSec);
+    },
+);
+
 export const glueClipsRemote = createAsyncThunk(
     "session/glueClipsRemote",
     async (clipIds: string[]) => {

@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use base64::Engine;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use tauri::Emitter;
@@ -708,6 +709,32 @@ pub(super) fn split_clip(
     payload.project = Some(state.project_meta_payload());
     drop(tl);
     if let Some(root_id) = root_track_id {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
+pub(super) fn split_clips_at(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    split_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|cid| tl.clips.iter().find(|c| c.id == *cid))
+        .map(|c| c.track_id.clone())
+        .filter_map(|tid| tl.resolve_root_track_id(&tid))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.split_clips_at(&clip_ids, split_sec);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
         crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
     }
     payload

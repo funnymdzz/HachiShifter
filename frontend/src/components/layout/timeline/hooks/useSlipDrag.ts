@@ -9,7 +9,7 @@ import {
     endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { webApi } from "../../../../services/webviewApi";
-import { getGroupClipIds } from "./useGroupExpansion";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 
 export type SlipDragState = {
     pointerId: number;
@@ -62,19 +62,19 @@ export function useSlipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        // Group expansion takes priority over multi-select
-        const groupIds = ignoreGrouping
-            ? undefined
-            : getGroupClipIds(
-                  clipId,
+        // Expand to include selected clips and their group members
+        const initialIds =
+            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
+                ? [...multiSelectedClipIds]
+                : [clipId];
+        const clipIds = ignoreGrouping
+            ? initialIds
+            : expandClipIdsWithGroups(
+                  initialIds,
                   sessionRef.current.clips,
+                  false,
                   sessionRef.current.disabledGroupIds,
               );
-        const clipIds = groupIds
-            ? groupIds
-            : multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
-              ? [...multiSelectedClipIds]
-              : [clipId];
 
         const initialById: SlipDragState["initialById"] = {};
         for (const id of clipIds) {
