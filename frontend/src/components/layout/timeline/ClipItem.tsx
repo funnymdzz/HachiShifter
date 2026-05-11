@@ -165,14 +165,6 @@ export const ClipItem = React.memo(function ClipItem({
             const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
             const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
 
-            if (shouldPrimeSelection) {
-                if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
-                    ensureSelected(clip.id);
-                }
-                selectClipRemote(clip.id);
-                recordLastClickPosition?.(e.clientX);
-            }
-
             const startX = e.clientX;
             const startY = e.clientY;
             const pointerId = e.pointerId;
@@ -209,6 +201,13 @@ export const ClipItem = React.memo(function ClipItem({
                     if (doShiftRangeSelect) {
                         onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
                         return;
+                    }
+                    if (shouldPrimeSelection) {
+                        if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
+                            ensureSelected(clip.id);
+                        }
+                        selectClipRemote(clip.id);
+                        recordLastClickPosition?.(e.clientX);
                     }
                     seekFromClientX(ev.clientX, true);
                 }
@@ -254,20 +253,12 @@ export const ClipItem = React.memo(function ClipItem({
     return (
         <div
             data-hs-clip-item="1"
-            className="absolute cursor-pointer overflow-visible group"
+            className="absolute overflow-visible group"
             style={{
                 left,
                 width,
                 top: 0,
                 height: rowHeight - CLIP_BODY_PADDING_Y,
-                transform: "translateZ(0)",
-                backfaceVisibility: "hidden",
-                WebkitMaskImage: leadingOverlapMaskImage,
-                maskImage: leadingOverlapMaskImage,
-                WebkitMaskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
-                maskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
-                WebkitMaskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
-                maskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
                 boxShadow: interactionHintBoxShadow,
             }}
             onContextMenu={(e) => {
@@ -292,6 +283,7 @@ export const ClipItem = React.memo(function ClipItem({
                 const doShiftRangeSelect = e.shiftKey && !alt && !ctrlOrMeta;
                 const shiftRangeAnchorClipId = doShiftRangeSelect ? rangeSelectAnchorClipId : null;
                 const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
+                const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
 
                 // Seek should happen on click, not on drag.
                 // Track whether the pointer moved beyond a small deadzone.
@@ -312,11 +304,19 @@ export const ClipItem = React.memo(function ClipItem({
                     window.removeEventListener("pointermove", onMove, true);
                     window.removeEventListener("pointerup", onUp, true);
                     window.removeEventListener("pointercancel", onUp, true);
-                    // Shift+点击且未移动时执行范围选择
-                    if (doShiftRangeSelect && !moved) {
-                        onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
-                    } else if (!moved && allowSeek) {
-                        seekFromClientX(ev.clientX, true);
+                    if (!moved) {
+                        if (doShiftRangeSelect) {
+                            onShiftRangeSelect(clip.id, shiftRangeAnchorClipId, startX);
+                        } else if (shouldPrimeSelection) {
+                            if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
+                                ensureSelected(clip.id);
+                            }
+                            selectClipRemote(clip.id);
+                            recordLastClickPosition?.(e.clientX);
+                        }
+                        if (allowSeek) {
+                            seekFromClientX(ev.clientX, true);
+                        }
                     }
                 }
 
@@ -328,14 +328,6 @@ export const ClipItem = React.memo(function ClipItem({
                 e.stopPropagation();
                 clearContextMenu();
 
-                const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
-                if (shouldPrimeSelection) {
-                    if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
-                        ensureSelected(clip.id);
-                    }
-                    selectClipRemote(clip.id);
-                    recordLastClickPosition?.(e.clientX);
-                }
                 startClipDrag(e, clip.id, clip.startSec, alt);
             }}
             title={
@@ -344,100 +336,110 @@ export const ClipItem = React.memo(function ClipItem({
                     : (clip.sourcePath ?? clip.name)
             }
         >
-            <ClipEdgeHandles
-                clipId={clip.id}
-                altPressed={altPressed}
-                multiSelectedCount={multiSelectedCount}
-                isInMultiSelectedSet={isInMultiSelectedSet}
-                ensureSelected={ensureSelected}
-                selectClipRemote={selectClipRemote}
-                onCtrlToggleSelect={onCtrlToggleSelect}
-                onShiftRangeSelect={onShiftRangeSelect}
-                rangeSelectAnchorClipId={rangeSelectAnchorClipId}
-                recordLastClickPosition={recordLastClickPosition}
-                seekFromClientX={seekFromClientX}
-                startEditDrag={startEditDrag}
-            />
-
-            <ClipHeader
-                clip={clip}
-                clipWidthPx={width}
-                trackColor={trackColor}
-                transparentVisuals
-                isPitchAdjustment={clip.midiNoteCount != null}
-                ensureSelected={ensureSelected}
-                selectClipRemote={selectClipRemote}
-                startEditDrag={startEditDrag}
-                toggleClipMuted={toggleClipMuted}
-                isInMultiSelectedSet={isInMultiSelectedSet}
-                multiSelectedCount={multiSelectedCount}
-                triggerRename={triggerRename}
-                onRenameCommit={onRenameCommit}
-                onRenameDone={onRenameDone}
-                onGainCommit={onGainCommit}
-                onFormantMorphCommit={onFormantMorphCommit}
-                onUngroupClip={onUngroupClip}
-                onToggleGroupDisabled={onToggleGroupDisabled}
-                activeGroupIds={activeGroupIds}
-                disabledGroupIds={disabledGroupIds}
-            />
-
-            {/* Body block (does not fill the entire track row; leaves header lane above) */}
             <div
-                className="absolute left-0 right-0 bottom-0 overflow-visible"
+                className="absolute inset-0 overflow-visible"
                 style={{
-                    top: CLIP_HEADER_HEIGHT,
+                    transform: "translateZ(0)",
+                    backfaceVisibility: "hidden",
+                    WebkitMaskImage: leadingOverlapMaskImage,
+                    maskImage: leadingOverlapMaskImage,
+                    WebkitMaskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
+                    maskRepeat: leadingOverlapMaskImage ? "no-repeat" : undefined,
+                    WebkitMaskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
+                    maskSize: leadingOverlapMaskImage ? "100% 100%" : undefined,
                 }}
             >
-                {/* Body (waveform + edit handles) */}
-                <div className="absolute inset-0">
-                    {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
-                    {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
-                    <div
-                        className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"
-                        style={{ cursor: "nwse-resize" }}
-                        onPointerDown={(e) => {
-                            startDeferredFadeEditDrag(e, "fade_in");
-                        }}
-                        title={t("fade_in")}
-                    />
-                    {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
-                    <div
-                        className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"
-                        style={{ cursor: "nesw-resize" }}
-                        onPointerDown={(e) => {
-                            startDeferredFadeEditDrag(e, "fade_out");
-                        }}
-                        title={t("fade_out")}
-                    />
+                <ClipEdgeHandles
+                    clipId={clip.id}
+                    altPressed={altPressed}
+                    isInMultiSelectedSet={isInMultiSelectedSet}
+                    multiSelectedCount={multiSelectedCount}
+                    ensureSelected={ensureSelected}
+                    selectClipRemote={selectClipRemote}
+                    onCtrlToggleSelect={onCtrlToggleSelect}
+                    onShiftRangeSelect={onShiftRangeSelect}
+                    rangeSelectAnchorClipId={rangeSelectAnchorClipId}
+                    recordLastClickPosition={recordLastClickPosition}
+                    seekFromClientX={seekFromClientX}
+                    startEditDrag={startEditDrag}
+                />
 
-                    {/* Fade handles: 操作区覆盖整�?fade 区域（fadeBeats > 0 时显示） */}
-                    {(clip.fadeInSec ?? 0) > 0 && (
+                <ClipHeader
+                    clip={clip}
+                    clipWidthPx={width}
+                    trackColor={trackColor}
+                    transparentVisuals
+                    isPitchAdjustment={clip.midiNoteCount != null}
+                    startEditDrag={startEditDrag}
+                    toggleClipMuted={toggleClipMuted}
+                    triggerRename={triggerRename}
+                    onRenameCommit={onRenameCommit}
+                    onRenameDone={onRenameDone}
+                    onGainCommit={onGainCommit}
+                    onFormantMorphCommit={onFormantMorphCommit}
+                    onUngroupClip={onUngroupClip}
+                    onToggleGroupDisabled={onToggleGroupDisabled}
+                    activeGroupIds={activeGroupIds}
+                    disabledGroupIds={disabledGroupIds}
+                />
+
+                {/* Body block (does not fill the entire track row; leaves header lane above) */}
+                <div
+                    className="absolute left-0 right-0 bottom-0 overflow-visible"
+                    style={{
+                        top: CLIP_HEADER_HEIGHT,
+                    }}
+                >
+                    {/* Body (waveform + edit handles) */}
+                    <div className="absolute inset-0">
+                        {/* Fade 角落 handle：始终存在，位于 body 左上�?右上角，用于�?0 开始拖拽出渐变 */}
+                        {/* left-[10px]：避开左侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                         <div
-                            className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
-                            style={{
-                                width: Math.min(width, (clip.fadeInSec ?? 0) * pxPerSec),
-                            }}
+                            className="absolute left-[10px] top-0 w-[20px] h-[20px] z-[55]"
+                            style={{ cursor: "nwse-resize" }}
                             onPointerDown={(e) => {
                                 startDeferredFadeEditDrag(e, "fade_in");
                             }}
                             title={t("fade_in")}
-                        ></div>
-                    )}
-                    {(clip.fadeOutSec ?? 0) > 0 && (
+                        />
+                        {/* right-[10px]：避开右侧 edge handle 的 10px 宽度，确保两者不重叠 */}
                         <div
-                            className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
-                            style={{
-                                width: Math.min(width, (clip.fadeOutSec ?? 0) * pxPerSec),
-                            }}
+                            className="absolute right-[10px] top-0 w-[20px] h-[20px] z-[55]"
+                            style={{ cursor: "nesw-resize" }}
                             onPointerDown={(e) => {
                                 startDeferredFadeEditDrag(e, "fade_out");
                             }}
                             title={t("fade_out")}
-                        ></div>
-                    )}
+                        />
 
-                    {/* 波形由 WaveformTrackCanvas（轨道级 Canvas）统一渲染，此处不再包含波形内容 */}
+                        {/* Fade handles: 操作区覆盖整�?fade 区域（fadeBeats > 0 时显示） */}
+                        {(clip.fadeInSec ?? 0) > 0 && (
+                            <div
+                                className="absolute left-0 top-0 h-full z-[40] cursor-nwse-resize"
+                                style={{
+                                    width: Math.min(width, (clip.fadeInSec ?? 0) * pxPerSec),
+                                }}
+                                onPointerDown={(e) => {
+                                    startDeferredFadeEditDrag(e, "fade_in");
+                                }}
+                                title={t("fade_in")}
+                            ></div>
+                        )}
+                        {(clip.fadeOutSec ?? 0) > 0 && (
+                            <div
+                                className="absolute right-0 top-0 h-full z-[40] cursor-nesw-resize"
+                                style={{
+                                    width: Math.min(width, (clip.fadeOutSec ?? 0) * pxPerSec),
+                                }}
+                                onPointerDown={(e) => {
+                                    startDeferredFadeEditDrag(e, "fade_out");
+                                }}
+                                title={t("fade_out")}
+                            ></div>
+                        )}
+
+                        {/* 波形由 WaveformTrackCanvas（轨道级 Canvas）统一渲染，此处不再包含波形内容 */}
+                    </div>
                 </div>
             </div>
         </div>

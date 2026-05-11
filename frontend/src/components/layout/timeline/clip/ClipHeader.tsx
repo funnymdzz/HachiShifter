@@ -16,12 +16,8 @@ export const ClipHeader: React.FC<{
     trackColor?: string;
     transparentVisuals?: boolean;
     isPitchAdjustment?: boolean;
-    ensureSelected: (clipId: string) => void;
-    selectClipRemote: (clipId: string) => void;
     startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
-    isInMultiSelectedSet: boolean;
-    multiSelectedCount: number;
     /** 触发内联重命名（由 ClipContextMenu 的"重命名"菜单项调用） */
     triggerRename?: boolean;
     onRenameCommit?: (clipId: string, newName: string) => void;
@@ -39,12 +35,8 @@ export const ClipHeader: React.FC<{
     trackColor,
     transparentVisuals = false,
     isPitchAdjustment = false,
-    ensureSelected,
-    selectClipRemote,
     startEditDrag,
     toggleClipMuted,
-    isInMultiSelectedSet,
-    multiSelectedCount,
     triggerRename = false,
     onRenameCommit,
     onRenameDone,
@@ -170,11 +162,40 @@ export const ClipHeader: React.FC<{
                     onPointerDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        if (multiSelectedCount !== 1 || !isInMultiSelectedSet) {
-                            ensureSelected(clip.id);
-                        }
-                        selectClipRemote(clip.id);
-                        startEditDrag(e, clip.id, "gain");
+
+                        const pointerId = e.pointerId;
+                        const targetEl = e.currentTarget as HTMLElement;
+                        const startX = e.clientX;
+                        const startY = e.clientY;
+                        let dragStarted = false;
+
+                        const onMove = (ev: PointerEvent) => {
+                            if (ev.pointerId !== pointerId || dragStarted) return;
+                            const dx = ev.clientX - startX;
+                            const dy = ev.clientY - startY;
+                            if (dx * dx + dy * dy < 9) return;
+                            dragStarted = true;
+                            startEditDrag(
+                                {
+                                    button: 0,
+                                    pointerId,
+                                    currentTarget: targetEl,
+                                } as unknown as React.PointerEvent,
+                                clip.id,
+                                "gain",
+                            );
+                        };
+
+                        const onEnd = (ev: PointerEvent) => {
+                            if (ev.pointerId !== pointerId) return;
+                            window.removeEventListener("pointermove", onMove, true);
+                            window.removeEventListener("pointerup", onEnd, true);
+                            window.removeEventListener("pointercancel", onEnd, true);
+                        };
+
+                        window.addEventListener("pointermove", onMove, true);
+                        window.addEventListener("pointerup", onEnd, true);
+                        window.addEventListener("pointercancel", onEnd, true);
                     }}
                     onDoubleClick={(e) => {
                         e.preventDefault();

@@ -595,7 +595,7 @@ export function useTimelineClipActions(
                         await dispatch(
                             setClipsStateBulkRemote({
                                 updates: buildBulkClipStateUpdates({
-                                    clipIds: created,
+                                    clipIds: [...changesById.keys()],
                                     changesById,
                                 }),
                                 checkpoint: false,
@@ -617,7 +617,7 @@ export function useTimelineClipActions(
                     }
                     for (const newClipIds of groupMap.values()) {
                         if (newClipIds.length >= 2) {
-                            await webApi.groupClips(newClipIds);
+                            await dispatch(groupClipsRemote(newClipIds)).unwrap();
                         }
                     }
                 }
@@ -633,7 +633,7 @@ export function useTimelineClipActions(
             lastClickedClipIdRef.current = clipId;
             const selectedIds = multiSelectedClipIdsRef.current;
             const selectedSet = multiSelectedSetRef.current;
-            if (selectedIds.length !== 1 || !selectedSet.has(clipId)) {
+            if (!selectedSet.has(clipId) || selectedIds.length > 1) {
                 setMultiSelectedClipIds([clipId]);
             }
         },

@@ -1833,6 +1833,8 @@ const sessionSlice = createSlice({
                     state.showParamValuePopup = Boolean((s as any).showParamValuePopup);
                 if (s.scaleHighlightMode != null)
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
+                if ((s as any).ignoreGrouping != null)
+                    state.ignoreGrouping = Boolean((s as any).ignoreGrouping);
                 if (s.lockParamLines != null)
                     state.lockParamLinesEnabled = Boolean(s.lockParamLines);
                 if ((s as any).quickSearchAutoNormalize != null)
@@ -1941,6 +1943,7 @@ const sessionSlice = createSlice({
                     canceled?: boolean;
                     path?: string;
                     imported?: { ok?: boolean } & TimelineState;
+                    newClipIds?: string[];
                 };
                 if (payload.canceled) {
                     state.status = "Import canceled";
@@ -1950,6 +1953,10 @@ const sessionSlice = createSlice({
                     state.audioPath = payload.path;
                     if (payload.imported?.ok) {
                         applyTimelineState(state, payload.imported, { force: true });
+                        if (payload.newClipIds && payload.newClipIds.length > 0) {
+                            state.multiSelectedClipIds = payload.newClipIds;
+                            state.selectedClipId = payload.newClipIds[0] ?? null;
+                        }
                     }
                 }
                 state.status = payload.imported?.ok ? "Audio imported" : "Import audio failed";
@@ -1965,11 +1972,16 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     path?: string;
                     imported?: { ok?: boolean } & TimelineState;
+                    newClipIds?: string[];
                 };
                 if (payload.path) {
                     state.audioPath = payload.path;
                     if (payload.imported?.ok) {
                         applyTimelineState(state, payload.imported, { force: true });
+                        if (payload.newClipIds && payload.newClipIds.length > 0) {
+                            state.multiSelectedClipIds = payload.newClipIds;
+                            state.selectedClipId = payload.newClipIds[0] ?? null;
+                        }
                     }
                 }
                 state.status = payload.imported?.ok
@@ -1993,9 +2005,10 @@ const sessionSlice = createSlice({
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
-                    // Apply auto-crossfade for newly imported clips
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -2018,6 +2031,8 @@ const sessionSlice = createSlice({
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -2040,6 +2055,8 @@ const sessionSlice = createSlice({
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -2081,11 +2098,16 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     imported?: TimelineState;
+                    newClipIds?: string[];
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "MIDI clip created" : "MIDI import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
             })
             .addCase(importMidiAsClip.rejected, setRejected)
@@ -2212,6 +2234,10 @@ const sessionSlice = createSlice({
                 const payload = action.payload as any;
                 if (payload?.tracks) {
                     applyTimelineState(state, payload, { force: true });
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
                 state.lastResult = payload;
                 state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
@@ -2232,6 +2258,10 @@ const sessionSlice = createSlice({
                 const payload = action.payload as any;
                 if (payload?.timeline) {
                     applyTimelineState(state, payload.timeline, { force: true });
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
                 const skippedFiles = payload?.skippedFiles;
                 state.reaperSkippedFilesDialog =
@@ -2485,6 +2515,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2520,6 +2555,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2555,6 +2595,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2588,6 +2633,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;

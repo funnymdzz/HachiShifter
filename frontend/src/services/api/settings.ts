@@ -11,6 +11,7 @@ export interface UiSettings {
     pitchSnapScale?: string;
     pitchSnapToleranceCents?: number;
     scaleHighlightMode?: string;
+    ignoreGrouping?: boolean;
     playheadZoom: boolean;
     autoScroll: boolean;
     paramEditorSeekPlayhead?: boolean;

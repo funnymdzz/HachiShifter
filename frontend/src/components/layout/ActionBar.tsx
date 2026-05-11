@@ -547,7 +547,10 @@ export function ActionBar() {
                     color="gray"
                     title={tAny("ignore_grouping")}
                     tabIndex={-1}
-                    onClick={() => dispatch(toggleIgnoreGrouping())}
+                    onClick={() => {
+                        dispatch(toggleIgnoreGrouping());
+                        void dispatch(persistUiSettings());
+                    }}
                 >
                     <svg
                         width="15"

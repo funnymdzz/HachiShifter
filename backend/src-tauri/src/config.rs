@@ -64,6 +64,8 @@ pub struct UiSettings {
     pub scale_highlight_mode: String,
     #[serde(default)]
     pub custom_scale_presets: Vec<CustomScale>,
+    #[serde(default)]
+    pub ignore_grouping: bool,
     #[serde(default = "default_midi_import_position")]
     pub midi_import_position: String,
     #[serde(default)]
@@ -244,6 +246,7 @@ impl Default for UiSettings {
             smoothness_percent: 0,
             scale_highlight_mode: default_scale_highlight_mode(),
             custom_scale_presets: Vec::new(),
+            ignore_grouping: false,
             midi_import_position: default_midi_import_position(),
             midi_fill_gaps: false,
             midi_multi_track_merge: true,

@@ -650,7 +650,7 @@ export function useClipDrag(deps: {
                                     await dispatch(
                                         setClipsStateBulkRemote({
                                             updates: buildBulkClipStateUpdates({
-                                                clipIds: created,
+                                                clipIds: [...changesById.keys()],
                                                 changesById,
                                             }),
                                             checkpoint: false,

@@ -39,6 +39,7 @@ export const persistUiSettings = createAsyncThunk(
             pitchSnapUnit: s.pitchSnapUnit,
             pitchSnapToleranceCents: s.pitchSnapToleranceCents,
             scaleHighlightMode: s.scaleHighlightMode,
+            ignoreGrouping: s.ignoreGrouping,
             playheadZoom: s.playheadZoomEnabled,
             autoScroll: s.autoScrollEnabled,
             paramEditorSeekPlayhead: s.paramEditorSeekPlayheadEnabled,

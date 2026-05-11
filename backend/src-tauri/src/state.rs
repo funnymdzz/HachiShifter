@@ -2478,6 +2478,7 @@ impl TimelineState {
                 {
                     let mut duplicated = source_clip.clone();
                     duplicated.id = new_id("clip");
+                    duplicated.group_id = None;
                     duplicated.track_id = template.track_id.clone();
                     duplicated.name = template.name.clone();
                     duplicated.start_sec = template.start_sec;

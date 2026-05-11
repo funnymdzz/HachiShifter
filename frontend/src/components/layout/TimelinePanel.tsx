@@ -73,6 +73,7 @@ import { useTimelineState } from "./timeline/hooks/useTimelineState";
 import { useTimelineDragDrop } from "./timeline/hooks/useTimelineDragDrop";
 import { useTimelineClipActions } from "./timeline/hooks/useTimelineClipActions";
 import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandlers";
+import { expandClipIdsWithGroups } from "./timeline/hooks/useGroupExpansion";
 import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 import { writeSystemClipboardObject } from "../../utils/systemClipboard";
@@ -1752,7 +1753,15 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCopy={(ids) => {
                                       void (async () => {
-                                          const result = await buildClipClipboardTemplates(ids);
+                                          const s = sessionRef.current;
+                                          const expandedIds = expandClipIdsWithGroups(
+                                              ids,
+                                              s.clips,
+                                              s.ignoreGrouping,
+                                              s.disabledGroupIds,
+                                          );
+                                          const result =
+                                              await buildClipClipboardTemplates(expandedIds);
                                           if (result.templates.length > 0) {
                                               clipClipboardRef.current = result;
                                               try {
@@ -1770,7 +1779,15 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCut={(ids) => {
                                       void (async () => {
-                                          const result = await buildClipClipboardTemplates(ids);
+                                          const s = sessionRef.current;
+                                          const expandedIds = expandClipIdsWithGroups(
+                                              ids,
+                                              s.clips,
+                                              s.ignoreGrouping,
+                                              s.disabledGroupIds,
+                                          );
+                                          const result =
+                                              await buildClipClipboardTemplates(expandedIds);
                                           if (result.templates.length === 0) return;
                                           clipClipboardRef.current = result;
                                           try {
@@ -1785,7 +1802,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                           }
                                           setContextMenu(null);
                                           setMultiSelectedClipIds([]);
-                                          void dispatch(removeClipsRemote(ids));
+                                          void dispatch(removeClipsRemote(expandedIds));
                                       })();
                                   }}
                                   onReplace={(ids) => {

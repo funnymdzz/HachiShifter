@@ -8,6 +8,7 @@ import { selectMergedKeybindings } from "../../../../features/keybindings/keybin
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
 import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
 import { shouldRouteClipPasteToParamEditor } from "../clipboardFocusRouting";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 
 const IS_MAC =
     typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
@@ -166,7 +167,14 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const result = await buildClipClipboardTemplates(selectedIds);
+                        const s = sessionRef.current;
+                        const expandedIds = expandClipIdsWithGroups(
+                            selectedIds,
+                            s.clips,
+                            s.ignoreGrouping,
+                            s.disabledGroupIds,
+                        );
+                        const result = await buildClipClipboardTemplates(expandedIds);
                         if (result.templates.length === 0) return;
                         clipClipboardRef.current = result;
                         try {
@@ -188,7 +196,14 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const result = await buildClipClipboardTemplates(selectedIds);
+                        const s = sessionRef.current;
+                        const expandedIds = expandClipIdsWithGroups(
+                            selectedIds,
+                            s.clips,
+                            s.ignoreGrouping,
+                            s.disabledGroupIds,
+                        );
+                        const result = await buildClipClipboardTemplates(expandedIds);
                         if (result.templates.length === 0) return;
                         clipClipboardRef.current = result;
                         try {
@@ -202,7 +217,7 @@ export function useKeyboardShortcuts(deps: {
                             // ignore
                         }
                         setMultiSelectedClipIds([]);
-                        void dispatch(removeClipsRemote(selectedIds));
+                        void dispatch(removeClipsRemote(expandedIds));
                     })();
                     return;
                 }
