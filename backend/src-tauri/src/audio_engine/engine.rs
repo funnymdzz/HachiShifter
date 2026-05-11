@@ -1360,6 +1360,9 @@ mod tests {
             extra_curves: None,
             extra_params: None,
             formant_morph: None,
+            group_id: None,
+            midi_fill_gaps: false,
+            midi_note_data: None,
         });
         timeline
     }

@@ -125,11 +125,11 @@ export interface UseTimelineClipActionsResult {
     // Clipboard
     clipClipboardRef: React.MutableRefObject<{
         templates: ClipTemplate[];
-        groupIds: Array<string | undefined>;
+        groupIds: string[];
     } | null>;
     buildClipClipboardTemplates: (
         ids: string[],
-    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
 
     // Clip operations
     groupClips: (ids: string[]) => void;
@@ -299,12 +299,12 @@ export function useTimelineClipActions(
     // ── Clipboard ────────────────────────────────────────────
     const clipClipboardRef = useRef<{
         templates: ClipTemplate[];
-        groupIds: Array<string | undefined>;
+        groupIds: string[];
     } | null>(null);
 
     const buildClipClipboardTemplates = React.useCallback(async (ids: string[]) => {
         const clips = sessionRef.current.clips.filter((c) => ids.includes(c.id));
-        const groupIds = clips.map((c) => c.groupId);
+        const groupIds = clips.map((c) => c.groupId).filter((g): g is string => g != null);
         const templates = await Promise.all(
             clips.map(async (clip) => {
                 const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
@@ -519,7 +519,7 @@ export function useTimelineClipActions(
     const pasteClipsAtPlayhead = React.useCallback(() => {
         void (async () => {
             let tpl: ClipTemplate[] | null = null;
-            let groupIds: Array<string | undefined> = [];
+            let groupIds: string[] = [];
             const internal = clipClipboardRef.current;
             if (internal) {
                 tpl = internal.templates;
@@ -529,7 +529,9 @@ export function useTimelineClipActions(
                 const fromSystem = await readSystemClipboardObject("clip");
                 if (fromSystem?.kind === "clip" && Array.isArray(fromSystem.templates)) {
                     tpl = fromSystem.templates;
-                    groupIds = (fromSystem as any).groupIds ?? [];
+                    groupIds = ((fromSystem as any).groupIds ?? []).filter(
+                        (g: any) => typeof g === "string",
+                    );
                     clipClipboardRef.current = { templates: fromSystem.templates, groupIds };
                 }
             } catch {

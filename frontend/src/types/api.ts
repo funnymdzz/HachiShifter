@@ -106,7 +106,7 @@ export interface TimelineState {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
-    disabled_group_ids: string[];
+    disabled_group_ids?: string[];
 }
 
 export interface TimelineResult {
@@ -121,7 +121,7 @@ export interface TimelineResult {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
-    disabled_group_ids: string[];
+    disabled_group_ids?: string[];
 }
 
 export interface TrackSummaryResult {

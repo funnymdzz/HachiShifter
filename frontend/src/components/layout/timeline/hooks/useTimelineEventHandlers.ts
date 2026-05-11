@@ -52,11 +52,11 @@ export interface UseTimelineEventHandlersArgs {
     // clipboard
     clipClipboardRef: React.MutableRefObject<{
         templates: ClipTemplate[];
-        groupIds: Array<string | undefined>;
+        groupIds: string[];
     } | null>;
     buildClipClipboardTemplates: (
         ids: string[],
-    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
 
     // clip actions
     pasteClipsAtPlayhead: () => void;

@@ -132,7 +132,6 @@ type TrackLaneProps = {
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
     activeGroupIds?: Set<string>;
     disabledGroupIds?: string[];
-    onUngroupClip?: (clipId: string) => void;
     onToggleGroupDisabled?: (groupId: string) => void;
 
     /** Ctrl+拖动复制时的 ghost 预览信息 */
@@ -180,7 +179,6 @@ export const TrackLane = React.memo(
             onFormantMorphCommit,
             activeGroupIds,
             disabledGroupIds,
-            onUngroupClip,
             onToggleGroupDisabled,
             ghostDrag,
             verticalTrackLockTrackId,
@@ -578,7 +576,6 @@ export const TrackLane = React.memo(
                             onFormantMorphCommit={onFormantMorphCommit}
                             activeGroupIds={activeGroupIds}
                             disabledGroupIds={disabledGroupIds}
-                            onUngroupClip={onUngroupClip}
                             onToggleGroupDisabled={onToggleGroupDisabled}
                             hovered={hoveredClipId === clip.id}
                         />
@@ -663,7 +660,6 @@ export const TrackLane = React.memo(
             sameStringArray(prev.overlayClipIds, next.overlayClipIds) &&
             prev.activeGroupIds === next.activeGroupIds &&
             prev.disabledGroupIds === next.disabledGroupIds &&
-            prev.onUngroupClip === next.onUngroupClip &&
             prev.onToggleGroupDisabled === next.onToggleGroupDisabled
             // viewportStartSec / viewportEndSec are consumed by WaveformTrackCanvas via the viewport bus
             // after mount, so pure horizontal scroll should not force a TrackLane rerender.

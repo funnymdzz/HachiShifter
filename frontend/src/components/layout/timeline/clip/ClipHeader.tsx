@@ -25,7 +25,6 @@ export const ClipHeader: React.FC<{
     /** 增益双击输入框提交（dB 值，已 clamp 到 -24~+12） */
     onGainCommit?: (clipId: string, db: number) => void;
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
-    onUngroupClip?: (clipId: string) => void;
     onToggleGroupDisabled?: (groupId: string) => void;
     activeGroupIds?: Set<string>;
     disabledGroupIds?: string[];

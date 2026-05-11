@@ -127,6 +127,15 @@ pub(super) fn read_midi_clipboard_to_memory(state: &AppState) -> serde_json::Val
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         cache.insert(guid.clone(), midi_data);
+        // 限制缓存大小，防止无限增长
+        while cache.len() > 16 {
+            let oldest = cache.keys().next().cloned();
+            if let Some(k) = oldest {
+                cache.remove(&k);
+            } else {
+                break;
+            }
+        }
     }
 
     let tracks_with_notes: Vec<&MidiTrackInfo> =
@@ -442,6 +451,13 @@ pub(super) fn import_midi_to_pitch(
     }
 
     state.audio_engine.update_timeline(tl.clone());
+
+    if let Some(ref guid) = clipboard_guid {
+        if !guid.is_empty() {
+            let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.remove(guid);
+        }
+    }
 
     serde_json::json!({
         "ok": true,
@@ -817,6 +833,14 @@ pub(super) fn import_midi_as_clip(
         for root in &root_track_ids {
             crate::pitch_analysis::maybe_schedule_pitch_orig(state, root);
         }
+
+        if let Some(ref guid) = clipboard_guid {
+            if !guid.is_empty() {
+                let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+                cache.remove(guid);
+            }
+        }
+
         payload
     }
 }
@@ -994,5 +1018,13 @@ pub(super) fn replace_midi_clip_data(
     if let Some(root) = root_track_id {
         crate::pitch_analysis::maybe_schedule_pitch_orig(state, &root);
     }
+
+    if let Some(ref guid) = clipboard_guid {
+        if !guid.is_empty() {
+            let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.remove(guid);
+        }
+    }
+
     payload
 }

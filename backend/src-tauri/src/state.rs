@@ -1409,6 +1409,8 @@ mod tests {
                     fade_in_curve: Some("sine".into()),
                     fade_out_curve: Some("logarithmic".into()),
                     linked_params: None,
+                    midi_fill_gaps: Some(false),
+                    midi_note_data: None,
                 },
                 CreateClipTemplatePayload {
                     track_id,
@@ -1428,6 +1430,8 @@ mod tests {
                     fade_in_curve: Some("linear".into()),
                     fade_out_curve: Some("scurve".into()),
                     linked_params: None,
+                    midi_fill_gaps: Some(false),
+                    midi_note_data: None,
                 },
             ],
             select_created_clips: true,
@@ -1508,6 +1512,8 @@ mod tests {
                 fade_in_curve: Some("linear".into()),
                 fade_out_curve: Some("scurve".into()),
                 linked_params: None,
+                midi_fill_gaps: Some(false),
+                midi_note_data: None,
             }],
             select_created_clips: true,
         });
@@ -1684,6 +1690,129 @@ mod tests {
         assert_eq!(morph.target_f2_hz, 1400.0);
         assert!((morph.strength - 0.50).abs() < 1e-6);
     }
+
+    // ── split_clips_at tests ──────────────────────────────────────
+
+    /// Split a grouped clip: left half keeps original group_id, right half gets new group_id.
+    #[test]
+    fn split_clips_at_basic() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("A".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("B".into()), Some(3.0), Some(2.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+        assert!(orig_group.is_some());
+
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // Left half (start_sec ≈ 0.0) keeps original group
+        let left = tl.clips.iter().find(|c| c.start_sec < 0.5 && c.id != c2).unwrap();
+        assert_eq!(left.group_id, orig_group);
+
+        // Right half (start_sec ≈ 1.0) gets new group
+        let right = tl.clips.iter().find(|c| c.start_sec >= 0.5 && c.id != c2).unwrap();
+        assert!(right.group_id.is_some());
+        assert_ne!(right.group_id, orig_group);
+    }
+
+    /// Right-side group with only 1 member gets dissolved after split.
+    #[test]
+    fn split_clips_at_dissolves_small_groups() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        // c1 at 0.0..2.0, c2 at 0.5..0.8 (entirely left of split point at 1.0)
+        let c1 = tl.add_clip(Some(tid.clone()), Some("A".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("B".into()), Some(0.5), Some(0.3), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        // Split c1 at 1.0. c2 starts at 0.5 < 1.0 so stays in original (left) group.
+        // Left group: left half of c1 + c2 = 2 members → survives.
+        // Right group: right half of c1 only → 1 member → dissolved.
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // Right half of c1 should have no group (dissolved)
+        let right_half = tl.clips.iter().find(|c| c.start_sec >= 0.9 && c.id != c2).unwrap();
+        assert!(right_half.group_id.is_none(), "right half should have no group");
+
+        // Left half and c2 should still be in the original group
+        let left_half = tl.clips.iter().find(|c| c.start_sec < 0.5 && c.id != c2).unwrap();
+        assert!(left_half.group_id.is_some(), "left half should keep group");
+        assert!(tl.clips.iter().find(|c| c.id == c2).unwrap().group_id.is_some(), "c2 should keep group");
+    }
+
+    /// Unsplit clip entirely to the right of the split point moves to the new group.
+    #[test]
+    fn split_clips_at_unsplit_member_to_right() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("left".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("right".into()), Some(2.5), Some(1.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+
+        // Split c1 at 1.0; c2 is at 2.5 > 1.0 so it goes to the right group
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // c2 should have moved to the new right group
+        let c2_after = tl.clips.iter().find(|c| c.id == c2).unwrap();
+        assert!(c2_after.group_id.is_some());
+        assert_ne!(c2_after.group_id, orig_group);
+    }
+
+    /// Unsplit clip to the left of the split point keeps the original group.
+    #[test]
+    fn split_clips_at_unsplit_member_stays_left() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("early".into()), Some(0.0), Some(1.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("later".into()), Some(3.0), Some(2.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+
+        // Split c2 at 4.0; c1 is at 0.0 < 4.0 so it stays in original group
+        tl.split_clips_at(&[c2.clone()], 4.0);
+
+        let c1_after = tl.clips.iter().find(|c| c.id == c1).unwrap();
+        assert_eq!(c1_after.group_id, orig_group);
+    }
+
+    /// Splitting clips from different groups simultaneously assigns distinct right-side groups.
+    #[test]
+    fn split_clips_at_mixed_groups() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+
+        // Group A
+        let a1 = tl.add_clip(Some(tid.clone()), Some("A1".into()), Some(0.0), Some(2.0), None);
+        let a2 = tl.add_clip(Some(tid.clone()), Some("A2".into()), Some(3.0), Some(1.0), None);
+        tl.group_clips(&[a1.clone(), a2.clone()]);
+        let group_a = tl.clips.iter().find(|c| c.id == a1).unwrap().group_id.clone();
+
+        // Group B
+        let b1 = tl.add_clip(Some(tid), Some("B1".into()), Some(5.0), Some(2.0), None);
+        let b2 = tl.add_clip(None, Some("B2".into()), Some(8.0), Some(1.0), None);
+        tl.group_clips(&[b1.clone(), b2.clone()]);
+        let group_b = tl.clips.iter().find(|c| c.id == b1).unwrap().group_id.clone();
+
+        assert_ne!(group_a, group_b);
+
+        // Split one clip from each group
+        tl.split_clips_at(&[a1.clone(), b1.clone()], 1.0);
+
+        // Each group should have at least 2 distinct group_ids after split (original + new)
+        let mut groups: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for clip in &tl.clips {
+            if let Some(ref gid) = clip.group_id {
+                groups.insert(gid.clone());
+            }
+        }
+        // Original group_a, new right group for A, original group_b, new right group for B
+        assert!(groups.len() >= 4, "expected >=4 groups, got {}", groups.len());
+    }
 }
 
 fn new_id(prefix: &str) -> String {
@@ -1783,7 +1912,11 @@ impl TimelineState {
             project_sec: Some(self.project_sec),
             project: None,
             missing_files: None,
-            disabled_group_ids: self.disabled_group_ids.iter().cloned().collect(),
+            disabled_group_ids: {
+                let mut ids: Vec<String> = self.disabled_group_ids.iter().cloned().collect();
+                ids.sort();
+                ids
+            },
         }
     }
 
@@ -3049,9 +3182,10 @@ impl TimelineState {
         if clip_ids.len() < 2 {
             return;
         }
+        let clip_id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
         let group_id = Uuid::new_v4().to_string();
         for c in &mut self.clips {
-            if clip_ids.contains(&c.id) {
+            if clip_id_set.contains(c.id.as_str()) {
                 c.group_id = Some(group_id.clone());
             }
         }

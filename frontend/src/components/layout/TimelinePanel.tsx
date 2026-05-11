@@ -1448,9 +1448,6 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                         onFormantMorphCommit={commitTrackLaneFormantMorph}
                                         activeGroupIds={activeGroupIds}
                                         disabledGroupIds={disabledGroupIds}
-                                        onUngroupClip={(clipId) => {
-                                            ungroupClips([clipId]);
-                                        }}
                                         onToggleGroupDisabled={(groupId) => {
                                             toggleGroupDisabled(groupId);
                                         }}

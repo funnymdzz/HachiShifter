@@ -51,7 +51,6 @@ export const ClipItem = React.memo(function ClipItem({
     onFormantMorphCommit,
     activeGroupIds,
     disabledGroupIds,
-    onUngroupClip,
     onToggleGroupDisabled,
     hovered = false,
 }: {
@@ -120,7 +119,6 @@ export const ClipItem = React.memo(function ClipItem({
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
     activeGroupIds?: Set<string>;
     disabledGroupIds?: string[];
-    onUngroupClip?: (clipId: string) => void;
     onToggleGroupDisabled?: (groupId: string) => void;
     hovered?: boolean;
 }) {
@@ -377,7 +375,6 @@ export const ClipItem = React.memo(function ClipItem({
                     onRenameDone={onRenameDone}
                     onGainCommit={onGainCommit}
                     onFormantMorphCommit={onFormantMorphCommit}
-                    onUngroupClip={onUngroupClip}
                     onToggleGroupDisabled={onToggleGroupDisabled}
                     activeGroupIds={activeGroupIds}
                     disabledGroupIds={disabledGroupIds}

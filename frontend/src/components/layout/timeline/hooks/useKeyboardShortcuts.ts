@@ -67,11 +67,11 @@ export function useKeyboardShortcuts(deps: {
     setMultiSelectedClipIds: (ids: string[]) => void;
     clipClipboardRef: React.RefObject<{
         templates: ClipTemplate[];
-        groupIds: Array<string | undefined>;
+        groupIds: string[];
     } | null>;
     buildClipClipboardTemplates: (
         ids: string[],
-    ) => Promise<{ templates: ClipTemplate[]; groupIds: Array<string | undefined> }>;
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     onNormalize: (ids: string[]) => void;
     onPaste: () => void;
