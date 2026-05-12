@@ -60,13 +60,15 @@ export interface ClipInfo {
     name: string;
     startSec: number;
     lengthSec: number;
-    color: "blue" | "violet" | "emerald" | "amber";
+    color: "blue" | "violet" | "emerald" | "amber" | "cyan";
     sourcePath?: string;
     durationSec?: number;
     durationFrames?: number; // 精确frame总数
     sourceSampleRate?: number; // 源文件采样率
     gain: number;
     muted: boolean;
+    /** When set, this clip belongs to a group of clips sharing the same UUID. */
+    groupId?: string;
     sourceStartSec: number;
     sourceEndSec: number;
     playbackRate: number;
@@ -75,9 +77,28 @@ export interface ClipInfo {
     fadeOutSec: number;
     fadeInCurve: FadeCurveType;
     fadeOutCurve: FadeCurveType;
+    formantMorph?: ClipFormantMorph;
+    midiNoteCount?: number;
+    midiNoteData?: MidiNoteEvent[];
+    midiFillGaps?: boolean;
+}
+
+export interface ClipFormantMorph {
+    enabled: boolean;
+    targetF1Hz: number;
+    targetF2Hz: number;
+    strength: number;
 }
 
 export type WaveformPreview = number[] | { l: number[]; r: number[] };
+
+export interface MidiNoteEvent {
+    startSec: number;
+    endSec: number;
+    note: number;
+    velocity: number;
+    channel: number;
+}
 
 export interface LinkedParamCurves {
     framePeriodMs: number;
@@ -86,11 +107,12 @@ export interface LinkedParamCurves {
     extraCurves: Record<string, number[]>;
 }
 
-export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color">> & {
+export type ClipTemplate = Partial<Omit<ClipInfo, "id" | "color" | "groupId">> & {
     trackId: string;
     name: string;
     startSec: number;
     lengthSec: number;
+    sourceClipId?: string;
     waveformPreview?: WaveformPreview;
     linkedParams?: LinkedParamCurves;
 };

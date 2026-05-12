@@ -8,6 +8,9 @@ mod clip_rendering_state;
 mod commands;
 #[path = "audio/hifigan_tension.rs"]
 mod hifigan_tension;
+#[path = "audio/formant_morph.rs"]
+mod formant_morph;
+mod formant_cache;
 mod launch_args;
 #[path = "audio/mixdown.rs"]
 mod mixdown;
@@ -62,6 +65,8 @@ mod reaper_import;
 mod reaper_parser;
 #[path = "audio/sstretch.rs"]
 mod sstretch;
+#[path = "audio/soundtouch.rs"]
+mod soundtouch;
 mod state;
 #[path = "vocoder/streaming_world.rs"]
 mod streaming_world;
@@ -172,10 +177,17 @@ pub fn run() {
                     let ws = crate::config::load_window_state(cfg_dir);
                     // 应用尺寸与位置（非最大化/全屏状态先应用尺寸/位置，再切换最大化）
                     if let (Some(w), Some(h)) = (ws.width, ws.height) {
-                        let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize { width: w, height: h }));
+                        let _ = win.set_size(tauri::Size::Logical(tauri::LogicalSize {
+                            width: w,
+                            height: h,
+                        }));
                     }
                     if let (Some(x), Some(y)) = (ws.x, ws.y) {
-                        let _ = win.set_position(tauri::Position::Logical(tauri::LogicalPosition { x: x as f64, y: y as f64 }));
+                        let _ =
+                            win.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                                x: x as f64,
+                                y: y as f64,
+                            }));
                     }
                     if ws.fullscreen.unwrap_or(false) {
                         let _ = win.set_fullscreen(true);
@@ -215,7 +227,8 @@ pub fn run() {
                     h_opt = Some(size.height as f64);
                 }
 
-                if let Some(cfg_dir) = win.app_handle().state::<state::AppState>().config_dir.get() {
+                if let Some(cfg_dir) = win.app_handle().state::<state::AppState>().config_dir.get()
+                {
                     let ws = crate::config::WindowState {
                         x: x_opt,
                         y: y_opt,
@@ -251,6 +264,7 @@ pub fn run() {
             commands::run_timed_auto_backup,
             commands::set_project_base_scale,
             commands::set_project_custom_scale,
+            commands::set_project_stretch_settings,
             commands::set_project_timeline_settings,
             commands::open_audio_dialog,
             commands::open_audio_dialog_multi,
@@ -277,6 +291,7 @@ pub fn run() {
             commands::set_param_frames,
             commands::restore_param_frames,
             commands::add_clip,
+            commands::create_clips_bulk,
             commands::get_static_param,
             commands::set_static_param,
             commands::remove_clip,
@@ -286,9 +301,17 @@ pub fn run() {
             commands::get_clip_linked_params,
             commands::apply_clip_linked_params,
             commands::set_clip_state,
+            commands::set_clips_state_bulk,
+            commands::duplicate_clips_bulk,
             commands::replace_clip_source,
             commands::split_clip,
+            commands::split_clips_at,
             commands::glue_clips,
+            commands::group_clips,
+            commands::ungroup_clips,
+            commands::toggle_group_disabled,
+            commands::convert_clips_to_pitch_reference,
+            commands::update_pitch_reference,
             commands::select_clip,
             commands::load_default_model,
             commands::load_model,
@@ -301,6 +324,7 @@ pub fn run() {
             commands::cancel_export_audio,
             commands::get_export_audio_defaults,
             commands::preview_export_audio_plan,
+            commands::quick_export_selected_clips,
             commands::play_original,
             commands::stop_audio,
             commands::get_playback_state,
@@ -323,9 +347,14 @@ pub fn run() {
             commands::clear_cache,
             commands::get_processor_params,
             commands::get_midi_tracks,
+            commands::read_midi_clipboard_to_memory,
             commands::import_midi_to_pitch,
+            commands::import_midi_as_clip,
+            commands::replace_midi_clip_data,
+            commands::pick_midi_output_path,
+            commands::export_pitch_to_midi,
             commands::get_ui_settings,
-            commands::save_ui_settings // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
+            commands::save_ui_settings, // TODO: 异步音高刷新命令暂时禁用，等待基础设施完成
                                        // commands::start_pitch_refresh_task,
                                        // commands::get_pitch_refresh_status,
                                        // commands::cancel_pitch_task

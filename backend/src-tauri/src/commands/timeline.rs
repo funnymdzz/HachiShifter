@@ -1,11 +1,133 @@
 use crate::state::AppState;
 use base64::Engine;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
+use tauri::Emitter;
+use tauri::Manager;
 use tauri::State;
 use uuid::Uuid;
 
 use super::common::ensure_temp_dir;
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClipFormantStatusPayload {
+    clip_id: String,
+    status: String,
+}
+
+fn emit_clip_formant_status(app: &tauri::AppHandle, clip_id: &str, status: &str) {
+    let _ = app.emit(
+        "clip_formant_status",
+        ClipFormantStatusPayload {
+            clip_id: clip_id.to_string(),
+            status: status.to_string(),
+        },
+    );
+}
+
+fn clip_formant_rebuild_needs_refresh(
+    before: Option<&crate::state::Clip>,
+    after: &crate::state::Clip,
+) -> bool {
+    let before_enabled = before
+        .and_then(|clip| clip.formant_morph.as_ref())
+        .map(|params| params.enabled)
+        .unwrap_or(false);
+    let after_enabled = after
+        .formant_morph
+        .as_ref()
+        .map(|params| params.enabled)
+        .unwrap_or(false);
+
+    if !before_enabled && !after_enabled {
+        return false;
+    }
+
+    let before_params = before.and_then(|clip| clip.formant_morph.as_ref());
+    let after_params = after.formant_morph.as_ref();
+    let params_changed = before_params != after_params;
+    let source_changed = before
+        .map(|clip| {
+            clip.source_path != after.source_path
+                || (clip.source_start_sec - after.source_start_sec).abs() > 1e-9
+                || (clip.source_end_sec - after.source_end_sec).abs() > 1e-9
+                || clip.reversed != after.reversed
+        })
+        .unwrap_or(after_enabled);
+
+    params_changed || source_changed
+}
+
+fn schedule_clip_formant_rebuild(state: &AppState, clip: crate::state::Clip) {
+    let Some(app) = state.app_handle.get().cloned() else {
+        return;
+    };
+    let clip_id = clip.id.clone();
+    let Some(formant) = clip.formant_morph.as_ref() else {
+        crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
+        return;
+    };
+    if !formant.enabled {
+        crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
+        return;
+    }
+
+    let generation = crate::formant_cache::begin_formant_rebuild_generation(&clip_id);
+    if let Some(formant) = clip.formant_morph.as_ref() {
+        crate::formant_cache::formant_debug_log(format!(
+            "schedule rebuild clip_id={} generation={} f1={:.1} f2={:.1} strength={:.3} source={} range=[{:.3},{:.3}] reversed={}",
+            clip_id,
+            generation,
+            formant.target_f1_hz,
+            formant.target_f2_hz,
+            formant.strength,
+            clip.source_path.as_deref().unwrap_or(""),
+            clip.source_start_sec,
+            clip.source_end_sec,
+            clip.reversed,
+        ));
+    }
+    emit_clip_formant_status(&app, &clip_id, "rebuilding");
+
+    let out_rate = state.audio_engine.sample_rate_hz().max(8_000);
+    std::thread::spawn(move || {
+        let result = crate::formant_cache::compute_formant_cache_entry_for_clip(&clip, out_rate);
+
+        if !crate::formant_cache::is_current_formant_rebuild_generation(&clip_id, generation) {
+            crate::formant_cache::formant_debug_log(format!(
+                "discard stale rebuild clip_id={} generation={}",
+                clip_id, generation
+            ));
+            return;
+        }
+
+        match result {
+            Ok((key, entry)) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "rebuild ready clip_id={} generation={} frames={} sr={}",
+                    clip_id, generation, entry.frames, entry.sample_rate
+                ));
+                crate::formant_cache::insert_formant_cache_entry(key, entry);
+                emit_clip_formant_status(&app, &clip_id, "ready");
+                let state = app.state::<AppState>();
+                let timeline = match state.timeline.lock() {
+                    Ok(guard) => guard.clone(),
+                    Err(poisoned) => poisoned.into_inner().clone(),
+                };
+                state.audio_engine.update_timeline(timeline);
+            }
+            Err(error) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "rebuild failed clip_id={} generation={} error={}",
+                    clip_id, generation, error
+                ));
+                emit_clip_formant_status(&app, &clip_id, "failed");
+            }
+        }
+    });
+}
 
 // ===================== dialogs / io =====================
 
@@ -284,10 +406,25 @@ pub(super) fn add_clip(
     payload
 }
 
+pub(super) fn create_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::CreateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let created_clip_ids = tl.create_clips_bulk(&payload);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut timeline_payload = tl.to_payload();
+    timeline_payload.created_clip_ids = Some(created_clip_ids);
+    timeline_payload.project = Some(state.project_meta_payload());
+    timeline_payload
+}
+
 pub(super) fn remove_clip(
     state: State<'_, AppState>,
     clip_id: String,
 ) -> crate::models::TimelineStatePayload {
+    crate::formant_cache::cancel_formant_rebuild_generation(&clip_id);
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
     tl.remove_clip(&clip_id);
@@ -297,17 +434,36 @@ pub(super) fn remove_clip(
     payload
 }
 
-/// 批量删除多个 clip，只产生一个 undo checkpoint
 pub(super) fn remove_clips(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,
 ) -> crate::models::TimelineStatePayload {
+    for clip_id in &clip_ids {
+        crate::formant_cache::cancel_formant_rebuild_generation(clip_id);
+    }
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
+    // Collect root track IDs before removing clips
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     tl.remove_clips(&clip_ids);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
     payload
 }
 
@@ -320,15 +476,38 @@ pub(super) fn move_clip(
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
+    let old_root = tl.resolve_root_track_id(
+        &tl.clips
+            .iter()
+            .find(|c| c.id == clip_id)
+            .map(|c| c.track_id.clone())
+            .unwrap_or_default(),
+    );
     tl.move_clip(
         &clip_id,
         start_sec,
         track_id,
         move_linked_params.unwrap_or(false),
     );
+    let new_root = tl
+        .clips
+        .iter()
+        .find(|c| c.id == clip_id)
+        .map(|c| c.track_id.clone())
+        .and_then(|tid| tl.resolve_root_track_id(&tid));
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    // Trigger pitch_orig reassembly for affected root tracks
+    if let Some(ref root_id) = old_root {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, root_id);
+    }
+    if new_root != old_root {
+        if let Some(ref root_id) = new_root {
+            crate::pitch_analysis::maybe_schedule_pitch_orig(&state, root_id);
+        }
+    }
     payload
 }
 
@@ -396,9 +575,11 @@ pub(super) fn set_clip_state(
     fade_in_curve: Option<String>,
     fade_out_curve: Option<String>,
     color: Option<String>,
+    formant_morph: Option<crate::state::ClipFormantMorph>,
     checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let previous_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
     // checkpoint 默认为 true，但可以通过传递 false 来抑制 undo checkpoint
     // 这在 undo group 内进行多次操作时很有用
     let do_checkpoint = checkpoint.unwrap_or(true);
@@ -422,12 +603,72 @@ pub(super) fn set_clip_state(
             fade_in_curve,
             fade_out_curve,
             color,
+            formant_morph,
         },
     );
+    let next_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
+    let root_track_id = tl
+        .clips
+        .iter()
+        .find(|c| c.id == clip_id)
+        .map(|c| c.track_id.clone())
+        .and_then(|tid| tl.resolve_root_track_id(&tid));
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+
+    if let Some(root_id) = root_track_id {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    if let Some(next_clip) = next_clip {
+        if clip_formant_rebuild_needs_refresh(previous_clip.as_ref(), &next_clip) {
+            schedule_clip_formant_rebuild(&state, next_clip);
+        }
+    }
     payload
+}
+
+pub(super) fn set_clips_state_bulk(
+    state: State<'_, AppState>,
+    updates: Vec<crate::state::BulkClipStatePatch>,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    if checkpoint.unwrap_or(true) {
+        state.checkpoint_timeline(&tl);
+    }
+    tl.patch_clips_state(&updates);
+    let mut root_track_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for update in &updates {
+        if let Some(clip) = tl.clips.iter().find(|c| c.id == update.clip_id) {
+            if let Some(root) = tl.resolve_root_track_id(&clip.track_id) {
+                root_track_ids.insert(root);
+            }
+        }
+    }
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root in &root_track_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, root);
+    }
+    payload
+}
+
+pub(super) fn duplicate_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::DuplicateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let created_clip_ids = tl.duplicate_clips_bulk(&payload);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut timeline_payload = tl.to_payload();
+    timeline_payload.created_clip_ids = Some(created_clip_ids);
+    timeline_payload.project = Some(state.project_meta_payload());
+    timeline_payload
 }
 
 pub(super) fn replace_clip_source(
@@ -456,10 +697,46 @@ pub(super) fn split_clip(
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
+    let root_track_id = tl
+        .clips
+        .iter()
+        .find(|c| c.id == clip_id)
+        .map(|c| c.track_id.clone())
+        .and_then(|tid| tl.resolve_root_track_id(&tid));
     tl.split_clip(&clip_id, split_sec);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    if let Some(root_id) = root_track_id {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
+pub(super) fn split_clips_at(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    split_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|cid| tl.clips.iter().find(|c| c.id == *cid))
+        .map(|c| c.track_id.clone())
+        .filter_map(|tid| tl.resolve_root_track_id(&tid))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.split_clips_at(&clip_ids, split_sec);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
     payload
 }
 
@@ -469,10 +746,87 @@ pub(super) fn glue_clips(
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
+    // Collect root track IDs before gluing
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     tl.glue_clips(&clip_ids);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
+pub(super) fn convert_clips_to_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    // 收集 root track IDs 用于后续 pitch 分析调度
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.convert_clips_to_pitch_reference(&clip_ids);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
+pub(super) fn update_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    // 收集 root track IDs 用于后续 pitch 分析调度
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.update_pitch_reference_from_track_params(&clip_ids);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
     payload
 }
 

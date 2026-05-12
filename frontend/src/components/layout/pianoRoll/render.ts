@@ -278,6 +278,13 @@ export interface DetectedPitchCurve {
     framePeriodMs: number;
 }
 
+export interface ReferencePitchOverlay {
+    rootTrackId: string;
+    strokeColor: string;
+    highlighted: boolean;
+    paramView: ParamViewSegment;
+}
+
 export function drawPianoRoll(args: {
     axisCanvas: HTMLCanvasElement | null;
     canvas: HTMLCanvasElement | null;
@@ -301,6 +308,7 @@ export function drawPianoRoll(args: {
     playheadSec: number; // 播放头位置（秒）
     pitchAnalysisPending?: boolean;
     waveformColors?: { fill: string; stroke: string };
+    referencePitchOverlays?: ReferencePitchOverlay[];
     /** 检测音高曲线列表，在 pitch 模式下渲染为参考线 */
     detectedPitchCurves?: DetectedPitchCurve[];
     /** 是否为深色主题（默认 true） */
@@ -318,6 +326,8 @@ export function drawPianoRoll(args: {
     snapToggleHeld?: boolean;
     scaleHighlightMode?: import("../../../features/session/sessionTypes").ScaleHighlightMode;
     paramMorphOverlay?: ParamMorphOverlay | null;
+    /** 自定义字体族，用于 canvas 文本渲染 */
+    fontFamily?: string;
 }) {
     const {
         axisCanvas,
@@ -344,11 +354,15 @@ export function drawPianoRoll(args: {
             fill: "rgba(255,255,255,0.2)",
             stroke: "rgba(255,255,255,0.5)",
         },
+        referencePitchOverlays,
         detectedPitchCurves,
         isDark = true,
         clipboardPreview,
         paramMorphOverlay,
+        fontFamily,
     } = args;
+
+    const resolvedFontFamily = fontFamily || "sans-serif";
 
     // 主题颜色查找表
     const colors = isDark
@@ -469,7 +483,10 @@ export function drawPianoRoll(args: {
                         if (!black) {
                             // 白键：C 音用蓝色加粗，其他用灰色
                             ctx.fillStyle = pc === 0 ? colors.cLabel : colors.whiteKeyLabel;
-                            ctx.font = pc === 0 ? "bold 9px sans-serif" : "9px sans-serif";
+                            ctx.font =
+                                pc === 0
+                                    ? `bold 9px ${resolvedFontFamily}`
+                                    : `9px ${resolvedFontFamily}`;
                             ctx.fillText(midiToLabel(midi), 4, midY);
                         } else {
                             // 黑键：在黑键宽度内裁剪绘制
@@ -478,7 +495,7 @@ export function drawPianoRoll(args: {
                             ctx.rect(0, top, w * 0.7, keyH);
                             ctx.clip();
                             ctx.fillStyle = colors.blackKeyLabel;
-                            ctx.font = "8px sans-serif";
+                            ctx.font = `8px ${resolvedFontFamily}`;
                             ctx.fillText(midiToLabel(midi), 3, midY);
                             ctx.restore();
                         }
@@ -500,7 +517,7 @@ export function drawPianoRoll(args: {
                 const vMin = view.center - span / 2;
                 const vMax = view.center + span / 2;
                 ctx.fillStyle = colors.tensionLabel;
-                ctx.font = "10px sans-serif";
+                ctx.font = `10px ${resolvedFontFamily}`;
                 ctx.textBaseline = "middle";
 
                 if (isChildPitchOffsetCentsParam(editParam)) {
@@ -836,6 +853,34 @@ export function drawPianoRoll(args: {
         return;
     }
 
+    if (editParam === "pitch" && referencePitchOverlays && referencePitchOverlays.length > 0) {
+        referencePitchOverlays.forEach((overlay) => {
+            const values = resolveSecondaryOverlayValues({
+                orig: overlay.paramView.orig,
+                edit: overlay.paramView.edit,
+            });
+            if (values.length < 2) return;
+            ctx.save();
+            ctx.strokeStyle = overlay.strokeColor;
+            ctx.lineWidth = overlay.highlighted ? 3.2 : 2.6;
+            ctx.setLineDash([]);
+            drawCurveTimed({
+                ctx,
+                values,
+                param: "pitch",
+                w,
+                h,
+                startFrame: overlay.paramView.startFrame,
+                stride: overlay.paramView.stride,
+                framePeriodMs: overlay.paramView.framePeriodMs,
+                visibleStartSec,
+                visibleDurSec,
+                valueToY,
+            });
+            ctx.restore();
+        });
+    }
+
     // 检测音高参考线：在 pitch 模式下，将后端推送的 per-clip 检测曲线渲染为半透明彩色参考线�?
     // 渲染在用户编辑曲线下方，不干扰主曲线的视觉层次�?
     if (editParam === "pitch" && detectedPitchCurves && detectedPitchCurves.length > 0) {
@@ -856,8 +901,6 @@ export function drawPianoRoll(args: {
             const curveStartSec = curve.curveStartSec;
 
             ctx.save();
-
-            ctx.strokeStyle;
             ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
             ctx.lineWidth = 2;
             ctx.setLineDash([]);
@@ -1096,7 +1139,7 @@ export function drawPianoRoll(args: {
     if (overlayText) {
         ctx.save();
         ctx.fillStyle = colors.overlayTextColor;
-        ctx.font = "12px sans-serif";
+        ctx.font = `12px ${resolvedFontFamily}`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(overlayText, w / 2, h * 0.88);

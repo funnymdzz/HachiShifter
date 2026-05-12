@@ -79,7 +79,7 @@ export const paramsApi = {
     getProcessorParams: (algo: string) =>
         invoke<ProcessorParamDescriptor[]>("get_processor_params", algo),
 
-    getMidiTracks: (midiPath: string) =>
+    getMidiTracks: (midiPath: string, clipboardGuid?: string) =>
         invoke<{
             ok: boolean;
             error?: string;
@@ -90,18 +90,122 @@ export const paramsApi = {
                 min_note: number;
                 max_note: number;
             }>;
-        }>("get_midi_tracks", midiPath),
+            initial_bpm?: number;
+            has_bpm?: boolean;
+        }>("get_midi_tracks", midiPath, clipboardGuid ?? null),
+
+    readMidiClipboardToMemory: () =>
+        invoke<{
+            ok: boolean;
+            error?: string;
+            guid?: string;
+            tracks?: Array<{
+                index: number;
+                name: string;
+                note_count: number;
+                min_note: number;
+                max_note: number;
+            }>;
+            initial_bpm?: number;
+            has_bpm?: boolean;
+        }>("read_midi_clipboard_to_memory"),
 
     importMidiToPitch: (
         midiPath: string,
-        trackIndex?: number,
+        trackIndices: number[],
         selectionStartFrame?: number,
         selectionMaxFrames?: number,
+        fillGaps?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
     ) =>
         invoke<{
             ok: boolean;
             error?: string;
             notes_imported?: number;
             frames_touched?: number;
-        }>("import_midi_to_pitch", midiPath, trackIndex, selectionStartFrame, selectionMaxFrames),
+        }>(
+            "import_midi_to_pitch",
+            midiPath,
+            trackIndices,
+            selectionStartFrame,
+            selectionMaxFrames,
+            fillGaps,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
+        ),
+
+    importMidiAsClip: (
+        midiPath: string,
+        trackIndices: number[],
+        trackId?: string,
+        startSec?: number,
+        fillGaps?: boolean,
+        multiTrackMerge?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
+    ) =>
+        invoke<TimelineResult & { ok: boolean; error?: string }>(
+            "import_midi_as_clip",
+            midiPath,
+            trackIndices,
+            trackId,
+            startSec,
+            fillGaps,
+            multiTrackMerge,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
+        ),
+
+    replaceMidiClipData: (
+        clipId: string,
+        midiPath: string,
+        trackIndices: number[],
+        fillGaps?: boolean,
+        noteBpmMode?: string,
+        specifiedBpm?: number,
+        importMidiBpmAsProject?: boolean,
+        clipboardGuid?: string,
+        closeLeadingGap?: boolean,
+    ) =>
+        invoke<TimelineResult & { ok: boolean; error?: string }>(
+            "replace_midi_clip_data",
+            clipId,
+            midiPath,
+            trackIndices,
+            fillGaps,
+            noteBpmMode,
+            specifiedBpm,
+            importMidiBpmAsProject,
+            clipboardGuid ?? null,
+            closeLeadingGap,
+        ),
+
+    exportPitchToMidi: (request: {
+        outputPath: string;
+        tracks: Array<{
+            trackId: string;
+            rootTrackId: string;
+            name: string;
+            startSec: number;
+            endSec: number;
+            clipId?: string;
+        }>;
+        bpm: number;
+        beatsPerBar: number;
+        baseScale: string;
+        projectScaleNotes: number[];
+    }) => invoke<{ ok: boolean; error?: string }>("export_pitch_to_midi", request),
 };

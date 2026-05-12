@@ -14,6 +14,33 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
+/// FCPE model frequency range — must match the model's training parameters.
+/// Source: HachiTune FCPEPitchDetector.h (open-ai-tuning/HachiTune)
+/// f0ToCent(32.7) → centToF0 for 360-bin output layer.
+pub const FCPE_F0_MIN_HZ: f64 = 32.7;
+pub const FCPE_F0_MAX_HZ: f64 = 1975.5;
+
+/// Precomputed cent table matching HachiTune FCPEPitchDetector::initCentTable().
+/// centTable[i] = cent(32.7) + (cent(1975.5) - cent(32.7)) * i / (n_bins - 1)
+static CENT_TABLE: OnceLock<Vec<f64>> = OnceLock::new();
+
+fn get_cent_table(n_bins: usize) -> &'static [f64] {
+    CENT_TABLE.get_or_init(|| {
+        let n = n_bins.max(2);
+        let cent_min = 1200.0 * (FCPE_F0_MIN_HZ / 10.0).log2();
+        let cent_max = 1200.0 * (FCPE_F0_MAX_HZ / 10.0).log2();
+        let span = cent_max - cent_min;
+        (0..n)
+            .map(|i| cent_min + span * (i as f64) / ((n - 1) as f64))
+            .collect()
+    })
+}
+
+/// Convert cent to Hz (matching HachiTune FCPEPitchDetector::centToF0).
+fn cent_to_hz(cent: f64) -> f64 {
+    10.0 * (2.0f64).powf(cent / 1200.0)
+}
+
 static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
 static SHARED_SESSION: OnceLock<Arc<Mutex<Session>>> = OnceLock::new();
 static PROBE: OnceLock<Result<(), String>> = OnceLock::new();
@@ -238,7 +265,7 @@ fn env_fcpe_fmin() -> f32 {
         .ok()
         .and_then(|s| s.trim().parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
-        .unwrap_or(30.0)
+        .unwrap_or(0.0)
 }
 
 fn env_fcpe_fmax(sr: u32) -> f32 {
@@ -322,6 +349,7 @@ fn reflect_pad(y: &[f32], left: usize, right: usize) -> Vec<f32> {
     out
 }
 
+/// Slaney mel scale (librosa default — matches FCPE model training).
 fn hz_to_mel_slaney(hz: f32) -> f32 {
     let f_min = 0.0;
     let f_sp = 200.0 / 3.0;
@@ -336,6 +364,7 @@ fn hz_to_mel_slaney(hz: f32) -> f32 {
     }
 }
 
+/// Inverse Slaney mel scale.
 fn mel_to_hz_slaney(mel: f32) -> f32 {
     let f_min = 0.0;
     let f_sp = 200.0 / 3.0;
@@ -466,8 +495,8 @@ fn build_mel_from_waveform(
 fn decode_model_output_to_f0_hz(
     shape: &ort::value::Shape,
     data: &[f32],
-    f0_floor: f64,
-    f0_ceil: f64,
+    _f0_floor: f64,
+    _f0_ceil: f64,
 ) -> Vec<f64> {
     if data.is_empty() {
         return Vec::new();
@@ -479,7 +508,13 @@ fn decode_model_output_to_f0_hz(
     if dims.len() <= 2 {
         return data
             .iter()
-            .map(|&v| if v.is_finite() && v > 0.0 { v as f64 } else { 0.0 })
+            .map(|&v| {
+                if v.is_finite() && v > 0.0 {
+                    v as f64
+                } else {
+                    0.0
+                }
+            })
             .collect();
     }
 
@@ -506,21 +541,21 @@ fn decode_model_output_to_f0_hz(
             return Vec::new();
         }
 
-        let min_hz = f0_floor.max(1.0);
-        let max_hz = f0_ceil.max(min_hz + 1e-6);
-        let log_span = (max_hz / min_hz).ln();
+        // Precompute cent table matching HachiTune's initCentTable()
+        let cent_table = get_cent_table(c);
+        // HachiTune uses confidence threshold 0.05
+        let threshold: f32 = 0.05;
 
         let mut out = Vec::with_capacity(t);
         for ti in 0..t {
+            // Step 1: find global argmax (confidence check)
             let mut best_k = 0usize;
             let mut best_v = f32::NEG_INFINITY;
 
             for k in 0..c {
                 let idx = if btc_layout {
-                    // [B,T,C] for first batch only.
                     ti * c + k
                 } else {
-                    // [B,C,T] for first batch only.
                     k * t + ti
                 };
                 let v = data[idx];
@@ -530,29 +565,54 @@ fn decode_model_output_to_f0_hz(
                 }
             }
 
-            let ratio = if c <= 1 {
-                0.0
+            // Confidence threshold (matching HachiTune)
+            if best_v <= threshold {
+                out.push(0.0);
+                continue;
+            }
+
+            // Step 2: local weighted average in cent space (±4 bins)
+            let local_start = best_k.saturating_sub(4);
+            let local_end = (best_k + 4).min(c.saturating_sub(1));
+
+            let mut weighted_sum = 0.0f64;
+            let mut weight_sum = 0.0f64;
+
+            for k in local_start..=local_end {
+                let idx = if btc_layout {
+                    ti * c + k
+                } else {
+                    k * t + ti
+                };
+                let v = data[idx] as f64;
+                weighted_sum += cent_table[k] * v;
+                weight_sum += v;
+            }
+
+            let hz = if weight_sum > 1e-9 {
+                let cent = weighted_sum / weight_sum;
+                cent_to_hz(cent)
             } else {
-                best_k as f64 / (c - 1) as f64
+                0.0
             };
-            let hz = min_hz * (log_span * ratio).exp();
             out.push(hz);
         }
         return out;
     }
 
-    data
-        .iter()
-        .map(|&v| if v.is_finite() && v > 0.0 { v as f64 } else { 0.0 })
+    data.iter()
+        .map(|&v| {
+            if v.is_finite() && v > 0.0 {
+                v as f64
+            } else {
+                0.0
+            }
+        })
         .collect()
 }
 
 fn tensor_rank_from_outlet(outlet: &ort::value::Outlet) -> usize {
-    outlet
-        .dtype()
-        .tensor_shape()
-        .map(|s| s.len())
-        .unwrap_or(0)
+    outlet.dtype().tensor_shape().map(|s| s.len()).unwrap_or(0)
 }
 
 fn build_waveform_tensor_for_rank(rank: usize, waveform: Vec<f32>) -> Result<Tensor<f32>, String> {
@@ -561,8 +621,11 @@ fn build_waveform_tensor_for_rank(rank: usize, waveform: Vec<f32>) -> Result<Ten
             .map_err(|e| format!("build FCPE input [T] failed: {e}")),
         2 => Tensor::from_array(([1usize, waveform.len()], waveform.into_boxed_slice()))
             .map_err(|e| format!("build FCPE input [1,T] failed: {e}")),
-        _ => Tensor::from_array(([1usize, 1usize, waveform.len()], waveform.into_boxed_slice()))
-            .map_err(|e| format!("build FCPE input [1,1,T] failed: {e}")),
+        _ => Tensor::from_array((
+            [1usize, 1usize, waveform.len()],
+            waveform.into_boxed_slice(),
+        ))
+        .map_err(|e| format!("build FCPE input [1,1,T] failed: {e}")),
     }
 }
 
@@ -641,10 +704,7 @@ fn run_with_named_inputs(
                 .map(|s| s.iter().copied().collect())
                 .unwrap_or_else(|| vec![-1, -1, 128]);
 
-            let mel_axis = mel_shape
-                .iter()
-                .position(|&d| d == 128)
-                .unwrap_or(2);
+            let mel_axis = mel_shape.iter().position(|&d| d == 128).unwrap_or(2);
             let n_mels = 128usize;
 
             let (mel, t) = build_mel_from_waveform(waveform, sample_rate, n_mels)
@@ -708,10 +768,7 @@ fn run_with_named_inputs(
                 .and_then(|o| o.dtype().tensor_shape())
                 .map(|s| s.iter().copied().collect())
                 .unwrap_or_else(|| vec![-1, -1, 128]);
-            let mel_axis = mel_shape
-                .iter()
-                .position(|&d| d == 128)
-                .unwrap_or(2);
+            let mel_axis = mel_shape.iter().position(|&d| d == 128).unwrap_or(2);
             let n_mels = 128usize;
 
             let (mel, t) = build_mel_from_waveform(waveform, sample_rate, n_mels)
@@ -879,13 +936,8 @@ pub fn infer_f0_hz(
         .lock()
         .map_err(|e| format!("FCPE session lock poisoned: {e}"))?;
 
-    let output_values = run_with_named_inputs(
-        &mut session,
-        &waveform,
-        sample_rate,
-        f0_floor,
-        f0_ceil,
-    )?;
+    let output_values =
+        run_with_named_inputs(&mut session, &waveform, sample_rate, f0_floor, f0_ceil)?;
 
     if output_values.is_empty() {
         return Ok(vec![0.0; target_frames]);

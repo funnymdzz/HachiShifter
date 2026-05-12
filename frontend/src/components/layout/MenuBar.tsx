@@ -10,10 +10,14 @@ import {
     removeTrackRemote,
     refreshRuntime,
     clearWaveformCacheRemote,
+    persistUiSettings,
     undoRemote,
     redoRemote,
     saveProjectRemote,
     saveProjectAsRemote,
+    setDefaultHifiganMelStretch,
+    setDefaultStretchAlgorithm,
+    setProjectStretchSettingsRemote,
 } from "../../features/session/sessionSlice";
 import {
     importAudioFromDialog,
@@ -54,6 +58,7 @@ interface MenuBarProps {
     onOpenProject: () => void;
     onOpenRecentProject: (projectPath: string) => void;
     onExit: () => void;
+    onImportMidiFromMenu: () => void;
     autoBackupSettings: AutoBackupSettings;
     onAutoBackupSettingsSaved: (settings: AutoBackupSettings) => void;
 }
@@ -63,6 +68,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     onOpenProject,
     onOpenRecentProject,
     onExit,
+    onImportMidiFromMenu,
     autoBackupSettings,
     onAutoBackupSettingsSaved,
 }) => {
@@ -131,6 +137,24 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         s.project.useCustomScale && s.project.customScale
             ? `${tAny("project_scale_prefix")} (${tAny("custom_scale_short")})`
             : `${tAny("project_scale_prefix")} (${SCALE_LABELS[s.project.baseScale]})`;
+    const effectiveProjectStretchAlgorithm =
+        s.project.stretchAlgorithmOverride ?? s.defaultStretchAlgorithm;
+    const effectiveProjectHifiganMelStretch =
+        s.project.hifiganMelStretchOverride ?? s.defaultHifiganMelStretch;
+
+    const stretchAlgorithmLabel = (value: "linear" | "signalsmith" | "soundtouch") => {
+        switch (value) {
+            case "linear":
+                return tAny("stretch_option_linear");
+            case "signalsmith":
+                return tAny("stretch_option_signalsmith");
+            case "soundtouch":
+            default:
+                return tAny("stretch_option_soundtouch");
+        }
+    };
+
+    const withCheck = (active: boolean, label: string) => `${active ? "●" : "○"} ${label}`;
 
     const resolveScaleToken = (scaleValue: string) =>
         scaleValue === "__project__" ? "__project__" : scaleValue;
@@ -211,6 +235,10 @@ export const MenuBar: React.FC<MenuBarProps> = ({
         }
     }, [dispatch, s.playheadSec, s.selectedTrackId]);
 
+    const handleImportMidiFromMenu = useCallback(() => {
+        onImportMidiFromMenu();
+    }, [onImportMidiFromMenu]);
+
     return (
         <Flex
             align="center"
@@ -284,6 +312,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                         }}
                     >
                         {t("menu_import_audio")}{" "}
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Item
+                        onSelect={() => {
+                            void handleImportMidiFromMenu();
+                        }}
+                    >
+                        {t("menu_import_midi")}{" "}
                     </DropdownMenu.Item>
                     <DropdownMenu.Item onSelect={() => void dispatch(openReaperFromDialog())}>
                         {t("menu_import_reaper")}
@@ -497,6 +532,183 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <DropdownMenu.Item onSelect={() => setKbDialogOpen(true)}>
                         {(t as (key: string) => string)("menu_keybindings")}
                     </DropdownMenu.Item>
+                </DropdownMenu.Content>
+            </DropdownMenu.Root>
+
+            <DropdownMenu.Root>
+                <DropdownMenu.Trigger className="shrink-0 rounded px-2 py-1 text-xs text-qt-text hover:bg-qt-highlight hover:text-white">
+                    <span>{tAny("menu_stretch")}</span>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content variant="soft" color="gray">
+                    <DropdownMenu.Sub>
+                        <DropdownMenu.SubTrigger>
+                            {tAny("stretch_project_override")}
+                        </DropdownMenu.SubTrigger>
+                        <DropdownMenu.SubContent>
+                            <DropdownMenu.Sub>
+                                <DropdownMenu.SubTrigger>
+                                    {`${tAny("stretch_algorithm")}: ${stretchAlgorithmLabel(effectiveProjectStretchAlgorithm)}`}
+                                </DropdownMenu.SubTrigger>
+                                <DropdownMenu.SubContent>
+                                    <DropdownMenu.Item
+                                        onSelect={() =>
+                                            void dispatch(
+                                                setProjectStretchSettingsRemote({
+                                                    stretchAlgorithmOverride: null,
+                                                    hifiganMelStretchOverride:
+                                                        s.project.hifiganMelStretchOverride,
+                                                }),
+                                            )
+                                        }
+                                    >
+                                        {withCheck(
+                                            s.project.stretchAlgorithmOverride == null,
+                                            `${tAny("stretch_inherit_global")} (${stretchAlgorithmLabel(s.defaultStretchAlgorithm)})`,
+                                        )}
+                                    </DropdownMenu.Item>
+                                    {(["linear", "signalsmith", "soundtouch"] as const).map(
+                                        (algorithm) => (
+                                            <DropdownMenu.Item
+                                                key={algorithm}
+                                                onSelect={() =>
+                                                    void dispatch(
+                                                        setProjectStretchSettingsRemote({
+                                                            stretchAlgorithmOverride: algorithm,
+                                                            hifiganMelStretchOverride:
+                                                                s.project.hifiganMelStretchOverride,
+                                                        }),
+                                                    )
+                                                }
+                                            >
+                                                {withCheck(
+                                                    s.project.stretchAlgorithmOverride ===
+                                                        algorithm,
+                                                    stretchAlgorithmLabel(algorithm),
+                                                )}
+                                            </DropdownMenu.Item>
+                                        ),
+                                    )}
+                                </DropdownMenu.SubContent>
+                            </DropdownMenu.Sub>
+                            <DropdownMenu.Sub>
+                                <DropdownMenu.SubTrigger>
+                                    {`${tAny("stretch_hifigan_mel")}: ${effectiveProjectHifiganMelStretch ? tAny("stretch_toggle_on") : tAny("stretch_toggle_off")}`}
+                                </DropdownMenu.SubTrigger>
+                                <DropdownMenu.SubContent>
+                                    <DropdownMenu.Item
+                                        onSelect={() =>
+                                            void dispatch(
+                                                setProjectStretchSettingsRemote({
+                                                    stretchAlgorithmOverride:
+                                                        s.project.stretchAlgorithmOverride,
+                                                    hifiganMelStretchOverride: null,
+                                                }),
+                                            )
+                                        }
+                                    >
+                                        {withCheck(
+                                            s.project.hifiganMelStretchOverride == null,
+                                            `${tAny("stretch_inherit_global")} (${s.defaultHifiganMelStretch ? tAny("stretch_toggle_on") : tAny("stretch_toggle_off")})`,
+                                        )}
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item
+                                        onSelect={() =>
+                                            void dispatch(
+                                                setProjectStretchSettingsRemote({
+                                                    stretchAlgorithmOverride:
+                                                        s.project.stretchAlgorithmOverride,
+                                                    hifiganMelStretchOverride: true,
+                                                }),
+                                            )
+                                        }
+                                    >
+                                        {withCheck(
+                                            s.project.hifiganMelStretchOverride === true,
+                                            tAny("stretch_toggle_on"),
+                                        )}
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item
+                                        onSelect={() =>
+                                            void dispatch(
+                                                setProjectStretchSettingsRemote({
+                                                    stretchAlgorithmOverride:
+                                                        s.project.stretchAlgorithmOverride,
+                                                    hifiganMelStretchOverride: false,
+                                                }),
+                                            )
+                                        }
+                                    >
+                                        {withCheck(
+                                            s.project.hifiganMelStretchOverride === false,
+                                            tAny("stretch_toggle_off"),
+                                        )}
+                                    </DropdownMenu.Item>
+                                </DropdownMenu.SubContent>
+                            </DropdownMenu.Sub>
+                        </DropdownMenu.SubContent>
+                    </DropdownMenu.Sub>
+
+                    <DropdownMenu.Separator />
+
+                    <DropdownMenu.Sub>
+                        <DropdownMenu.SubTrigger>
+                            {tAny("stretch_global_default")}
+                        </DropdownMenu.SubTrigger>
+                        <DropdownMenu.SubContent>
+                            <DropdownMenu.Sub>
+                                <DropdownMenu.SubTrigger>
+                                    {`${tAny("stretch_algorithm")}: ${stretchAlgorithmLabel(s.defaultStretchAlgorithm)}`}
+                                </DropdownMenu.SubTrigger>
+                                <DropdownMenu.SubContent>
+                                    {(["linear", "signalsmith", "soundtouch"] as const).map(
+                                        (algorithm) => (
+                                            <DropdownMenu.Item
+                                                key={algorithm}
+                                                onSelect={() => {
+                                                    dispatch(setDefaultStretchAlgorithm(algorithm));
+                                                    void dispatch(persistUiSettings());
+                                                }}
+                                            >
+                                                {withCheck(
+                                                    s.defaultStretchAlgorithm === algorithm,
+                                                    stretchAlgorithmLabel(algorithm),
+                                                )}
+                                            </DropdownMenu.Item>
+                                        ),
+                                    )}
+                                </DropdownMenu.SubContent>
+                            </DropdownMenu.Sub>
+                            <DropdownMenu.Sub>
+                                <DropdownMenu.SubTrigger>
+                                    {`${tAny("stretch_hifigan_mel")}: ${s.defaultHifiganMelStretch ? tAny("stretch_toggle_on") : tAny("stretch_toggle_off")}`}
+                                </DropdownMenu.SubTrigger>
+                                <DropdownMenu.SubContent>
+                                    <DropdownMenu.Item
+                                        onSelect={() => {
+                                            dispatch(setDefaultHifiganMelStretch(true));
+                                            void dispatch(persistUiSettings());
+                                        }}
+                                    >
+                                        {withCheck(
+                                            s.defaultHifiganMelStretch,
+                                            tAny("stretch_toggle_on"),
+                                        )}
+                                    </DropdownMenu.Item>
+                                    <DropdownMenu.Item
+                                        onSelect={() => {
+                                            dispatch(setDefaultHifiganMelStretch(false));
+                                            void dispatch(persistUiSettings());
+                                        }}
+                                    >
+                                        {withCheck(
+                                            !s.defaultHifiganMelStretch,
+                                            tAny("stretch_toggle_off"),
+                                        )}
+                                    </DropdownMenu.Item>
+                                </DropdownMenu.SubContent>
+                            </DropdownMenu.Sub>
+                        </DropdownMenu.SubContent>
+                    </DropdownMenu.Sub>
                 </DropdownMenu.Content>
             </DropdownMenu.Root>
 

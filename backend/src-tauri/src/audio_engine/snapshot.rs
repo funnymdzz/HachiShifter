@@ -93,6 +93,7 @@ fn clip_source_bounds_frames(clip: &Clip, src_total_frames: usize, sr: u32) -> (
 pub(crate) fn make_stretch_key(
     path: &Path,
     out_rate: u32,
+    algorithm: crate::time_stretch::UserStretchAlgorithm,
     source_start: f64,
     source_end: f64,
     playback_rate: f64,
@@ -100,6 +101,7 @@ pub(crate) fn make_stretch_key(
     StretchKey {
         path: path.to_path_buf(),
         out_rate,
+        algorithm,
         bpm_q: 0, // 不再依赖 BPM
         trim_start_q: quantize_i64(source_start, 1000.0),
         trim_end_q: quantize_i64(source_end, 1000.0),
@@ -117,6 +119,8 @@ pub(crate) fn schedule_stretch_jobs(
 ) {
     // 计算 track_gain，删除了无用的 bpm 和冗余的 audible_tracks
     let track_gain = compute_track_gains(&timeline.tracks);
+    let stretch_algorithm = crate::time_stretch::resolved_user_external_stretch_algorithm();
+    let runtime_stretch_algorithm = stretch_algorithm.to_runtime();
 
     for clip in &timeline.clips {
         if clip.muted {
@@ -137,13 +141,21 @@ pub(crate) fn schedule_stretch_jobs(
         let Some(source_path) = clip.source_path.as_ref() else {
             continue;
         };
+        let processor_handles_stretch = timeline
+            .resolve_root_track_id(&clip.track_id)
+            .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
+            .map(|t| {
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                crate::renderer::processor_handles_time_stretch(kind, t.compose_enabled)
+            })
+            .unwrap_or(false);
         let playback_rate = clip.playback_rate as f64;
         let playback_rate = if playback_rate.is_finite() && playback_rate > 0.0 {
             playback_rate
         } else {
             1.0
         };
-        if (playback_rate - 1.0).abs() <= 1e-6 {
+        if processor_handles_stretch || (playback_rate - 1.0).abs() <= 1e-6 {
             continue;
         }
         let path = Path::new(source_path);
@@ -154,6 +166,7 @@ pub(crate) fn schedule_stretch_jobs(
         let key = make_stretch_key(
             path,
             out_rate,
+            stretch_algorithm,
             clip.source_start_sec.max(0.0),
             clip.source_end_sec,
             playback_rate,
@@ -187,6 +200,7 @@ pub(crate) fn schedule_stretch_jobs(
 
         let _ = stretch_tx.send(StretchJob {
             key,
+            algorithm: runtime_stretch_algorithm,
             source_start_sec: clip.source_start_sec.max(0.0),
             source_end_sec: clip.source_end_sec,
             playback_rate,
@@ -203,6 +217,7 @@ pub(crate) fn build_snapshot(
     stretch_cache: &Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
 ) -> EngineSnapshot {
     let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let stretch_algorithm = crate::time_stretch::resolved_user_external_stretch_algorithm();
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
         timeline.bpm
     } else {
@@ -263,6 +278,22 @@ pub(crate) fn build_snapshot(
         } else {
             1.0
         };
+        let processor_handles_stretch = timeline
+            .resolve_root_track_id(&clip.track_id)
+            .and_then(|root| {
+                let t = tracks_by_id.get(root.as_str()).copied()?;
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                let has_adjustment = timeline
+                    .params_by_root_track
+                    .get(&root)
+                    .map(|e| e.has_pitch_adjustment_active)
+                    .unwrap_or(false);
+                Some(crate::renderer::processor_handles_time_stretch(
+                    kind,
+                    t.compose_enabled || has_adjustment,
+                ))
+            })
+            .unwrap_or(false);
 
         let src = match get_resampled_stereo_cached(path, out_rate, cache) {
             Some(v) => v,
@@ -300,14 +331,82 @@ pub(crate) fn build_snapshot(
                 0
             };
 
-        // If playback_rate != 1, prefer an asynchronously precomputed, pitch-preserving buffer.
-        // Never block snapshot building here.
+        // If the clip has formant morph enabled, build/use a clip-local preprocessed buffer first,
+        // then feed that buffer into later stretch / processor stages.
+        let formant_params = clip.formant_morph.as_ref().filter(|params| params.enabled);
         let mut src_render = src;
         let mut playback_rate_render = playback_rate;
-        if (playback_rate - 1.0).abs() > 1e-6 {
+        if let Some(params) = formant_params {
+            let slice_start = (src_start as usize).saturating_mul(2);
+            let slice_end = (src_end as usize).saturating_mul(2).min(src_render.pcm.len());
+            let mut clip_pcm = src_render.pcm[slice_start..slice_end].to_vec();
+            if clip.reversed {
+                crate::mixdown::reverse_interleaved_frames(&mut clip_pcm, 2);
+            }
+
+            let key = crate::formant_cache::make_formant_cache_key(
+                &clip.id,
+                path,
+                out_rate,
+                clip.source_start_sec.max(0.0),
+                clip.source_end_sec,
+                clip.reversed,
+                params,
+            );
+            match crate::formant_cache::get_or_compute_formant_audio(
+                key,
+                &clip_pcm,
+                out_rate,
+                params,
+            ) {
+                Ok(entry) => {
+                    crate::formant_cache::formant_debug_log(format!(
+                        "snapshot using formant clip_id={} frames={} diff={:.8} processor_handles_stretch={} playback_rate={:.4}",
+                        clip.id,
+                        entry.frames,
+                        crate::formant_cache::average_abs_diff(&clip_pcm, entry.pcm_stereo.as_ref()),
+                        processor_handles_stretch,
+                        playback_rate,
+                    ));
+                    src_render = ResampledStereo {
+                        sample_rate: entry.sample_rate,
+                        frames: entry.frames,
+                        pcm: entry.pcm_stereo,
+                    };
+                    src_start = 0;
+                    src_end = src_render.frames as u64;
+                    repeat = false;
+                    if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
+                        let target_frames =
+                            ((src_render.frames as f64) / playback_rate).round().max(2.0) as usize;
+                        let stretched = crate::time_stretch::time_stretch_interleaved(
+                            src_render.pcm.as_slice(),
+                            2,
+                            out_rate,
+                            target_frames,
+                            stretch_algorithm.to_runtime(),
+                        );
+                        src_render = ResampledStereo {
+                            sample_rate: out_rate,
+                            frames: target_frames,
+                            pcm: Arc::new(stretched),
+                        };
+                        src_end = src_render.frames as u64;
+                        playback_rate_render = 1.0;
+                    }
+                }
+                Err(error) => {
+                    crate::formant_cache::formant_debug_log(format!(
+                        "snapshot formant error clip_id={} error={}",
+                        clip.id, error
+                    ));
+                }
+            }
+        } else if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
             let key = make_stretch_key(
                 path,
                 out_rate,
+                stretch_algorithm,
                 clip.source_start_sec.max(0.0),
                 clip.source_end_sec,
                 playback_rate,
@@ -428,6 +527,7 @@ pub(crate) fn build_snapshot(
                             playback_rate,
                             extra_curves,
                             extra_params,
+                            clip.formant_morph.as_ref().filter(|params| params.enabled),
                             None,
                         );
                         if debug {
@@ -613,7 +713,7 @@ pub(crate) fn build_snapshot(
             src: src_render,
             src_start_frame: src_start,
             src_end_frame: src_end,
-            reversed: clip.reversed,
+            reversed: formant_params.is_some().then_some(false).unwrap_or(clip.reversed),
             playback_rate: playback_rate_render,
             local_src_offset_frames,
             repeat,
@@ -668,6 +768,31 @@ pub(crate) fn build_snapshot(
         duration_frames,
         track_ids: Arc::new(track_ids),
         clips: Arc::new(clips_out),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn make_stretch_key_distinguishes_algorithm() {
+        let path = std::path::Path::new("demo.wav");
+        let linear = super::make_stretch_key(
+            path,
+            48_000,
+            crate::time_stretch::UserStretchAlgorithm::Linear,
+            0.0,
+            1.0,
+            0.75,
+        );
+        let soundtouch = super::make_stretch_key(
+            path,
+            48_000,
+            crate::time_stretch::UserStretchAlgorithm::Soundtouch,
+            0.0,
+            1.0,
+            0.75,
+        );
+        assert_ne!(linear, soundtouch);
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::state::{SynthPipelineKind, TimelineState};
+use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 use std::path::Component;
 use std::path::{Path, PathBuf};
@@ -60,6 +61,12 @@ pub struct SynthConfig {
     /// 工程默认合成管线，`None` 时由 Track 的 `pitch_analysis_algo` 决定。
     #[serde(default)]
     pub default_pipeline: Option<SynthPipelineKind>,
+    /// 工程级外部时间拉伸算法覆盖；`None` 表示继承全局默认值。
+    #[serde(default)]
+    pub stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    /// 工程级 HiFiGAN mel-stretch 开关覆盖；`None` 表示继承全局默认值。
+    #[serde(default)]
+    pub hifigan_mel_stretch_override: Option<bool>,
 }
 
 // ─── 工程文件 ──────────────────────────────────────────────────────────────────
@@ -69,6 +76,8 @@ pub struct SynthConfig {
 pub struct ProjectFile {
     pub version: u32,
     pub name: String,
+    #[serde(default)]
+    pub notes_markdown: String,
     pub timeline: TimelineState,
     #[serde(default = "default_base_scale")]
     pub base_scale: String,
@@ -99,6 +108,7 @@ impl ProjectFile {
         Self {
             version: 2,
             name,
+            notes_markdown: String::new(),
             timeline,
             base_scale,
             beats_per_bar,
@@ -234,7 +244,10 @@ pub fn prepare_source_paths_for_save(mut tl: TimelineState, project_path: &Path)
     tl
 }
 
-pub fn resolve_source_paths_on_open(mut tl: TimelineState, project_path: &Path) -> (TimelineState, Vec<String>) {
+pub fn resolve_source_paths_on_open(
+    mut tl: TimelineState,
+    project_path: &Path,
+) -> (TimelineState, Vec<String>) {
     let dir = project_path.parent().unwrap_or_else(|| Path::new("."));
     let mut missing_files = std::collections::BTreeSet::new();
 

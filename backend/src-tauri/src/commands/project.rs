@@ -4,6 +4,9 @@ use crate::project::{
 };
 use crate::state::AppState;
 use crate::synth_clip_cache;
+use crate::time_stretch::{
+    update_project_stretch_overrides, update_runtime_stretch_settings, UserStretchAlgorithm,
+};
 use chrono::Local;
 use std::fs;
 use std::io::Write;
@@ -112,6 +115,28 @@ fn load_auto_backup_settings(state: &AppState) -> crate::config::AutoBackupSetti
     crate::config::AutoBackupSettings::default()
 }
 
+fn load_ui_stretch_defaults(state: &AppState) -> (UserStretchAlgorithm, bool) {
+    if let Some(config_dir) = state.config_dir.get() {
+        let settings = crate::config::load_ui_settings(config_dir);
+        return (
+            settings.default_stretch_algorithm,
+            settings.default_hifigan_mel_stretch,
+        );
+    }
+    (UserStretchAlgorithm::default(), true)
+}
+
+fn sync_runtime_stretch_settings(state: &AppState) {
+    let (default_algorithm, default_hifigan_mel_stretch) = load_ui_stretch_defaults(state);
+    let project = state.project.lock().unwrap_or_else(|e| e.into_inner());
+    update_runtime_stretch_settings(
+        default_algorithm,
+        default_hifigan_mel_stretch,
+        project.stretch_algorithm_override,
+        project.hifigan_mel_stretch_override,
+    );
+}
+
 fn is_hifishifter_project_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -142,8 +167,12 @@ fn rotate_existing_project_file_for_backup(path: &Path) -> Result<Option<PathBuf
 
     let backup_path = save_on_save_backup_path(path);
     if backup_path.exists() {
-        fs::remove_file(&backup_path)
-            .map_err(|e| format!("Failed to remove stale save backup {:?}: {}", backup_path, e))?;
+        fs::remove_file(&backup_path).map_err(|e| {
+            format!(
+                "Failed to remove stale save backup {:?}: {}",
+                backup_path, e
+            )
+        })?;
     }
 
     fs::rename(path, &backup_path).map_err(|e| {
@@ -254,7 +283,9 @@ fn resolve_timed_backup_output_path(
         template.trim().to_string()
     };
 
-    let project_folder = resolve_project_folder_for_backup(state).display().to_string();
+    let project_folder = resolve_project_folder_for_backup(state)
+        .display()
+        .to_string();
     let project_name = resolve_project_name_for_backup(state);
 
     let replaced = normalized_template
@@ -275,7 +306,10 @@ fn resolve_timed_backup_output_path(
     Ok((output_path, fallback_used))
 }
 
-fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -> Result<(), String> {
+fn atomic_write_project_snapshot_to_path(
+    state: &AppState,
+    output_path: &Path,
+) -> Result<(), String> {
     let output_name = project_name_from_path(output_path);
     let project_file = build_project_file_snapshot(state, output_path, &output_name);
     let bytes = serialize_project_file_for_path(&project_file, output_path)?;
@@ -354,7 +388,11 @@ fn atomic_write_project_snapshot_to_path(state: &AppState, output_path: &Path) -
     Ok(())
 }
 
-fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_name: &str) -> ProjectFile {
+fn build_project_file_snapshot(
+    state: &AppState,
+    project_path: &Path,
+    project_name: &str,
+) -> ProjectFile {
     let mut tl = state
         .timeline
         .lock()
@@ -362,7 +400,16 @@ fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_na
         .clone();
     tl.project_sec = latest_clip_end_sec(&tl).max(4.0).ceil();
 
-    let (base_scale, use_custom_scale, custom_scale, beats_per_bar, grid_size) = {
+    let (
+        base_scale,
+        use_custom_scale,
+        custom_scale,
+        beats_per_bar,
+        grid_size,
+        notes_markdown,
+        stretch_algorithm_override,
+        hifigan_mel_stretch_override,
+    ) = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         (
             normalize_scale_key(&p.base_scale),
@@ -370,6 +417,9 @@ fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_na
             normalize_custom_scale(p.custom_scale.clone()),
             normalize_beats_per_bar(p.beats_per_bar),
             normalize_grid_size(&p.grid_size),
+            p.notes_markdown.clone(),
+            p.stretch_algorithm_override,
+            p.hifigan_mel_stretch_override,
         )
     };
 
@@ -383,13 +433,13 @@ fn build_project_file_snapshot(state: &AppState, project_path: &Path, project_na
     );
     pf.use_custom_scale = use_custom_scale && custom_scale.is_some();
     pf.custom_scale = custom_scale;
+    pf.notes_markdown = notes_markdown;
+    pf.synth_config.stretch_algorithm_override = stretch_algorithm_override;
+    pf.synth_config.hifigan_mel_stretch_override = hifigan_mel_stretch_override;
     pf
 }
 
-fn unique_entry_path(
-    desired: &str,
-    used_paths: &mut std::collections::HashSet<String>,
-) -> String {
+fn unique_entry_path(desired: &str, used_paths: &mut std::collections::HashSet<String>) -> String {
     let path = Path::new(desired);
     let parent = path
         .parent()
@@ -522,10 +572,7 @@ fn save_project_archive_to_zip_inner(
 
     // 为了保证保存的原子性，先写入临时文件，成功后再重命名为最终路径。
     let tmp_path = {
-        let ext = zip_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let ext = zip_path.extension().and_then(|s| s.to_str()).unwrap_or("");
         if ext.is_empty() {
             // 没有扩展名的情况，直接追加后缀
             zip_path.with_extension("tmp_save")
@@ -539,8 +586,7 @@ fn save_project_archive_to_zip_inner(
     let write_result: Result<(), String> = (|| {
         let file = fs::File::create(&tmp_path).map_err(|e| e.to_string())?;
         let mut zip = zip::ZipWriter::new(file);
-        let options =
-            FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let options = FileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
         zip.start_file(project_entry_name.clone(), options)
             .map_err(|e| e.to_string())?;
@@ -553,7 +599,8 @@ fn save_project_archive_to_zip_inner(
             }
             // 使用流式写入，避免将整个文件读入内存。
             let mut src_file = fs::File::open(source_path).map_err(|e| e.to_string())?;
-            zip.start_file(zip_entry, options).map_err(|e| e.to_string())?;
+            zip.start_file(zip_entry, options)
+                .map_err(|e| e.to_string())?;
             std::io::copy(&mut src_file, &mut zip).map_err(|e| e.to_string())?;
         }
 
@@ -596,7 +643,10 @@ fn save_project_archive_to_zip_inner(
             if destination_existed {
                 if backup_path.exists() {
                     fs::remove_file(&backup_path).map_err(|e| {
-                        format!("Failed to remove stale archive backup {:?}: {}", backup_path, e)
+                        format!(
+                            "Failed to remove stale archive backup {:?}: {}",
+                            backup_path, e
+                        )
                     })?;
                 }
 
@@ -653,11 +703,12 @@ pub(crate) fn save_project_to_path_inner(
     let bytes = serialize_project_file_for_path(&pf, &path)?;
 
     let auto_backup_settings = load_auto_backup_settings(state);
-    let rotated_backup = if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
-        rotate_existing_project_file_for_backup(&path)?
-    } else {
-        None
-    };
+    let rotated_backup =
+        if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
+            rotate_existing_project_file_for_backup(&path)?
+        } else {
+            None
+        };
 
     // 使用原子保存，防止程序崩溃或断电导致工程文件损坏
     let tmp_path = path.with_extension("tmp_save");
@@ -698,7 +749,9 @@ pub(super) fn get_project_meta(state: State<'_, AppState>) -> crate::models::Pro
     state.project_meta_payload()
 }
 
-pub(super) fn get_auto_backup_settings(state: State<'_, AppState>) -> crate::config::AutoBackupSettings {
+pub(super) fn get_auto_backup_settings(
+    state: State<'_, AppState>,
+) -> crate::config::AutoBackupSettings {
     load_auto_backup_settings(state.inner())
 }
 
@@ -718,12 +771,13 @@ pub(super) fn run_timed_auto_backup(
     path_template: String,
 ) -> serde_json::Value {
     let now = Local::now();
-    let (mut output_path, fallback_used) = match resolve_timed_backup_output_path(state.inner(), &path_template, now) {
-        Ok(value) => value,
-        Err(error) => {
-            return serde_json::json!({ "ok": false, "error": error });
-        }
-    };
+    let (mut output_path, fallback_used) =
+        match resolve_timed_backup_output_path(state.inner(), &path_template, now) {
+            Ok(value) => value,
+            Err(error) => {
+                return serde_json::json!({ "ok": false, "error": error });
+            }
+        };
 
     if output_path.extension().is_none() {
         output_path.set_extension("hshp");
@@ -754,12 +808,16 @@ pub(super) fn new_project(
         p.name = "Untitled".to_string();
         p.path = None;
         p.dirty = false;
+        p.notes_markdown = String::new();
         p.base_scale = "C".to_string();
         p.use_custom_scale = false;
         p.custom_scale = None;
         p.beats_per_bar = 4;
         p.grid_size = "1/4".to_string();
+        p.stretch_algorithm_override = None;
+        p.hifigan_mel_stretch_override = None;
     }
+    sync_runtime_stretch_settings(state.inner());
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         tl.project_scale_notes = base_scale_notes("C");
@@ -819,8 +877,7 @@ pub(super) fn open_project(
         *tl = pf.timeline.clone();
         let normalized_base_scale = normalize_scale_key(&pf.base_scale);
         let normalized_custom_scale = normalize_custom_scale(pf.custom_scale.clone());
-        let normalized_use_custom_scale =
-            pf.use_custom_scale && normalized_custom_scale.is_some();
+        let normalized_use_custom_scale = pf.use_custom_scale && normalized_custom_scale.is_some();
         tl.project_scale_notes = effective_scale_notes(
             &normalized_base_scale,
             normalized_use_custom_scale,
@@ -834,11 +891,14 @@ pub(super) fn open_project(
         p.name = project_name_from_path(&path);
         p.path = Some(project_path.clone());
         p.dirty = false;
+        p.notes_markdown = pf.notes_markdown;
         p.base_scale = normalize_scale_key(&pf.base_scale);
         p.custom_scale = normalize_custom_scale(pf.custom_scale);
         p.use_custom_scale = pf.use_custom_scale && p.custom_scale.is_some();
         p.beats_per_bar = normalize_beats_per_bar(pf.beats_per_bar);
         p.grid_size = normalize_grid_size(&pf.grid_size);
+        p.stretch_algorithm_override = pf.synth_config.stretch_algorithm_override;
+        p.hifigan_mel_stretch_override = pf.synth_config.hifigan_mel_stretch_override;
         // recent list (in-memory)
         p.recent.retain(|x| x != &project_path);
         p.recent.insert(0, project_path.clone());
@@ -847,6 +907,7 @@ pub(super) fn open_project(
         }
         update_window_title(&window, &p.name, p.dirty);
     }
+    sync_runtime_stretch_settings(state.inner());
 
     // 持久化最近工程列表
     save_recent_projects(state.inner());
@@ -858,7 +919,15 @@ pub(super) fn open_project(
     payload
 }
 
-pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_json::Value {
+pub(super) fn save_project(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    if let Some(notes_markdown) = notes_markdown {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        p.notes_markdown = notes_markdown;
+    }
     let existing_path = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         p.path.clone()
@@ -867,10 +936,18 @@ pub(super) fn save_project(state: State<'_, AppState>, window: Window) -> serde_
         return save_project_to_path(state, window, path);
     }
     // No path yet -> Save As
-    save_project_as(state, window)
+    save_project_as(state, window, None)
 }
 
-pub(super) fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json::Value {
+pub(super) fn save_project_as(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    if let Some(notes_markdown) = notes_markdown {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        p.notes_markdown = notes_markdown;
+    }
     let default_name = {
         let p = state.project.lock().unwrap_or_else(|e| e.into_inner());
         if p.name.trim().is_empty() {
@@ -1034,5 +1111,45 @@ pub(super) fn set_project_timeline_settings(
         }
     }
 
+    serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
+}
+
+pub(super) fn set_project_stretch_settings(
+    state: State<'_, AppState>,
+    stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    hifigan_mel_stretch_override: Option<bool>,
+) -> serde_json::Value {
+    let (name, changed, was_clean) = {
+        let mut p = state.project.lock().unwrap_or_else(|e| e.into_inner());
+        let changed = p.stretch_algorithm_override != stretch_algorithm_override
+            || p.hifigan_mel_stretch_override != hifigan_mel_stretch_override;
+        if !changed {
+            return serde_json::json!({ "ok": true, "project": state.project_meta_payload() });
+        }
+        let was_clean = !p.dirty;
+        p.stretch_algorithm_override = stretch_algorithm_override;
+        p.hifigan_mel_stretch_override = hifigan_mel_stretch_override;
+        p.dirty = true;
+        (p.name.clone(), true, was_clean)
+    };
+
+    if changed && was_clean {
+        if let Some(handle) = state.app_handle.get() {
+            use tauri::Manager;
+            if let Some(win) = handle.get_webview_window("main") {
+                let title = format!("HiFiShifter - {}*", name);
+                let _ = win.set_title(&title);
+            }
+        }
+    }
+
+    update_project_stretch_overrides(stretch_algorithm_override, hifigan_mel_stretch_override);
+    {
+        let timeline = state.timeline.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        for clip in &timeline.clips {
+            crate::synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+        }
+        state.audio_engine.update_timeline(timeline);
+    }
     serde_json::json!({ "ok": true, "project": state.project_meta_payload() })
 }

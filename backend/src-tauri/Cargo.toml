@@ -1,6 +1,6 @@
 [package]
 name = "HiFiShifter"
-version = "0.1.0-beta.9"
+version = "0.1.0-beta.10"
 description = "A high-quality audio shifter"
 authors = ["ARounder"]
 edition = "2021"
@@ -48,6 +48,7 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 rustfft = "6"
 num-complex = "0.4"
+aberth = "0.4"
 ndarray = { version = "0.16", optional = true }
 
 [target.'cfg(windows)'.dependencies]

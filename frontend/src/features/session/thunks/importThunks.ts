@@ -4,6 +4,8 @@ import type { SessionState } from "../sessionSlice";
 
 import { addTrackRemote, setClipStateRemote } from "./timelineThunks";
 import { computeAutoCrossfadeFromPayload } from "../../../components/layout/timeline/hooks/autoCrossfade";
+import { computeClipNormalizationGain } from "../clipNormalization";
+import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
 
 type RawTimelineClip = {
     id?: string;
@@ -111,7 +113,7 @@ export const importAudioFromDialog = createAsyncThunk(
 
 export const importAudioFromPath = createAsyncThunk(
     "session/importAudioFromPath",
-    async (audioPath: string, { dispatch, rejectWithValue }) => {
+    async (audioPath: string, { dispatch, rejectWithValue, getState }) => {
         dispatch(setAudioPathAction(audioPath));
         const imported = await webApi.importAudioItem(audioPath);
         if (!(imported as { ok?: boolean }).ok) {
@@ -120,10 +122,18 @@ export const importAudioFromPath = createAsyncThunk(
                     "import_audio_item_failed",
             );
         }
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const result = imported as { clips?: Array<{ id?: string }> };
+        const newClipIds = (result.clips ?? [])
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             path: audioPath,
             imported,
+            newClipIds,
         };
     },
 );
@@ -135,6 +145,7 @@ export const importAudioAtPosition = createAsyncThunk(
             audioPath: string;
             trackId?: string | null;
             startSec?: number;
+            normalizeAfterImport?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -187,13 +198,67 @@ export const importAudioAtPosition = createAsyncThunk(
                 .map((c) => c.id)
                 .filter((id): id is string => !!id && !beforeClipIds.has(id));
 
-            const latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
+            let latestTimeline = await syncAutoCrossfadeFromLatestTimeline({
                 dispatch: dispatch as unknown as (
                     action: unknown,
                 ) => Promise<unknown> & { unwrap: () => Promise<unknown> },
                 getState,
                 newClipIds,
             });
+
+            if (payload.normalizeAfterImport && newClipIds.length > 0) {
+                const timelineForNormalization = (latestTimeline ?? imported) as {
+                    clips?: Array<{
+                        id?: string;
+                        source_path?: string;
+                        duration_sec?: number;
+                        length_sec?: number;
+                        source_start_sec?: number;
+                        source_end_sec?: number;
+                        playback_rate?: number;
+                    }>;
+                };
+                for (const clipId of newClipIds) {
+                    const clip = timelineForNormalization.clips?.find(
+                        (entry) => entry.id === clipId,
+                    );
+                    if (!clip) continue;
+                    const gain = computeClipNormalizationGain(
+                        {
+                            sourcePath: clip.source_path,
+                            durationSec: Number(clip.duration_sec ?? 0) || undefined,
+                            lengthSec: Math.max(0, Number(clip.length_sec ?? 0) || 0),
+                            sourceStartSec: Number(clip.source_start_sec ?? 0) || 0,
+                            sourceEndSec: Number(clip.source_end_sec ?? 0) || 0,
+                            playbackRate: Number(clip.playback_rate ?? 1) || 1,
+                        },
+                        {
+                            getInterleavedSlice: (
+                                sourcePath,
+                                _channel,
+                                sourceStartSec,
+                                sourceSpanSec,
+                            ) =>
+                                waveformMipmapStore.getInterleavedSlice(
+                                    sourcePath,
+                                    0,
+                                    sourceStartSec,
+                                    sourceSpanSec,
+                                ),
+                            releaseInterleaved: (data) =>
+                                waveformMipmapStore.releaseInterleaved(data as Float32Array),
+                        },
+                    );
+                    if (gain == null) continue;
+                    latestTimeline = (await dispatch(
+                        setClipStateRemote({
+                            clipId,
+                            gain,
+                            checkpoint: false,
+                        }),
+                    ).unwrap()) as typeof latestTimeline;
+                }
+            }
 
             // 导入后将光标定位到第一个音频块的起始位置
             const importedResult = latestTimeline ?? imported;
@@ -671,6 +736,77 @@ export const importMultipleAudioFilesAtPosition = createAsyncThunk(
             }
 
             return { ok: true, imported: importedResult, newClipIds };
+        } finally {
+            void webApi.endUndoGroup();
+        }
+    },
+);
+
+export const importMidiAsClip = createAsyncThunk(
+    "session/importMidiAsClip",
+    async (
+        payload: {
+            midiPath: string;
+            trackIndices: number[];
+            trackId?: string | null;
+            startSec?: number;
+            fillGaps?: boolean;
+            multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
+        },
+        { dispatch, rejectWithValue, getState },
+    ) => {
+        await webApi.beginUndoGroup();
+        try {
+            let targetTrackId: string | undefined;
+            if (payload.trackId === null || payload.trackId === undefined) {
+                const state = getState() as { session: SessionState };
+                const beforeIds = new Set(state.session.tracks.map((t) => t.id));
+                const added = await dispatch(
+                    addTrackRemote({ name: undefined, parentTrackId: null }),
+                ).unwrap();
+                targetTrackId =
+                    added.tracks.find((t) => !beforeIds.has(t.id))?.id ??
+                    added.selected_track_id ??
+                    added.tracks[added.tracks.length - 1]?.id ??
+                    undefined;
+            } else {
+                targetTrackId = payload.trackId;
+            }
+
+            const imported = await webApi.importMidiAsClip(
+                payload.midiPath,
+                payload.trackIndices,
+                targetTrackId,
+                payload.startSec ?? 0,
+                payload.fillGaps,
+                payload.multiTrackMerge,
+                payload.noteBpmMode,
+                payload.specifiedBpm,
+                payload.importBpmAsProject,
+                payload.clipboardGuid,
+                payload.closeLeadingGap,
+            );
+            if (!(imported as { ok?: boolean }).ok) {
+                const errMsg =
+                    (imported as { missing_files?: string[] }).missing_files?.[0] ??
+                    "import_midi_clip_failed";
+                return rejectWithValue(errMsg);
+            }
+            const beforeClipIds = new Set(
+                (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+            );
+            const result = imported as { clips?: Array<{ id?: string }> };
+            const newClipIds = (result.clips ?? [])
+                .map((c) => c.id)
+                .filter((id): id is string => !!id && !beforeClipIds.has(id));
+            return { ok: true, imported, newClipIds };
+        } catch (err) {
+            return rejectWithValue(err instanceof Error ? err.message : "import_midi_clip_failed");
         } finally {
             void webApi.endUndoGroup();
         }

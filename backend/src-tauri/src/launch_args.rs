@@ -46,16 +46,7 @@ pub fn is_audio_file_path(path: &Path) -> bool {
         .map(|ext| {
             matches!(
                 ext.to_ascii_lowercase().as_str(),
-                "wav"
-                    | "flac"
-                    | "mp3"
-                    | "ogg"
-                    | "m4a"
-                    | "aac"
-                    | "aif"
-                    | "aiff"
-                    | "wma"
-                    | "opus"
+                "wav" | "flac" | "mp3" | "ogg" | "m4a" | "aac" | "aif" | "aiff" | "wma" | "opus"
             )
         })
         .unwrap_or(false)

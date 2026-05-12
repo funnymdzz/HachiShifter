@@ -43,11 +43,11 @@ pub const MAX_MIPMAP_LEVELS: usize = 3;
 
 /// 默认 mipmap 除数因子 (针对 44.1kHz 优化)
 /// 三级 mipmap 缓存方案：
-/// - L0 (div=32):   精细级，近距离对轨，spp ≤ 256
-/// - L1 (div=512):  中间级，日常编辑，256 < spp ≤ 2048
-/// - L2 (div=4096): 全局级，预览/导航，spp > 2048
+/// - L0 (div=16):   精细级，近距离对轨，spp ≤ 512
+/// - L1 (div=512):  中间级，日常编辑，512 < spp ≤ 1024
+/// - L2 (div=4096): 全局级，预览/导航，spp > 1024
 pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
-    32,   // Level 0: ~1378 peaks/sec at 44.1kHz (精细级，近距离对轨)
+    16,   // Level 0: ~2756 peaks/sec at 44.1kHz (精细级，近距离对轨)
     512,  // Level 1: ~86 peaks/sec at 44.1kHz (中间级，日常编辑)
     4096, // Level 2: ~11 peaks/sec at 44.1kHz (全局级，预览/导航)
 ];
@@ -57,7 +57,7 @@ pub const DEFAULT_DIVISION_FACTORS: [u32; MAX_MIPMAP_LEVELS] = [
 /// SPP_THRESHOLDS[0] < spp ≤ SPP_THRESHOLDS[1] → L1
 /// spp > SPP_THRESHOLDS[1] → L2
 #[allow(dead_code)]
-pub const SPP_THRESHOLDS: [f64; 2] = [256.0, 2048.0];
+pub const SPP_THRESHOLDS: [f64; 2] = [512.0, 1024.0];
 
 // ============== 文件头结构 ==============
 
@@ -382,9 +382,9 @@ impl HfsPeakFile {
     #[allow(dead_code)]
     pub fn select_mipmap_level(&self, samples_per_pixel: f64) -> usize {
         // 根据 spp 阈值选择最佳 mipmap 级别
-        // spp ≤ 256 → L0 (div=64, 精细级)
-        // 256 < spp ≤ 2048 → L1 (div=512, 中间级)
-        // spp > 2048 → L2 (div=4096, 全局级)
+        // spp ≤ 512 → L0 (div=16, 精细级)
+        // 512 < spp ≤ 1024 → L1 (div=512, 中间级)
+        // spp > 1024 → L2 (div=4096, 全局级)
         let max_level = self.mipmap_headers.len().saturating_sub(1);
 
         if samples_per_pixel <= SPP_THRESHOLDS[0] {
@@ -1469,7 +1469,6 @@ impl HfsPeaksCache {
 
         Ok((removed_files, removed_bytes))
     }
-
 }
 
 /// 获取文件元数据指纹

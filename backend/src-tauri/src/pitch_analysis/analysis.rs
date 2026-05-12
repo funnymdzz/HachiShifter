@@ -1,4 +1,4 @@
-﻿// pitch_analysis::analysis — 核心分析流水线
+// pitch_analysis::analysis — 核心分析流水线
 // 包含：快照/diff、单 clip 分析、并行多 clip 分析、音高曲线合成。
 
 #![allow(dead_code)]
@@ -7,9 +7,7 @@ use crate::state::{AppState, Clip, PitchAnalysisAlgo, TimelineState};
 use std::collections::HashSet;
 use std::path::Path;
 
-use super::{
-    build_root_pitch_key, hz_to_midi, resample_curve_linear, PitchJob,
-};
+use super::{build_root_pitch_key, hz_to_midi, resample_curve_linear, PitchJob};
 
 fn build_root_mix_timeline(tl: &TimelineState, root_track_id: &str) -> TimelineState {
     // Collect root + descendants.
@@ -244,7 +242,24 @@ pub(crate) fn build_pitch_job(tl: &TimelineState, root_track_id: &str) -> Option
         .find(|t| t.id == root_track_id)
         .map(|t| (t.compose_enabled, t.pitch_analysis_algo.clone()))
         .unwrap_or((false, PitchAnalysisAlgo::Unknown));
-    if !compose_enabled {
+
+    // 检查是否存在非静音的音高参考块（MIDI clip），若存在则即使 compose_enabled 为 false
+    // 也需要触发 pitch_orig 组装，确保音高参考块的数据能写入 pitch_edit 并影响渲染。
+    let has_active_midi_clip = tl.clips.iter().any(|c| {
+        tl.resolve_root_track_id(&c.track_id).as_deref() == Some(root_track_id)
+            && !c.muted
+            && c.midi_note_data.is_some()
+    });
+
+    // 若当前 params 中已记录 has_pitch_adjustment_active，则即使所有 MIDI clip 都被静音，
+    // 也应触发组装以清除标志和对应的音高数据。
+    let currently_has_adjustment = tl
+        .params_by_root_track
+        .get(root_track_id)
+        .map(|e| e.has_pitch_adjustment_active)
+        .unwrap_or(false);
+
+    if !compose_enabled && !has_active_midi_clip && !currently_has_adjustment {
         return None;
     }
     if matches!(algo, PitchAnalysisAlgo::None) {
@@ -1267,9 +1282,9 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
     // root curve by choosing the dominant (highest-weight) voiced clip each frame.
     // This avoids WORLD instability on overlap regions.
 
-    // Match python demo defaults (utils/wav2F0.py): f0_min=40, f0_max=1600.
-    let f0_floor = 40.0;
-    let f0_ceil = 1600.0;
+    // Match FCPE model training range (HachiTune: F0_MIN=32.7, F0_MAX=1975.5).
+    let f0_floor = crate::fcpe_onnx::FCPE_F0_MIN_HZ;
+    let f0_ceil = crate::fcpe_onnx::FCPE_F0_MAX_HZ;
     let frame_period_tl_ms = job.frame_period_ms.max(0.1);
 
     // Track gains (mute/solo already cleared in build_root_mix_timeline).
@@ -1356,12 +1371,8 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
         let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
 
         // Resample to analysis rate (44100) and convert to mono.
-        let mut segment = crate::mixdown::linear_resample_interleaved(
-            segment,
-            in_channels_usize,
-            in_rate,
-            44100,
-        );
+        let mut segment =
+            crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, 44100);
         if clip.reversed {
             crate::mixdown::reverse_interleaved_frames(&mut segment, in_channels_usize);
         }

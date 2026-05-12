@@ -20,6 +20,8 @@ interface EditContextMenuProps {
     onAddVibrato?: () => void;
     onQuantize?: () => void;
     onMeanQuantize?: () => void;
+    onSaveAsPitchRef?: () => void;
+    onExportMidi?: () => void;
 }
 
 export function EditContextMenu({
@@ -41,6 +43,8 @@ export function EditContextMenu({
     onAddVibrato,
     onQuantize,
     onMeanQuantize,
+    onSaveAsPitchRef,
+    onExportMidi,
 }: EditContextMenuProps) {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
@@ -222,6 +226,31 @@ export function EditContextMenu({
             >
                 {tAny("menu_mean_quantize")}
             </div>
+            {isPitchParam && onSaveAsPitchRef && (
+                <>
+                    <div className={sepClass} />
+                    <div
+                        className={itemClass}
+                        onClick={() => {
+                            onSaveAsPitchRef();
+                            onClose();
+                        }}
+                    >
+                        {tAny("menu_save_as_pitch_ref")}
+                    </div>
+                    {onExportMidi && (
+                        <div
+                            className={itemClass}
+                            onClick={() => {
+                                onExportMidi();
+                                onClose();
+                            }}
+                        >
+                            {tAny("menu_export_midi")}
+                        </div>
+                    )}
+                </>
+            )}
         </div>
     );
 }

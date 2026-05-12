@@ -12,6 +12,9 @@ use tauri::{Emitter, Manager, State};
 
 use super::common::{new_temp_wav_path, render_timeline_to_wav};
 
+#[cfg(test)]
+mod synth_quick_export_tests;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ExportAudioMode {
@@ -67,6 +70,15 @@ pub(crate) struct ExportAudioRequest {
     pub skip_existing_paths: Vec<String>,
     pub sample_rate: Option<u32>,
     pub bit_depth: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct QuickExportSelectedClipsRequest {
+    #[serde(default)]
+    pub clip_ids: Vec<String>,
+    pub output_dir: String,
+    pub file_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -297,7 +309,7 @@ pub(super) fn save_synthesized(
         sample_rate: 44100,
         start_sec: 0.0,
         end_sec: None,
-        stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+        stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
         apply_pitch_edit: true,
         export_format: crate::mixdown::ExportFormat::Wav32f,
         quality_preset: crate::mixdown::QualityPreset::Export,
@@ -435,7 +447,7 @@ pub(super) fn save_separated(state: State<'_, AppState>, output_dir: String) -> 
             sample_rate: 44100,
             start_sec: 0.0,
             end_sec: None,
-            stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+            stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
             apply_pitch_edit: true,
             export_format: crate::mixdown::ExportFormat::Wav32f,
             quality_preset: crate::mixdown::QualityPreset::Export,
@@ -558,12 +570,9 @@ pub(super) fn preview_export_audio_plan(
 
     match request.mode {
         ExportAudioMode::Project => {
-            let Ok((path, _, _)) = resolve_project_output_path(
-                &state,
-                &request,
-                &project_name,
-                export_start_time,
-            ) else {
+            let Ok((path, _, _)) =
+                resolve_project_output_path(&state, &request, &project_name, export_start_time)
+            else {
                 return ExportAudioPlanPayload {
                     ok: false,
                     mode: ExportAudioMode::Project,
@@ -735,17 +744,21 @@ pub(super) fn export_audio_advanced(
         ExportAudioMode::Project => {
             let project_name = resolve_project_name(&state);
             let export_start_time = Local::now();
-            let (out_path, output_dir_value, file_name_value) =
-                match resolve_project_output_path(&state, &request, &project_name, export_start_time) {
-                    Ok(value) => value,
-                    Err(error) => {
-                        return serde_json::json!({
-                            "ok": false,
-                            "mode": "project",
-                            "error": error,
-                        });
-                    }
-                };
+            let (out_path, output_dir_value, file_name_value) = match resolve_project_output_path(
+                &state,
+                &request,
+                &project_name,
+                export_start_time,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    return serde_json::json!({
+                        "ok": false,
+                        "mode": "project",
+                        "error": error,
+                    });
+                }
+            };
 
             if let Some(parent) = out_path.parent() {
                 if let Err(error) = fs::create_dir_all(parent) {
@@ -803,7 +816,7 @@ pub(super) fn export_audio_advanced(
                 sample_rate: requested_sample_rate,
                 start_sec,
                 end_sec,
-                stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+                stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
                 apply_pitch_edit: true,
                 export_format: requested_export_format,
                 quality_preset: crate::mixdown::QualityPreset::Export,
@@ -1124,8 +1137,11 @@ pub(super) fn export_audio_advanced(
                 sub_timeline
                     .tracks
                     .retain(|track| target.included_track_ids.contains(&track.id));
-                let active_track_ids: HashSet<&str> =
-                    sub_timeline.tracks.iter().map(|track| track.id.as_str()).collect();
+                let active_track_ids: HashSet<&str> = sub_timeline
+                    .tracks
+                    .iter()
+                    .map(|track| track.id.as_str())
+                    .collect();
                 sub_timeline
                     .clips
                     .retain(|clip| active_track_ids.contains(clip.track_id.as_str()));
@@ -1134,7 +1150,7 @@ pub(super) fn export_audio_advanced(
                     sample_rate: requested_sample_rate,
                     start_sec,
                     end_sec,
-                    stretch: crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+                    stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
                     apply_pitch_edit: true,
                     export_format: requested_export_format,
                     quality_preset: crate::mixdown::QualityPreset::Export,
@@ -1234,6 +1250,185 @@ pub(super) fn export_audio_advanced(
     }
 }
 
+pub(crate) fn build_quick_export_timeline_and_range(
+    timeline: &crate::state::TimelineState,
+    clip_ids: &[String],
+) -> Result<(crate::state::TimelineState, f64, f64), String> {
+    if clip_ids.is_empty() {
+        return Err("quick export requires at least one clip".to_string());
+    }
+
+    let selected_ids: HashSet<&str> = clip_ids.iter().map(String::as_str).collect();
+    let mut export_timeline = timeline.clone();
+    export_timeline
+        .clips
+        .retain(|clip| selected_ids.contains(clip.id.as_str()));
+
+    if export_timeline.clips.is_empty() {
+        return Err("quick export could not find selected clips".to_string());
+    }
+
+    let start_sec = export_timeline
+        .clips
+        .iter()
+        .map(|clip| clip.start_sec.max(0.0))
+        .fold(f64::INFINITY, f64::min);
+    let end_sec = export_timeline
+        .clips
+        .iter()
+        .map(|clip| (clip.start_sec + clip.length_sec).max(0.0))
+        .fold(0.0_f64, f64::max);
+
+    export_timeline.selected_clip_id = None;
+
+    Ok((export_timeline, start_sec, end_sec))
+}
+
+pub(super) fn quick_export_selected_clips(
+    state: State<'_, AppState>,
+    request: QuickExportSelectedClipsRequest,
+) -> serde_json::Value {
+    let output_dir_template = request.output_dir.trim();
+    if output_dir_template.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "error": "quick_export_output_dir_required",
+        });
+    }
+
+    let file_name_template = request.file_name.trim();
+    if file_name_template.is_empty() {
+        return serde_json::json!({
+            "ok": false,
+            "error": "quick_export_file_name_required",
+        });
+    }
+
+    let timeline = state
+        .timeline
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let (export_timeline, start_sec, end_sec) =
+        match build_quick_export_timeline_and_range(&timeline, &request.clip_ids) {
+            Ok(value) => value,
+            Err(error) => {
+                return serde_json::json!({
+                    "ok": false,
+                    "error": error,
+                });
+            }
+        };
+
+    let export_settings = state
+        .config_dir
+        .get()
+        .map(|config_dir| crate::config::load_export_settings(config_dir))
+        .unwrap_or_default();
+    let requested_sample_rate = normalize_export_sample_rate(export_settings.sample_rate);
+    let requested_bit_depth = normalize_export_bit_depth(export_settings.bit_depth);
+    let requested_export_format = export_format_from_bit_depth(requested_bit_depth);
+
+    let project_name = resolve_project_name(&state);
+    let project_folder = resolve_project_folder(&state).display().to_string();
+    let export_start_time = Local::now();
+    let output_dir = match resolve_output_dir_template(
+        output_dir_template,
+        &project_name,
+        &project_folder,
+        export_start_time,
+    ) {
+        Ok(value) if !value.trim().is_empty() => value,
+        Ok(_) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": "quick_export_output_dir_required",
+            });
+        }
+        Err(error) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": error,
+            });
+        }
+    };
+
+    let mut rendered_file_name = file_name_template
+        .replace("<ProjectName>", &project_name)
+        .replace("<ProjectFolder>", &project_folder)
+        .trim()
+        .to_string();
+    rendered_file_name = match try_apply_time_format(&rendered_file_name, export_start_time) {
+        Ok(value) => value,
+        Err(error) => {
+            return serde_json::json!({
+                "ok": false,
+                "error": error,
+            });
+        }
+    };
+    rendered_file_name = sanitize_file_name_segment(&rendered_file_name);
+    if rendered_file_name.is_empty() {
+        rendered_file_name = format!("{project_name}_quick_export.wav");
+    }
+    if !rendered_file_name.to_ascii_lowercase().ends_with(".wav") {
+        rendered_file_name.push_str(".wav");
+    }
+
+    let out_path = Path::new(&output_dir).join(&rendered_file_name);
+    if let Some(parent) = out_path.parent() {
+        if let Err(error) = fs::create_dir_all(parent) {
+            return serde_json::json!({
+                "ok": false,
+                "path": out_path.display().to_string(),
+                "error": format!("Cannot create directory: {error}"),
+            });
+        }
+    }
+
+    match crate::mixdown::render_mixdown_wav(
+        &export_timeline,
+        &out_path,
+        crate::mixdown::MixdownOptions {
+            sample_rate: requested_sample_rate,
+            start_sec,
+            end_sec: Some(end_sec),
+            stretch: crate::time_stretch::resolved_external_stretch_algorithm(),
+            apply_pitch_edit: true,
+            export_format: requested_export_format,
+            quality_preset: crate::mixdown::QualityPreset::Export,
+            cancel_flag: None,
+        },
+    ) {
+        Ok(result) => {
+            persist_successful_export_settings(
+                &state,
+                Some(output_dir_template.to_string()),
+                None,
+                None,
+                None,
+                Some(requested_sample_rate),
+                Some(requested_bit_depth),
+            );
+            let num_samples = (result.duration_sec * result.sample_rate as f64)
+                .round()
+                .max(0.0) as u32;
+            serde_json::json!({
+                "ok": true,
+                "path": out_path.display().to_string(),
+                "sample_rate": result.sample_rate,
+                "num_samples": num_samples,
+                "duration_sec": result.duration_sec,
+            })
+        }
+        Err(error) => serde_json::json!({
+            "ok": false,
+            "path": out_path.display().to_string(),
+            "error": error,
+        }),
+    }
+}
+
 fn normalize_export_range(
     timeline: &crate::state::TimelineState,
     range: &ExportTimeRange,
@@ -1262,7 +1457,10 @@ fn normalize_export_range(
 fn build_display_track_order(tracks: &[crate::state::Track]) -> Vec<crate::state::Track> {
     let mut by_parent: HashMap<Option<String>, Vec<crate::state::Track>> = HashMap::new();
     for track in tracks.iter().cloned() {
-        by_parent.entry(track.parent_id.clone()).or_default().push(track);
+        by_parent
+            .entry(track.parent_id.clone())
+            .or_default()
+            .push(track);
     }
     for siblings in by_parent.values_mut() {
         siblings.sort_by_key(|track| track.order);
@@ -1479,8 +1677,8 @@ fn latest_clip_end_sec(timeline: &crate::state::TimelineState) -> f64 {
 
 fn normalize_export_sample_rate(sample_rate: u32) -> u32 {
     match sample_rate {
-        8_000 | 11_025 | 12_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000
-        | 88_200 | 96_000 | 176_400 | 192_000 => sample_rate,
+        8_000 | 11_025 | 12_000 | 16_000 | 22_050 | 24_000 | 32_000 | 44_100 | 48_000 | 88_200
+        | 96_000 | 176_400 | 192_000 => sample_rate,
         _ => 44_100,
     }
 }
@@ -1720,7 +1918,12 @@ fn build_unique_export_file_name(
             sanitize_file_name_segment(track_name)
         ));
     }
-    if relative.extension().and_then(|ext| ext.to_str()).map(|ext| ext.eq_ignore_ascii_case("wav")) != Some(true) {
+    if relative
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("wav"))
+        != Some(true)
+    {
         let stem = relative
             .file_name()
             .and_then(|name| name.to_str())
@@ -1728,7 +1931,11 @@ fn build_unique_export_file_name(
             .to_string();
         let mut new_file_name = sanitize_file_name_segment(&stem);
         if new_file_name.is_empty() {
-            new_file_name = format!("{}_{}.wav", export_index_token, sanitize_file_name_segment(track_name));
+            new_file_name = format!(
+                "{}_{}.wav",
+                export_index_token,
+                sanitize_file_name_segment(track_name)
+            );
         } else if !new_file_name.to_ascii_lowercase().ends_with(".wav") {
             new_file_name.push_str(".wav");
         }

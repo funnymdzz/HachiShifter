@@ -19,6 +19,8 @@ mod dialogs;
 mod file_browser;
 #[path = "commands/midi.rs"]
 mod midi;
+#[path = "commands/midi_export.rs"]
+mod midi_export;
 #[path = "commands/onnx_status.rs"]
 mod onnx_status;
 #[path = "commands/params.rs"]
@@ -149,13 +151,21 @@ pub fn open_project(
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_project(state: State<'_, AppState>, window: Window) -> serde_json::Value {
-    project::save_project(state, window)
+pub fn save_project(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    project::save_project(state, window, notes_markdown)
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn save_project_as(state: State<'_, AppState>, window: Window) -> serde_json::Value {
-    project::save_project_as(state, window)
+pub fn save_project_as(
+    state: State<'_, AppState>,
+    window: Window,
+    notes_markdown: Option<String>,
+) -> serde_json::Value {
+    project::save_project_as(state, window, notes_markdown)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -201,6 +211,19 @@ pub fn set_project_timeline_settings(
     project::set_project_timeline_settings(state, beats_per_bar, grid_size)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_project_stretch_settings(
+    state: State<'_, AppState>,
+    stretch_algorithm_override: Option<crate::time_stretch::UserStretchAlgorithm>,
+    hifigan_mel_stretch_override: Option<bool>,
+) -> serde_json::Value {
+    project::set_project_stretch_settings(
+        state,
+        stretch_algorithm_override,
+        hifigan_mel_stretch_override,
+    )
+}
+
 // ===================== dialogs =====================
 
 #[tauri::command(rename_all = "camelCase")]
@@ -226,6 +249,11 @@ pub fn pick_directory() -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn open_midi_dialog() -> serde_json::Value {
     dialogs::open_midi_dialog()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn pick_midi_output_path() -> serde_json::Value {
+    dialogs::pick_midi_output_path()
 }
 
 // ===================== waveform =====================
@@ -406,6 +434,15 @@ pub fn add_clip(
 ) -> crate::models::TimelineStatePayload {
     timeline::add_clip(state, track_id, name, start_sec, length_sec, source_path)
 }
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn create_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::CreateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::create_clips_bulk(state, payload)
+}
+
 #[tauri::command(rename_all = "camelCase")]
 pub fn remove_clip(
     state: State<'_, AppState>,
@@ -475,6 +512,7 @@ pub fn set_clip_state(
     fade_in_curve: Option<String>,
     fade_out_curve: Option<String>,
     color: Option<String>,
+    formant_morph: Option<crate::state::ClipFormantMorph>,
     checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_clip_state(
@@ -494,8 +532,26 @@ pub fn set_clip_state(
         fade_in_curve,
         fade_out_curve,
         color,
+        formant_morph,
         checkpoint,
     )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_clips_state_bulk(
+    state: State<'_, AppState>,
+    updates: Vec<crate::state::BulkClipStatePatch>,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::set_clips_state_bulk(state, updates, checkpoint)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn duplicate_clips_bulk(
+    state: State<'_, AppState>,
+    payload: crate::state::DuplicateClipsBulkPayload,
+) -> crate::models::TimelineStatePayload {
+    timeline::duplicate_clips_bulk(state, payload)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -516,11 +572,74 @@ pub fn split_clip(
     timeline::split_clip(state, clip_id, split_sec)
 }
 #[tauri::command(rename_all = "camelCase")]
+pub fn split_clips_at(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    split_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    timeline::split_clips_at(state, clip_ids, split_sec)
+}
+#[tauri::command(rename_all = "camelCase")]
 pub fn glue_clips(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,
 ) -> crate::models::TimelineStatePayload {
     timeline::glue_clips(state, clip_ids)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn group_clips(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.group_clips(&clip_ids);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn ungroup_clips(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.ungroup_clips(&clip_ids);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn toggle_group_disabled(
+    state: State<'_, AppState>,
+    group_id: String,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    tl.toggle_group_disabled(&group_id);
+    let payload = tl.to_payload();
+    drop(tl);
+    payload
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn convert_clips_to_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    timeline::convert_clips_to_pitch_reference(state, clip_ids)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn update_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    timeline::update_pitch_reference(state, clip_ids)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -658,9 +777,7 @@ pub fn cancel_export_audio() -> serde_json::Value {
 }
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_export_audio_defaults(
-    state: State<'_, AppState>,
-) -> synth::ExportAudioDefaultsPayload {
+pub fn get_export_audio_defaults(state: State<'_, AppState>) -> synth::ExportAudioDefaultsPayload {
     synth::get_export_audio_defaults(state)
 }
 
@@ -670,6 +787,14 @@ pub fn preview_export_audio_plan(
     request: synth::ExportAudioRequest,
 ) -> synth::ExportAudioPlanPayload {
     synth::preview_export_audio_plan(state, request)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn quick_export_selected_clips(
+    state: State<'_, AppState>,
+    request: synth::QuickExportSelectedClipsRequest,
+) -> serde_json::Value {
+    synth::quick_export_selected_clips(state, request)
 }
 
 // ===================== playback =====================
@@ -836,25 +961,114 @@ pub fn get_processor_params(algo: String) -> Vec<processor_caps::ParamDescriptor
 // ===================== midi =====================
 
 #[tauri::command(rename_all = "camelCase")]
-pub fn get_midi_tracks(midi_path: String) -> serde_json::Value {
-    midi::get_midi_tracks(midi_path)
+pub fn get_midi_tracks(
+    state: State<'_, AppState>,
+    midi_path: String,
+    clipboard_guid: Option<String>,
+) -> serde_json::Value {
+    midi::get_midi_tracks(state.inner(), midi_path, clipboard_guid)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn read_midi_clipboard_to_memory(state: State<'_, AppState>) -> serde_json::Value {
+    midi::read_midi_clipboard_to_memory(state.inner())
 }
 
 #[tauri::command(rename_all = "camelCase")]
 pub fn import_midi_to_pitch(
     state: State<'_, AppState>,
     midi_path: String,
-    track_index: Option<usize>,
+    track_indices: Vec<usize>,
     selection_start_frame: Option<usize>,
     selection_max_frames: Option<usize>,
+    fill_gaps: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> serde_json::Value {
     midi::import_midi_to_pitch(
         state.inner(),
         midi_path,
-        track_index,
+        track_indices,
         selection_start_frame,
         selection_max_frames,
+        fill_gaps,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
     )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn import_midi_as_clip(
+    state: State<'_, AppState>,
+    midi_path: String,
+    track_indices: Vec<usize>,
+    track_id: Option<String>,
+    start_sec: f64,
+    fill_gaps: Option<bool>,
+    multi_track_merge: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    midi::import_midi_as_clip(
+        state.inner(),
+        midi_path,
+        track_indices,
+        track_id,
+        start_sec,
+        fill_gaps,
+        multi_track_merge,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn replace_midi_clip_data(
+    state: State<'_, AppState>,
+    clip_id: String,
+    midi_path: String,
+    track_indices: Vec<usize>,
+    fill_gaps: Option<bool>,
+    note_bpm_mode: Option<String>,
+    specified_bpm: Option<f64>,
+    import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    midi::replace_midi_clip_data(
+        state.inner(),
+        clip_id,
+        midi_path,
+        track_indices,
+        fill_gaps,
+        note_bpm_mode,
+        specified_bpm,
+        import_midi_bpm_as_project,
+        clipboard_guid,
+        close_leading_gap,
+    )
+}
+
+// ===================== midi_export =====================
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn export_pitch_to_midi(
+    state: State<'_, AppState>,
+    request: midi_export::MidiExportRequest,
+) -> serde_json::Value {
+    midi_export::export_pitch_to_midi(state.inner(), request)
 }
 
 // ===================== ui_settings =====================

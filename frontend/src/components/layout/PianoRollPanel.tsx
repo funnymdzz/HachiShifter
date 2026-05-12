@@ -8,7 +8,7 @@ import React, {
     useRef,
     useState,
 } from "react";
-import { Flex, Text, Button, Select, Box, IconButton } from "@radix-ui/themes";
+import { Flex, Text, Button, Select, Box, IconButton, DropdownMenu } from "@radix-ui/themes";
 import {
     CursorArrowIcon,
     EyeOpenIcon,
@@ -33,16 +33,23 @@ import {
     cycleDragDirection,
     setToolMode,
     persistUiSettings,
+    setVisibleReferenceRootTrackIds,
+    toggleVisibleReferenceRootTrackId,
+    createClipsRemote,
+    addTrackRemote,
+    importMidiAsClip,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
 import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
+import { coreApi } from "../../services/api/core";
 import type { ParamFramesPayload } from "../../types/api";
 import {
     degreeInputToScaleSteps,
     isScaleKey,
+    SCALE_NOTES,
     snapToScale,
     snapToSemitone,
     transposePitchByScaleSteps,
@@ -67,7 +74,13 @@ import {
 
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./pianoRoll/constants";
 import { drawPianoRoll } from "./pianoRoll/render";
-import type { DetectedPitchCurve } from "./pianoRoll/render";
+import type { DetectedPitchCurve, ReferencePitchOverlay } from "./pianoRoll/render";
+import {
+    buildReferencePitchStrokeColor,
+    cleanupVisibleReferenceRootTrackIds,
+    listReferenceRootTracks,
+} from "./pianoRoll/referenceRootTracks";
+import { buildReferenceRootTrackTriggerElement } from "./pianoRoll/referenceRootTrackTrigger";
 import { averageSelectionValues, smoothSelectionValues } from "./pianoRoll/selectionTransforms";
 import { usePianoRollData } from "./pianoRoll/usePianoRollData";
 import { useClipsPeaksForPianoRoll } from "./pianoRoll/useClipsPeaksForPianoRoll";
@@ -113,7 +126,7 @@ import { ProgressBar } from "../ProgressBar";
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
-import { coreApi } from "../../services/api/core";
+import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
 import { applySelectWheelChange } from "../../utils/selectWheel";
@@ -125,6 +138,11 @@ import {
 
 const NOTE_NAMES_SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 const PARAM_EDITOR_VERTICAL_SCROLL_RANGE_PX = 1600;
+
+function sameStringArray(a: string[], b: string[]) {
+    if (a.length !== b.length) return false;
+    return a.every((value, index) => value === b[index]);
+}
 
 export const PianoRollPanel: React.FC = () => {
     const dispatch = useAppDispatch();
@@ -218,6 +236,9 @@ export const PianoRollPanel: React.FC = () => {
     const [snapToggleHeld, setSnapToggleHeld] = useState(false);
     // 仅在参数编辑实际操作期间（选择拖拽/绘制）参与临时吸附视觉切换
     const [snapGestureActive, setSnapGestureActive] = useState(false);
+    const [hoveredReferenceRootTrackId, setHoveredReferenceRootTrackId] = useState<string | null>(
+        null,
+    );
 
     useEffect(() => {
         const kb = mergedKeybindings["modifier.clipNoSnap"];
@@ -237,7 +258,7 @@ export const PianoRollPanel: React.FC = () => {
             window.removeEventListener("blur", onBlur);
         };
     }, [mergedKeybindings]);
-    const { mode: themeMode } = useAppTheme();
+    const { mode: themeMode, fontFamily } = useAppTheme();
     const waveformColors = useMemo(() => getWaveformColors(themeMode, "piano-roll"), [themeMode]);
 
     const effectivePitchSnapVisual =
@@ -250,6 +271,57 @@ export const PianoRollPanel: React.FC = () => {
     // MIDI 导入弹窗状态
     const [midiDialogOpen, setMidiDialogOpen] = useState(false);
     const [midiPath, setMidiPath] = useState<string | null>(null);
+    const [clipboardGuid, setClipboardGuid] = useState<string | null>(null);
+    // 导入位置选项（持久化到软件设置）
+    const [importPosition, setImportPosition] = useState<string>("selection");
+    // 填补空隙选项（持久化到软件设置）
+    const [fillGaps, setFillGaps] = useState<boolean>(false);
+    // BPM 选项（持久化到软件设置）
+    const [importBpmAsProject, setImportBpmAsProject] = useState(false);
+    const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
+    const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    const [multiTrackMerge, setMultiTrackMerge] = useState<boolean>(true);
+    const [closeLeadingGap, setCloseLeadingGap] = useState<boolean>(true);
+    const [importTargetReaperClipboard, setImportTargetReaperClipboard] =
+        useState<string>("pitchParam");
+    const [importTargetParamEditor, setImportTargetParamEditor] = useState<string>("pitchParam");
+    const midiDialogSourceRef = useRef<"reaperClipboard" | "paramEditor">("paramEditor");
+    // 启动时从设置加载
+    useEffect(() => {
+        settingsApi.getUiSettings().then((s) => {
+            if (s?.midiImportPosition) {
+                setImportPosition(s.midiImportPosition);
+            }
+            if (s?.midiFillGaps != null) {
+                setFillGaps(s.midiFillGaps);
+            }
+            if (s?.midiImportBpmAsProject != null) {
+                setImportBpmAsProject(s.midiImportBpmAsProject);
+            }
+            if (s?.midiNoteBpmMode != null) {
+                setNoteBpmMode(s.midiNoteBpmMode);
+            }
+            if (s?.midiSpecifiedBpm != null) {
+                setSpecifiedBpm(s.midiSpecifiedBpm);
+            }
+            if (s?.midiMultiTrackMerge != null) {
+                setMultiTrackMerge(s.midiMultiTrackMerge);
+            }
+            if (s?.midiCloseLeadingGap != null) {
+                setCloseLeadingGap(s.midiCloseLeadingGap);
+            }
+            if (s?.midiImportTargetReaperClipboard != null) {
+                setImportTargetReaperClipboard(s.midiImportTargetReaperClipboard);
+            } else if ((s as any)?.midiImportTarget != null) {
+                setImportTargetReaperClipboard((s as any).midiImportTarget);
+            }
+            if (s?.midiImportTargetParamEditor != null) {
+                setImportTargetParamEditor(s.midiImportTargetParamEditor);
+            } else if ((s as any)?.midiImportTarget != null) {
+                setImportTargetParamEditor((s as any).midiImportTarget);
+            }
+        });
+    }, []);
     // 记录打开弹窗时的选区（拍数），用于后续计算帧偏移
     const [midiDialogSelection, setMidiDialogSelection] = useState<{
         aBeat: number;
@@ -328,20 +400,20 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [drawToolMenuOpen]);
 
-    const handleOpenMidiDialog = useCallback(async () => {
-        try {
-            const res = await coreApi.openMidiDialog();
-            if (res.ok && !res.canceled && res.path) {
-                // 快照当前选区（拍为单位）
-                const sel = selectionRef.current;
-                setMidiDialogSelection(sel ? { ...sel } : null);
-                setMidiPath(res.path);
-                setMidiDialogOpen(true);
-            }
-        } catch {
-            // 静默忽略
-        }
-    }, []);
+    const handleOpenMidiDialog = useCallback(() => {
+        midiDialogSourceRef.current = "paramEditor";
+        // 快照当前选区（拍为单位）
+        const sel = selectionRef.current;
+        setMidiDialogSelection(sel ? { ...sel } : null);
+        // 快照当前的 editParam 和 toolMode，保证异步加载轨道期间 selectionAvailable 不变
+        midiDialogOpenParamsRef.current = {
+            editParam: s.editParam,
+            toolMode: s.toolMode,
+        };
+        setMidiPath(null);
+        setClipboardGuid(null);
+        setMidiDialogOpen(true);
+    }, [s.editParam, s.toolMode]);
 
     const effectiveSelectedTrackId = useMemo(() => {
         if (s.selectedTrackId) return s.selectedTrackId;
@@ -805,6 +877,42 @@ export const PianoRollPanel: React.FC = () => {
         return ids;
     }, [rootTrackId, s.tracks]);
 
+    const referenceRootTrackOptions = useMemo(
+        () =>
+            listReferenceRootTracks({
+                tracks: s.tracks,
+                currentRootTrackId: rootTrackId,
+            }),
+        [rootTrackId, s.tracks],
+    );
+
+    const visibleReferenceRootTrackIds = useMemo(
+        () =>
+            cleanupVisibleReferenceRootTrackIds({
+                tracks: s.tracks,
+                currentRootTrackId: rootTrackId,
+                visibleReferenceRootTrackIds: s.visibleReferenceRootTrackIds,
+            }),
+        [rootTrackId, s.tracks, s.visibleReferenceRootTrackIds],
+    );
+
+    useEffect(() => {
+        if (sameStringArray(visibleReferenceRootTrackIds, s.visibleReferenceRootTrackIds)) {
+            return;
+        }
+        dispatch(setVisibleReferenceRootTrackIds(visibleReferenceRootTrackIds));
+        void dispatch(persistUiSettings());
+    }, [dispatch, s.visibleReferenceRootTrackIds, visibleReferenceRootTrackIds]);
+
+    useEffect(() => {
+        if (
+            hoveredReferenceRootTrackId &&
+            !visibleReferenceRootTrackIds.includes(hoveredReferenceRootTrackId)
+        ) {
+            setHoveredReferenceRootTrackId(null);
+        }
+    }, [hoveredReferenceRootTrackId, visibleReferenceRootTrackIds]);
+
     const pitchHardDisableReason = useMemo(() => {
         if (editParam !== "pitch") return null;
         if (!rootTrack) return null;
@@ -836,6 +944,14 @@ export const PianoRollPanel: React.FC = () => {
     }, [editParam, processorParams, secondaryParamVisible]);
 
     const dynamicProjectSec = useMemo(() => getDynamicProjectSec(s.clips), [s.clips]);
+
+    const updateVisibleReferenceRootTrackIds = useCallback(
+        (nextTrackIds: string[]) => {
+            dispatch(setVisibleReferenceRootTrackIds(nextTrackIds));
+            void dispatch(persistUiSettings());
+        },
+        [dispatch],
+    );
 
     const secPerBeat = 60 / Math.max(1e-6, s.bpm);
     const contentWidth = Math.max(1, Math.ceil(dynamicProjectSec * pxPerSec));
@@ -1232,6 +1348,11 @@ export const PianoRollPanel: React.FC = () => {
     }
 
     const selectionRef = useRef<{ aBeat: number; bBeat: number } | null>(null);
+    // 记录打开 MIDI 弹窗时的 editParam / toolMode 快照，避免异步加载轨道期间 Redux 状态变化导致 selectionAvailable 跳变
+    const midiDialogOpenParamsRef = useRef<{
+        editParam: string;
+        toolMode: string;
+    }>({ editParam: "pitch", toolMode: "select" });
     const [selectionUi, setSelectionUi] = useState<{
         aBeat: number;
         bBeat: number;
@@ -1274,6 +1395,7 @@ export const PianoRollPanel: React.FC = () => {
         paramView,
         setParamView,
         secondaryParamViews,
+        referencePitchViews,
         bumpRefreshToken,
         refreshNow,
         refreshSecondaryNow,
@@ -1282,6 +1404,7 @@ export const PianoRollPanel: React.FC = () => {
     } = usePianoRollData({
         editParam,
         secondaryParamIds: visibleSecondaryParamIds,
+        referenceRootTrackIds: visibleReferenceRootTrackIds,
         pitchEnabled,
         paramsEpoch: (s as unknown as { paramsEpoch?: number }).paramsEpoch ?? 0,
         rootTrackId,
@@ -1307,20 +1430,110 @@ export const PianoRollPanel: React.FC = () => {
             invalidate();
             return;
         }
-        if (visibleSecondaryParamIds.length > 0) {
+        if (visibleSecondaryParamIds.length > 0 || visibleReferenceRootTrackIds.length > 0) {
             void refreshSecondaryNowRef.current();
             return;
         }
         invalidate();
-    }, [visibleSecondaryParamIds, invalidate, rootTrackId]);
+    }, [invalidate, rootTrackId, visibleReferenceRootTrackIds, visibleSecondaryParamIds]);
 
     const handleMidiImported = useCallback(
         (_result: { notes_imported: number; frames_touched: number }) => {
-            // 导入完成后刷新参数面板
             refreshNow();
         },
         [refreshNow],
     );
+
+    const handleImportAsClip = useCallback(
+        (result: {
+            trackIndices: number[];
+            notesCount: number;
+            midiPath: string;
+            fillGaps: boolean;
+            multiTrackMerge?: boolean;
+            noteBpmMode?: string;
+            specifiedBpm?: number;
+            importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
+        }) => {
+            void dispatch(
+                importMidiAsClip({
+                    midiPath: result.midiPath,
+                    trackIndices: result.trackIndices,
+                    trackId: s.selectedTrackId,
+                    startSec: s.playheadSec,
+                    fillGaps: result.fillGaps || undefined,
+                    multiTrackMerge: result.multiTrackMerge,
+                    noteBpmMode: result.noteBpmMode,
+                    specifiedBpm: result.specifiedBpm,
+                    importBpmAsProject: result.importBpmAsProject,
+                    clipboardGuid: result.clipboardGuid,
+                    closeLeadingGap: result.closeLeadingGap,
+                }),
+            );
+        },
+        [dispatch, s.selectedTrackId, s.playheadSec],
+    );
+
+    // 导入位置变更时持久化保存
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void settingsApi.saveUiSettings({ midiImportPosition: position } as any);
+    }, []);
+
+    // 填补空隙选项变更时持久化保存
+    const handleFillGapsChange = useCallback((value: boolean) => {
+        setFillGaps(value);
+        void settingsApi.saveUiSettings({ midiFillGaps: value } as any);
+    }, []);
+
+    // BPM 选项变更时持久化保存
+    const handleImportBpmAsProjectChange = useCallback((v: boolean) => {
+        setImportBpmAsProject(v);
+        void settingsApi.saveUiSettings({ midiImportBpmAsProject: v } as any);
+    }, []);
+
+    const handleNoteBpmModeChange = useCallback((v: string) => {
+        setNoteBpmMode(v);
+        void settingsApi.saveUiSettings({ midiNoteBpmMode: v } as any);
+    }, []);
+
+    const handleSpecifiedBpmChange = useCallback((v: number) => {
+        setSpecifiedBpm(v);
+        void settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any);
+    }, []);
+
+    const handleMultiTrackMergeChange = useCallback((v: boolean) => {
+        setMultiTrackMerge(v);
+        void settingsApi.saveUiSettings({ midiMultiTrackMerge: v } as any);
+    }, []);
+
+    const handleCloseLeadingGapChange = useCallback((v: boolean) => {
+        setCloseLeadingGap(v);
+        void settingsApi.saveUiSettings({ midiCloseLeadingGap: v } as any);
+    }, []);
+
+    const handleImportTargetChange = useCallback((v: string) => {
+        if (midiDialogSourceRef.current === "reaperClipboard") {
+            setImportTargetReaperClipboard(v);
+            void settingsApi.saveUiSettings({ midiImportTargetReaperClipboard: v } as any);
+        } else {
+            setImportTargetParamEditor(v);
+            void settingsApi.saveUiSettings({ midiImportTargetParamEditor: v } as any);
+        }
+    }, []);
+
+    const handleRequestEnableCompose = useCallback(() => {
+        const rtId = rootTrackId;
+        if (!rtId) return;
+        dispatch(
+            setTrackStateRemote({
+                trackId: rtId,
+                composeEnabled: true,
+            }),
+        );
+    }, [dispatch, rootTrackId]);
 
     // 计算 MIDI 导入的选区帧约束（与 pasteReaper 逻辑一致）
     const midiSelArgs = useMemo(() => {
@@ -1332,6 +1545,13 @@ export const PianoRollPanel: React.FC = () => {
         const fc = Math.max(1, Math.ceil(((b - a) * secPerBeat * 1000) / fp));
         return { selectionStartFrame: sf, selectionMaxFrames: fc };
     }, [midiDialogSelection, paramView?.framePeriodMs, secPerBeat]);
+
+    // selection 导入模式是否可用（基于弹窗打开时的快照，避免异步加载轨道时状态变化）
+    const midiSelectionAvailable = useMemo(() => {
+        if (!midiDialogSelection) return false;
+        const p = midiDialogOpenParamsRef.current;
+        return p.editParam === "pitch" && p.toolMode === "select";
+    }, [midiDialogSelection]);
 
     // 获取当前 track 下的所 ?clips，用 ?per-clip 波形叠加绘制
     // 获取轨道组内所有 clips（包含 root 轨道及所有子轨道的 clip）
@@ -1415,10 +1635,45 @@ export const PianoRollPanel: React.FC = () => {
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
+    const referencePitchOverlays = useMemo((): ReferencePitchOverlay[] => {
+        if (editParam !== "pitch") return [];
+        return visibleReferenceRootTrackIds
+            .map((trackId) => {
+                const paramViewForTrack = referencePitchViews[trackId];
+                if (!paramViewForTrack) return null;
+                const totalPoints = Math.max(
+                    paramViewForTrack.orig.length,
+                    paramViewForTrack.edit.length,
+                );
+                if (totalPoints < 2) return null;
+                const track = s.tracks.find((item) => item.id === trackId);
+                return {
+                    rootTrackId: trackId,
+                    strokeColor: buildReferencePitchStrokeColor(
+                        track?.color ?? null,
+                        hoveredReferenceRootTrackId === trackId,
+                    ),
+                    highlighted: hoveredReferenceRootTrackId === trackId,
+                    paramView: paramViewForTrack,
+                };
+            })
+            .filter((item): item is ReferencePitchOverlay => item != null);
+    }, [
+        editParam,
+        hoveredReferenceRootTrackId,
+        referencePitchViews,
+        s.tracks,
+        visibleReferenceRootTrackIds,
+    ]);
+
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
         invalidate();
     }, [detectedPitchCurves, invalidate]);
+
+    useEffect(() => {
+        invalidate();
+    }, [invalidate, referencePitchOverlays]);
 
     // Ensure pitch-snap related changes immediately redraw
     useEffect(() => {
@@ -1464,8 +1719,10 @@ export const PianoRollPanel: React.FC = () => {
             secPerBeat,
             playheadSec: s.playheadSec,
             waveformColors,
+            referencePitchOverlays,
             detectedPitchCurves,
             isDark: themeMode === "dark",
+            fontFamily,
             clipboardPreview: s.showClipboardPreview ? clipboardRef.current : null,
             // pitch snap visual helpers
             pitchSnapUnit: s.pitchSnapUnit,
@@ -1950,6 +2207,8 @@ export const PianoRollPanel: React.FC = () => {
             // External clipboard paste ops – work with or without selection
             if (op === "pasteReaper" || op === "pasteVocalShifter") {
                 const sel2 = selectionRef.current;
+                const capturedEditParam = s.editParam;
+                const capturedToolMode = s.toolMode;
                 let selArgs:
                     | {
                           selectionStartFrame?: number;
@@ -1967,7 +2226,27 @@ export const PianoRollPanel: React.FC = () => {
                     };
                 }
                 if (op === "pasteReaper") {
-                    void dispatch(pasteReaperClipboard(selArgs));
+                    // 检查剪贴板是否包含 Standard MIDI File，若有则弹出统一导入弹窗
+                    void (async () => {
+                        try {
+                            const midiCheck = await paramsApi.readMidiClipboardToMemory();
+                            if (midiCheck.ok && midiCheck.guid) {
+                                midiDialogSourceRef.current = "reaperClipboard";
+                                setClipboardGuid(midiCheck.guid);
+                                setMidiPath(null);
+                                setMidiDialogSelection(sel2 ? { ...sel2 } : null);
+                                midiDialogOpenParamsRef.current = {
+                                    editParam: capturedEditParam,
+                                    toolMode: capturedToolMode,
+                                };
+                                setMidiDialogOpen(true);
+                                return;
+                            }
+                        } catch {
+                            // 检查失败，回退到普通 Reaper 粘贴
+                        }
+                        void dispatch(pasteReaperClipboard(selArgs));
+                    })();
                 } else {
                     void dispatch(
                         pasteVocalShifterClipboard({
@@ -2691,6 +2970,180 @@ export const PianoRollPanel: React.FC = () => {
         },
         [editParam],
     );
+
+    const handleSaveAsPitchRef = useCallback(async () => {
+        const sel = selectionRef.current;
+        if (!sel || !rootTrackId) return;
+
+        const aBeat = Math.min(sel.aBeat, sel.bBeat);
+        const bBeat = Math.max(sel.aBeat, sel.bBeat);
+        const startSec = aBeat * secPerBeat;
+        const lengthSec = Math.max(0.01, (bBeat - aBeat) * secPerBeat);
+
+        const fp = paramView?.framePeriodMs ?? 5;
+        const startFrame = Math.max(0, Math.floor((startSec * 1000) / fp));
+        const frameCount = Math.max(1, Math.ceil((lengthSec * 1000) / fp));
+
+        const res = await paramsApi.getParamFrames(rootTrackId, "pitch", startFrame, frameCount, 1);
+        if (!res?.ok || !res.edit) return;
+
+        const pitchValues: number[] = (res.edit as number[]).map((v) => Number(v) || 0);
+
+        // Convert pitch values (semitones) to MIDI note events
+        // 保留原始浮点音高值，不进行半音量化
+        const fpSec = fp / 1000;
+        const midiNoteData: Array<{
+            startSec: number;
+            endSec: number;
+            note: number;
+            velocity: number;
+            channel: number;
+        }> = [];
+        if (pitchValues.length > 0) {
+            let segStartFrame = 0;
+            let currentNote = pitchValues[0];
+            for (let i = 1; i < pitchValues.length; i++) {
+                const note = pitchValues[i];
+                if (Math.abs(note - currentNote) > 0.001) {
+                    midiNoteData.push({
+                        startSec: segStartFrame * fpSec,
+                        endSec: i * fpSec,
+                        note: currentNote,
+                        velocity: 100,
+                        channel: 0,
+                    });
+                    segStartFrame = i;
+                    currentNote = note;
+                }
+            }
+            midiNoteData.push({
+                startSec: segStartFrame * fpSec,
+                endSec: pitchValues.length * fpSec,
+                note: currentNote,
+                velocity: 100,
+                channel: 0,
+            });
+        }
+
+        // Determine target track: try the track above the currently selected track.
+        // If no track above exists, or the above track has overlapping clips
+        // in the import time range, create a new track above the current track.
+        const orderedTrackIds = s.tracks.map((t) => t.id);
+        const trackIndexById: Record<string, number> = {};
+        orderedTrackIds.forEach((id, idx) => {
+            trackIndexById[id] = idx;
+        });
+
+        const currentIdx = s.selectedTrackId ? (trackIndexById[s.selectedTrackId] ?? -1) : -1;
+        let targetTrackId: string | null = null;
+
+        if (currentIdx > 0) {
+            const aboveTrackId = orderedTrackIds[currentIdx - 1];
+
+            const hasOverlap = s.clips.some(
+                (c) =>
+                    c.trackId === aboveTrackId &&
+                    c.startSec < startSec + lengthSec &&
+                    c.startSec + c.lengthSec > startSec,
+            );
+            if (!hasOverlap) {
+                const currentTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
+                const aboveTrack = s.tracks.find((t) => t.id === aboveTrackId);
+                if (
+                    currentTrack &&
+                    aboveTrack &&
+                    currentTrack.depth != null &&
+                    aboveTrack.depth != null &&
+                    currentTrack.depth >= aboveTrack.depth
+                ) {
+                    targetTrackId = aboveTrackId;
+                }
+            }
+        }
+
+        if (!targetTrackId) {
+            // Create a new track above the current track
+            const currentTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
+            const newTrackPayload: Record<string, unknown> = {
+                name: undefined,
+                parentTrackId: currentTrack?.parentId ?? null,
+            };
+            if (currentIdx >= 0) {
+                newTrackPayload.index = currentIdx;
+            }
+            const result = await dispatch(
+                addTrackRemote(newTrackPayload as { name?: string; parentTrackId?: string | null }),
+            ).unwrap();
+            const added = result as {
+                selected_track_id?: string;
+                tracks?: Array<{ id: string }>;
+            };
+            targetTrackId =
+                added.selected_track_id ?? added.tracks?.[added.tracks.length - 1]?.id ?? null;
+        }
+
+        if (!targetTrackId) return;
+
+        await dispatch(
+            createClipsRemote({
+                templates: [
+                    {
+                        trackId: targetTrackId,
+                        name: "Pitch Ref",
+                        startSec,
+                        lengthSec,
+                        midiNoteData,
+                        midiFillGaps: true,
+                    },
+                ],
+            }),
+        );
+    }, [
+        selectionRef,
+        rootTrackId,
+        secPerBeat,
+        paramView,
+        s.tracks,
+        s.selectedTrackId,
+        s.clips,
+        dispatch,
+    ]);
+
+    const handleExportMidiFromEditor = useCallback(async () => {
+        if (!rootTrackId) return;
+        const sel = selectionRef.current;
+        if (!sel) return;
+
+        const saveResult = await coreApi.pickMidiOutputPath();
+        if (!saveResult.ok || saveResult.canceled || !saveResult.path) return;
+
+        const aBeat = Math.min(sel.aBeat, sel.bBeat);
+        const bBeat = Math.max(sel.aBeat, sel.bBeat);
+        const startSec = aBeat * secPerBeat;
+        const endSec = Math.max(startSec + 0.01, bBeat * secPerBeat);
+
+        const selectedTrack = s.tracks.find((t) => t.id === s.selectedTrackId);
+        const trackName = selectedTrack?.name ?? "Track";
+        const scaleNotes =
+            SCALE_NOTES[(s.project?.baseScale as keyof typeof SCALE_NOTES) ?? "C"] ?? SCALE_NOTES.C;
+
+        await paramsApi.exportPitchToMidi({
+            outputPath: saveResult.path,
+            tracks: [
+                {
+                    trackId: s.selectedTrackId ?? rootTrackId,
+                    rootTrackId,
+                    name: trackName,
+                    startSec,
+                    endSec,
+                },
+            ],
+            bpm: s.bpm,
+            beatsPerBar: s.project?.beatsPerBar ?? 4,
+            baseScale: s.project?.baseScale ?? "C",
+            projectScaleNotes: scaleNotes,
+        });
+    }, [rootTrackId, selectionRef, secPerBeat, s]);
 
     // Pitch Snap 设置弹窗状态
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
@@ -3437,6 +3890,80 @@ export const PianoRollPanel: React.FC = () => {
                                 );
                             })}
                             {editParam === "pitch" ? (
+                                <DropdownMenu.Root>
+                                    <DropdownMenu.Trigger className="shrink-0 rounded border border-qt-border bg-qt-panel px-2 py-1 text-xs text-qt-text hover:bg-qt-hover">
+                                        {buildReferenceRootTrackTriggerElement(
+                                            `${t("reference_root_tracks")}${
+                                                visibleReferenceRootTrackIds.length > 0
+                                                    ? ` (${visibleReferenceRootTrackIds.length})`
+                                                    : ""
+                                            }`,
+                                        )}
+                                    </DropdownMenu.Trigger>
+                                    <DropdownMenu.Content variant="soft" color="gray">
+                                        <DropdownMenu.Item
+                                            onSelect={() =>
+                                                updateVisibleReferenceRootTrackIds(
+                                                    referenceRootTrackOptions.map(
+                                                        (track) => track.id,
+                                                    ),
+                                                )
+                                            }
+                                        >
+                                            {t("reference_root_tracks_all")}
+                                        </DropdownMenu.Item>
+                                        <DropdownMenu.Item
+                                            onSelect={() => updateVisibleReferenceRootTrackIds([])}
+                                        >
+                                            {t("reference_root_tracks_clear")}
+                                        </DropdownMenu.Item>
+                                        <DropdownMenu.Separator />
+                                        {referenceRootTrackOptions.length === 0 ? (
+                                            <DropdownMenu.Item disabled>
+                                                {t("reference_root_tracks_empty")}
+                                            </DropdownMenu.Item>
+                                        ) : (
+                                            referenceRootTrackOptions.map((track) => (
+                                                <DropdownMenu.CheckboxItem
+                                                    key={track.id}
+                                                    checked={visibleReferenceRootTrackIds.includes(
+                                                        track.id,
+                                                    )}
+                                                    onCheckedChange={() => {
+                                                        dispatch(
+                                                            toggleVisibleReferenceRootTrackId(
+                                                                track.id,
+                                                            ),
+                                                        );
+                                                        void dispatch(persistUiSettings());
+                                                    }}
+                                                    onPointerEnter={() =>
+                                                        setHoveredReferenceRootTrackId(track.id)
+                                                    }
+                                                    onPointerLeave={() =>
+                                                        setHoveredReferenceRootTrackId(null)
+                                                    }
+                                                >
+                                                    <Flex align="center" gap="2">
+                                                        <span
+                                                            className="inline-block h-2.5 w-2.5 rounded-full"
+                                                            style={{
+                                                                background:
+                                                                    buildReferencePitchStrokeColor(
+                                                                        track.color,
+                                                                        true,
+                                                                    ),
+                                                            }}
+                                                        />
+                                                        <span>{track.name}</span>
+                                                    </Flex>
+                                                </DropdownMenu.CheckboxItem>
+                                            ))
+                                        )}
+                                    </DropdownMenu.Content>
+                                </DropdownMenu.Root>
+                            ) : null}
+                            {editParam === "pitch" ? (
                                 <Button
                                     size="1"
                                     variant="soft"
@@ -3622,9 +4149,35 @@ export const PianoRollPanel: React.FC = () => {
                 open={midiDialogOpen}
                 onOpenChange={setMidiDialogOpen}
                 midiPath={midiPath}
+                importTarget={
+                    midiDialogSourceRef.current === "reaperClipboard"
+                        ? importTargetReaperClipboard
+                        : importTargetParamEditor
+                }
+                onImportTargetChange={handleImportTargetChange}
+                rootTrackComposeEnabled={rootTrack?.composeEnabled ?? true}
+                onRequestEnableCompose={handleRequestEnableCompose}
+                clipboardGuid={clipboardGuid}
                 selectionStartFrame={midiSelArgs.selectionStartFrame}
                 selectionMaxFrames={midiSelArgs.selectionMaxFrames}
                 onImported={handleMidiImported}
+                onImportAsClip={handleImportAsClip}
+                importPosition={importPosition}
+                onImportPositionChange={handleImportPositionChange}
+                selectionAvailable={midiSelectionAvailable}
+                fillGaps={fillGaps}
+                onFillGapsChange={handleFillGapsChange}
+                projectBpm={s.bpm}
+                importBpmAsProject={importBpmAsProject}
+                onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
+                noteBpmMode={noteBpmMode}
+                onNoteBpmModeChange={handleNoteBpmModeChange}
+                specifiedBpm={specifiedBpm}
+                onSpecifiedBpmChange={handleSpecifiedBpmChange}
+                multiTrackMerge={multiTrackMerge}
+                onMultiTrackMergeChange={handleMultiTrackMergeChange}
+                closeLeadingGap={closeLeadingGap}
+                onCloseLeadingGapChange={handleCloseLeadingGapChange}
             />
             {ctxMenu && s.toolMode === "select" && (
                 <EditContextMenu
@@ -3646,6 +4199,8 @@ export const PianoRollPanel: React.FC = () => {
                     onAddVibrato={() => openEditDialog("addVibrato")}
                     onQuantize={() => openEditDialog("quantize")}
                     onMeanQuantize={() => openEditDialog("meanQuantize")}
+                    onSaveAsPitchRef={() => void handleSaveAsPitchRef()}
+                    onExportMidi={() => void handleExportMidiFromEditor()}
                 />
             )}
         </Flex>

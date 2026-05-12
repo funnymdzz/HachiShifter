@@ -33,6 +33,7 @@ export interface TimelineTrack {
 
 export interface TimelineClip {
     id: string;
+    group_id?: string;
     track_id: string;
     name: string;
     start_sec: number;
@@ -58,6 +59,21 @@ export interface TimelineClip {
     fade_out_sec?: number;
     fade_in_curve?: string;
     fade_out_curve?: string;
+    formant_morph?: {
+        enabled: boolean;
+        target_f1_hz: number;
+        target_f2_hz: number;
+        strength: number;
+    };
+    midi_note_count?: number;
+    midi_note_data?: Array<{
+        start_sec: number;
+        end_sec: number;
+        note: number;
+        velocity: number;
+        channel?: number;
+    }>;
+    midi_fill_gaps?: boolean;
 }
 
 export interface ProjectMeta {
@@ -65,6 +81,7 @@ export interface ProjectMeta {
     path?: string | null;
     dirty: boolean;
     recent: string[];
+    notes_markdown?: string;
     base_scale?: string;
     use_custom_scale?: boolean;
     custom_scale?: {
@@ -74,6 +91,8 @@ export interface ProjectMeta {
     } | null;
     beats_per_bar?: number;
     grid_size?: string;
+    stretch_algorithm_override?: "linear" | "signalsmith" | "soundtouch" | null;
+    hifigan_mel_stretch_override?: boolean | null;
 }
 
 export interface TimelineState {
@@ -87,6 +106,7 @@ export interface TimelineState {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
+    disabled_group_ids?: string[];
 }
 
 export interface TimelineResult {
@@ -101,6 +121,7 @@ export interface TimelineResult {
     project?: ProjectMeta;
     missing_files?: string[];
     skipped_files?: string[];
+    disabled_group_ids?: string[];
 }
 
 export interface TrackSummaryResult {
@@ -168,7 +189,7 @@ export interface WaveformPeaksSegmentPayload {
     max: number[];
 }
 
-/** HFSPeaks v2 mipmap 级别（L0=div32, L1=div512, L2=div4096） */
+/** HFSPeaks v2 mipmap 级别（L0=div16, L1=div512, L2=div4096；默认切换阈值 512/1024 spp） */
 export type MipmapLevel = 0 | 1 | 2;
 
 /** v2 波形峰值响应 */

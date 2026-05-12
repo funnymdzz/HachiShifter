@@ -19,10 +19,7 @@ pub(crate) mod vslib_processor;
 pub use chain::ProcessingStage;
 #[allow(unused_imports)]
 pub use chain::{ProcessorChain, StageContext};
-pub use traits::{
-    ClipProcessContext, ClipProcessor, ParamDescriptor, ParamKind,
-    Renderer,
-};
+pub use traits::{ClipProcessContext, ClipProcessor, ParamDescriptor, ParamKind, Renderer};
 #[allow(unused_imports)]
 pub use traits::{ProcessorCapabilities, RenderContext, RendererCapabilities};
 #[allow(unused_imports)]
@@ -73,6 +70,16 @@ pub fn get_processor(kind: SynthPipelineKind) -> Box<dyn ClipProcessor> {
     }
 }
 
+pub fn processor_handles_time_stretch(kind: SynthPipelineKind, compose_enabled: bool) -> bool {
+    if !compose_enabled {
+        return false;
+    }
+    match kind {
+        SynthPipelineKind::NsfHifiganOnnx => crate::time_stretch::should_use_hifigan_mel_stretch(),
+        _ => get_processor(kind).capabilities().handles_time_stretch,
+    }
+}
+
 pub fn get_param_descriptor(kind: SynthPipelineKind, param_id: &str) -> Option<ParamDescriptor> {
     get_processor(kind)
         .param_descriptors()
@@ -91,5 +98,25 @@ pub fn static_enum_default_value(kind: SynthPipelineKind, param_id: &str) -> Opt
     match get_param_descriptor(kind, param_id)?.kind {
         ParamKind::StaticEnum { default_value, .. } => Some(default_value),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::processor_handles_time_stretch;
+    use crate::state::SynthPipelineKind;
+    use crate::time_stretch::{update_runtime_stretch_settings, UserStretchAlgorithm};
+
+    #[test]
+    fn hifigan_mel_stretch_requires_compose_enabled() {
+        update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, true, None, None);
+        assert!(!processor_handles_time_stretch(
+            SynthPipelineKind::NsfHifiganOnnx,
+            false,
+        ));
+        assert!(processor_handles_time_stretch(
+            SynthPipelineKind::NsfHifiganOnnx,
+            true,
+        ));
     }
 }

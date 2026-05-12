@@ -1,4 +1,5 @@
 use crate::project::CustomScale;
+use crate::time_stretch::UserStretchAlgorithm;
 use std::fs;
 use std::path::Path;
 
@@ -41,6 +42,14 @@ pub struct UiSettings {
     pub show_param_value_popup: bool,
     #[serde(default = "default_true")]
     pub lock_param_lines: bool,
+    #[serde(default)]
+    pub quick_search_auto_normalize: bool,
+    #[serde(default)]
+    pub visible_reference_root_track_ids: Vec<String>,
+    #[serde(default)]
+    pub default_stretch_algorithm: UserStretchAlgorithm,
+    #[serde(default = "default_hifigan_mel_stretch")]
+    pub default_hifigan_mel_stretch: bool,
     #[serde(default = "default_drag_direction")]
     pub drag_direction: String,
     #[serde(default = "default_drag_direction")]
@@ -55,6 +64,24 @@ pub struct UiSettings {
     pub scale_highlight_mode: String,
     #[serde(default)]
     pub custom_scale_presets: Vec<CustomScale>,
+    #[serde(default)]
+    pub ignore_grouping: bool,
+    #[serde(default = "default_midi_import_position")]
+    pub midi_import_position: String,
+    #[serde(default)]
+    pub midi_fill_gaps: bool,
+    #[serde(default = "default_true")]
+    pub midi_multi_track_merge: bool,
+    #[serde(default)]
+    pub midi_import_bpm_as_project: bool,
+    #[serde(default = "default_midi_note_bpm_mode")]
+    pub midi_note_bpm_mode: String,
+    #[serde(default)]
+    pub midi_specified_bpm: Option<f64>,
+    #[serde(default = "default_true")]
+    pub midi_close_leading_gap: bool,
+    #[serde(default = "default_midi_import_target")]
+    pub midi_import_target: String,
 }
 
 /// 导出音频设置（持久化到 app_config.json）
@@ -173,8 +200,24 @@ fn default_draw_drag_direction() -> String {
     "free".to_string()
 }
 
+fn default_hifigan_mel_stretch() -> bool {
+    true
+}
+
 fn default_scale_highlight_mode() -> String {
     "off".to_string()
+}
+
+fn default_midi_import_position() -> String {
+    "selection".to_string()
+}
+
+fn default_midi_note_bpm_mode() -> String {
+    "midi".to_string()
+}
+
+fn default_midi_import_target() -> String {
+    "pitchParam".to_string()
 }
 
 impl Default for UiSettings {
@@ -192,6 +235,10 @@ impl Default for UiSettings {
             show_clipboard_preview: true,
             show_param_value_popup: true,
             lock_param_lines: true,
+            quick_search_auto_normalize: false,
+            visible_reference_root_track_ids: Vec::new(),
+            default_stretch_algorithm: UserStretchAlgorithm::default(),
+            default_hifigan_mel_stretch: default_hifigan_mel_stretch(),
             drag_direction: default_drag_direction(),
             select_drag_direction: default_drag_direction(),
             draw_drag_direction: default_draw_drag_direction(),
@@ -199,7 +246,32 @@ impl Default for UiSettings {
             smoothness_percent: 0,
             scale_highlight_mode: default_scale_highlight_mode(),
             custom_scale_presets: Vec::new(),
+            ignore_grouping: false,
+            midi_import_position: default_midi_import_position(),
+            midi_fill_gaps: false,
+            midi_multi_track_merge: true,
+            midi_import_bpm_as_project: false,
+            midi_note_bpm_mode: default_midi_note_bpm_mode(),
+            midi_specified_bpm: None,
+            midi_close_leading_gap: true,
+            midi_import_target: default_midi_import_target(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UiSettings;
+    use crate::time_stretch::UserStretchAlgorithm;
+
+    #[test]
+    fn ui_settings_defaults_to_signalsmith_and_hifigan_mel_stretch_on() {
+        let settings = UiSettings::default();
+        assert_eq!(
+            settings.default_stretch_algorithm,
+            UserStretchAlgorithm::Signalsmith
+        );
+        assert!(settings.default_hifigan_mel_stretch);
     }
 }
 
@@ -341,4 +413,3 @@ pub fn save_auto_backup_settings(config_dir: &Path, settings: &AutoBackupSetting
     cfg.auto_backup = settings.normalized();
     save_config(config_dir, &cfg);
 }
-

@@ -148,11 +148,23 @@ cd HiFiShifter
 - **Node.js**（推奨18+）および npm
 - **Rustツールチェーン**（`rust-toolchain.toml` を参照）
 - **Tauri 2 CLI**：`cargo install tauri-cli --version "^2"`
+- **CMake**（SoundTouchライブラリのビルドに必要）
 
 フロントエンドの依存関係をインストールします：
 
 ```bash
 npm --prefix frontend install
+```
+
+### 3. SoundTouch ソース
+
+SoundTouch オーディオタイムストレッチライブラリはコンパイル時にソースからビルドされます。初回ビルド時に**自動クローン**されるため、手動操作は不要です。
+
+オフラインビルド用に、事前に手動でクローンすることも可能です：
+
+```bash
+cd backend/src-tauri/third_party/soundtouch-static
+git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.git soundtouch
 ```
 
 ## クイックスタート
@@ -195,6 +207,7 @@ $env:TAURI_UI_MODE='build'; cargo tauri dev
 このプロジェクトは以下のオープンソースライブラリのコードやモデルアーキテクチャを使用しています：
 
 - [WORLD](https://github.com/mmorise/World) — 高品質な音声分析・合成システム
+- [SoundTouch](https://www.surina.net/soundtouch/) — オーディオタイムストレッチ・ピッチシフトライブラリ（LGPL）
 - [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — 高品質なオーディオタイムストレッチライブラリ（MIT）
 - [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — 音声解析・合成ライブラリ
 - [SingingVocoders](https://github.com/openvpi/SingingVocoders) — 歌声合成ボコーダー（OpenVPI）

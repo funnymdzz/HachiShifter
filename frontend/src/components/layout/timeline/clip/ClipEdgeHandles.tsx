@@ -8,8 +8,13 @@ export const ClipEdgeHandles: React.FC<{
     ensureSelected: (clipId: string) => void;
     selectClipRemote: (clipId: string) => void;
     onCtrlToggleSelect: (clipId: string) => void;
-    onShiftRangeSelect: (clipId: string, anchorClipIdOverride?: string | null) => void;
+    onShiftRangeSelect: (
+        clipId: string,
+        anchorClipIdOverride?: string | null,
+        targetClientX?: number,
+    ) => void;
     rangeSelectAnchorClipId: string | null;
+    recordLastClickPosition?: (clientX: number) => void;
     seekFromClientX: (clientX: number, commit: boolean) => void;
     startEditDrag: (
         e: React.PointerEvent,
@@ -26,6 +31,7 @@ export const ClipEdgeHandles: React.FC<{
     onCtrlToggleSelect,
     onShiftRangeSelect,
     rangeSelectAnchorClipId,
+    recordLastClickPosition,
     seekFromClientX,
     startEditDrag,
 }) => {
@@ -58,13 +64,6 @@ export const ClipEdgeHandles: React.FC<{
                         : null;
                     const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
                     const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
-
-                    if (shouldPrimeSelection) {
-                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                            ensureSelected(clipId);
-                        }
-                        selectClipRemote(clipId);
-                    }
 
                     const startX = e.clientX;
                     const startY = e.clientY;
@@ -101,8 +100,15 @@ export const ClipEdgeHandles: React.FC<{
                                 return;
                             }
                             if (doShiftRangeSelect) {
-                                onShiftRangeSelect(clipId, shiftRangeAnchorClipId);
+                                onShiftRangeSelect(clipId, shiftRangeAnchorClipId, startX);
                                 return;
+                            }
+                            if (shouldPrimeSelection) {
+                                if (!isInMultiSelectedSet || multiSelectedCount > 1) {
+                                    ensureSelected(clipId);
+                                }
+                                selectClipRemote(clipId);
+                                recordLastClickPosition?.(e.clientX);
                             }
                             seekFromClientX(ev.clientX, true);
                         }
@@ -134,13 +140,6 @@ export const ClipEdgeHandles: React.FC<{
                         : null;
                     const doCtrlToggleOnly = ctrlOrMeta && !e.shiftKey && !alt;
                     const shouldPrimeSelection = !doCtrlToggleOnly && !doShiftRangeSelect;
-
-                    if (shouldPrimeSelection) {
-                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                            ensureSelected(clipId);
-                        }
-                        selectClipRemote(clipId);
-                    }
 
                     const startX = e.clientX;
                     const startY = e.clientY;
@@ -177,8 +176,15 @@ export const ClipEdgeHandles: React.FC<{
                                 return;
                             }
                             if (doShiftRangeSelect) {
-                                onShiftRangeSelect(clipId, shiftRangeAnchorClipId);
+                                onShiftRangeSelect(clipId, shiftRangeAnchorClipId, startX);
                                 return;
+                            }
+                            if (shouldPrimeSelection) {
+                                if (!isInMultiSelectedSet || multiSelectedCount > 1) {
+                                    ensureSelected(clipId);
+                                }
+                                selectClipRemote(clipId);
+                                recordLastClickPosition?.(e.clientX);
                             }
                             seekFromClientX(ev.clientX, true);
                         }

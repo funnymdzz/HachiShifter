@@ -60,6 +60,12 @@ export interface ExportAudioDefaults {
     bitDepth: 16 | 24 | 32;
 }
 
+export interface QuickExportSelectedClipsRequest {
+    clipIds: string[];
+    outputDir: string;
+    fileName: string;
+}
+
 export const coreApi = {
     ping: () => invoke<{ ok: boolean; message: string }>("ping"),
     getRuntimeInfo: () => invoke<RuntimeInfo>("get_runtime_info"),
@@ -81,6 +87,9 @@ export const coreApi = {
 
     openMidiDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string }>("open_midi_dialog"),
+
+    pickMidiOutputPath: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>("pick_midi_output_path"),
 
     clearWaveformCache: () =>
         invoke<{
@@ -142,6 +151,16 @@ export const coreApi = {
 
     previewExportAudioPlan: (request: AdvancedExportRequest) =>
         invoke<ExportAudioPlan>("preview_export_audio_plan", request),
+
+    quickExportSelectedClips: (request: QuickExportSelectedClipsRequest) =>
+        invoke<{
+            ok: boolean;
+            path?: string;
+            sample_rate?: number;
+            num_samples?: number;
+            duration_sec?: number;
+            error?: string;
+        }>("quick_export_selected_clips", request),
 
     playOriginal: (startSec = 0) =>
         invoke<{ ok: boolean; playing?: string; start_sec?: number }>("play_original", startSec),

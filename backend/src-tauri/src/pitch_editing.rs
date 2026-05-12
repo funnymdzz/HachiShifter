@@ -140,6 +140,24 @@ fn curve_differs_from_default_in_range(
     end_sec: f64,
     default_value: f32,
 ) -> bool {
+    curve_differs_from_default_in_range_with_tolerance(
+        curve,
+        frame_period_ms,
+        start_sec,
+        end_sec,
+        default_value,
+        1e-3,
+    )
+}
+
+fn curve_differs_from_default_in_range_with_tolerance(
+    curve: Option<&Vec<f32>>,
+    frame_period_ms: f64,
+    start_sec: f64,
+    end_sec: f64,
+    default_value: f32,
+    tolerance: f32,
+) -> bool {
     let Some(curve) = curve else {
         return false;
     };
@@ -154,7 +172,7 @@ fn curve_differs_from_default_in_range(
     let hi = end_idx.min(curve.len());
     curve[lo..hi]
         .iter()
-        .any(|value| (value - default_value).abs() > 1e-3)
+        .any(|value| (value - default_value).abs() >= tolerance)
 }
 
 pub(crate) fn hifigan_tension_curve_for_clip<'a>(
@@ -198,12 +216,13 @@ pub(crate) fn hifigan_formant_shift_active_for_clip(
     clip_start_sec: f64,
 ) -> bool {
     let curve = hifigan_formant_shift_curve_for_clip(entry, clip);
-    curve_differs_from_default_in_range(
+    curve_differs_from_default_in_range_with_tolerance(
         curve,
         entry.frame_period_ms.max(0.1),
         clip_start_sec,
         clip_start_sec + clip.length_sec.max(0.0),
         0.0,
+        0.5,
     )
 }
 
@@ -258,6 +277,69 @@ pub fn selected_pitch_edit_algorithm(timeline: &TimelineState) -> PitchEditAlgor
     PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::hifigan_formant_shift_active_for_clip;
+    use crate::state::{Clip, TrackParamsState};
+    use std::collections::HashMap;
+
+    fn make_clip() -> Clip {
+        Clip {
+            id: "clip-a".to_string(),
+            track_id: "track-a".to_string(),
+            name: "Clip".to_string(),
+            start_sec: 0.0,
+            length_sec: 2.0,
+            color: "blue".to_string(),
+            source_path: Some("a.wav".to_string()),
+            source_path_relative: None,
+            duration_sec: Some(2.0),
+            duration_frames: None,
+            source_sample_rate: Some(44_100),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 2.0,
+            playback_rate: 1.0,
+            reversed: false,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
+            formant_morph: None,
+            group_id: None,
+            midi_fill_gaps: false,
+            midi_note_data: None,
+        }
+    }
+
+    #[test]
+    fn hifigan_formant_shift_ignores_near_zero_residual_values() {
+        let mut entry = TrackParamsState {
+            frame_period_ms: 5.0,
+            ..Default::default()
+        };
+        entry.extra_curves = HashMap::from([("formant_shift_cents".to_string(), vec![0.1; 500])]);
+
+        assert!(!hifigan_formant_shift_active_for_clip(&entry, &make_clip(), 0.0));
+    }
+
+    #[test]
+    fn hifigan_formant_shift_detects_meaningful_offsets() {
+        let mut entry = TrackParamsState {
+            frame_period_ms: 5.0,
+            ..Default::default()
+        };
+        entry.extra_curves = HashMap::from([("formant_shift_cents".to_string(), vec![1.0; 500])]);
+
+        assert!(hifigan_formant_shift_active_for_clip(&entry, &make_clip(), 0.0));
+    }
+}
+
 fn semitone_ratio(semitones: f64) -> f64 {
     (2.0f64).powf(semitones / 12.0)
 }
@@ -297,7 +379,7 @@ fn child_pitch_offset_curve_key(mode: ChildPitchOffsetParamMode, track_id: &str)
     }
 }
 
-fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
+pub(crate) fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
     if scale_notes.is_empty() {
         return vec![0, 2, 4, 5, 7, 9, 11];
     }
@@ -320,7 +402,7 @@ fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
     out
 }
 
-fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
+pub(crate) fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
     let degree_count = offsets.len() as i32;
     if degree_count <= 0 {
         return 0.0;
@@ -330,7 +412,7 @@ fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
     (oct * 12 + offsets[idx]) as f64
 }
 
-fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
+pub(crate) fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
     if !abs_degree.is_finite() {
         return 0.0;
     }
@@ -344,7 +426,7 @@ fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
     lower + (upper - lower) * frac
 }
 
-fn transpose_midi_by_scale_steps(midi: f64, degree_steps: f64, scale_notes: &[u8]) -> f64 {
+pub(crate) fn transpose_midi_by_scale_steps(midi: f64, degree_steps: f64, scale_notes: &[u8]) -> f64 {
     if !midi.is_finite() || degree_steps.abs() <= 1e-9 {
         return midi;
     }
@@ -393,7 +475,10 @@ fn active_child_pitch_offset_config<'a>(
     timeline: &'a TimelineState,
     clip_track_id: &str,
 ) -> Option<ChildPitchOffsetConfig<'a>> {
-    let track = timeline.tracks.iter().find(|track| track.id == clip_track_id)?;
+    let track = timeline
+        .tracks
+        .iter()
+        .find(|track| track.id == clip_track_id)?;
     if track.parent_id.is_none() {
         return None;
     }
@@ -431,20 +516,16 @@ fn active_child_pitch_offset_config<'a>(
 
     for track_id in lineage_child_ids {
         let cents_curve = entry.and_then(|state| {
-            state
-                .extra_curves
-                .get(&child_pitch_offset_curve_key(
-                    ChildPitchOffsetParamMode::Cents,
-                    track_id,
-                ))
+            state.extra_curves.get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Cents,
+                track_id,
+            ))
         });
         let degree_steps_curve = entry.and_then(|state| {
-            state
-                .extra_curves
-                .get(&child_pitch_offset_curve_key(
-                    ChildPitchOffsetParamMode::Degrees,
-                    track_id,
-                ))
+            state.extra_curves.get(&child_pitch_offset_curve_key(
+                ChildPitchOffsetParamMode::Degrees,
+                track_id,
+            ))
         });
 
         let static_cents = CHILD_PITCH_OFFSET_CENTS_DEFAULT;
@@ -857,7 +938,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     };
     let child_offset_cfg = active_child_pitch_offset_config(timeline, &clip.track_id);
     let has_child_pitch_offset = child_offset_cfg.is_some();
-    if !track.compose_enabled {
+    if !track.compose_enabled && !entry.has_pitch_adjustment_active {
         return Ok(false);
     }
 
@@ -873,20 +954,24 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
-    // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行 mel 域拉伸。
+    // 即使用户没有编辑音高/张力/共振峰，也需要触发处理器渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::get_processor(kind)
-            .capabilities()
-            .handles_time_stretch;
+        let compose_or_pitch_adjust =
+            track.compose_enabled || entry.has_pitch_adjustment_active;
+        let handles =
+            crate::renderer::processor_handles_time_stretch(kind, compose_or_pitch_adjust);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };
 
     // v2 semantics: do nothing until the user actually modified the edit curve.
     // This avoids treating auto-synced `pitch_edit` (e.g. copied from pitch_orig) as an edit.
-    // 例外：needs_processor_stretch 时必须进入处理器以执行 mel 拉伸。
+    // 例外：needs_processor_stretch 时必须进入处理器以执行其内部拉伸。
+    // 例外：has_pitch_adjustment_active 时，音高参考块提供的 MIDI 音高数据已写入 pitch_edit，
+    //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
+        && !entry.has_pitch_adjustment_active
         && !extra_processing
         && !tension_processing
         && !formant_processing
@@ -900,14 +985,13 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     let pitch_edit = entry.pitch_edit.as_slice();
 
     // 预计算处理器能力：决定 seg_end_sec 的时间轴计算方式。
-    // - handles_time_stretch=true（如 World/HiFiGAN chain、vslib）：
+    // - handles_time_stretch=true（如 vslib）：
     //     输入 PCM 为源速率，输出 = 源帧数 / playback_rate（时间轴帧数）
-    // - handles_time_stretch=false：输入 PCM 已由外部 Signalsmith Stretch 预拉伸，帧数 = 时间轴帧数
+    // - handles_time_stretch=false：输入 PCM 已由外部时间拉伸预拉伸，帧数 = 时间轴帧数
     let kind = SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
     let clip_playback_rate = (clip.playback_rate as f64).max(1e-6);
-    let processor_handles_stretch = crate::renderer::get_processor(kind)
-        .capabilities()
-        .handles_time_stretch;
+    let processor_handles_stretch =
+        crate::renderer::processor_handles_time_stretch(kind, track.compose_enabled);
 
     // Quick skip when user never set a target in this segment window.
     let seg_frames = pcm_stereo.len() / 2;
@@ -919,12 +1003,9 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     };
     // seg_end_sec 始终以时间轴坐标（输出帧）计，确保音高编辑范围检测与声码器上下文一致
     let seg_end_sec = seg_start_sec + (expected_out_frames as f64) / (sample_rate.max(1) as f64);
-    let has_pitch_user_edit = any_user_edit_in_range(
-        frame_period_ms,
-        pitch_edit,
-        seg_start_sec,
-        seg_end_sec,
-    ) || has_child_pitch_offset;
+    let has_pitch_user_edit =
+        any_user_edit_in_range(frame_period_ms, pitch_edit, seg_start_sec, seg_end_sec)
+            || has_child_pitch_offset;
     if !has_pitch_user_edit
         && !extra_processing
         && !tension_processing
@@ -977,7 +1058,10 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             seg_end_sec,
         );
         if !has_effective_pitch_change
-            && !(extra_processing || tension_processing || formant_processing || needs_processor_stretch)
+            && !(extra_processing
+                || tension_processing
+                || formant_processing
+                || needs_processor_stretch)
         {
             return Ok(false);
         }
@@ -1043,7 +1127,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             clip.extra_params.as_ref().unwrap_or(extra_params);
 
         // 若处理器自己处理时间拉伸（如 vslib 使用 Timing 控制点），传递实际 playback_rate；
-        // 否则 PCM 已由外部 Signalsmith Stretch 预处理，rate=1.0。
+        // 否则 PCM 已由外部时间拉伸预处理，rate=1.0。
         let ctx_playback_rate = if processor_handles_stretch { clip_playback_rate } else { 1.0 };
 
         let ctx = crate::renderer::ClipProcessContext {
@@ -1067,7 +1151,7 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
                 clip.id,
                 processor.id(),
                 processor.is_available(),
-                processor.capabilities().handles_time_stretch,
+                processor_handles_stretch,
                 mono.len(),
                 expected_out_frames,
                 seg_start_sec,
@@ -1187,7 +1271,8 @@ pub fn does_clip_need_processor_render(
     clip: &crate::state::Clip,
     clip_start_sec: f64,
 ) -> bool {
-    let has_child_pitch_offset = active_child_pitch_offset_config(timeline, &clip.track_id).is_some();
+    let has_child_pitch_offset =
+        active_child_pitch_offset_config(timeline, &clip.track_id).is_some();
     let Some(clip_root) = timeline.resolve_root_track_id(&clip.track_id) else {
         return false;
     };
@@ -1195,7 +1280,9 @@ pub fn does_clip_need_processor_render(
     let Some((track, entry)) = root_pitch_edit_state(timeline, &clip_root) else {
         return false;
     };
-    if !track.compose_enabled {
+    // 当存在非静音的音高参考块时，即使 compose_enabled 为 false，
+    // 也需要触发处理器预渲染，确保音高参考块的 MIDI 数据能应用到同组的音频块。
+    if !track.compose_enabled && !entry.has_pitch_adjustment_active {
         return false;
     }
     if !pitch_edit_backend_available_for_track(track) {
@@ -1214,12 +1301,13 @@ pub fn does_clip_need_processor_render(
         && hifigan_formant_shift_active_for_clip(entry, clip, clip_start_sec);
 
     // 当处理器声明 handles_time_stretch 且 playback_rate != 1.0 时，
-    // 即使用户没有编辑音高，也需要触发处理器预渲染以执行 mel 域拉伸。
+    // 即使用户没有编辑音高，也需要触发处理器预渲染以执行其内部拉伸。
     let needs_processor_stretch = {
         let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
-        let handles = crate::renderer::get_processor(kind)
-            .capabilities()
-            .handles_time_stretch;
+        let compose_or_pitch_adjust =
+            track.compose_enabled || entry.has_pitch_adjustment_active;
+        let handles =
+            crate::renderer::processor_handles_time_stretch(kind, compose_or_pitch_adjust);
         let rate = (clip.playback_rate as f64).max(1e-6);
         handles && (rate - 1.0).abs() > 1e-6
     };
@@ -1227,8 +1315,11 @@ pub fn does_clip_need_processor_render(
     // v2 semantics: only treat pitch edit as active after the user modified the edit curve.
     // Otherwise `pitch_edit` may be auto-synced to `pitch_orig` and contain non-zero MIDI values,
     // which should NOT trigger synthesis / prerender.
-    // 例外：needs_processor_stretch 时必须触发预渲染以执行 mel 拉伸。
+    // 例外：needs_processor_stretch 时必须触发预渲染以执行其内部拉伸。
+    // 例外：has_pitch_adjustment_active 时，音高参考块提供的 MIDI 音高数据已写入 pitch_edit，
+    //       即使 pitch_edit_user_modified 为 false 也应触发渲染。
     if !entry.pitch_edit_user_modified
+        && !entry.has_pitch_adjustment_active
         && !extra_processing
         && !tension_processing
         && !formant_processing

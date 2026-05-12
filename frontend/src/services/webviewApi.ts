@@ -28,6 +28,7 @@ export const webApi = {
     getPlaybackState: coreApi.getPlaybackState,
     openAudioDialog: coreApi.openAudioDialog,
     openAudioDialogMultiple: coreApi.openAudioDialogMultiple,
+    openMidiDialog: coreApi.openMidiDialog,
     pickOutputPath: coreApi.pickOutputPath,
     closeWindow: coreApi.closeWindow,
 
@@ -60,6 +61,7 @@ export const webApi = {
     saveProjectAs: projectApi.saveProjectAs,
     setProjectBaseScale: projectApi.setProjectBaseScale,
     setProjectCustomScale: projectApi.setProjectCustomScale,
+    setProjectStretchSettings: projectApi.setProjectStretchSettings,
     setProjectTimelineSettings: projectApi.setProjectTimelineSettings,
 
     openVocalShifterDialog: projectApi.openVocalShifterDialog,
@@ -83,6 +85,10 @@ export const webApi = {
     getTimelineState: timelineApi.getTimelineState,
     importAudioItem: timelineApi.importAudioItem,
     importAudioBytes: timelineApi.importAudioBytes,
+    importMidiAsClip: paramsApi.importMidiAsClip,
+    replaceMidiClipData: paramsApi.replaceMidiClipData,
+    getMidiTracks: paramsApi.getMidiTracks,
+    readMidiClipboardToMemory: paramsApi.readMidiClipboardToMemory,
 
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,
@@ -94,6 +100,7 @@ export const webApi = {
     getTrackSummary: timelineApi.getTrackSummary,
 
     addClip: timelineApi.addClip,
+    createClipsBulk: timelineApi.createClipsBulk,
     removeClip: timelineApi.removeClip,
     removeClips: timelineApi.removeClips,
     moveClip: timelineApi.moveClip,
@@ -101,9 +108,17 @@ export const webApi = {
     getClipLinkedParams: timelineApi.getClipLinkedParams,
     applyClipLinkedParams: timelineApi.applyClipLinkedParams,
     setClipState: timelineApi.setClipState,
+    setClipsStateBulk: timelineApi.setClipsStateBulk,
+    duplicateClipsBulk: timelineApi.duplicateClipsBulk,
     replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
+    splitClipsAt: timelineApi.splitClipsAt,
     glueClips: timelineApi.glueClips,
+    groupClips: timelineApi.groupClips,
+    ungroupClips: timelineApi.ungroupClips,
+    toggleGroupDisabled: timelineApi.toggleGroupDisabled,
+    convertClipsToPitchReference: timelineApi.convertClipsToPitchReference,
+    updatePitchReference: timelineApi.updatePitchReference,
     selectClip: timelineApi.selectClip,
 
     setTransport: timelineApi.setTransport,

@@ -10,12 +10,13 @@ import {
     setClipLength,
     setClipPlaybackRate,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     setClipSourceRange,
     beginInteraction,
     endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { applyAutoCrossfade } from "./autoCrossfade";
-import { clamp, gainToDb, dbToGain } from "../math";
+import { clamp } from "../math";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { paramsApi } from "../../../../services/api";
@@ -26,6 +27,9 @@ import {
     scaleClipFadesForStretch,
     type StretchGroupState,
 } from "./stretchGroup";
+import { applyBulkFadeValue, applyBulkGainDeltaDb, getBulkEditableClipIds } from "./bulkClipEdit";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
+import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
 
 export function resolveStretchParamTypes(
     pitchEditUserModified: boolean | null | undefined,
@@ -161,6 +165,23 @@ export type EditDragState = {
     baseSourceSampleRate: number | null;
     baseDurationSec: number | null;
     stretchGroup: StretchGroupState | null;
+    selectedClipIds: string[];
+    baseGainById: Record<string, number>;
+    /** Per-clip base state for multi-clip trim operations */
+    baseByClipId: Record<
+        string,
+        {
+            startSec: number;
+            lengthSec: number;
+            playbackRate: number;
+            sourceStartSec: number;
+            sourceEndSec: number;
+            reversed: boolean;
+            durationFrames: number | null;
+            sourceSampleRate: number | null;
+            durationSec: number | null;
+        }
+    >;
 };
 
 export function useEditDrag(deps: {
@@ -175,6 +196,8 @@ export function useEditDrag(deps: {
     noSnapKb: Keybinding;
     /** 网格吸附全局开关 */
     gridSnapEnabled: boolean;
+    /** 忽略编组 */
+    ignoreGrouping: boolean;
 }) {
     const {
         scrollRef,
@@ -186,6 +209,7 @@ export function useEditDrag(deps: {
         beatFromClientX,
         noSnapKb,
         gridSnapEnabled,
+        ignoreGrouping,
     } = deps;
 
     const editDragRef = useRef<EditDragState | null>(null);
@@ -200,10 +224,30 @@ export function useEditDrag(deps: {
         if (!scroller) return;
         const rightEdgeBeat = clip.startSec + clip.lengthSec;
 
-        const selectedClipIds =
-            multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
-                ? [...multiSelectedClipIds]
-                : [clipId];
+        // Resolve which clips to operate on.
+        // Trim / stretch / slip expand to all selected + their group members.
+        // Gain / fades only apply to multi-selected clips (no group expansion).
+        const initialIds = getBulkEditableClipIds({
+            activeClipId: clipId,
+            multiSelectedClipIds,
+            multiSelectedSet,
+        });
+        const supportsGroupExpansion =
+            !ignoreGrouping && type !== "fade_in" && type !== "fade_out" && type !== "gain";
+        const selectedClipIds = supportsGroupExpansion
+            ? expandClipIdsWithGroups(
+                  initialIds,
+                  sessionRef.current.clips,
+                  false,
+                  sessionRef.current.disabledGroupIds,
+              )
+            : initialIds;
+        const baseGainById = Object.fromEntries(
+            selectedClipIds.map((id) => {
+                const selectedClip = sessionRef.current.clips.find((entry) => entry.id === id);
+                return [id, Number(selectedClip?.gain ?? 1) || 1];
+            }),
+        ) as Record<string, number>;
         const stretchGroup =
             type === "stretch_left" || type === "stretch_right"
                 ? buildStretchGroupState({
@@ -213,11 +257,6 @@ export function useEditDrag(deps: {
                       edge: type,
                   })
                 : null;
-
-        // 对于 gain 类型的拖动，使用 beginUndoGroup 将整个拖动操作包装为一个原子 undo entry
-        if (type === "gain") {
-            void webApi.beginUndoGroup();
-        }
 
         dispatch(checkpointHistory());
         dispatch(beginInteraction());
@@ -241,13 +280,35 @@ export function useEditDrag(deps: {
             baseSourceSampleRate: clip.sourceSampleRate ?? null,
             baseDurationSec: clip.durationSec ?? null,
             stretchGroup,
+            selectedClipIds,
+            baseGainById,
+            baseByClipId: Object.fromEntries(
+                selectedClipIds.map((id) => {
+                    const c =
+                        id === clipId ? clip : sessionRef.current.clips.find((x) => x.id === id);
+                    return [
+                        id,
+                        {
+                            startSec: c?.startSec ?? 0,
+                            lengthSec: c?.lengthSec ?? 0,
+                            playbackRate: Number(c?.playbackRate ?? 1) || 1,
+                            sourceStartSec: c?.sourceStartSec ?? 0,
+                            sourceEndSec: c?.sourceEndSec ?? 0,
+                            reversed: !!c?.reversed,
+                            durationFrames: c?.durationFrames ?? null,
+                            sourceSampleRate: c?.sourceSampleRate ?? null,
+                            durationSec: c?.durationSec ?? null,
+                        },
+                    ];
+                }),
+            ),
         };
 
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 
         let ticking = false;
         let latestEvent: PointerEvent | null = null;
-        let currentTrackingGain = clip.gain;
+        let accumulatedGainDeltaDb = 0;
 
         function onMove(ev: PointerEvent) {
             latestEvent = ev;
@@ -279,15 +340,29 @@ export function useEditDrag(deps: {
                 if (drag.type === "fade_in") {
                     const raw = beat - drag.basestartSec;
                     const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                    dispatch(setClipFades({ clipId: drag.clipId, fadeInSec: next }));
+                    const fadeUpdates = applyBulkFadeValue({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            sessionRef.current.clips.map((clip) => [clip.id, clip] as const),
+                        ),
+                        target: "fadeInSec",
+                        nextValue: next,
+                    });
+                    batch(() => {
+                        for (const update of fadeUpdates) {
+                            dispatch(setClipFades(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void dispatch(
-                                setClipStateRemote({ clipId: drag.clipId, fadeInSec: next }),
-                            );
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            if (now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void dispatch(
+                                    setClipStateRemote({ clipId: drag.clipId, fadeInSec: next }),
+                                );
+                            }
                         }
                     } catch {}
                     return;
@@ -295,15 +370,29 @@ export function useEditDrag(deps: {
                 if (drag.type === "fade_out") {
                     const raw = drag.rightEdgeBeat - beat;
                     const next = clamp(raw, 0, Math.max(0, drag.baselengthSec));
-                    dispatch(setClipFades({ clipId: drag.clipId, fadeOutSec: next }));
+                    const fadeUpdates = applyBulkFadeValue({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            sessionRef.current.clips.map((clip) => [clip.id, clip] as const),
+                        ),
+                        target: "fadeOutSec",
+                        nextValue: next,
+                    });
+                    batch(() => {
+                        for (const update of fadeUpdates) {
+                            dispatch(setClipFades(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void dispatch(
-                                setClipStateRemote({ clipId: drag.clipId, fadeOutSec: next }),
-                            );
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            if (now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void dispatch(
+                                    setClipStateRemote({ clipId: drag.clipId, fadeOutSec: next }),
+                                );
+                            }
                         }
                     } catch {}
                     return;
@@ -311,20 +400,37 @@ export function useEditDrag(deps: {
                 if (drag.type === "gain") {
                     const movementY = (currentEv.movementY ?? 0) as number;
                     const deltaDb = -movementY * 0.25;
-                    const nextDb = clamp(gainToDb(currentTrackingGain) + deltaDb, -12, 12);
-                    const nextGain = clamp(dbToGain(nextDb), dbToGain(-12), dbToGain(12));
-                    currentTrackingGain = nextGain;
-                    dispatch(setClipGain({ clipId: drag.clipId, gain: nextGain }));
+                    accumulatedGainDeltaDb += deltaDb;
+                    const gainUpdates = applyBulkGainDeltaDb({
+                        clipIds: drag.selectedClipIds,
+                        clipsById: new Map(
+                            drag.selectedClipIds.map((id) => [
+                                id,
+                                { gain: drag.baseGainById[id] ?? 1 },
+                            ]),
+                        ),
+                        deltaDb: accumulatedGainDeltaDb,
+                        minDb: -12,
+                        maxDb: 12,
+                    });
+                    batch(() => {
+                        for (const update of gainUpdates) {
+                            dispatch(setClipGain(update));
+                        }
+                    });
                     try {
-                        const now = Date.now();
-                        const last = lastRemoteSentRef.current[drag.clipId] || 0;
-                        if (now - last > 200) {
-                            lastRemoteSentRef.current[drag.clipId] = now;
-                            void webApi.setClipState({
-                                clipId: drag.clipId,
-                                gain: nextGain,
-                                checkpoint: false,
-                            });
+                        if (drag.selectedClipIds.length === 1) {
+                            const now = Date.now();
+                            const last = lastRemoteSentRef.current[drag.clipId] || 0;
+                            const nextGain = gainUpdates[0]?.gain;
+                            if (nextGain != null && now - last > 200) {
+                                lastRemoteSentRef.current[drag.clipId] = now;
+                                void webApi.setClipState({
+                                    clipId: drag.clipId,
+                                    gain: nextGain,
+                                    checkpoint: false,
+                                });
+                            }
                         }
                     } catch {}
                     return;
@@ -375,52 +481,84 @@ export function useEditDrag(deps: {
                 }
 
                 if (drag.type === "trim_left") {
-                    const desiredStart = clamp(beat, 0, drag.rightEdgeBeat - minLen);
-                    const desiredDelta = desiredStart - drag.basestartSec;
-                    const rate = drag.basePlaybackRate > 0 ? drag.basePlaybackRate : 1;
-                    if (drag.baseReversed) {
-                        const sourceDuration = (() => {
-                            if (
-                                drag.baseDurationFrames &&
-                                drag.baseSourceSampleRate &&
-                                drag.baseSourceSampleRate > 0
-                            ) {
-                                return drag.baseDurationFrames / drag.baseSourceSampleRate;
-                            }
-                            return drag.baseDurationSec || 0;
-                        })();
-                        let nextTrimEnd = drag.baseSourceEndSec - desiredDelta * rate;
-                        nextTrimEnd = Math.max(drag.baseSourceStartSec, nextTrimEnd);
-                        if (sourceDuration > 0) {
-                            nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
+                    const minLen = 0.0;
+                    const anchorBase = drag.baseByClipId[drag.clipId];
+                    if (!anchorBase) return;
+                    const anchorRight = anchorBase.startSec + anchorBase.lengthSec;
+                    const desiredStart = clamp(beat, 0, anchorRight - minLen);
+                    const desiredDelta = desiredStart - anchorBase.startSec;
+
+                    // Find the most constrained delta across all group members
+                    let limitedDelta = desiredDelta;
+                    for (const id of drag.selectedClipIds) {
+                        const base = drag.baseByClipId[id];
+                        if (!base) continue;
+                        const rate = base.playbackRate > 0 ? base.playbackRate : 1;
+                        if (base.reversed) {
+                            const maxDelta = (base.sourceEndSec - base.sourceStartSec) / rate;
+                            limitedDelta = Math.min(limitedDelta, maxDelta);
+                        } else {
+                            limitedDelta = Math.min(limitedDelta, base.lengthSec - minLen);
+                            const minAllowed = -base.sourceStartSec / rate;
+                            limitedDelta = Math.max(limitedDelta, minAllowed);
                         }
-                        const actualDeltaTrim = drag.baseSourceEndSec - nextTrimEnd;
-                        const actualDeltaTimeline = actualDeltaTrim / rate;
-                        const nextStart = drag.basestartSec + actualDeltaTimeline;
-                        const nextLen = clamp(
-                            drag.baselengthSec - actualDeltaTimeline,
-                            minLen,
-                            10_000,
-                        );
-                        dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
-                        dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
-                        dispatch(
-                            setClipSourceRange({ clipId: drag.clipId, sourceEndSec: nextTrimEnd }),
-                        );
-                        return;
                     }
 
-                    let nextTrimStart = drag.baseSourceStartSec + desiredDelta * rate;
-                    nextTrimStart = Math.max(0, nextTrimStart);
-                    const actualDeltaTrim = nextTrimStart - drag.baseSourceStartSec;
-                    const actualDeltaTimeline = actualDeltaTrim / rate;
-                    const nextStart = drag.basestartSec + actualDeltaTimeline;
-                    const nextLen = clamp(drag.baselengthSec - actualDeltaTimeline, minLen, 10_000);
-                    dispatch(moveClipStart({ clipId: drag.clipId, startSec: nextStart }));
-                    dispatch(setClipLength({ clipId: drag.clipId, lengthSec: nextLen }));
-                    dispatch(
-                        setClipSourceRange({ clipId: drag.clipId, sourceStartSec: nextTrimStart }),
-                    );
+                    batch(() => {
+                        for (const id of drag.selectedClipIds) {
+                            const base = drag.baseByClipId[id];
+                            if (!base) continue;
+                            const rate = base.playbackRate > 0 ? base.playbackRate : 1;
+                            if (base.reversed) {
+                                const sourceDuration = (() => {
+                                    if (
+                                        base.durationFrames &&
+                                        base.sourceSampleRate &&
+                                        base.sourceSampleRate > 0
+                                    ) {
+                                        return base.durationFrames / base.sourceSampleRate;
+                                    }
+                                    return base.durationSec || 0;
+                                })();
+                                let nextTrimEnd = base.sourceEndSec - limitedDelta * rate;
+                                nextTrimEnd = Math.max(base.sourceStartSec, nextTrimEnd);
+                                if (sourceDuration > 0)
+                                    nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
+                                const actualDeltaTrim = base.sourceEndSec - nextTrimEnd;
+                                const actualDeltaTimeline = actualDeltaTrim / rate;
+                                const nextStart = base.startSec + actualDeltaTimeline;
+                                const nextLen = clamp(
+                                    base.lengthSec - actualDeltaTimeline,
+                                    minLen,
+                                    10_000,
+                                );
+                                dispatch(moveClipStart({ clipId: id, startSec: nextStart }));
+                                dispatch(setClipLength({ clipId: id, lengthSec: nextLen }));
+                                dispatch(
+                                    setClipSourceRange({ clipId: id, sourceEndSec: nextTrimEnd }),
+                                );
+                            } else {
+                                let nextTrimStart = base.sourceStartSec + limitedDelta * rate;
+                                nextTrimStart = Math.max(0, nextTrimStart);
+                                const actualDeltaTrim = nextTrimStart - base.sourceStartSec;
+                                const actualDeltaTimeline = actualDeltaTrim / rate;
+                                const nextStart = base.startSec + actualDeltaTimeline;
+                                const nextLen = clamp(
+                                    base.lengthSec - actualDeltaTimeline,
+                                    minLen,
+                                    10_000,
+                                );
+                                dispatch(moveClipStart({ clipId: id, startSec: nextStart }));
+                                dispatch(setClipLength({ clipId: id, lengthSec: nextLen }));
+                                dispatch(
+                                    setClipSourceRange({
+                                        clipId: id,
+                                        sourceStartSec: nextTrimStart,
+                                    }),
+                                );
+                            }
+                        }
+                    });
                     return;
                 }
 
@@ -455,52 +593,97 @@ export function useEditDrag(deps: {
                 }
 
                 if (drag.type === "trim_right") {
-                    const desiredRight = clamp(beat, drag.basestartSec + minLen, 10_000);
-                    const rate = drag.basePlaybackRate > 0 ? drag.basePlaybackRate : 1;
-                    const sourceDuration = (() => {
-                        if (
-                            drag.baseDurationFrames &&
-                            drag.baseSourceSampleRate &&
-                            drag.baseSourceSampleRate > 0
-                        ) {
-                            return drag.baseDurationFrames / drag.baseSourceSampleRate;
-                        }
-                        return drag.baseDurationSec || 0;
-                    })();
-                    const desiredLen = desiredRight - drag.basestartSec;
+                    const minLen = 0.0;
+                    const anchorBase = drag.baseByClipId[drag.clipId];
+                    if (!anchorBase) return;
+
+                    const desiredRight = clamp(beat, anchorBase.startSec + minLen, 10_000);
+                    const desiredLen = desiredRight - anchorBase.startSec;
                     const nextLen = clamp(desiredLen, minLen, 10_000);
-                    const usedDeltaTimeline = nextLen - drag.baselengthSec;
-                    if (drag.baseReversed) {
-                        let nextTrimStart = drag.baseSourceStartSec - usedDeltaTimeline * rate;
-                        nextTrimStart = Math.max(0, nextTrimStart);
-                        nextTrimStart = Math.min(nextTrimStart, drag.baseSourceEndSec);
-                        const actualSourceLen = drag.baseSourceEndSec - nextTrimStart;
-                        const maxTimelineLen = actualSourceLen / rate;
-                        const finalLen =
-                            maxTimelineLen > 0 ? Math.min(nextLen, maxTimelineLen) : nextLen;
-                        dispatch(setClipLength({ clipId: drag.clipId, lengthSec: finalLen }));
-                        dispatch(
-                            setClipSourceRange({
-                                clipId: drag.clipId,
-                                sourceStartSec: nextTrimStart,
-                            }),
-                        );
-                        return;
+                    const desiredDeltaTimeline = nextLen - anchorBase.lengthSec;
+
+                    // Find the most constrained delta across all group members
+                    let limitedDelta = desiredDeltaTimeline;
+                    for (const id of drag.selectedClipIds) {
+                        const base = drag.baseByClipId[id];
+                        if (!base) continue;
+                        const rate = base.playbackRate > 0 ? base.playbackRate : 1;
+                        const sourceDuration = (() => {
+                            if (
+                                base.durationFrames &&
+                                base.sourceSampleRate &&
+                                base.sourceSampleRate > 0
+                            ) {
+                                return base.durationFrames / base.sourceSampleRate;
+                            }
+                            return base.durationSec || 0;
+                        })();
+                        if (base.reversed) {
+                            const maxSourceLen = base.sourceEndSec;
+                            const maxTimelineLen = maxSourceLen / rate;
+                            limitedDelta = Math.min(limitedDelta, maxTimelineLen - base.lengthSec);
+                            limitedDelta = Math.max(limitedDelta, -base.lengthSec + minLen);
+                        } else {
+                            const maxSourceLen =
+                                sourceDuration > 0
+                                    ? sourceDuration - base.sourceStartSec
+                                    : Number.POSITIVE_INFINITY;
+                            const maxTimelineLen = maxSourceLen / rate;
+                            limitedDelta = Math.min(limitedDelta, maxTimelineLen - base.lengthSec);
+                            limitedDelta = Math.max(limitedDelta, -base.lengthSec + minLen);
+                        }
                     }
 
-                    let nextTrimEnd = drag.baseSourceEndSec + usedDeltaTimeline * rate;
-                    nextTrimEnd = Math.max(0, nextTrimEnd);
-                    if (sourceDuration > 0) {
-                        nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
-                    }
-                    const actualSourceLen = nextTrimEnd - drag.baseSourceStartSec;
-                    const maxTimelineLen = actualSourceLen / rate;
-                    const finalLen =
-                        maxTimelineLen > 0 ? Math.min(nextLen, maxTimelineLen) : nextLen;
-                    dispatch(setClipLength({ clipId: drag.clipId, lengthSec: finalLen }));
-                    dispatch(
-                        setClipSourceRange({ clipId: drag.clipId, sourceEndSec: nextTrimEnd }),
-                    );
+                    batch(() => {
+                        for (const id of drag.selectedClipIds) {
+                            const base = drag.baseByClipId[id];
+                            if (!base) continue;
+                            const rate = base.playbackRate > 0 ? base.playbackRate : 1;
+                            const sourceDuration = (() => {
+                                if (
+                                    base.durationFrames &&
+                                    base.sourceSampleRate &&
+                                    base.sourceSampleRate > 0
+                                ) {
+                                    return base.durationFrames / base.sourceSampleRate;
+                                }
+                                return base.durationSec || 0;
+                            })();
+                            if (base.reversed) {
+                                let nextTrimStart = base.sourceStartSec - limitedDelta * rate;
+                                nextTrimStart = Math.max(0, nextTrimStart);
+                                nextTrimStart = Math.min(nextTrimStart, base.sourceEndSec);
+                                const actualSourceLen = base.sourceEndSec - nextTrimStart;
+                                const maxTimelineLen = actualSourceLen / rate;
+                                const finalLen =
+                                    maxTimelineLen > 0
+                                        ? Math.min(base.lengthSec + limitedDelta, maxTimelineLen)
+                                        : base.lengthSec + limitedDelta;
+                                dispatch(setClipLength({ clipId: id, lengthSec: finalLen }));
+                                dispatch(
+                                    setClipSourceRange({
+                                        clipId: id,
+                                        sourceStartSec: nextTrimStart,
+                                    }),
+                                );
+                            } else {
+                                let nextTrimEnd = base.sourceEndSec + limitedDelta * rate;
+                                nextTrimEnd = Math.max(0, nextTrimEnd);
+                                if (sourceDuration > 0)
+                                    nextTrimEnd = Math.min(nextTrimEnd, sourceDuration);
+                                const actualSourceLen = nextTrimEnd - base.sourceStartSec;
+                                const maxTimelineLen = actualSourceLen / rate;
+                                const finalLen =
+                                    maxTimelineLen > 0
+                                        ? Math.min(base.lengthSec + limitedDelta, maxTimelineLen)
+                                        : base.lengthSec + limitedDelta;
+                                dispatch(setClipLength({ clipId: id, lengthSec: finalLen }));
+                                dispatch(
+                                    setClipSourceRange({ clipId: id, sourceEndSec: nextTrimEnd }),
+                                );
+                            }
+                        }
+                    });
                     return;
                 }
 
@@ -538,26 +721,25 @@ export function useEditDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             editDragRef.current = null;
 
-            // 如果是 gain 类型的拖动，确保 undo group 被正确结束
-            const wasGainType = drag.type === "gain";
-
             const isGroupStretch =
                 drag.stretchGroup != null &&
                 (drag.type === "stretch_left" || drag.type === "stretch_right");
 
             const clipNow = sessionRef.current.clips.find((c) => c.id === drag.clipId);
             if (!isGroupStretch && !clipNow) {
-                // 即使 clip 不存在也要结束 undo group
-                if (wasGainType) {
-                    void webApi.endUndoGroup();
-                }
                 dispatch(endInteraction());
                 return;
             }
             const singleClipNow = clipNow ?? null;
 
+            // 保存拉伸后的播放速率，persist 后重新应用（两阶段更新策略）
+            let reapplyRates: Array<{ clipId: string; rate: number }> | null = null;
+
+            const isMultiClipEdit = drag.selectedClipIds.length > 1;
             const autoCrossfadeClipIds =
-                isGroupStretch && drag.stretchGroup ? drag.stretchGroup.clipIds : [drag.clipId];
+                isMultiClipEdit || (isGroupStretch && drag.stretchGroup)
+                    ? (drag.stretchGroup?.clipIds ?? drag.selectedClipIds)
+                    : [drag.clipId];
             const shouldApplyAutoCrossfade =
                 sessionRef.current.autoCrossfadeEnabled &&
                 (drag.type === "trim_left" ||
@@ -621,6 +803,9 @@ export function useEditDrag(deps: {
                     );
 
                 if (stretchPatches.length > 0) {
+                    reapplyRates = stretchPatches
+                        .filter((p) => p.playbackRate !== 1)
+                        .map((p) => ({ clipId: p.clipId, rate: p.playbackRate }));
                     persistPromise = runInsideUndoGroup(async () => {
                         const stretchPersistPromises = stretchPatches.map((patch) =>
                             dispatch(
@@ -647,54 +832,138 @@ export function useEditDrag(deps: {
                     });
                 }
             } else if (drag.type === "trim_left" && singleClipNow) {
-                const sourceRangePatch = singleClipNow.reversed
-                    ? { sourceEndSec: singleClipNow.sourceEndSec }
-                    : { sourceStartSec: singleClipNow.sourceStartSec };
-                if (shouldApplyAutoCrossfade) {
-                    persistPromise = runWithOptionalAutoCrossfade(async () => {
-                        await dispatch(
+                if (drag.selectedClipIds.length > 1) {
+                    const trimPatches = drag.selectedClipIds
+                        .map((id) => {
+                            const now = sessionRef.current.clips.find((c) => c.id === id);
+                            if (!now) return null;
+                            return {
+                                clipId: id,
+                                startSec: now.startSec,
+                                lengthSec: now.lengthSec,
+                                reversed: now.reversed,
+                                sourceStartSec: now.sourceStartSec,
+                                sourceEndSec: now.sourceEndSec,
+                            };
+                        })
+                        .filter((p) => p != null);
+                    if (trimPatches.length > 0) {
+                        persistPromise = runInsideUndoGroup(async () => {
+                            const promises = trimPatches.map((patch) => {
+                                const src = patch.reversed
+                                    ? { sourceEndSec: patch.sourceEndSec }
+                                    : { sourceStartSec: patch.sourceStartSec };
+                                return dispatch(
+                                    setClipStateRemote({
+                                        clipId: patch.clipId,
+                                        startSec: patch.startSec,
+                                        lengthSec: patch.lengthSec,
+                                        ...src,
+                                        checkpoint: false,
+                                    }),
+                                ).unwrap();
+                            });
+                            await Promise.allSettled(promises);
+                            if (shouldApplyAutoCrossfade) {
+                                await applyAutoCrossfade(
+                                    sessionRef.current,
+                                    autoCrossfadeClipIds,
+                                    dispatch,
+                                );
+                            }
+                        });
+                    }
+                } else {
+                    const sourceRangePatch = singleClipNow.reversed
+                        ? { sourceEndSec: singleClipNow.sourceEndSec }
+                        : { sourceStartSec: singleClipNow.sourceStartSec };
+                    if (shouldApplyAutoCrossfade) {
+                        persistPromise = runWithOptionalAutoCrossfade(async () => {
+                            await dispatch(
+                                setClipStateRemote({
+                                    clipId: drag.clipId,
+                                    startSec: singleClipNow.startSec,
+                                    lengthSec: singleClipNow.lengthSec,
+                                    ...sourceRangePatch,
+                                    checkpoint: false,
+                                }),
+                            ).unwrap();
+                        });
+                    } else {
+                        persistPromise = dispatch(
                             setClipStateRemote({
                                 clipId: drag.clipId,
                                 startSec: singleClipNow.startSec,
                                 lengthSec: singleClipNow.lengthSec,
                                 ...sourceRangePatch,
-                                checkpoint: false,
                             }),
                         ).unwrap();
-                    });
-                } else {
-                    persistPromise = dispatch(
-                        setClipStateRemote({
-                            clipId: drag.clipId,
-                            startSec: singleClipNow.startSec,
-                            lengthSec: singleClipNow.lengthSec,
-                            ...sourceRangePatch,
-                        }),
-                    ).unwrap();
+                    }
                 }
             } else if (drag.type === "trim_right" && singleClipNow) {
-                const sourceRangePatch = singleClipNow.reversed
-                    ? { sourceStartSec: singleClipNow.sourceStartSec }
-                    : { sourceEndSec: singleClipNow.sourceEndSec };
-                if (shouldApplyAutoCrossfade) {
-                    persistPromise = runWithOptionalAutoCrossfade(async () => {
-                        await dispatch(
+                if (drag.selectedClipIds.length > 1) {
+                    const trimPatches = drag.selectedClipIds
+                        .map((id) => {
+                            const now = sessionRef.current.clips.find((c) => c.id === id);
+                            if (!now) return null;
+                            return {
+                                clipId: id,
+                                lengthSec: now.lengthSec,
+                                reversed: now.reversed,
+                                sourceStartSec: now.sourceStartSec,
+                                sourceEndSec: now.sourceEndSec,
+                            };
+                        })
+                        .filter((p) => p != null);
+                    if (trimPatches.length > 0) {
+                        persistPromise = runInsideUndoGroup(async () => {
+                            const promises = trimPatches.map((patch) => {
+                                const src = patch.reversed
+                                    ? { sourceStartSec: patch.sourceStartSec }
+                                    : { sourceEndSec: patch.sourceEndSec };
+                                return dispatch(
+                                    setClipStateRemote({
+                                        clipId: patch.clipId,
+                                        lengthSec: patch.lengthSec,
+                                        ...src,
+                                        checkpoint: false,
+                                    }),
+                                ).unwrap();
+                            });
+                            await Promise.allSettled(promises);
+                            if (shouldApplyAutoCrossfade) {
+                                await applyAutoCrossfade(
+                                    sessionRef.current,
+                                    autoCrossfadeClipIds,
+                                    dispatch,
+                                );
+                            }
+                        });
+                    }
+                } else {
+                    const sourceRangePatch = singleClipNow.reversed
+                        ? { sourceStartSec: singleClipNow.sourceStartSec }
+                        : { sourceEndSec: singleClipNow.sourceEndSec };
+                    if (shouldApplyAutoCrossfade) {
+                        persistPromise = runWithOptionalAutoCrossfade(async () => {
+                            await dispatch(
+                                setClipStateRemote({
+                                    clipId: drag.clipId,
+                                    lengthSec: singleClipNow.lengthSec,
+                                    ...sourceRangePatch,
+                                    checkpoint: false,
+                                }),
+                            ).unwrap();
+                        });
+                    } else {
+                        persistPromise = dispatch(
                             setClipStateRemote({
                                 clipId: drag.clipId,
                                 lengthSec: singleClipNow.lengthSec,
                                 ...sourceRangePatch,
-                                checkpoint: false,
                             }),
                         ).unwrap();
-                    });
-                } else {
-                    persistPromise = dispatch(
-                        setClipStateRemote({
-                            clipId: drag.clipId,
-                            lengthSec: singleClipNow.lengthSec,
-                            ...sourceRangePatch,
-                        }),
-                    ).unwrap();
+                    }
                 }
             } else if (drag.type === "stretch_left" && singleClipNow) {
                 if (shouldApplyAutoCrossfade) {
@@ -723,6 +992,9 @@ export function useEditDrag(deps: {
                         }),
                     ).unwrap();
                 }
+                if (singleClipNow.playbackRate !== 1) {
+                    reapplyRates = [{ clipId: drag.clipId, rate: singleClipNow.playbackRate }];
+                }
             } else if (drag.type === "stretch_right" && singleClipNow) {
                 if (shouldApplyAutoCrossfade) {
                     persistPromise = runWithOptionalAutoCrossfade(async () => {
@@ -748,31 +1020,62 @@ export function useEditDrag(deps: {
                         }),
                     ).unwrap();
                 }
+                if (singleClipNow.playbackRate !== 1) {
+                    reapplyRates = [{ clipId: drag.clipId, rate: singleClipNow.playbackRate }];
+                }
             } else if (drag.type === "fade_in" && singleClipNow) {
-                // 确保结束时把最终值持久化到后端
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { fadeInSec: nextClip?.fadeInSec ?? 0 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        fadeInSec: singleClipNow.fadeInSec,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
             } else if (drag.type === "fade_out" && singleClipNow) {
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { fadeOutSec: nextClip?.fadeOutSec ?? 0 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        fadeOutSec: singleClipNow.fadeOutSec,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
             } else if (drag.type === "gain" && singleClipNow) {
+                const changesById = new Map(
+                    drag.selectedClipIds.map((clipId) => {
+                        const nextClip = sessionRef.current.clips.find((c) => c.id === clipId);
+                        return [clipId, { gain: nextClip?.gain ?? 1 }] as const;
+                    }),
+                );
                 persistPromise = dispatch(
-                    setClipStateRemote({
-                        clipId: drag.clipId,
-                        gain: singleClipNow.gain,
+                    setClipsStateBulkRemote({
+                        updates: buildBulkClipStateUpdates({
+                            clipIds: drag.selectedClipIds,
+                            changesById,
+                        }),
                     }),
                 ).unwrap();
-                // 结束 gain 拖动时调用 endUndoGroup，结束 undo group
-                void Promise.resolve(persistPromise).finally(() => {
-                    void webApi.endUndoGroup();
+            }
+
+            // 两阶段播放速率更新：后端响应后重新应用前端计算的值
+            if (reapplyRates && reapplyRates.length > 0 && persistPromise) {
+                void persistPromise.then(() => {
+                    for (const { clipId, rate } of reapplyRates!) {
+                        dispatch(setClipPlaybackRate({ clipId, playbackRate: rate }));
+                    }
                 });
             }
 

@@ -6,9 +6,10 @@
 // 参考规范：用户需求文档§2
 
 use crate::audio_utils::try_read_wav_info;
+use crate::midi_import::{self, MidiNoteEvent};
 use crate::models::PitchRange;
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 // ─── 块标识 (8 bytes each) ───
@@ -46,6 +47,9 @@ fn segment_overlap_sec(left_timeline_sec: f64, right_timeline_sec: f64) -> f64 {
 
 /// HiFiShifter 支持的音频格式扩展名
 const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
+
+/// 标准 MIDI 文件扩展名
+const SUPPORTED_MIDI_EXTS: &[&str] = &["mid", "midi", "smf"];
 
 const FILE_HEADER_SIZE: usize = 16;
 const MAGIC: [u8; 4] = [0x56, 0x53, 0x50, 0x44]; // "VSPD"
@@ -93,19 +97,19 @@ struct VspPitchPoint {
     disabled: bool,
     #[allow(dead_code)]
     original_pitch: i16, // *PIT (offset 20)
-    pitch: i16,          // PIT (offset 22)
-    formant: i16,        // FRM (offset 24)
-    bre: i16,            // BRE (offset 26)
+    pitch: i16,   // PIT (offset 22)
+    formant: i16, // FRM (offset 24)
+    bre: i16,     // BRE (offset 26)
     #[allow(dead_code)]
-    eq1: i16,            // EQ1 (offset 28)
+    eq1: i16, // EQ1 (offset 28)
     #[allow(dead_code)]
-    eq2: i16,            // EQ2 (offset 30)
-    dyn_orig: f64,       // *DYN (offset 32)
-    dyn_edit: f64,       // DYN (offset 40)
-    vol: f64,            // VOL (offset 48)
-    pan: f64,            // PAN (offset 56)
+    eq2: i16, // EQ2 (offset 30)
+    dyn_orig: f64, // *DYN (offset 32)
+    dyn_edit: f64, // DYN (offset 40)
+    vol: f64,     // VOL (offset 48)
+    pan: f64,     // PAN (offset 56)
     #[allow(dead_code)]
-    heq_or_mrp: i16,     // HEQ/MRP (offset 82)
+    heq_or_mrp: i16, // HEQ/MRP (offset 82)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -509,6 +513,105 @@ fn is_audio_supported(path: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn is_midi_file(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            SUPPORTED_MIDI_EXTS
+                .iter()
+                .any(|&ext| ext.eq_ignore_ascii_case(e))
+        })
+        .unwrap_or(false)
+}
+
+/// 从 MIDI 文件创建音高参考块（Pitch Reference Clip）。
+///
+/// 解析标准 MIDI 文件，将所有轨道的音符合并为一个 Clip，
+/// 应用播放速率后归一化音符时间，使最早音符起始于 clip 相对时间 0。
+fn create_midi_clip_from_file(
+    midi_path: &str,
+    track_id: &str,
+    start_sec: f64,
+    playback_rate: f64,
+    bpm: f64,
+) -> Result<Clip, String> {
+    let midi_result = midi_import::parse_midi_file(Path::new(midi_path), Some(bpm))?;
+
+    // 合并所有轨道的音符
+    let mut notes: Vec<MidiNoteEvent> = midi_result.track_notes.into_iter().flatten().collect();
+    notes.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if notes.is_empty() {
+        return Err("MIDI file contains no notes".into());
+    }
+
+    let rate = playback_rate.max(0.01);
+
+    // 归一化使最早音符的起始时间为 0（在源时间中，不除以播放速率以避免下游重复应用）
+    let first_start = notes
+        .iter()
+        .map(|n| n.start_sec)
+        .fold(f64::INFINITY, f64::min);
+    for note in &mut notes {
+        note.start_sec -= first_start;
+        note.end_sec -= first_start;
+    }
+
+    let last_end = notes
+        .iter()
+        .map(|n| n.end_sec)
+        .fold(0.0f64, f64::max);
+
+    let min_note = notes.iter().fold(127.0f32, |m, n| m.min(n.note));
+    let max_note = notes.iter().fold(0.0f32, |m, n| m.max(n.note));
+
+    let clip_name = Path::new(midi_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("MIDI")
+        .to_string();
+
+    Ok(Clip {
+        id: new_clip_id(),
+            group_id: None,
+            track_id: track_id.to_string(),
+        name: clip_name,
+        start_sec,
+        length_sec: (last_end / rate).max(0.1),
+        color: "cyan".to_string(),
+        source_path: None,
+        source_path_relative: None,
+        duration_sec: None,
+        duration_frames: None,
+        source_sample_rate: None,
+        waveform_preview: None,
+        pitch_range: Some(PitchRange {
+            min: min_note,
+            max: max_note,
+        }),
+        gain: 1.0,
+        muted: false,
+        source_start_sec: 0.0,
+        source_end_sec: last_end,
+        playback_rate: rate as f32,
+        reversed: false,
+        fade_in_sec: 0.0,
+        fade_out_sec: 0.0,
+        fade_in_curve: String::new(),
+        fade_out_curve: String::new(),
+        extra_curves: None,
+        extra_params: None,
+        formant_morph: None,
+        midi_note_data: Some(notes),
+        midi_fill_gaps: false,
+    })
+}
+
 /// 将 VocalShifter 音量倍率（1.0 = 0 dB）转换为 HiFiShifter 的 0.0–1.0 音量范围。
 /// HiFiShifter 默认音量为 0.9，VocalShifter 1.0 对应全音量。
 fn convert_volume(vs_volume: f64) -> f32 {
@@ -517,7 +620,7 @@ fn convert_volume(vs_volume: f64) -> f32 {
 
 /// 轨道颜色调色板（与 state.rs 中一致）
 const TRACK_COLORS: &[&str] = &[
-    "#4f8ef7", "#a78bfa", "#34d399", "#fb923c", "#f472b6", "#38bdf8", "#facc15", "#f87171",
+    "#6f8fa9", "#8c7fa3", "#6f9581", "#aa7f67", "#9a6f82", "#6e95a0", "#a39061", "#996d68",
 ];
 
 fn clip_color() -> String {
@@ -694,6 +797,57 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         // 解析音频路径
         let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
 
+        // ─── MIDI 文件 → 音高参考块 ───
+        if is_midi_file(&audio_path) {
+            if !Path::new(&audio_path).exists() {
+                skipped_files.push(base.audio_path.clone());
+                continue;
+            }
+
+            let (is_world, synth_mode) = ext
+                .map(|e| algo_type_to_hs(e.algo_type))
+                .unwrap_or((false, 1));
+            let track_id = track_algo_map
+                .get(&(base.track_index, is_world, synth_mode))
+                .or_else(|| {
+                    track_algo_map
+                        .iter()
+                        .find(|(&(i, _, _), _)| i == base.track_index)
+                        .map(|(_, id)| id)
+                })
+                .cloned()
+                .unwrap_or_else(|| hs_tracks.first().map(|t| t.id.clone()).unwrap_or_default());
+
+            if let Some(e) = ext {
+                synth_mode_by_track
+                    .entry(track_id.clone())
+                    .or_insert_with(|| algo_synth_mode(e.algo_type));
+            }
+
+            let item_start_sec = base.start_sample / sample_rate;
+
+            let time_markers = ext.map(|e| &e.time_markers[..]).unwrap_or(&[]);
+            let rate = if time_markers.len() == 2 {
+                let m0 = &time_markers[0];
+                let m1 = &time_markers[1];
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
+                (src_dur / new_dur).max(0.01)
+            } else {
+                1.0
+            };
+
+            match create_midi_clip_from_file(&audio_path, &track_id, item_start_sec, rate, bpm) {
+                Ok(clip) => {
+                    hs_clips.push(clip);
+                }
+                Err(_e) => {
+                    skipped_files.push(base.audio_path.clone());
+                }
+            }
+            continue;
+        }
+
         // 检查格式支持
         if !is_audio_supported(&audio_path) {
             skipped_files.push(base.audio_path.clone());
@@ -808,7 +962,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -835,6 +990,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
+                    midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -909,7 +1067,8 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -936,6 +1095,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
+                midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             // 写入 pitch 数据
@@ -1013,6 +1175,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     pitch_orig: pitch_edit.clone(),
                     pitch_edit,
                     pitch_edit_user_modified: true,
+                    has_pitch_adjustment_active: false,
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
@@ -1042,6 +1205,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: track_order,
     };
 
@@ -1404,6 +1568,38 @@ pub fn import_vsp_clipboard(
         // 解析音频路径
         let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
 
+        // ─── MIDI 文件 → 音高参考块 ───
+        if is_midi_file(&audio_path) {
+            if !Path::new(&audio_path).exists() {
+                skipped_files.push(base.audio_path.clone());
+                continue;
+            }
+
+            let item_start_sec = base.start_sample / sample_rate + time_offset;
+
+            let time_markers = ext.map(|e| &e.time_markers[..]).unwrap_or(&[]);
+            let rate = if time_markers.len() == 2 {
+                let m0 = &time_markers[0];
+                let m1 = &time_markers[1];
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
+                (src_dur / new_dur).max(0.01)
+            } else {
+                1.0
+            };
+
+            let bpm_val = if project.bpm > 0.0 { project.bpm } else { 120.0 };
+            match create_midi_clip_from_file(&audio_path, &target_track_id, item_start_sec, rate, bpm_val) {
+                Ok(clip) => {
+                    hs_clips.push(clip);
+                }
+                Err(_e) => {
+                    skipped_files.push(base.audio_path.clone());
+                }
+            }
+            continue;
+        }
+
         if !is_audio_supported(&audio_path) {
             skipped_files.push(base.audio_path.clone());
             continue;
@@ -1489,7 +1685,8 @@ pub fn import_vsp_clipboard(
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: target_track_id.clone(),
+            group_id: None,
+            track_id: target_track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -1516,6 +1713,9 @@ pub fn import_vsp_clipboard(
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
+                    midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -1589,7 +1789,8 @@ pub fn import_vsp_clipboard(
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: target_track_id.clone(),
+            group_id: None,
+            track_id: target_track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -1616,6 +1817,9 @@ pub fn import_vsp_clipboard(
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
+                midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             write_pitch_data_for_segment(
@@ -1689,6 +1893,7 @@ pub fn import_vsp_clipboard(
                     pitch_orig: pitch_edit.clone(),
                     pitch_edit,
                     pitch_edit_user_modified: true,
+                    has_pitch_adjustment_active: false,
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
@@ -1717,6 +1922,7 @@ pub fn import_vsp_clipboard(
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: next_order,
     };
 
@@ -1908,6 +2114,38 @@ fn import_vsp_clipboard_selected_tracks(
 
         let audio_path = resolve_audio_path(&base.audio_path, vsp_file_dir);
 
+        // ─── MIDI 文件 → 音高参考块 ───
+        if is_midi_file(&audio_path) {
+            if !Path::new(&audio_path).exists() {
+                skipped_files.push(base.audio_path.clone());
+                continue;
+            }
+
+            let item_start_sec = base.start_sample / sample_rate;
+
+            let time_markers = ext.map(|e| &e.time_markers[..]).unwrap_or(&[]);
+            let rate = if time_markers.len() == 2 {
+                let m0 = &time_markers[0];
+                let m1 = &time_markers[1];
+                let src_dur = ((m1.original_pos - m0.original_pos) / sample_rate).max(0.001);
+                let new_dur = ((m1.new_pos - m0.new_pos) / sample_rate).max(0.001);
+                (src_dur / new_dur).max(0.01)
+            } else {
+                1.0
+            };
+
+            let bpm_val = if project.bpm > 0.0 { project.bpm } else { 120.0 };
+            match create_midi_clip_from_file(&audio_path, &track_id, item_start_sec, rate, bpm_val) {
+                Ok(clip) => {
+                    hs_clips.push(clip);
+                }
+                Err(_e) => {
+                    skipped_files.push(base.audio_path.clone());
+                }
+            }
+            continue;
+        }
+
         if !is_audio_supported(&audio_path) {
             skipped_files.push(base.audio_path.clone());
             continue;
@@ -1991,7 +2229,8 @@ fn import_vsp_clipboard_selected_tracks(
 
                 hs_clips.push(Clip {
                     id: clip_id.clone(),
-                    track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                     name: format!("{} ({})", clip_name, seg_idx + 1),
                     start_sec: clip_start,
                     length_sec: clip_length,
@@ -2018,6 +2257,9 @@ fn import_vsp_clipboard_selected_tracks(
                     fade_out_curve: String::new(),
                     extra_curves: None,
                     extra_params: None,
+                    formant_morph: None,
+                    midi_note_data: None,
+                    midi_fill_gaps: false,
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -2089,7 +2331,8 @@ fn import_vsp_clipboard_selected_tracks(
 
             hs_clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.clone(),
+            group_id: None,
+            track_id: track_id.clone(),
                 name: clip_name,
                 start_sec: item_start_sec,
                 length_sec: clip_length,
@@ -2116,6 +2359,9 @@ fn import_vsp_clipboard_selected_tracks(
                 fade_out_curve: String::new(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
+                midi_note_data: None,
+                midi_fill_gaps: false,
             });
 
             write_pitch_data_for_segment(
@@ -2186,6 +2432,7 @@ fn import_vsp_clipboard_selected_tracks(
                     pitch_orig: pitch_edit.clone(),
                     pitch_edit,
                     pitch_edit_user_modified: true,
+                    has_pitch_adjustment_active: false,
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
@@ -2214,6 +2461,7 @@ fn import_vsp_clipboard_selected_tracks(
         project_sec: project_end,
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
+        disabled_group_ids: HashSet::new(),
         next_track_order: track_order,
     };
 

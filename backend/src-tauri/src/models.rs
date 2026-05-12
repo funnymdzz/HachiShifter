@@ -1,4 +1,7 @@
+use crate::midi_import::MidiNoteEvent;
 use crate::project::CustomScale;
+use crate::state::ClipFormantMorph;
+use crate::time_stretch::UserStretchAlgorithm;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,12 +18,17 @@ pub struct ProjectMetaPayload {
     pub path: Option<String>,
     pub dirty: bool,
     pub recent: Vec<String>,
+    pub notes_markdown: String,
     pub base_scale: String,
     pub use_custom_scale: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_scale: Option<CustomScale>,
     pub beats_per_bar: u32,
     pub grid_size: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stretch_algorithm_override: Option<UserStretchAlgorithm>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hifigan_mel_stretch_override: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +55,8 @@ pub struct TimelineTrack {
 #[serde(rename_all = "snake_case")]
 pub struct TimelineClip {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub track_id: String,
     pub name: String,
     pub start_sec: f64,
@@ -71,6 +81,34 @@ pub struct TimelineClip {
     pub fade_out_sec: Option<f64>,
     pub fade_in_curve: Option<String>,
     pub fade_out_curve: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formant_morph: Option<ClipFormantMorphPayload>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_note_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_note_data: Option<Vec<MidiNoteEvent>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub midi_fill_gaps: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ClipFormantMorphPayload {
+    pub enabled: bool,
+    pub target_f1_hz: f64,
+    pub target_f2_hz: f64,
+    pub strength: f64,
+}
+
+impl From<&ClipFormantMorph> for ClipFormantMorphPayload {
+    fn from(value: &ClipFormantMorph) -> Self {
+        Self {
+            enabled: value.enabled,
+            target_f1_hz: value.target_f1_hz,
+            target_f2_hz: value.target_f2_hz,
+            strength: value.strength,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +117,10 @@ pub struct TimelineStatePayload {
     pub ok: bool,
     pub tracks: Vec<TimelineTrack>,
     pub clips: Vec<TimelineClip>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_clip_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_track_ids: Option<Vec<String>>,
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,
@@ -90,6 +132,9 @@ pub struct TimelineStatePayload {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missing_files: Option<Vec<String>>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled_group_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

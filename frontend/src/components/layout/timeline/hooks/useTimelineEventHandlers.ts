@@ -24,6 +24,8 @@ import { useKeyboardShortcuts } from "./useKeyboardShortcuts";
 import { gridStepBeats, MIN_PX_PER_SEC, MAX_PX_PER_SEC } from "../";
 import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { computeAutoFollowScrollLeft } from "../../../../utils/autoFollowScroll";
+import { resolveTimelineMinPxPerSec } from "../runtime/timelineZoomBounds";
+import { shouldRouteClipPasteToParamEditor } from "../clipboardFocusRouting";
 
 // ── Args 类型 ─────────────────────────────────────────────────
 export interface UseTimelineEventHandlersArgs {
@@ -48,13 +50,20 @@ export interface UseTimelineEventHandlersArgs {
     setMultiSelectedClipIds: (ids: string[] | ((prev: string[]) => string[])) => void;
 
     // clipboard
-    clipClipboardRef: React.MutableRefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.MutableRefObject<{
+        templates: ClipTemplate[];
+        groupIds: string[];
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
 
     // clip actions
     pasteClipsAtPlayhead: () => void;
     splitSelectedAtPlayhead: () => void;
     normalizeClips: (ids: string[]) => void;
+    groupClips: (ids: string[]) => void;
+    ungroupClips: (ids: string[]) => void;
     isEditableTarget: (target: EventTarget | null) => boolean;
 
     // context menu
@@ -88,10 +97,8 @@ export interface UseTimelineEventHandlersArgs {
     // auto-scroll
     syncScrollLeft: (next: number) => void;
 
-    // session values (for auto-scroll / focusCursor)
-    autoScrollEnabled: boolean;
-    isPlaying: boolean;
-    playheadSec: number;
+    // session values (for zoom / focusCursor)
+    dynamicProjectSec: number;
 }
 
 // ── Hook 实现 ─────────────────────────────────────────────────
@@ -113,15 +120,15 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         pasteClipsAtPlayhead,
         splitSelectedAtPlayhead,
         normalizeClips,
+        groupClips,
+        ungroupClips,
         isEditableTarget,
         contextMenu,
         trackAreaMenu,
         setContextMenu,
         setTrackAreaMenu,
         syncScrollLeft,
-        autoScrollEnabled,
-        isPlaying,
-        playheadSec,
+        dynamicProjectSec,
     } = args;
 
     // ── useKeyboardShortcuts 桥接 ────────────────────────────
@@ -136,6 +143,8 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         onNormalize: normalizeClips,
         onPaste: pasteClipsAtPlayhead,
         onSplitSelected: splitSelectedAtPlayhead,
+        onGroup: groupClips,
+        onUngroup: ungroupClips,
     });
 
     // ── hifi:editOp ──────────────────────────────────────────
@@ -143,18 +152,26 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         function onEditOp(e: Event) {
             const op = (e as CustomEvent<{ op?: string }>).detail?.op;
             const active = document.activeElement as HTMLElement | null;
-            const inPianoRoll =
+            const inPianoRoll = Boolean(
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]");
-            const inTrackHeader =
+                active?.closest?.("[data-piano-roll-scroller]"),
+            );
+            const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+            );
             const deferToPianoRollForSelection =
                 inPianoRoll &&
                 sessionRef.current.toolMode === "select" &&
                 (op === "selectAll" || op === "deselect");
             if (deferToPianoRollForSelection) return;
-            if (op === "paste" && (inPianoRoll || inTrackHeader)) {
+            if (
+                op === "paste" &&
+                shouldRouteClipPasteToParamEditor({
+                    inPianoRoll,
+                    inTrackHeader,
+                })
+            ) {
                 return;
             }
             if (inPianoRoll && op !== "selectAll" && op !== "deselect") {
@@ -299,12 +316,16 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
             const zoom = computeAnchoredHorizontalZoom({
                 currentScale: pxPerSecRef.current,
                 factor,
-                minScale: MIN_PX_PER_SEC,
+                minScale: resolveTimelineMinPxPerSec({
+                    baseMinPxPerSec: MIN_PX_PER_SEC,
+                    projectSec: dynamicProjectSec,
+                    viewportWidthPx: scroller.clientWidth,
+                }),
                 maxScale: MAX_PX_PER_SEC,
                 scrollLeft: scroller.scrollLeft,
                 viewportWidth: scroller.clientWidth,
                 anchorSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
-                contentSec: sessionRef.current.projectSec,
+                contentSec: dynamicProjectSec,
             });
             if (!zoom) return;
 
@@ -333,30 +354,13 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         return () => window.removeEventListener("pointerdown", onAnyPointerDown, true);
     }, [contextMenu, trackAreaMenu]);
 
-    // ── Auto-scroll: keep playhead visible during playback ───
-    useEffect(() => {
-        if (!autoScrollEnabled || !isPlaying) return;
-        const scroller = scrollRef.current;
-        if (!scroller) return;
-        const next = computeAutoFollowScrollLeft({
-            playheadSec,
-            pxPerSec,
-            viewportWidth: scroller.clientWidth,
-            contentWidth: scroller.scrollWidth,
-        });
-        if (Math.abs(scroller.scrollLeft - next) > 0.5) {
-            scroller.scrollLeft = next;
-            syncScrollLeft(next);
-        }
-    }, [autoScrollEnabled, isPlaying, playheadSec, pxPerSec]);
-
     // ── hifi:focusCursor ─────────────────────────────────────
     useEffect(() => {
         function handler() {
             const scroller = scrollRef.current;
             if (!scroller) return;
             const next = computeAutoFollowScrollLeft({
-                playheadSec,
+                playheadSec: Number(sessionRef.current.playheadSec ?? 0) || 0,
                 pxPerSec,
                 viewportWidth: scroller.clientWidth,
                 contentWidth: scroller.scrollWidth,
@@ -366,5 +370,5 @@ export function useTimelineEventHandlers(args: UseTimelineEventHandlersArgs): vo
         }
         window.addEventListener("hifi:focusCursor", handler);
         return () => window.removeEventListener("hifi:focusCursor", handler);
-    }, [playheadSec, pxPerSec]);
+    }, [pxPerSec, sessionRef, syncScrollLeft]);
 }

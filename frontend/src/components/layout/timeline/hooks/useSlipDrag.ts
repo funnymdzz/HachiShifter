@@ -9,6 +9,7 @@ import {
     endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { webApi } from "../../../../services/webviewApi";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 
 export type SlipDragState = {
     pointerId: number;
@@ -34,6 +35,7 @@ export function useSlipDrag(deps: {
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
     beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
+    ignoreGrouping: boolean;
 }) {
     const {
         scrollRef,
@@ -42,6 +44,7 @@ export function useSlipDrag(deps: {
         multiSelectedClipIds,
         multiSelectedSet,
         beatFromClientX,
+        ignoreGrouping,
     } = deps;
 
     const slipDragRef = useRef<SlipDragState | null>(null);
@@ -59,17 +62,31 @@ export function useSlipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        const clipIds =
+        // Expand to include selected clips and their group members
+        const initialIds =
             multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
                 ? [...multiSelectedClipIds]
                 : [clipId];
+        const clipIds = ignoreGrouping
+            ? initialIds
+            : expandClipIdsWithGroups(
+                  initialIds,
+                  sessionRef.current.clips,
+                  false,
+                  sessionRef.current.disabledGroupIds,
+              );
 
         const initialById: SlipDragState["initialById"] = {};
         for (const id of clipIds) {
             const c = sessionRef.current.clips.find((x) => x.id === id);
             if (!c) continue;
-            // 纯秒域：source 文件总时长就是最大 slip 范围
-            const sourceDurationSec = Number(c.durationSec ?? 0) || null;
+            // MIDI clip：从 midiNoteData 计算源时长；音频 clip：使用 durationSec
+            let sourceDurationSec: number | null;
+            if (c.midiNoteData && c.midiNoteData.length > 0) {
+                sourceDurationSec = c.midiNoteData.reduce((max, n) => Math.max(max, n.endSec), 0);
+            } else {
+                sourceDurationSec = Number(c.durationSec ?? 0) || null;
+            }
             const sourceStartSec = Number(c.sourceStartSec ?? 0) || 0;
             const sourceEndSec = Math.max(0, Number(c.sourceEndSec ?? 0) || 0);
             const maxSlipSec =

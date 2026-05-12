@@ -34,6 +34,7 @@ import { useClipPitchDataListener } from "./hooks/useClipPitchDataListener";
 import { PitchAnalysisProvider, usePitchAnalysis } from "./contexts/PitchAnalysisContext";
 import { PianoRollStatusProvider, usePianoRollStatus } from "./contexts/PianoRollStatusContext";
 import { FileBrowserPanel } from "./components/layout/FileBrowserPanel";
+import { NotebookPanel } from "./components/layout/NotebookPanel";
 import { QuickSearchPopup } from "./components/layout/QuickSearchPopup";
 import { useKeybindings } from "./features/keybindings/useKeybindings";
 import type { ActionId } from "./features/keybindings/types";
@@ -54,6 +55,7 @@ import {
 import type { MessageKey } from "./i18n/messages";
 import type { CloseRequestedEvent } from "@tauri-apps/api/window";
 import { useAutoBackupScheduler } from "./hooks/useAutoBackupScheduler";
+import { useClipFormantStatusListener } from "./hooks/useClipFormantStatusListener";
 
 const statusKey: Record<string, string> = {
     Ready: "status_ready",
@@ -125,9 +127,12 @@ function AppInner() {
     const runtimeIsPlaying = useAppSelector((state) => state.session.runtime.isPlaying);
     const runtimeHasSynthesized = useAppSelector((state) => state.session.runtime.hasSynthesized);
     const fileBrowserVisible = useAppSelector((state) => state.fileBrowser.visible);
+    const notebookVisible = useAppSelector((state) => state.notebook.visible);
     const toolMode = useAppSelector((state) => state.session.toolMode);
     const drawToolMode = useAppSelector((state) => state.session.drawToolMode);
     const projectDirty = useAppSelector((state) => state.session.project.dirty);
+    const playheadSec = useAppSelector((state) => state.session.playheadSec);
+    const selectedTrackId = useAppSelector((state) => state.session.selectedTrackId);
     const paramsEpoch = useAppSelector((state) => state.session.paramsEpoch);
     // 使用 ref 桥接最新的工程修改状态
     const projectDirtyRef = useRef(projectDirty);
@@ -166,6 +171,134 @@ function AppInner() {
     const allowWindowCloseRef = useRef(false);
     const missingFileResolverRef = useRef<((shouldPick: boolean) => void) | null>(null);
     const processorParamCacheRef = useRef(new Map<string, ProcessorParamDescriptor[]>());
+
+    // MIDI clip import dialog state (lifted from TimelinePanel)
+    const [midiClipDialogOpen, setMidiClipDialogOpen] = useState(false);
+    const [midiClipPath, setMidiClipPath] = useState<string | null>(null);
+    const [midiClipStartSec, setMidiClipStartSec] = useState(0);
+    const [midiClipTrackId, setMidiClipTrackId] = useState<string | null>(null);
+    const [midiClipClipboardGuid, setMidiClipClipboardGuid] = useState<string | null>(null);
+    const [fillGaps, setFillGaps] = useState(false);
+    const [multiTrackMerge, setMultiTrackMerge] = useState(true);
+    const [importBpmAsProject, setImportBpmAsProject] = useState(false);
+    const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
+    const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    const [importPosition, setImportPosition] = useState<string>("selection");
+    const [closeLeadingGap, setCloseLeadingGap] = useState(true);
+    const [midiImportTargetMenu, setMidiImportTargetMenu] = useState<string>("pitchRef");
+    const [midiImportTargetDragDrop, setMidiImportTargetDragDrop] = useState<string>("pitchRef");
+    const [midiDialogSource, setMidiDialogSource] = useState<"menu" | "dragDrop">("menu");
+
+    // 加载 MIDI 相关设置
+    useEffect(() => {
+        import("./services/api/settings").then(({ settingsApi }) => {
+            settingsApi.getUiSettings().then((s) => {
+                if (s?.midiFillGaps != null) {
+                    setFillGaps(s.midiFillGaps);
+                }
+                if (s?.midiMultiTrackMerge != null) {
+                    setMultiTrackMerge(s.midiMultiTrackMerge);
+                }
+                if (s?.midiImportBpmAsProject != null) {
+                    setImportBpmAsProject(s.midiImportBpmAsProject);
+                }
+                if (s?.midiNoteBpmMode != null) {
+                    setNoteBpmMode(s.midiNoteBpmMode);
+                }
+                if (s?.midiSpecifiedBpm != null) {
+                    setSpecifiedBpm(s.midiSpecifiedBpm);
+                }
+                if (s?.midiImportPosition != null) {
+                    setImportPosition(s.midiImportPosition);
+                }
+                if (s?.midiCloseLeadingGap != null) {
+                    setCloseLeadingGap(s.midiCloseLeadingGap);
+                }
+                if (s?.midiImportTargetMenu != null) {
+                    setMidiImportTargetMenu(s.midiImportTargetMenu);
+                } else if ((s as any)?.midiImportTarget != null) {
+                    setMidiImportTargetMenu((s as any).midiImportTarget);
+                }
+                if (s?.midiImportTargetDragDrop != null) {
+                    setMidiImportTargetDragDrop(s.midiImportTargetDragDrop);
+                } else if ((s as any)?.midiImportTarget != null) {
+                    setMidiImportTargetDragDrop((s as any).midiImportTarget);
+                }
+            });
+        });
+    }, []);
+
+    const handleImportMidiFromMenu = useCallback(() => {
+        setMidiDialogSource("menu");
+        setMidiClipPath(null);
+        setMidiClipClipboardGuid(null);
+        setMidiClipStartSec(playheadSec ?? 0);
+        setMidiClipTrackId(selectedTrackId ?? null);
+        setMidiClipDialogOpen(true);
+    }, [playheadSec, selectedTrackId]);
+
+    const handleFillGapsChange = useCallback((v: boolean) => {
+        setFillGaps(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiFillGaps: v } as any),
+        );
+    }, []);
+
+    const handleMultiTrackMergeChange = useCallback((v: boolean) => {
+        setMultiTrackMerge(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiMultiTrackMerge: v } as any),
+        );
+    }, []);
+
+    const handleImportBpmAsProjectChange = useCallback((v: boolean) => {
+        setImportBpmAsProject(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportBpmAsProject: v } as any),
+        );
+    }, []);
+
+    const handleNoteBpmModeChange = useCallback((v: string) => {
+        setNoteBpmMode(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiNoteBpmMode: v } as any),
+        );
+    }, []);
+
+    const handleSpecifiedBpmChange = useCallback((v: number) => {
+        setSpecifiedBpm(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any),
+        );
+    }, []);
+
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportPosition: position } as any),
+        );
+    }, []);
+
+    const handleCloseLeadingGapChange = useCallback((v: boolean) => {
+        setCloseLeadingGap(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiCloseLeadingGap: v } as any),
+        );
+    }, []);
+
+    const handleImportTargetMenuChange = useCallback((v: string) => {
+        setMidiImportTargetMenu(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportTargetMenu: v } as any),
+        );
+    }, []);
+
+    const handleImportTargetDragDropChange = useCallback((v: string) => {
+        setMidiImportTargetDragDrop(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportTargetDragDrop: v } as any),
+        );
+    }, []);
 
     const splitter = useMemo(() => {
         const minTopPx = 200;
@@ -264,6 +397,7 @@ function AppInner() {
 
     // 监听后端 clip_pitch_data 事件，将 per-clip MIDI 曲线存入 store
     useClipPitchDataListener();
+    useClipFormantStatusListener();
 
     // 阻止浏览器默认的 Ctrl+F 搜索、右键菜单和 Alt 键
 
@@ -1419,12 +1553,13 @@ function AppInner() {
                 onOpenProject={handleOpenProject}
                 onOpenRecentProject={handleOpenRecentProject}
                 onExit={handleExitApp}
+                onImportMidiFromMenu={handleImportMidiFromMenu}
                 autoBackupSettings={autoBackupSettings}
                 onAutoBackupSettingsSaved={handleAutoBackupSettingsSaved}
             />
             <ActionBar />
 
-            {/* Main Content Area: Splitter + optional File Browser */}
+            {/* Main Content Area: Splitter + optional right-side panels */}
             <Flex className="flex-1 min-h-0">
                 {/* Left: Timeline / PianoRoll vertical splitter */}
                 <div ref={containerRef} className="flex-1 min-w-0 min-h-0 flex flex-col">
@@ -1433,7 +1568,37 @@ function AppInner() {
                         className="min-h-[200px] border-b border-qt-border relative bg-qt-base"
                         style={{ flexGrow: splitRatio, flexBasis: 0 }}
                     >
-                        <TimelinePanel />
+                        <TimelinePanel
+                            midiClipDialogOpen={midiClipDialogOpen}
+                            midiClipPath={midiClipPath}
+                            midiClipStartSec={midiClipStartSec}
+                            midiClipTrackId={midiClipTrackId}
+                            midiClipClipboardGuid={midiClipClipboardGuid}
+                            fillGaps={fillGaps}
+                            multiTrackMerge={multiTrackMerge}
+                            importBpmAsProject={importBpmAsProject}
+                            noteBpmMode={noteBpmMode}
+                            specifiedBpm={specifiedBpm}
+                            importPosition={importPosition}
+                            closeLeadingGap={closeLeadingGap}
+                            onMidiClipDialogOpenChange={setMidiClipDialogOpen}
+                            onMidiClipPathChange={setMidiClipPath}
+                            onMidiClipStartSecChange={setMidiClipStartSec}
+                            onMidiClipTrackIdChange={setMidiClipTrackId}
+                            onFillGapsChange={handleFillGapsChange}
+                            onMultiTrackMergeChange={handleMultiTrackMergeChange}
+                            onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
+                            onNoteBpmModeChange={handleNoteBpmModeChange}
+                            onSpecifiedBpmChange={handleSpecifiedBpmChange}
+                            onImportPositionChange={handleImportPositionChange}
+                            onCloseLeadingGapChange={handleCloseLeadingGapChange}
+                            midiDialogSource={midiDialogSource}
+                            onMidiDialogSourceChange={setMidiDialogSource}
+                            importTargetMenu={midiImportTargetMenu}
+                            onImportTargetMenuChange={handleImportTargetMenuChange}
+                            importTargetDragDrop={midiImportTargetDragDrop}
+                            onImportTargetDragDropChange={handleImportTargetDragDropChange}
+                        />
                     </Box>
 
                     {/* Splitter */}
@@ -1454,11 +1619,19 @@ function AppInner() {
                     </Box>
                 </div>
 
-                {/* Right: File Browser Panel (可收起) */}
-                {fileBrowserVisible && (
-                    <div className="w-[280px] shrink-0 border-l border-qt-border bg-qt-window flex flex-col">
-                        <FileBrowserPanel />
-                    </div>
+                {(fileBrowserVisible || notebookVisible) && (
+                    <Flex className="shrink-0 min-h-0 border-l border-qt-border bg-qt-window">
+                        {fileBrowserVisible ? (
+                            <div className="w-[280px] shrink-0 border-r border-qt-border bg-qt-window flex flex-col">
+                                <FileBrowserPanel />
+                            </div>
+                        ) : null}
+                        {notebookVisible ? (
+                            <div className="w-[320px] shrink-0 bg-qt-window flex flex-col">
+                                <NotebookPanel />
+                            </div>
+                        ) : null}
+                    </Flex>
                 )}
             </Flex>
 

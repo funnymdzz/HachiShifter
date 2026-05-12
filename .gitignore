@@ -74,6 +74,7 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
+backend/src-tauri/target-codex/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -165,3 +166,9 @@ cython_debug/
 
 run_gui.bat
 build_and_run.bat
+
+.claude/settings.json
+.claude/settings.local.json
+
+# Cloned third-party sources (built at compile time)
+backend/src-tauri/third_party/soundtouch-static/soundtouch/

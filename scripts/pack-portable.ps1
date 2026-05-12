@@ -162,7 +162,6 @@ $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\fcpe\fcpe.onnx";                   Dst = "models\fcpe\fcpe.onnx" }
 )
 
-# Only include vslib_x64.dll for x86_64 builds
 if ($ArchShort -eq "x64") {
     $Resources += @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll"; Dst = "vslib_x64.dll" }
 }
@@ -218,12 +217,16 @@ if (Test-Path $LicensePath) {
     Write-Host "  ✓ LICENSE" -ForegroundColor DarkGreen
 }
 
-# 检查是否有额外的 DLL 依赖（如 onnxruntime）
-$OrtDll = Join-Path $TargetRelease "onnxruntime.dll"
-if (Test-Path $OrtDll) {
-    Copy-Item $OrtDll -Destination $TempDir
-    Write-Host "  ✓ onnxruntime.dll" -ForegroundColor DarkGreen
+# Copy any DLLs from the release directory produced by build.rs
+# (SoundTouchDLL.dll, onnxruntime.dll, etc.)
+# Exclude vslib_x64.dll which is handled separately above from the third_party source.
+Get-ChildItem -Path $TargetRelease -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.Name -ne "vslib_x64.dll") {
+        Copy-Item $_.FullName -Destination $TempDir
+        Write-Host "  ✓ $($_.Name)" -ForegroundColor DarkGreen
+    }
 }
+
 
 # 检查 WebView2Loader.dll（Tauri 可能需要）
 $Wv2Dll = Join-Path $TargetRelease "WebView2Loader.dll"

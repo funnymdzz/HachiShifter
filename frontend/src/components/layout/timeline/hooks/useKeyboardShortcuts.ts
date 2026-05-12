@@ -7,6 +7,8 @@ import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { selectMergedKeybindings } from "../../../../features/keybindings/keybindingsSlice";
 import type { ActionId, Keybinding, KeybindingMap } from "../../../../features/keybindings/types";
 import { writeSystemClipboardObject } from "../../../../utils/systemClipboard";
+import { shouldRouteClipPasteToParamEditor } from "../clipboardFocusRouting";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 
 const IS_MAC =
     typeof navigator !== "undefined" && navigator.platform?.toLowerCase().includes("mac");
@@ -18,6 +20,8 @@ const CLIP_ACTIONS: ActionId[] = [
     "clip.paste",
     "clip.split",
     "clip.normalize",
+    "clip.group",
+    "clip.ungroup",
 ];
 /**
  * 判断 KeyboardEvent 是否匹配某个 Keybinding
@@ -61,12 +65,19 @@ export function useKeyboardShortcuts(deps: {
     dispatch: AppDispatch;
     multiSelectedClipIds: string[];
     setMultiSelectedClipIds: (ids: string[]) => void;
-    clipClipboardRef: React.RefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.RefObject<{
+        templates: ClipTemplate[];
+        groupIds: string[];
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
     isEditableTarget: (target: EventTarget | null) => boolean;
     onNormalize: (ids: string[]) => void;
     onPaste: () => void;
     onSplitSelected: () => void;
+    onGroup: (ids: string[]) => void;
+    onUngroup: (ids: string[]) => void;
 }) {
     const {
         sessionRef,
@@ -79,6 +90,8 @@ export function useKeyboardShortcuts(deps: {
         onNormalize,
         onPaste,
         onSplitSelected,
+        onGroup,
+        onUngroup,
     } = deps;
 
     const keybindings = useAppSelector(selectMergedKeybindings);
@@ -101,15 +114,23 @@ export function useKeyboardShortcuts(deps: {
                       : [];
 
             const active = document.activeElement as HTMLElement | null;
-            const inPianoRoll =
+            const inPianoRoll = Boolean(
                 active?.hasAttribute("data-piano-roll-scroller") ||
-                active?.closest?.("[data-piano-roll-scroller]");
-            const inTrackHeader =
+                active?.closest?.("[data-piano-roll-scroller]"),
+            );
+            const inTrackHeader = Boolean(
                 Boolean(active?.closest?.("[data-track-list-panel]")) ||
-                document.body.getAttribute("data-hs-focus-window") === "trackHeader";
+                document.body.getAttribute("data-hs-focus-window") === "trackHeader",
+            );
 
             // clip.paste 与 pianoRoll.paste 冲突时：参数编辑器 / 轨道头焦点优先参数粘贴
-            if (actionId === "clip.paste" && (inPianoRoll || inTrackHeader)) {
+            if (
+                actionId === "clip.paste" &&
+                shouldRouteClipPasteToParamEditor({
+                    inPianoRoll,
+                    inTrackHeader,
+                })
+            ) {
                 e.preventDefault();
                 e.stopPropagation();
                 window.dispatchEvent(new CustomEvent("hifi:editOp", { detail: { op: "paste" } }));
@@ -146,16 +167,22 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(selectedIds);
-                        if (templates.length === 0) return;
-                        (
-                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
-                        ).current = templates;
+                        const s = sessionRef.current;
+                        const expandedIds = expandClipIdsWithGroups(
+                            selectedIds,
+                            s.clips,
+                            s.ignoreGrouping,
+                            s.disabledGroupIds,
+                        );
+                        const result = await buildClipClipboardTemplates(expandedIds);
+                        if (result.templates.length === 0) return;
+                        clipClipboardRef.current = result;
                         try {
                             await writeSystemClipboardObject({
                                 version: 1,
                                 kind: "clip",
-                                templates,
+                                templates: result.templates,
+                                groupIds: result.groupIds,
                             });
                         } catch {
                             // ignore
@@ -169,22 +196,28 @@ export function useKeyboardShortcuts(deps: {
                     e.preventDefault();
                     e.stopPropagation();
                     void (async () => {
-                        const templates = await buildClipClipboardTemplates(selectedIds);
-                        if (templates.length === 0) return;
-                        (
-                            clipClipboardRef as React.MutableRefObject<ClipTemplate[] | null>
-                        ).current = templates;
+                        const s = sessionRef.current;
+                        const expandedIds = expandClipIdsWithGroups(
+                            selectedIds,
+                            s.clips,
+                            s.ignoreGrouping,
+                            s.disabledGroupIds,
+                        );
+                        const result = await buildClipClipboardTemplates(expandedIds);
+                        if (result.templates.length === 0) return;
+                        clipClipboardRef.current = result;
                         try {
                             await writeSystemClipboardObject({
                                 version: 1,
                                 kind: "clip",
-                                templates,
+                                templates: result.templates,
+                                groupIds: result.groupIds,
                             });
                         } catch {
                             // ignore
                         }
                         setMultiSelectedClipIds([]);
-                        void dispatch(removeClipsRemote(selectedIds));
+                        void dispatch(removeClipsRemote(expandedIds));
                     })();
                     return;
                 }
@@ -210,6 +243,22 @@ export function useKeyboardShortcuts(deps: {
                     onNormalize(selectedIds);
                     return;
                 }
+
+                case "clip.group": {
+                    if (selectedIds.length < 2) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onGroup(selectedIds);
+                    return;
+                }
+
+                case "clip.ungroup": {
+                    if (selectedIds.length === 0) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onUngroup(selectedIds);
+                    return;
+                }
             }
         }
         window.addEventListener("keydown", onKeyDown, true);
@@ -226,5 +275,7 @@ export function useKeyboardShortcuts(deps: {
         onNormalize,
         onPaste,
         onSplitSelected,
+        onGroup,
+        onUngroup,
     ]);
 }

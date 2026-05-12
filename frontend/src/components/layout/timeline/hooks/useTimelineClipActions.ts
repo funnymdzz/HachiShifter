@@ -22,19 +22,28 @@ import {
     setClipGain,
     setClipMuted,
     setClipStateRemote,
+    setClipsStateBulkRemote,
     setMultiSelectedClipIds as setMultiSelectedClipIdsAction,
     setplayheadSec,
     setSelectedClip,
     setSelectedClipPreservingTrack,
     replaceClipSourceRemote,
-    splitClipRemote,
+    splitClipsAtRemote,
 } from "../../../../features/session/sessionSlice";
+import {
+    groupClipsRemote,
+    ungroupClipsRemote,
+    toggleGroupDisabledRemote,
+} from "../../../../features/session/thunks/timelineThunks";
 import { webApi } from "../../../../services/webviewApi";
 import { waveformMipmapStore } from "../../../../utils/waveformMipmapStore";
-import { dbToGain } from "../math";
 import { computeAutoCrossfadeFromPayload } from "./autoCrossfade";
 import { useTimelineSelectionRect } from "../";
 import { readSystemClipboardObject } from "../../../../utils/systemClipboard";
+import { getBulkEditableClipIds } from "./bulkClipEdit";
+import { getGroupClipIds } from "./useGroupExpansion";
+import { buildBulkClipStateUpdates } from "./bulkClipRemotePayloads";
+import { computeClipNormalizationGain } from "../../../../features/session/clipNormalization";
 
 // ── Args / Result 类型 ────────────────────────────────────────
 
@@ -42,9 +51,12 @@ export interface UseTimelineClipActionsArgs {
     sessionRef: React.MutableRefObject<RootState["session"]>;
     scrollRef: React.MutableRefObject<HTMLDivElement | null>;
     lastClickedClipIdRef: React.MutableRefObject<string | null>;
+    lastClickedClientXRef: React.MutableRefObject<number | null>;
     pxPerSec: number;
     pxPerBeat: number;
     rowHeight: number;
+    ignoreGrouping: boolean;
+    disabledGroupIds: string[];
 }
 
 export interface UseTimelineClipActionsResult {
@@ -111,16 +123,29 @@ export interface UseTimelineClipActionsResult {
     onSelectionRectPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
 
     // Clipboard
-    clipClipboardRef: React.MutableRefObject<ClipTemplate[] | null>;
-    buildClipClipboardTemplates: (ids: string[]) => Promise<ClipTemplate[]>;
+    clipClipboardRef: React.MutableRefObject<{
+        templates: ClipTemplate[];
+        groupIds: string[];
+    } | null>;
+    buildClipClipboardTemplates: (
+        ids: string[],
+    ) => Promise<{ templates: ClipTemplate[]; groupIds: string[] }>;
 
     // Clip operations
+    groupClips: (ids: string[]) => void;
+    ungroupClips: (ids: string[]) => void;
+    toggleGroupDisabled: (groupId: string) => void;
     normalizeClips: (ids: string[]) => void;
     replaceClipSources: (ids: string[]) => Promise<void>;
     splitClipIdsAtPlayhead: (clipIds: string[]) => string[];
     splitSelectedAtPlayhead: () => void;
-    selectClipRangeByRect: (targetClipId: string, anchorClipIdOverride?: string | null) => void;
+    selectClipRangeByRect: (
+        targetClipId: string,
+        anchorClipIdOverride?: string | null,
+        targetClientX?: number,
+    ) => void;
     rangeSelectAnchorClipId: string | null;
+    recordLastClickPosition: (clientX: number) => void;
     pasteClipsAtPlayhead: () => void;
     clearContextMenu: () => void;
 
@@ -159,12 +184,15 @@ export function useTimelineClipActions(
         sessionRef,
         scrollRef,
         lastClickedClipIdRef,
+        lastClickedClientXRef,
         pxPerSec,
         rowHeight,
         dispatch,
         sameSourceConfirmResolverRef,
         setSameSourceConfirmOpen,
         setPlayheadFromClientX,
+        ignoreGrouping,
+        disabledGroupIds,
     } = args;
 
     const { t } = useI18n();
@@ -191,10 +219,10 @@ export function useTimelineClipActions(
     );
 
     // 切换工具时清除多选
-    const s = useAppSelector((state: RootState) => state.session);
+    const toolMode = useAppSelector((state: RootState) => state.session.toolMode);
     useEffect(() => {
         dispatch(setMultiSelectedClipIdsAction([]));
-    }, [s.toolMode, dispatch]);
+    }, [toolMode, dispatch]);
 
     const multiSelectedSet = useMemo(() => new Set(multiSelectedClipIds), [multiSelectedClipIds]);
     const multiSelectedSetRef = useRef(multiSelectedSet);
@@ -227,6 +255,29 @@ export function useTimelineClipActions(
         setContextMenu(null);
     }, []);
 
+    // ── Group / Ungroup ───────────────────────────────────────
+    const groupClips = React.useCallback(
+        (ids: string[]) => {
+            if (ids.length < 2) return;
+            void dispatch(groupClipsRemote(ids));
+        },
+        [dispatch],
+    );
+
+    const ungroupClips = React.useCallback(
+        (ids: string[]) => {
+            void dispatch(ungroupClipsRemote(ids));
+        },
+        [dispatch],
+    );
+
+    const toggleGroupDisabled = React.useCallback(
+        (groupId: string) => {
+            void dispatch(toggleGroupDisabledRemote(groupId));
+        },
+        [dispatch],
+    );
+
     // ── Selection rect ───────────────────────────────────────
     const handleSelectionRectSingleSelect = React.useCallback(
         (clipId: string) => {
@@ -246,15 +297,20 @@ export function useTimelineClipActions(
     });
 
     // ── Clipboard ────────────────────────────────────────────
-    const clipClipboardRef = useRef<ClipTemplate[] | null>(null);
+    const clipClipboardRef = useRef<{
+        templates: ClipTemplate[];
+        groupIds: string[];
+    } | null>(null);
 
     const buildClipClipboardTemplates = React.useCallback(async (ids: string[]) => {
         const clips = sessionRef.current.clips.filter((c) => ids.includes(c.id));
-        return Promise.all(
+        const groupIds = clips.map((c) => c.groupId).filter((g): g is string => g != null);
+        const templates = await Promise.all(
             clips.map(async (clip) => {
                 const linkedParamsResult = await webApi.getClipLinkedParams(clip.id);
                 return {
                     ...clip,
+                    sourceClipId: clip.id,
                     waveformPreview: sessionRef.current.clipWaveforms[clip.id],
                     linkedParams: linkedParamsResult.ok
                         ? linkedParamsResult.linkedParams
@@ -262,6 +318,7 @@ export function useTimelineClipActions(
                 };
             }),
         );
+        return { templates, groupIds };
     }, []);
 
     // ── normalizeClips ───────────────────────────────────────
@@ -269,35 +326,19 @@ export function useTimelineClipActions(
         (ids: string[]) => {
             for (const id of ids) {
                 const clip = sessionRef.current.clips.find((c) => c.id === id);
-                if (!clip?.sourcePath || !clip.durationSec || clip.durationSec <= 0) {
-                    continue;
-                }
-                const sourceStartSec = Number(clip.sourceStartSec ?? 0) || 0;
-                const sourceEndSec =
-                    Number(clip.sourceEndSec ?? clip.durationSec) || clip.durationSec;
-                const playbackRate = Math.max(1e-6, Number(clip.playbackRate ?? 1) || 1);
-                const clipSourceSpanSec = Math.max(
-                    0,
-                    Math.min(clip.lengthSec * playbackRate, sourceEndSec - sourceStartSec),
-                );
-                if (clipSourceSpanSec <= 0) continue;
-
-                const slice = waveformMipmapStore.getInterleavedSlice(
-                    clip.sourcePath,
-                    0,
-                    sourceStartSec,
-                    clipSourceSpanSec,
-                );
-                if (!slice || slice.interleaved.length < 2) continue;
-                const data = slice.interleaved;
-                let peak = 0;
-                for (let i = 0; i < data.length; i++) {
-                    const v = Math.abs(data[i]);
-                    if (v > peak) peak = v;
-                }
-                waveformMipmapStore.releaseInterleaved(data);
-                if (peak <= 0) continue;
-                const newGain = Math.min(Math.max(1.0 / peak, dbToGain(-12)), dbToGain(12));
+                if (!clip) continue;
+                const newGain = computeClipNormalizationGain(clip, {
+                    getInterleavedSlice: (sourcePath, _channel, sourceStartSec, sourceSpanSec) =>
+                        waveformMipmapStore.getInterleavedSlice(
+                            sourcePath,
+                            0,
+                            sourceStartSec,
+                            sourceSpanSec,
+                        ),
+                    releaseInterleaved: (data) =>
+                        waveformMipmapStore.releaseInterleaved(data as Float32Array),
+                });
+                if (newGain == null) continue;
                 dispatch(setClipGain({ clipId: id, gain: newGain }));
                 void dispatch(setClipStateRemote({ clipId: id, gain: newGain }));
             }
@@ -308,7 +349,14 @@ export function useTimelineClipActions(
     // ── replaceClipSources ───────────────────────────────────
     const replaceClipSources = React.useCallback(
         async (ids: string[]) => {
-            const selected = sessionRef.current.clips.filter((c) => ids.includes(c.id));
+            // 过滤掉音高参考块（没有音频源文件）
+            const audioOnlyIds = ids.filter((id) => {
+                const c = sessionRef.current.clips.find((clip) => clip.id === id);
+                return c && c.midiNoteCount == null;
+            });
+            if (audioOnlyIds.length === 0) return;
+
+            const selected = sessionRef.current.clips.filter((c) => audioOnlyIds.includes(c.id));
             if (selected.length === 0) return;
 
             const picked = await webApi.openAudioDialog();
@@ -324,7 +372,7 @@ export function useTimelineClipActions(
             if (selectedSourcePaths.size > 0) {
                 const hasOtherClipsWithSameSource = sessionRef.current.clips.some(
                     (clip) =>
-                        !ids.includes(clip.id) &&
+                        !audioOnlyIds.includes(clip.id) &&
                         Boolean(clip.sourcePath && selectedSourcePaths.has(clip.sourcePath)),
                 );
                 if (hasOtherClipsWithSameSource) {
@@ -337,7 +385,7 @@ export function useTimelineClipActions(
 
             await dispatch(
                 replaceClipSourceRemote({
-                    clipIds: ids,
+                    clipIds: audioOnlyIds,
                     newSourcePath: picked.path,
                     replaceSameSource,
                 }),
@@ -350,13 +398,29 @@ export function useTimelineClipActions(
     const splitClipIdsAtPlayhead = React.useCallback(
         (clipIds: string[]) => {
             const splitSec = Math.max(0, Number(sessionRef.current.playheadSec ?? 0) || 0);
-            const eligibleIds = clipIds.filter((id) => {
+
+            // Expand to include all group members of any input clip
+            const expandedIds = new Set(clipIds);
+            if (!ignoreGrouping) {
+                for (const id of clipIds) {
+                    const groupMembers = getGroupClipIds(
+                        id,
+                        sessionRef.current.clips,
+                        disabledGroupIds,
+                    );
+                    if (groupMembers) {
+                        for (const gid of groupMembers) expandedIds.add(gid);
+                    }
+                }
+            }
+
+            const eligibleIds = Array.from(expandedIds).filter((id) => {
                 const c = sessionRef.current.clips.find((clip) => clip.id === id);
                 if (!c) return false;
-                return splitSec >= c.startSec && splitSec <= c.startSec + c.lengthSec;
+                return splitSec > c.startSec + 1e-6 && splitSec < c.startSec + c.lengthSec - 1e-6;
             });
-            for (const clipId of eligibleIds) {
-                void dispatch(splitClipRemote({ clipId, splitSec }));
+            if (eligibleIds.length > 0) {
+                void dispatch(splitClipsAtRemote({ clipIds: eligibleIds, splitSec }));
             }
             return eligibleIds;
         },
@@ -374,9 +438,17 @@ export function useTimelineClipActions(
         splitClipIdsAtPlayhead(selectedIds);
     }, [splitClipIdsAtPlayhead]);
 
+    // ── recordLastClickPosition ──────────────────────────────
+    const recordLastClickPosition = React.useCallback(
+        (clientX: number) => {
+            lastClickedClientXRef.current = clientX;
+        },
+        [lastClickedClientXRef],
+    );
+
     // ── selectClipRangeByRect ────────────────────────────────
     const selectClipRangeByRect = React.useCallback(
-        (targetClipId: string, anchorClipIdOverride?: string | null) => {
+        (targetClipId: string, anchorClipIdOverride?: string | null, targetClientX?: number) => {
             const session = sessionRef.current;
             const target = session.clips.find((c) => c.id === targetClipId);
             if (!target) return;
@@ -395,16 +467,32 @@ export function useTimelineClipActions(
                 setMultiSelectedClipIds([targetClipId]);
                 dispatch(setSelectedClip(targetClipId));
                 lastClickedClipIdRef.current = targetClipId;
+                lastClickedClientXRef.current = targetClientX ?? null;
                 return;
             }
 
             const minTrack = Math.min(anchorTrackIndex, targetTrackIndex);
             const maxTrack = Math.max(anchorTrackIndex, targetTrackIndex);
-            const minStartSec = Math.min(anchor.startSec, target.startSec);
-            const maxEndSec = Math.max(
-                anchor.startSec + anchor.lengthSec,
-                target.startSec + target.lengthSec,
-            );
+
+            // 使用鼠标点击位置（时间秒）构建选择矩形，避免长 clip 导致的过度选择
+            let anchorClickSec: number;
+            let targetClickSec: number;
+
+            const scroller = scrollRef.current;
+            const anchorClientX = lastClickedClientXRef.current;
+            if (scroller && anchorClientX != null && targetClientX != null) {
+                const bounds = scroller.getBoundingClientRect();
+                const xScroll = scroller.scrollLeft;
+                anchorClickSec = Math.max(0, (anchorClientX - bounds.left + xScroll) / pxPerSec);
+                targetClickSec = Math.max(0, (targetClientX - bounds.left + xScroll) / pxPerSec);
+            } else {
+                // 降级：使用 clip 的 startSec 作为点击时间近似
+                anchorClickSec = anchor.startSec;
+                targetClickSec = target.startSec;
+            }
+
+            const minStartSec = Math.min(anchorClickSec, targetClickSec);
+            const maxEndSec = Math.max(anchorClickSec, targetClickSec);
 
             const selected = session.clips
                 .filter((clip) => {
@@ -422,19 +510,29 @@ export function useTimelineClipActions(
             setMultiSelectedClipIds(next);
             dispatch(setSelectedClip(targetClipId));
             lastClickedClipIdRef.current = targetClipId;
+            lastClickedClientXRef.current = targetClientX ?? null;
         },
-        [dispatch, setMultiSelectedClipIds],
+        [dispatch, setMultiSelectedClipIds, pxPerSec],
     );
 
     // ── pasteClipsAtPlayhead ─────────────────────────────────
     const pasteClipsAtPlayhead = React.useCallback(() => {
         void (async () => {
-            let tpl = clipClipboardRef.current;
+            let tpl: ClipTemplate[] | null = null;
+            let groupIds: string[] = [];
+            const internal = clipClipboardRef.current;
+            if (internal) {
+                tpl = internal.templates;
+                groupIds = internal.groupIds;
+            }
             try {
                 const fromSystem = await readSystemClipboardObject("clip");
                 if (fromSystem?.kind === "clip" && Array.isArray(fromSystem.templates)) {
                     tpl = fromSystem.templates;
-                    clipClipboardRef.current = fromSystem.templates;
+                    groupIds = ((fromSystem as any).groupIds ?? []).filter(
+                        (g: any) => typeof g === "string",
+                    );
+                    clipClipboardRef.current = { templates: fromSystem.templates, groupIds };
                 }
             } catch {
                 // ignore and fallback to internal clipboard
@@ -453,7 +551,6 @@ export function useTimelineClipActions(
                 ...c,
                 startSec: Math.max(0, c.startSec + delta),
             }));
-
             dispatch(checkpointHistory());
             await webApi.beginUndoGroup();
             try {
@@ -488,17 +585,42 @@ export function useTimelineClipActions(
                     }>;
                     const fadeUpdates = computeAutoCrossfadeFromPayload(allClips, created);
                     if (fadeUpdates.length > 0) {
-                        const fadePromises = fadeUpdates.map((u) =>
-                            dispatch(
-                                setClipStateRemote({
-                                    clipId: u.clipId,
+                        const changesById = new Map(
+                            fadeUpdates.map((u) => [
+                                u.clipId,
+                                {
                                     fadeInSec: u.fadeInSec,
                                     fadeOutSec: u.fadeOutSec,
-                                    checkpoint: false,
-                                }),
-                            ).unwrap(),
+                                },
+                            ]),
                         );
-                        await Promise.allSettled(fadePromises);
+                        await dispatch(
+                            setClipsStateBulkRemote({
+                                updates: buildBulkClipStateUpdates({
+                                    clipIds: [...changesById.keys()],
+                                    changesById,
+                                }),
+                                checkpoint: false,
+                            }),
+                        ).unwrap();
+                    }
+                }
+
+                // Re-group pasted clips: original grouped clips get new independent groups
+                if (groupIds.length === created.length) {
+                    const groupMap = new Map<string, string[]>();
+                    for (let i = 0; i < groupIds.length; i++) {
+                        const gid = groupIds[i];
+                        if (gid && created[i]) {
+                            const list = groupMap.get(gid);
+                            if (list) list.push(created[i]);
+                            else groupMap.set(gid, [created[i]]);
+                        }
+                    }
+                    for (const newClipIds of groupMap.values()) {
+                        if (newClipIds.length >= 2) {
+                            await dispatch(groupClipsRemote(newClipIds)).unwrap();
+                        }
                     }
                 }
             } finally {
@@ -513,7 +635,7 @@ export function useTimelineClipActions(
             lastClickedClipIdRef.current = clipId;
             const selectedIds = multiSelectedClipIdsRef.current;
             const selectedSet = multiSelectedSetRef.current;
-            if (selectedIds.length === 0 || !selectedSet.has(clipId)) {
+            if (!selectedSet.has(clipId) || selectedIds.length > 1) {
                 setMultiSelectedClipIds([clipId]);
             }
         },
@@ -620,16 +742,28 @@ export function useTimelineClipActions(
 
     const toggleTrackLaneClipMuted = React.useCallback(
         (clipId: string, nextMuted: boolean) => {
-            dispatch(
-                setClipMuted({
-                    clipId,
-                    muted: nextMuted,
-                }),
+            const targetIds = getBulkEditableClipIds({
+                activeClipId: clipId,
+                multiSelectedClipIds: multiSelectedClipIdsRef.current,
+                multiSelectedSet: multiSelectedSetRef.current,
+            });
+            const changesById = new Map(
+                targetIds.map((targetId) => [targetId, { muted: nextMuted }] as const),
             );
+            for (const targetId of targetIds) {
+                dispatch(
+                    setClipMuted({
+                        clipId: targetId,
+                        muted: nextMuted,
+                    }),
+                );
+            }
             void dispatch(
-                setClipStateRemote({
-                    clipId,
-                    muted: nextMuted,
+                setClipsStateBulkRemote({
+                    updates: buildBulkClipStateUpdates({
+                        clipIds: targetIds,
+                        changesById,
+                    }),
                 }),
             );
         },
@@ -667,10 +801,21 @@ export function useTimelineClipActions(
     const commitTrackLaneGain = React.useCallback(
         (clipId: string, db: number) => {
             const gain = Math.pow(10, db / 20);
+            const targetIds = getBulkEditableClipIds({
+                activeClipId: clipId,
+                multiSelectedClipIds: multiSelectedClipIdsRef.current,
+                multiSelectedSet: multiSelectedSetRef.current,
+            });
+            const changesById = new Map(targetIds.map((targetId) => [targetId, { gain }] as const));
+            for (const targetId of targetIds) {
+                dispatch(setClipGain({ clipId: targetId, gain }));
+            }
             void dispatch(
-                setClipStateRemote({
-                    clipId,
-                    gain,
+                setClipsStateBulkRemote({
+                    updates: buildBulkClipStateUpdates({
+                        clipIds: targetIds,
+                        changesById,
+                    }),
                 }),
             );
         },
@@ -700,12 +845,16 @@ export function useTimelineClipActions(
         clipClipboardRef,
         buildClipClipboardTemplates,
 
+        groupClips,
+        ungroupClips,
+        toggleGroupDisabled,
         normalizeClips,
         replaceClipSources,
         splitClipIdsAtPlayhead,
         splitSelectedAtPlayhead,
         selectClipRangeByRect,
         rangeSelectAnchorClipId,
+        recordLastClickPosition,
         pasteClipsAtPlayhead,
         clearContextMenu,
 

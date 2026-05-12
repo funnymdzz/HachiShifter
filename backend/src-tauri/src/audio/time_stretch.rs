@@ -1,4 +1,29 @@
-#[allow(dead_code)]
+use std::sync::{Mutex, OnceLock};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserStretchAlgorithm {
+    Linear,
+    Signalsmith,
+    Soundtouch,
+}
+
+impl Default for UserStretchAlgorithm {
+    fn default() -> Self {
+        Self::Signalsmith
+    }
+}
+
+impl UserStretchAlgorithm {
+    pub fn to_runtime(self) -> StretchAlgorithm {
+        match self {
+            Self::Linear => StretchAlgorithm::LinearResample,
+            Self::Signalsmith => StretchAlgorithm::SignalsmithStretch,
+            Self::Soundtouch => StretchAlgorithm::SoundTouchDll,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StretchAlgorithm {
     /// Current fallback: linear resampling in the time domain.
@@ -11,9 +36,105 @@ pub enum StretchAlgorithm {
     /// statically linked at compile time. Always available.
     SignalsmithStretch,
 
+    /// Default time-stretch implementation via SoundTouch Windows DLL.
+    SoundTouchDll,
+
     /// Desired: zplane Elastique (Soloist) time-stretch preserving pitch + formants.
     /// This requires integrating the Elastique SDK (commercial).
     ElastiqueSoloist,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStretchSettings {
+    pub default_algorithm: UserStretchAlgorithm,
+    pub default_hifigan_mel_stretch: bool,
+    pub project_algorithm_override: Option<UserStretchAlgorithm>,
+    pub project_hifigan_mel_stretch_override: Option<bool>,
+}
+
+impl Default for RuntimeStretchSettings {
+    fn default() -> Self {
+        Self {
+            default_algorithm: UserStretchAlgorithm::default(),
+            default_hifigan_mel_stretch: true,
+            project_algorithm_override: None,
+            project_hifigan_mel_stretch_override: None,
+        }
+    }
+}
+
+impl RuntimeStretchSettings {
+    pub fn effective_algorithm(self) -> UserStretchAlgorithm {
+        self.project_algorithm_override
+            .unwrap_or(self.default_algorithm)
+    }
+
+    pub fn effective_hifigan_mel_stretch(self) -> bool {
+        self.project_hifigan_mel_stretch_override
+            .unwrap_or(self.default_hifigan_mel_stretch)
+    }
+}
+
+fn runtime_stretch_settings_cell() -> &'static Mutex<RuntimeStretchSettings> {
+    static CELL: OnceLock<Mutex<RuntimeStretchSettings>> = OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(RuntimeStretchSettings::default()))
+}
+
+pub fn current_runtime_stretch_settings() -> RuntimeStretchSettings {
+    *runtime_stretch_settings_cell()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn update_runtime_stretch_settings(
+    default_algorithm: UserStretchAlgorithm,
+    default_hifigan_mel_stretch: bool,
+    project_algorithm_override: Option<UserStretchAlgorithm>,
+    project_hifigan_mel_stretch_override: Option<bool>,
+) {
+    let mut settings = runtime_stretch_settings_cell()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    settings.default_algorithm = default_algorithm;
+    settings.default_hifigan_mel_stretch = default_hifigan_mel_stretch;
+    settings.project_algorithm_override = project_algorithm_override;
+    settings.project_hifigan_mel_stretch_override = project_hifigan_mel_stretch_override;
+}
+
+pub fn update_global_stretch_defaults(
+    default_algorithm: UserStretchAlgorithm,
+    default_hifigan_mel_stretch: bool,
+) {
+    let mut settings = runtime_stretch_settings_cell()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    settings.default_algorithm = default_algorithm;
+    settings.default_hifigan_mel_stretch = default_hifigan_mel_stretch;
+}
+
+pub fn update_project_stretch_overrides(
+    project_algorithm_override: Option<UserStretchAlgorithm>,
+    project_hifigan_mel_stretch_override: Option<bool>,
+) {
+    let mut settings = runtime_stretch_settings_cell()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    settings.project_algorithm_override = project_algorithm_override;
+    settings.project_hifigan_mel_stretch_override = project_hifigan_mel_stretch_override;
+}
+
+pub fn resolved_external_stretch_algorithm() -> StretchAlgorithm {
+    current_runtime_stretch_settings()
+        .effective_algorithm()
+        .to_runtime()
+}
+
+pub fn resolved_user_external_stretch_algorithm() -> UserStretchAlgorithm {
+    current_runtime_stretch_settings().effective_algorithm()
+}
+
+pub fn should_use_hifigan_mel_stretch() -> bool {
+    current_runtime_stretch_settings().effective_hifigan_mel_stretch()
 }
 
 const STRETCH_SILENCE_WINDOW_MS: f64 = 10.0;
@@ -189,11 +310,113 @@ pub fn time_stretch_interleaved(
                 }
             }
         }
+        StretchAlgorithm::SoundTouchDll => {
+            let in_frames = if channels == 0 {
+                0
+            } else {
+                input.len() / channels
+            };
+            if in_frames < 2 || out_frames < 2 {
+                return linear_time_stretch_interleaved(input, channels, out_frames);
+            }
+            let ratio = (out_frames as f64) / (in_frames as f64);
+            let result = crate::soundtouch::try_time_stretch_interleaved_realtime(
+                input,
+                channels,
+                sample_rate.max(1),
+                ratio,
+                out_frames,
+            )
+            .or_else(|_| {
+                crate::soundtouch::try_time_stretch_interleaved_offline(
+                    input,
+                    channels,
+                    sample_rate.max(1),
+                    ratio,
+                    out_frames,
+                )
+            });
+
+            match result {
+                Ok(mut out) => {
+                    preserve_hard_silence_after_stretch(
+                        input,
+                        &mut out,
+                        channels,
+                        sample_rate.max(1),
+                    );
+                    out.resize(out_frames * channels, 0.0);
+                    out
+                }
+                Err(e) => {
+                    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                        eprintln!("time_stretch: SoundTouch failed, falling back: {e}");
+                    }
+                    linear_time_stretch_interleaved(input, channels, out_frames)
+                }
+            }
+        }
         StretchAlgorithm::ElastiqueSoloist => {
             // TODO: integrate Elastique SDK and implement true pitch/formant-preserving stretch.
             // For now, fall back to the existing linear method to keep the app functional.
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        current_runtime_stretch_settings, resolved_external_stretch_algorithm,
+        should_use_hifigan_mel_stretch, time_stretch_interleaved, update_runtime_stretch_settings,
+        StretchAlgorithm, UserStretchAlgorithm,
+    };
+
+    #[test]
+    fn soundtouch_fallback_keeps_requested_length() {
+        let input = vec![0.0f32, 0.5, 0.25, -0.25];
+        let out = time_stretch_interleaved(
+            &input,
+            1,
+            44_100,
+            8,
+            StretchAlgorithm::SoundTouchDll,
+        );
+        assert_eq!(out.len(), 8);
+    }
+
+    #[test]
+    fn default_algorithm_symbol_exists() {
+        let algo = StretchAlgorithm::SoundTouchDll;
+        assert!(matches!(algo, StretchAlgorithm::SoundTouchDll));
+    }
+
+    #[test]
+    fn project_override_inherits_and_resolves_from_global_defaults() {
+        update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, true, None, None);
+        let settings = current_runtime_stretch_settings();
+        assert_eq!(settings.effective_algorithm(), UserStretchAlgorithm::Signalsmith);
+        assert!(settings.effective_hifigan_mel_stretch());
+        assert!(matches!(
+            resolved_external_stretch_algorithm(),
+            StretchAlgorithm::SignalsmithStretch
+        ));
+        assert!(should_use_hifigan_mel_stretch());
+
+        update_runtime_stretch_settings(
+            UserStretchAlgorithm::Signalsmith,
+            true,
+            Some(UserStretchAlgorithm::Linear),
+            Some(false),
+        );
+        let settings = current_runtime_stretch_settings();
+        assert_eq!(settings.effective_algorithm(), UserStretchAlgorithm::Linear);
+        assert!(!settings.effective_hifigan_mel_stretch());
+        assert!(matches!(
+            resolved_external_stretch_algorithm(),
+            StretchAlgorithm::LinearResample
+        ));
+        assert!(!should_use_hifigan_mel_stretch());
     }
 }
 

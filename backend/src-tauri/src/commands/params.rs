@@ -45,7 +45,10 @@ fn resolve_child_pitch_offset_curve_default_value(
     param: &str,
 ) -> Option<f32> {
     let spec = parse_child_pitch_offset_param(param)?;
-    let track = timeline.tracks.iter().find(|track| track.id == spec.track_id)?;
+    let track = timeline
+        .tracks
+        .iter()
+        .find(|track| track.id == spec.track_id)?;
     if track.parent_id.is_none() {
         return None;
     }

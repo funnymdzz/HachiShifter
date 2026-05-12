@@ -1,5 +1,6 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { webApi } from "../../../services/webviewApi";
+import type { SessionState } from "../sessionSlice";
 import { requestMissingFileReplacement } from "./missingFilePrompt";
 
 async function resolveMissingFilesInteractively(timeline: any, missingFiles: string[] | undefined) {
@@ -75,8 +76,11 @@ export const saveProjectRemote = createAsyncThunk(
     async (_, { rejectWithValue, getState }) => {
         const state = getState() as any;
         const hasPath = Boolean(state?.session?.project?.path);
+        const notesMarkdown = String(state?.session?.project?.notesMarkdown ?? "");
 
-        const res = hasPath ? await webApi.saveProject() : await webApi.saveProjectAs();
+        const res = hasPath
+            ? await webApi.saveProject(notesMarkdown)
+            : await webApi.saveProjectAs(notesMarkdown);
         if (!res || res.ok === false) {
             return rejectWithValue(res?.error ?? "save_project_failed");
         }
@@ -86,8 +90,10 @@ export const saveProjectRemote = createAsyncThunk(
 
 export const saveProjectAsRemote = createAsyncThunk(
     "session/saveProjectAsRemote",
-    async (_, { rejectWithValue }) => {
-        const res = await webApi.saveProjectAs();
+    async (_, { rejectWithValue, getState }) => {
+        const state = getState() as any;
+        const notesMarkdown = String(state?.session?.project?.notesMarkdown ?? "");
+        const res = await webApi.saveProjectAs(notesMarkdown);
         if (!res || res.ok === false) {
             return rejectWithValue(res?.error ?? "save_project_as_failed");
         }
@@ -128,9 +134,26 @@ export const setProjectTimelineSettingsRemote = createAsyncThunk(
     },
 );
 
+export const setProjectStretchSettingsRemote = createAsyncThunk(
+    "session/setProjectStretchSettingsRemote",
+    async (
+        payload: {
+            stretchAlgorithmOverride?: "linear" | "signalsmith" | "soundtouch" | null;
+            hifiganMelStretchOverride?: boolean | null;
+        },
+        { rejectWithValue },
+    ) => {
+        const res = await webApi.setProjectStretchSettings(payload);
+        if (!res || res.ok === false) {
+            return rejectWithValue("set_project_stretch_settings_failed");
+        }
+        return res;
+    },
+);
+
 export const openVocalShifterFromDialog = createAsyncThunk(
     "session/openVocalShifterFromDialog",
-    async (_, { rejectWithValue }) => {
+    async (_, { rejectWithValue, getState }) => {
         const picked = await webApi.openVocalShifterDialog();
         if (!picked.ok) return rejectWithValue("open_vocalshifter_dialog_failed");
         if (picked.canceled || !picked.path) {
@@ -141,35 +164,51 @@ export const openVocalShifterFromDialog = createAsyncThunk(
             return rejectWithValue(result?.error ?? "import_vocalshifter_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             canceled: false,
             timeline: result,
             skippedFiles: result.skipped_files as string[] | undefined,
+            newClipIds,
         } as const;
     },
 );
 
 export const openVocalShifterFromPath = createAsyncThunk(
     "session/openVocalShifterFromPath",
-    async (vspPath: string, { rejectWithValue }) => {
+    async (vspPath: string, { rejectWithValue, getState }) => {
         let result = await webApi.importVocalShifterProject(vspPath);
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "import_vocalshifter_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             canceled: false,
             timeline: result,
             skippedFiles: result.skipped_files as string[] | undefined,
+            newClipIds,
         } as const;
     },
 );
 
 export const openReaperFromDialog = createAsyncThunk(
     "session/openReaperFromDialog",
-    async (_, { rejectWithValue }) => {
+    async (_, { rejectWithValue, getState }) => {
         const picked = await webApi.openReaperDialog();
         if (!picked.ok) return rejectWithValue("open_reaper_dialog_failed");
         if (picked.canceled || !picked.path) {
@@ -180,28 +219,44 @@ export const openReaperFromDialog = createAsyncThunk(
             return rejectWithValue(result?.error ?? "import_reaper_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             canceled: false,
             timeline: result,
             skippedFiles: result.skipped_files as string[] | undefined,
+            newClipIds,
         } as const;
     },
 );
 
 export const openReaperFromPath = createAsyncThunk(
     "session/openReaperFromPath",
-    async (rppPath: string, { rejectWithValue }) => {
+    async (rppPath: string, { rejectWithValue, getState }) => {
         let result = await webApi.importReaperProject(rppPath);
         if (!result?.ok) {
             return rejectWithValue(result?.error ?? "import_reaper_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             canceled: false,
             timeline: result,
             skippedFiles: result.skipped_files as string[] | undefined,
+            newClipIds,
         } as const;
     },
 );

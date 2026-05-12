@@ -4,8 +4,9 @@ version = 4
 
 [[package]]
 name = "HiFiShifter"
-version = "0.1.0-beta.9"
+version = "0.1.0-beta.10"
 dependencies = [
+ "aberth",
  "arc-swap",
  "base64 0.22.1",
  "blake3",
@@ -37,6 +38,17 @@ dependencies = [
  "tauri-plugin-opener",
  "uuid",
  "zip",
+]
+
+[[package]]
+name = "aberth"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cb783fafbd88179a8f541eddc7d23edb991791ff3ed4f86098dd64a418626fb"
+dependencies = [
+ "arrayvec",
+ "num-complex",
+ "num-traits",
 ]
 
 [[package]]

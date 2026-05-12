@@ -222,15 +222,11 @@ fn global_cache() -> &'static Mutex<LruCache<u64, HnsepCacheEntry>> {
 /// 避免在大量切片场景下因 LRU 容量不足导致缓存驱逐和重复推理。
 pub fn ensure_cache_capacity(min_capacity: usize) {
     let next = min_capacity.max(1);
-    let mut cache = global_cache()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
+    let mut cache = global_cache().lock().unwrap_or_else(|e| e.into_inner());
     let current_cap = cache.cap().get();
     if next > current_cap {
         cache.resize(NonZeroUsize::new(next).unwrap());
-        eprintln!(
-            "[hnsep] LRU cache resized: {current_cap} -> {next}"
-        );
+        eprintln!("[hnsep] LRU cache resized: {current_cap} -> {next}");
     }
 }
 

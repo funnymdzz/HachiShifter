@@ -11,7 +11,7 @@ use arc_swap::ArcSwap;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::state::TimelineState;
-use crate::time_stretch::{time_stretch_interleaved, StretchAlgorithm};
+use crate::time_stretch::time_stretch_interleaved;
 
 use super::mix::{
     render_callback_f32, render_callback_i16, render_callback_u16, SnapshotTransitionState,
@@ -173,10 +173,7 @@ impl AudioEngine {
                         }
                     };
 
-                    let Some(app) = meter_app_handle
-                        .lock()
-                        .ok()
-                        .and_then(|guard| guard.clone())
+                    let Some(app) = meter_app_handle.lock().ok().and_then(|guard| guard.clone())
                     else {
                         continue;
                     };
@@ -235,7 +232,7 @@ impl AudioEngine {
 
             let (stretch_tx, stretch_rx) = mpsc::channel::<StretchJob>();
 
-            // Worker that computes Signalsmith Stretch off the command thread.
+            // Worker that computes SoundTouch stretch off the command thread.
             // Keep it small to avoid CPU spikes.
             {
                 let cache = cache_for_cmd.clone();
@@ -244,8 +241,15 @@ impl AudioEngine {
                 let tx_ready = tx_for_worker.clone();
                 thread::spawn(move || {
                     while let Ok(job) = stretch_rx.recv() {
-                        // If Signalsmith Stretch isn't available, drop the job.
-                        if !crate::sstretch::is_available() {
+                        let runtime_available = match job.algorithm {
+                            crate::time_stretch::StretchAlgorithm::SoundTouchDll => {
+                                crate::soundtouch::is_available()
+                            }
+                            crate::time_stretch::StretchAlgorithm::SignalsmithStretch
+                            | crate::time_stretch::StretchAlgorithm::LinearResample => true,
+                            crate::time_stretch::StretchAlgorithm::ElastiqueSoloist => false,
+                        };
+                        if !runtime_available {
                             if let Ok(mut s) = inflight.lock() {
                                 s.remove(&job.key);
                             }
@@ -322,7 +326,7 @@ impl AudioEngine {
                             2,
                             job.key.out_rate,
                             loop_out_frames,
-                            StretchAlgorithm::SignalsmithStretch,
+                            job.algorithm,
                         );
 
                         let stretched_src = ResampledStereo {
@@ -856,6 +860,26 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     eprintln!("[engine] Pitch schedule check: clips={}, clip_changed={}, track_changed={}, needs_schedule={}",
         tl.clips.len(), clip_changed, track_pitch_settings_changed, needs_pitch_schedule);
 
+    // 预计算需要推送 pitch data 的 MIDI clip（必须在 *s.last_timeline 赋值之前，避免 borrow 冲突）
+    let midi_clips_needing_emit: std::collections::HashSet<String> = tl
+        .clips
+        .iter()
+        .filter(|c| c.midi_note_data.is_some())
+        .filter(|c| {
+            old_clips_map.get(c.id.as_str()).map_or(true, |old| {
+                (old.start_sec - c.start_sec).abs() > 1e-9
+                    || (old.source_start_sec - c.source_start_sec).abs() > 1e-6
+                    || (old.source_end_sec - c.source_end_sec).abs() > 1e-6
+                    || (old.playback_rate - c.playback_rate).abs() > 1e-6
+                    || old.reversed != c.reversed
+                    || old.midi_fill_gaps != c.midi_fill_gaps
+                    || old.muted != c.muted
+                    || old.midi_note_data != c.midi_note_data
+            })
+        })
+        .map(|c| c.id.clone())
+        .collect();
+
     *s.last_timeline = Some(tl.clone());
     *s.last_play_file = None;
 
@@ -933,6 +957,39 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
             {
                 // 适配 &str
                 emit_clip_pitch_data_for_clip(app, &tl, clip);
+            }
+        }
+    }
+
+    // 新增或参数变更的 MIDI clip 需要推送 pitch data
+    // （MIDI clip 没有 source_path，不会进入 pitch_params_changed_clip_ids 和 schedule_clip_pitch_jobs）
+    if !midi_clips_needing_emit.is_empty() {
+        if let Some(app) = s.app_handle.as_ref() {
+            for clip in tl
+                .clips
+                .iter()
+                .filter(|c| midi_clips_needing_emit.contains(c.id.as_str()))
+            {
+                emit_clip_pitch_data_for_clip(app, &tl, clip);
+            }
+        }
+
+        // MIDI clip 的变更需要触发 pitch_orig 组装，设置 has_pitch_adjustment_active 标志，
+        // 确保渲染管线能正确地将音高参考块的 MIDI 数据应用到同组音频块的渲染中。
+        if let Some(app) = s.app_handle.as_ref() {
+            let state = app.state::<crate::state::AppState>();
+            let mut emitted_roots: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for clip in tl
+                .clips
+                .iter()
+                .filter(|c| midi_clips_needing_emit.contains(c.id.as_str()))
+            {
+                if let Some(root) = tl.resolve_root_track_id(&clip.track_id) {
+                    if emitted_roots.insert(root.clone()) {
+                        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root);
+                    }
+                }
             }
         }
     }
@@ -1034,8 +1091,17 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
 
 fn handle_audio_ready(s: &mut EngineWorkerState, _key: super::types::AudioKey) {
     // A decoded/resampled buffer became available.
-    // Rebuild the snapshot so missing clips can be attached.
+    // Requeue stretch work now that the source PCM cache exists, then rebuild the snapshot so
+    // plain-audio clips can swap from playback_rate fallback to the selected external stretcher.
     if let Some(tl) = s.last_timeline.as_ref() {
+        schedule_stretch_jobs(
+            tl,
+            s.sr,
+            s.stretch_tx,
+            s.stretch_inflight,
+            s.stretch_cache,
+            s.app_handle.as_ref(),
+        );
         let snap = build_snapshot(tl, s.sr, s.cache, s.stretch_cache);
         s.duration_frames
             .store(snap.duration_frames, Ordering::Relaxed);
@@ -1103,6 +1169,103 @@ fn emit_clip_pitch_data_for_clip(
         clip.playback_rate, root,
     );
 
+    // ── MIDI clip 路径：直接从 midi_note_data 生成音高曲线 ──
+    if let Some(ref notes) = clip.midi_note_data {
+        let fp = frame_period_ms.max(0.1);
+        let clip_len_sec = clip.length_sec.max(0.0);
+        let target_frames = ((clip_len_sec * 1000.0) / fp).round().max(1.0) as usize;
+        let mut midi_curve = vec![0.0f32; target_frames];
+
+        let pr = clip.playback_rate as f64;
+        let pr_valid = if pr.is_finite() && pr > 0.0 { pr } else { 1.0 };
+        let src_start = clip.source_start_sec.max(0.0);
+        let src_end = if clip.source_end_sec > 0.0 {
+            clip.source_end_sec
+        } else {
+            // 估算源范围终点：用最后一个音符的结束时间
+            notes
+                .iter()
+                .map(|n| n.end_sec)
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(clip_len_sec)
+                .max(clip_len_sec)
+        };
+        let src_total_len = src_end - src_start;
+
+        for note in notes {
+            if note.end_sec <= src_start || note.start_sec >= src_end {
+                continue;
+            }
+            let rel_start = (note.start_sec - src_start).max(0.0);
+            let rel_end = (note.end_sec - src_start).min(src_total_len);
+            if rel_end <= rel_start {
+                continue;
+            }
+            // 倒放时镜像音符位置
+            let (eff_start, eff_end) = if clip.reversed {
+                (
+                    (src_total_len - rel_end).max(0.0),
+                    (src_total_len - rel_start).min(src_total_len),
+                )
+            } else {
+                (rel_start, rel_end)
+            };
+            if eff_end <= eff_start {
+                continue;
+            }
+            let note_start_frame = ((eff_start / pr_valid * 1000.0) / fp).round() as usize;
+            let note_end_frame = ((eff_end / pr_valid * 1000.0) / fp).round() as usize;
+            let write_end = note_end_frame.min(target_frames);
+            if note_start_frame < write_end {
+                let note_value = note.note as f32;
+                for frame in note_start_frame..write_end {
+                    let current = midi_curve[frame];
+                    if note_value > current || current <= 0.0 {
+                        midi_curve[frame] = note_value;
+                    }
+                }
+            }
+        }
+
+        // 填补音符之间的空隙
+        if clip.midi_fill_gaps && target_frames > 0 {
+            let first = midi_curve.iter().position(|&v| v > 0.0);
+            let last = midi_curve.iter().rposition(|&v| v > 0.0);
+            if let (Some(f), Some(l)) = (first, last) {
+                if f < l {
+                    let mut last_pitch: f32 = 0.0;
+                    for i in f..=l {
+                        let current = midi_curve[i];
+                        if current > 0.0 {
+                            last_pitch = current;
+                        } else if last_pitch > 0.0 {
+                            midi_curve[i] = last_pitch;
+                        }
+                    }
+                }
+            }
+        }
+
+        let curve_start_sec = compute_pitch_curve_start_sec(clip);
+        eprintln!(
+            "[pitch:emit] clip_id={} (MIDI) → curve_start={:.3}s curve_len={} fp={:.1}ms total_dur={:.3}s",
+            clip.id,
+            curve_start_sec,
+            midi_curve.len(),
+            frame_period_ms,
+            midi_curve.len() as f64 * frame_period_ms / 1000.0,
+        );
+        let payload = ClipPitchDataPayload {
+            clip_id: clip.id.clone(),
+            curve_start_sec,
+            midi_curve,
+            frame_period_ms,
+        };
+        let _ = app.emit("clip_pitch_data", payload);
+        return;
+    }
+
+    // ── 音频 clip 路径：从 FCPE 缓存获取音高曲线 ──
     let Some(cached) = get_or_compute_clip_pitch_midi_global(tl, clip, &root, frame_period_ms)
     else {
         eprintln!("[pitch:emit] clip_id={} → 缓存未命中，跳过", clip.id);
@@ -1152,4 +1315,119 @@ fn emit_clip_pitch_data_for_clip(
 /// 而是由 moved_clip_ids 分支重新推送 trim+resample 后的 pitch 数据。
 fn clip_pitch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
     old.source_path != new.source_path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audio_engine::resource_manager::ResourceManager;
+    use crate::audio_engine::types::{EngineCommand, EngineSnapshot};
+    use crate::state::{Clip, TimelineState};
+    use crate::time_stretch::{update_runtime_stretch_settings, UserStretchAlgorithm};
+    use arc_swap::ArcSwap;
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::sync::{mpsc, Arc, Mutex};
+
+    fn make_plain_stretch_timeline() -> TimelineState {
+        let mut timeline = TimelineState::default();
+        let track_id = timeline.tracks[0].id.clone();
+        timeline.clips.push(Clip {
+            id: "clip-1".to_string(),
+            track_id,
+            name: "clip".to_string(),
+            start_sec: 0.0,
+            length_sec: 1.0,
+            color: "#ffffff".to_string(),
+            source_path: Some("E:/virtual/test.wav".to_string()),
+            source_path_relative: None,
+            duration_sec: Some(1.0),
+            duration_frames: Some(44_100),
+            source_sample_rate: Some(44_100),
+            waveform_preview: None,
+            pitch_range: None,
+            gain: 1.0,
+            muted: false,
+            source_start_sec: 0.0,
+            source_end_sec: 1.0,
+            playback_rate: 0.75,
+            reversed: false,
+            fade_in_sec: 0.0,
+            fade_out_sec: 0.0,
+            fade_in_curve: "sine".to_string(),
+            fade_out_curve: "sine".to_string(),
+            extra_curves: None,
+            extra_params: None,
+            formant_morph: None,
+            group_id: None,
+            midi_fill_gaps: false,
+            midi_note_data: None,
+        });
+        timeline
+    }
+
+    #[test]
+    fn audio_ready_requeues_stretch_jobs_for_plain_audio_clips() {
+        update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, false, None, None);
+
+        let timeline = make_plain_stretch_timeline();
+        let (engine_tx, _engine_rx) = mpsc::channel::<EngineCommand>();
+        let (stretch_tx, stretch_rx) = mpsc::channel();
+
+        let resources = ResourceManager::new(engine_tx.clone());
+        let cache = resources.cache().clone();
+        let stretch_cache = Arc::new(Mutex::new(HashMap::new()));
+        let stretch_inflight = Arc::new(Mutex::new(HashSet::new()));
+        let snapshot = Arc::new(ArcSwap::from_pointee(EngineSnapshot {
+            bpm: 120.0,
+            sample_rate: 44_100,
+            duration_frames: 0,
+            track_ids: Arc::new(vec![]),
+            clips: Arc::new(vec![]),
+        }));
+        let is_playing = Arc::new(AtomicBool::new(false));
+        let target = Arc::new(Mutex::new(None));
+        let base_frames = Arc::new(AtomicU64::new(0));
+        let position_frames = Arc::new(AtomicU64::new(0));
+        let duration_frames = Arc::new(AtomicU64::new(0));
+        let meter_state = Arc::new(Mutex::new(HashMap::new()));
+        let meter_generation = Arc::new(AtomicU64::new(0));
+        let mut last_timeline = Some(timeline);
+        let mut last_play_file = None;
+
+        let mut worker = EngineWorkerState {
+            sr: 44_100,
+            is_playing: &is_playing,
+            target: &target,
+            base_frames: &base_frames,
+            position_frames: &position_frames,
+            duration_frames: &duration_frames,
+            snapshot: &snapshot,
+            cache: &cache,
+            stretch_cache: &stretch_cache,
+            stretch_inflight: &stretch_inflight,
+            stretch_tx: &stretch_tx,
+            resources: &resources,
+            tx: &engine_tx,
+            last_timeline: &mut last_timeline,
+            last_play_file: &mut last_play_file,
+            app_handle: None,
+            meter_state: &meter_state,
+            meter_generation: &meter_generation,
+        };
+
+        handle_audio_ready(
+            &mut worker,
+            (PathBuf::from("E:/virtual/test.wav"), 44_100),
+        );
+
+        let job = stretch_rx
+            .try_recv()
+            .expect("audio_ready should requeue stretch work once source audio becomes available");
+        assert!(matches!(
+            job.algorithm,
+            crate::time_stretch::StretchAlgorithm::SignalsmithStretch
+        ));
+    }
 }

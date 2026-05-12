@@ -5,25 +5,34 @@ import type { SessionState } from "../../../../features/session/sessionSlice";
 import {
     addTrackRemote,
     checkpointHistory,
-    createClipsRemote,
+    duplicateClipsBulkRemote,
     moveClipRemote,
     moveClipsRemote,
     moveClipStart,
     moveClipTrack,
     selectClipRemote,
-    setClipStateRemote,
+    setClipsStateBulkRemote,
     selectTrackRemote,
     seekPlayhead,
     setplayheadSec,
     beginInteraction,
     endInteraction,
 } from "../../../../features/session/sessionSlice";
-import type { ClipTemplate } from "../../../../features/session/sessionTypes";
 import { isModifierActive } from "../../../../features/keybindings/keybindingsSlice";
 import type { Keybinding } from "../../../../features/keybindings/types";
 import { applyAutoCrossfade, computeAutoCrossfadeFromPayload } from "./autoCrossfade";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
+import {
+    buildBulkClipStateUpdates,
+    buildDuplicateClipsBulkPayload,
+} from "./bulkClipRemotePayloads";
 import { buildDropToNewTrackMoves, computeSelectedTrackSpan } from "./clipDropMoveUtils";
+import {
+    computeTimelineTrackDragLock,
+    computeTimelineTrackDragLockThresholdPx,
+} from "../runtime/timelineTrackDragLock";
 import { webApi } from "../../../../services/webviewApi";
+import { resolveClipDragCopyMode } from "./clipDragCopyMode";
 
 export const NEW_TRACK_SENTINEL = "__hs_new_track__";
 
@@ -73,6 +82,7 @@ export function useClipDrag(deps: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
     sessionRef: React.RefObject<SessionState>;
     rowHeight: number;
+    pxPerSec: number;
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
     dispatch: AppDispatch;
@@ -91,6 +101,8 @@ export function useClipDrag(deps: {
     copyDragKb: Keybinding;
     /** 自动交叉淡入淡出 */
     autoCrossfadeEnabled: boolean;
+    /** 忽略编组 */
+    ignoreGrouping: boolean;
     /** Ctrl+点击（未拖动）时的多选切换回调 */
     onCtrlClick?: (clipId: string) => void;
 }) {
@@ -100,6 +112,7 @@ export function useClipDrag(deps: {
         multiSelectedClipIds,
         multiSelectedSet,
         dispatch,
+        pxPerSec,
         snapBeat,
         beatFromClientX,
         trackIdFromClientY,
@@ -110,12 +123,14 @@ export function useClipDrag(deps: {
         gridSnapEnabled,
         copyDragKb,
         autoCrossfadeEnabled,
+        ignoreGrouping,
         onCtrlClick,
     } = deps;
     void gridSnapEnabled;
 
     const clipDragRef = useRef<ClipDragState | null>(null);
     const [ghostDrag, setGhostDrag] = useState<GhostDragInfo | null>(null);
+    const [verticalTrackLockTrackId, setVerticalTrackLockTrackId] = useState<string | null>(null);
 
     function resolveTrackIdByOffset(
         drag: ClipDragState,
@@ -161,10 +176,19 @@ export function useClipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        const clipIds =
+        // Expand to include selected clips and their group members
+        const initialIds =
             multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
                 ? [...multiSelectedClipIds]
                 : [clipId];
+        const clipIds = ignoreGrouping
+            ? initialIds
+            : expandClipIdsWithGroups(
+                  initialIds,
+                  sessionRef.current.clips,
+                  false,
+                  sessionRef.current.disabledGroupIds,
+              );
 
         const initialById: Record<string, { startSec: number; trackId: string }> = {};
         let minstartSec = Number.POSITIVE_INFINITY;
@@ -232,12 +256,15 @@ export function useClipDrag(deps: {
             lastTrackOffset: 0,
             lastTrackId: targetTrackId,
             lastDeltaBeat: 0,
-            copyMode: isModifierActive(copyDragKb, e.nativeEvent),
+            copyMode: false,
+            // Ctrl+点击（无拖动）多选切换标记；仅在未发生拖动时生效。
+            // 拖动开始后此标记被清除，由拖拽逻辑接管（Ctrl 拖动 = 复制模式）。
             ctrlSelectionToggle: e.ctrlKey || e.metaKey,
             startClientX: e.clientX,
             startClientY: e.clientY,
             hasMoved: false,
         };
+        setVerticalTrackLockTrackId(null);
         scroller.setPointerCapture(e.pointerId);
 
         function onMove(ev: PointerEvent) {
@@ -250,6 +277,14 @@ export function useClipDrag(deps: {
                 const dy = ev.clientY - drag.startClientY;
                 if (dx * dx + dy * dy < 9) return;
                 drag.hasMoved = true;
+                drag.ctrlSelectionToggle = false;
+                // 拖动开始时根据当前按键状态决定是否为复制拖动
+                drag.copyMode = resolveClipDragCopyMode({
+                    existingCopyMode: drag.copyMode,
+                    ctrlKey: ev.ctrlKey,
+                    metaKey: ev.metaKey,
+                    modifierActive: isModifierActive(copyDragKb, ev),
+                });
                 if (!drag.copyMode) {
                     dispatch(checkpointHistory());
                     dispatch(beginInteraction());
@@ -257,6 +292,17 @@ export function useClipDrag(deps: {
                     // share a single backend undo entry.
                     void webApi.beginUndoGroup();
                 }
+            }
+
+            // 拖动过程中允许 copyMode 随按键变化（但不会从 true 变回 false）
+            const copyMode = resolveClipDragCopyMode({
+                existingCopyMode: drag.copyMode,
+                ctrlKey: ev.ctrlKey,
+                metaKey: ev.metaKey,
+                modifierActive: isModifierActive(copyDragKb, ev),
+            });
+            if (copyMode !== drag.copyMode) {
+                drag.copyMode = copyMode;
             }
             const b = el.getBoundingClientRect();
             const beatNow = beatFromClientX(ev.clientX, b, el.scrollLeft);
@@ -303,25 +349,41 @@ export function useClipDrag(deps: {
                 setClipDropNewTrack(false);
             }
 
-            // ── 轴锁定：垂直跨轨道拖拽时，水平偏移小于阈值则冻结水平位移 ──
-            const HORIZONTAL_LOCK_THRESHOLD = 30; // px
             const horizontalPx = Math.abs(ev.clientX - drag.startClientX);
-            const isTrackChanging =
-                drag.lastTrackOffset !== 0 || (hoveredTrackId == null && drag.allowDropToNewTrack);
-            if (isTrackChanging && horizontalPx < HORIZONTAL_LOCK_THRESHOLD) {
+            const trackLock = computeTimelineTrackDragLock({
+                initialTrackId: drag.initialAnchorTrackId,
+                hoveredTrackId,
+                horizontalDeltaPx: horizontalPx,
+                thresholdPx: computeTimelineTrackDragLockThresholdPx(pxPerSec),
+            });
+            setVerticalTrackLockTrackId(trackLock.lockedTrackId);
+            if (trackLock.locked) {
                 deltaBeat = 0;
                 drag.lastDeltaBeat = 0;
             }
 
             // copyMode 时不移动原 clip，只更新 ghost 预览位置
-            if (drag.copyMode) {
-                setGhostDrag({
-                    clipIds: drag.clipIds,
-                    initialById: drag.initialById,
-                    deltaSec: deltaBeat,
-                    targetTrackId: nextTrackId,
-                    targetTrackOffset: drag.lastTrackOffset,
-                    allowTrackMove: drag.allowTrackMove,
+            if (copyMode) {
+                setGhostDrag((prev) => {
+                    if (
+                        prev &&
+                        prev.deltaSec === deltaBeat &&
+                        prev.targetTrackId === nextTrackId &&
+                        prev.targetTrackOffset === drag.lastTrackOffset &&
+                        prev.allowTrackMove === drag.allowTrackMove &&
+                        prev.clipIds === drag.clipIds &&
+                        prev.initialById === drag.initialById
+                    ) {
+                        return prev;
+                    }
+                    return {
+                        clipIds: drag.clipIds,
+                        initialById: drag.initialById,
+                        deltaSec: deltaBeat,
+                        targetTrackId: nextTrackId,
+                        targetTrackOffset: drag.lastTrackOffset,
+                        allowTrackMove: drag.allowTrackMove,
+                    };
                 });
             } else {
                 batch(() => {
@@ -357,6 +419,7 @@ export function useClipDrag(deps: {
             if (!drag || drag.pointerId !== e.pointerId) return;
             clipDragRef.current = null;
             setClipDropNewTrack(false);
+            setVerticalTrackLockTrackId(null);
 
             const maybeSelectTargetTrack = (targetTrackId: string | null) => {
                 if (!targetTrackId) return;
@@ -453,58 +516,10 @@ export function useClipDrag(deps: {
                 // copyMode 下原 clip 未被移动，直接根据 ghost 偏移量计算副本位置
                 // copyMode 不使用交互锁（原 clip 未被拖动改变位置）
                 void (async () => {
-                    const templateInputs = drag.clipIds
-                        .map((id) => {
-                            const initial = drag.initialById[id];
-                            const now = sessionRef.current.clips.find((c) => c.id === id);
-                            if (!initial || !now) return null;
-                            return { id, initial, now };
-                        })
-                        .filter(
-                            (
-                                input,
-                            ): input is {
-                                id: string;
-                                initial: { startSec: number; trackId: string };
-                                now: (typeof sessionRef.current.clips)[number];
-                            } => input != null,
-                        );
-
-                    const linkedParamsResults = await Promise.all(
-                        templateInputs.map((input) => webApi.getClipLinkedParams(input.id)),
+                    const sourceClipIds = drag.clipIds.filter((id) =>
+                        sessionRef.current.clips.some((clip) => clip.id === id),
                     );
-
-                    const templates: ClipTemplate[] = templateInputs.map((input, index) => {
-                        const { initial, now } = input;
-                        const targetTrackId = drag.allowTrackMove
-                            ? drag.lastTrackId == null
-                                ? null
-                                : resolveTrackIdByOffset(drag, input.id, drag.lastTrackOffset)
-                            : initial.trackId;
-                        const linkedParamsResult = linkedParamsResults[index];
-                        return {
-                            trackId: targetTrackId ?? initial.trackId,
-                            name: String(now.name),
-                            startSec: Math.max(0, initial.startSec + drag.lastDeltaBeat),
-                            lengthSec: Number(now.lengthSec),
-                            sourcePath: now.sourcePath,
-                            durationSec: now.durationSec,
-                            gain: Number(now.gain ?? 1) || 1,
-                            muted: Boolean(now.muted),
-                            sourceStartSec: Number(now.sourceStartSec ?? 0) || 0,
-                            sourceEndSec: Number(now.sourceEndSec ?? 0) || 0,
-                            playbackRate: Number(now.playbackRate ?? 1) || 1,
-                            fadeInSec: Number(now.fadeInSec ?? 0) || 0,
-                            fadeOutSec: Number(now.fadeOutSec ?? 0) || 0,
-                            fadeInCurve: now.fadeInCurve,
-                            fadeOutCurve: now.fadeOutCurve,
-                            linkedParams: linkedParamsResult.ok
-                                ? linkedParamsResult.linkedParams
-                                : undefined,
-                        };
-                    });
-
-                    if (templates.length === 0) {
+                    if (sourceClipIds.length === 0) {
                         return;
                     }
                     dispatch(checkpointHistory());
@@ -512,59 +527,98 @@ export function useClipDrag(deps: {
                         // Begin backend undo group for copy-drag + auto-crossfade
                         await webApi.beginUndoGroup();
                         try {
+                            const targetTrackIdByClipId = new Map<string, string>();
                             if (dropToNewTrack) {
                                 if (drag.hasMixedTrackSelection) {
-                                    // mixed selection: create multiple new tracks matching source span
                                     const spanInfo = computeSelectedTrackSpan({
                                         clipIds: drag.clipIds,
                                         initialById: drag.initialById,
                                         trackIndexById: drag.initialTrackIndexById,
                                     });
                                     if (!spanInfo) throw new Error("create_track_failed");
-
-                                    const minIdx = spanInfo.minTrackIndex;
-                                    const span = spanInfo.span;
-                                    const created = await createNewTracksForDrop(span);
-                                    if (created.length === span) {
-                                        for (const tpl of templates) {
-                                            const srcIdx = drag.initialTrackIndexById[tpl.trackId];
-                                            if (!Number.isFinite(srcIdx)) continue;
-                                            const offset = Number(srcIdx) - minIdx;
-                                            tpl.trackId = created[offset] ?? tpl.trackId;
-                                        }
-                                        maybeSelectTargetTrack(created[0] ?? null);
-                                    } else {
-                                        // fallback to single new track
-                                        const newTrackId = await createNewTrackForDrop();
-                                        if (newTrackId) {
-                                            for (const tpl of templates) tpl.trackId = newTrackId;
-                                            maybeSelectTargetTrack(newTrackId);
+                                    const created = await createNewTracksForDrop(spanInfo.span);
+                                    if (created.length !== spanInfo.span) {
+                                        throw new Error("create_track_failed");
+                                    }
+                                    for (const clipId of sourceClipIds) {
+                                        const initial = drag.initialById[clipId];
+                                        if (!initial) continue;
+                                        const srcIdx = drag.initialTrackIndexById[initial.trackId];
+                                        if (!Number.isFinite(srcIdx)) continue;
+                                        const offset = Number(srcIdx) - spanInfo.minTrackIndex;
+                                        const targetTrackId = created[offset];
+                                        if (targetTrackId) {
+                                            targetTrackIdByClipId.set(clipId, targetTrackId);
                                         }
                                     }
                                 } else {
                                     const newTrackId = await createNewTrackForDrop();
-                                    if (newTrackId) {
-                                        for (const tpl of templates) {
-                                            tpl.trackId = newTrackId;
-                                        }
-                                        maybeSelectTargetTrack(newTrackId);
+                                    if (!newTrackId) throw new Error("create_track_failed");
+                                    for (const clipId of sourceClipIds) {
+                                        targetTrackIdByClipId.set(clipId, newTrackId);
                                     }
                                 }
                             } else {
-                                maybeSelectTargetTrack(drag.lastTrackId ?? null);
+                                for (const clipId of sourceClipIds) {
+                                    const initial = drag.initialById[clipId];
+                                    if (!initial) continue;
+                                    const targetTrackId =
+                                        drag.allowTrackMove && drag.lastTrackOffset !== 0
+                                            ? (resolveTrackIdByOffset(
+                                                  drag,
+                                                  clipId,
+                                                  drag.lastTrackOffset,
+                                              ) ?? initial.trackId)
+                                            : initial.trackId;
+                                    targetTrackIdByClipId.set(clipId, targetTrackId);
+                                }
                             }
+
+                            const firstTargetTrackId = targetTrackIdByClipId.get(sourceClipIds[0]);
+                            if (firstTargetTrackId) {
+                                maybeSelectTargetTrack(firstTargetTrackId);
+                            }
+                            const trackMapping = new Map<string, string>();
+                            for (const clipId of sourceClipIds) {
+                                const initial = drag.initialById[clipId];
+                                const targetTrackId = targetTrackIdByClipId.get(clipId);
+                                if (!initial || !targetTrackId) continue;
+                                trackMapping.set(initial.trackId, targetTrackId);
+                            }
+                            if (trackMapping.size === 0) return;
+                            const trackMode = Array.from(trackMapping.entries()).every(
+                                ([sourceTrackId, targetTrackId]) => sourceTrackId === targetTrackId,
+                            )
+                                ? { kind: "same_track" }
+                                : {
+                                      kind: "explicit_mapping",
+                                      mapping: Object.fromEntries(trackMapping),
+                                  };
                             const payload = await dispatch(
-                                createClipsRemote({ templates }),
+                                duplicateClipsBulkRemote(
+                                    buildDuplicateClipsBulkPayload({
+                                        sourceClipIds,
+                                        deltaSec: drag.lastDeltaBeat,
+                                        copyLinkedParams: sessionRef.current.lockParamLinesEnabled,
+                                        applyAutoCrossfade: autoCrossfadeEnabled,
+                                        trackMode,
+                                        renameCopies: false,
+                                    }),
+                                ),
                             ).unwrap();
                             const created: string[] = payload?.createdClipIds ?? [];
                             if (!Array.isArray(created) || created.length === 0) return;
                             setMultiSelectedClipIds(created);
                             void dispatch(selectClipRemote(created[0]));
                             // 复制拖动后，将播放光标定位到目标时间点（所有副本中最靠前的起始位置）
-                            const targetStartSec = templates.reduce(
-                                (min, t) => Math.min(min, t.startSec),
-                                Infinity,
-                            );
+                            const targetStartSec = sourceClipIds.reduce((min, clipId) => {
+                                const initial = drag.initialById[clipId];
+                                if (!initial) return min;
+                                return Math.min(
+                                    min,
+                                    Math.max(0, initial.startSec + drag.lastDeltaBeat),
+                                );
+                            }, Infinity);
                             if (Number.isFinite(targetStartSec)) {
                                 dispatch(setplayheadSec(targetStartSec));
                                 void dispatch(seekPlayhead(targetStartSec));
@@ -584,17 +638,24 @@ export function useClipDrag(deps: {
                                     created,
                                 );
                                 if (fadeUpdates.length > 0) {
-                                    const fadePromises = fadeUpdates.map((u) =>
-                                        dispatch(
-                                            setClipStateRemote({
-                                                clipId: u.clipId,
+                                    const changesById = new Map(
+                                        fadeUpdates.map((u) => [
+                                            u.clipId,
+                                            {
                                                 fadeInSec: u.fadeInSec,
                                                 fadeOutSec: u.fadeOutSec,
-                                                checkpoint: false,
-                                            }),
-                                        ).unwrap(),
+                                            },
+                                        ]),
                                     );
-                                    await Promise.allSettled(fadePromises);
+                                    await dispatch(
+                                        setClipsStateBulkRemote({
+                                            updates: buildBulkClipStateUpdates({
+                                                clipIds: [...changesById.keys()],
+                                                changesById,
+                                            }),
+                                            checkpoint: false,
+                                        }),
+                                    ).unwrap();
                                 }
                             }
                         } finally {
@@ -799,5 +860,5 @@ export function useClipDrag(deps: {
         window.addEventListener("pointercancel", end);
     }
 
-    return { clipDragRef, startClipDrag, ghostDrag };
+    return { clipDragRef, startClipDrag, ghostDrag, verticalTrackLockTrackId };
 }

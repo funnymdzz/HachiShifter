@@ -148,11 +148,23 @@ Make sure the following tools are installed:
 - **Node.js** (recommended 18+) and npm
 - **Rust toolchain** (see `rust-toolchain.toml`)
 - **Tauri 2 CLI**: `cargo install tauri-cli --version "^2"`
+- **CMake** (required to build the SoundTouch library)
 
 Install frontend dependencies:
 
 ```bash
 npm --prefix frontend install
+```
+
+### 3. SoundTouch Source
+
+The SoundTouch audio time stretching library is built from source at compile time. It is **auto-cloned** on first build — no manual steps required.
+
+For offline builds, you can pre-clone manually:
+
+```bash
+cd backend/src-tauri/third_party/soundtouch-static
+git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.git soundtouch
 ```
 
 ## Quick Start
@@ -195,6 +207,7 @@ $env:TAURI_UI_MODE='build'; cargo tauri dev
 This project uses code or model architectures from the following open-source libraries:
 
 - [WORLD](https://github.com/mmorise/World) — High-quality speech analysis and synthesis system
+- [SoundTouch](https://www.surina.net/soundtouch/) — Audio time stretching and pitch shifting library (LGPL)
 - [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — High-quality audio time stretching library (MIT)
 - [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — Voice analysis and synthesis library
 - [SingingVocoders](https://github.com/openvpi/SingingVocoders) — Singing voice vocoder (OpenVPI)

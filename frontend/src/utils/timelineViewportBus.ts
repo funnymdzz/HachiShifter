@@ -3,6 +3,10 @@
  *
  * 解决 WaveformTrackCanvas 在滚动/缩放时的渲染延迟问题。
  *
+ * 注意：
+ * 新的 timeline canvas runtime 不应依赖这个总线作为主视口状态来源。
+ * 这个总线现在主要保留给 legacy waveform fallback 路径。
+ *
  * 问题背景：
  *   PianoRoll 是单一组件，syncScrollLeft() 可以直接调 invalidate() 触发 Canvas 重绘（~16ms）。
  *   WaveformTrackCanvas 是子组件，滚动信息必须经过 React state → props 链路传递：

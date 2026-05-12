@@ -83,11 +83,18 @@ export function isAudioFilePath(path: string | null | undefined): boolean {
     return /\.(wav|flac|mp3|ogg|m4a|aac|aif|aiff|wma|opus)$/i.test(normalized);
 }
 
+export function isMidiFilePath(path: string | null | undefined): boolean {
+    const normalized = String(path ?? "").trim();
+    if (!normalized) return false;
+    return /\.(mid|midi)$/i.test(normalized);
+}
+
 export type ExternalPathActionKind =
     | "openProject"
     | "importReaper"
     | "importVocalShifter"
-    | "importAudio";
+    | "importAudio"
+    | "importMidi";
 
 export function detectExternalPathAction(
     path: string | null | undefined,
@@ -98,6 +105,7 @@ export function detectExternalPathAction(
     if (isReaperProjectFilePath(normalized)) return "importReaper";
     if (isVocalShifterProjectFilePath(normalized)) return "importVocalShifter";
     if (isAudioFilePath(normalized)) return "importAudio";
+    if (isMidiFilePath(normalized)) return "importMidi";
     return null;
 }
 

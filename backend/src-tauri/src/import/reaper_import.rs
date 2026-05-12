@@ -5,11 +5,12 @@
 use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
 use crate::reaper_parser::{
-    self, stretch_segments_from_markers, ReaperData, ReaperEnvelope, ReaperItem, ReaperTake,
-    ReaperTrack,
+    self, stretch_segments_from_markers, ReaperData, ReaperEnvelope, ReaperItem,
+    ReaperMidiEvent, ReaperMidiSourceData, ReaperTake, ReaperTrack,
 };
 use crate::state::{Clip, PitchAnalysisAlgo, TimelineState, Track, TrackParamsState};
-use std::collections::BTreeMap;
+use crate::midi_import::MidiNoteEvent;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 /// HiFiShifter 支持的音频格式扩展名
@@ -32,7 +33,7 @@ fn segment_overlap_sec(left_timeline_sec: f64, right_timeline_sec: f64) -> f64 {
 
 /// 轨道颜色调色板（与 state.rs / vocalshifter_import.rs 一致）
 const TRACK_COLORS: &[&str] = &[
-    "#4f8ef7", "#a78bfa", "#34d399", "#fb923c", "#f472b6", "#38bdf8", "#facc15", "#f87171",
+    "#6f8fa9", "#8c7fa3", "#6f9581", "#aa7f67", "#9a6f82", "#6e95a0", "#a39061", "#996d68",
 ];
 
 fn clip_color() -> String {
@@ -87,7 +88,10 @@ fn reaper_fade_curve(values: &[f64]) -> String {
     .to_string()
 }
 
-fn derive_fades_from_item_volume_envelope(item: &ReaperItem, item_length: f64) -> (Option<f64>, Option<f64>) {
+fn derive_fades_from_item_volume_envelope(
+    item: &ReaperItem,
+    item_length: f64,
+) -> (Option<f64>, Option<f64>) {
     let mut points: Vec<(f64, f64)> = item
         .envelopes
         .iter()
@@ -175,7 +179,8 @@ fn effective_item_fades(item: &ReaperItem, take: &ReaperTake, item_length: f64) 
     } else {
         reaper_fade_length_sec(&item.fade_out).clamp(0.0, max_len)
     };
-    let (env_fade_in, env_fade_out) = derive_fades_from_item_volume_envelope(item, item_length.max(0.0));
+    let (env_fade_in, env_fade_out) =
+        derive_fades_from_item_volume_envelope(item, item_length.max(0.0));
 
     // 仅在显式 fade 长度缺失时才从音量包络推导，避免覆盖 Reaper 的直接 FADEIN/FADEOUT。
     if fade_in_sec <= 1e-9 {
@@ -295,7 +300,10 @@ fn take_linear_gain(item: &ReaperItem, take: &ReaperTake) -> f64 {
 
     // 兼容部分 Reaper 多 Take 工程：非主 take 的 VOLPAN 可能写成 0，
     // 但实际可听音量继承自主 take。此处仅对“显式 take”做回退。
-    let explicit_take = item.takes.iter().any(|candidate| std::ptr::eq(candidate, take));
+    let explicit_take = item
+        .takes
+        .iter()
+        .any(|candidate| std::ptr::eq(candidate, take));
     if !explicit_take {
         return vol.max(0.0);
     }
@@ -324,7 +332,8 @@ fn compute_item_source_window_sec(
         compute_take_source_bounds_sec(take, source_duration_sec);
 
     let consumed = consumed_sec.max(0.0);
-    let anchor = compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, is_reversed);
+    let anchor =
+        compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, is_reversed);
 
     if is_reversed {
         let end = anchor;
@@ -347,7 +356,7 @@ pub struct ReaperImportResult {
 pub fn import_rpp(path: &Path) -> Result<ReaperImportResult, String> {
     let data = reaper_parser::parse_rpp_file(path)?;
     let rpp_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    convert_reaper_data(data, Some(rpp_dir))
+    convert_reaper_data(data, Some(rpp_dir), 120.0)
 }
 
 /// 导入 Reaper 剪贴板数据。
@@ -360,6 +369,7 @@ pub fn import_reaper_clipboard(
     playhead_sec: f64,
     selected_track_idx: usize,
     ordered_track_ids: &[String],
+    project_bpm: f64,
 ) -> Result<ReaperImportResult, String> {
     let reaper_data = reaper_parser::parse_clipboard_bytes(data)?;
     convert_reaper_data_clipboard(
@@ -367,6 +377,7 @@ pub fn import_reaper_clipboard(
         playhead_sec,
         selected_track_idx,
         ordered_track_ids,
+        project_bpm,
     )
 }
 
@@ -378,10 +389,11 @@ fn convert_reaper_data_clipboard(
     playhead_sec: f64,
     selected_track_idx: usize,
     ordered_track_ids: &[String],
+    project_bpm: f64,
 ) -> Result<ReaperImportResult, String> {
     if data.is_track_data {
-        // 有 Track 信息，创建新轨道
-        convert_reaper_data(data, None)
+        // 有 Track 信息，创建新轨道；clipboard 数据可能无 TEMPO 行，传入 fallback BPM
+        convert_reaper_data(data, None, project_bpm)
     } else {
         // 纯 Item（可能含 TRACKSKIP）：粘贴到现有轨道，偏移到光标
         convert_reaper_items_to_existing_tracks(
@@ -389,6 +401,7 @@ fn convert_reaper_data_clipboard(
             playhead_sec,
             selected_track_idx,
             ordered_track_ids,
+            project_bpm,
         )
     }
 }
@@ -402,9 +415,11 @@ fn convert_reaper_items_to_existing_tracks(
     playhead_sec: f64,
     selected_track_idx: usize,
     ordered_track_ids: &[String],
+    project_bpm: f64,
 ) -> Result<ReaperImportResult, String> {
     let mut skipped_files: Vec<String> = Vec::new();
     let mut clips: Vec<Clip> = Vec::new();
+    let mut reaper_group_map: HashMap<i32, Vec<String>> = HashMap::new();
     let mut new_tracks: Vec<Track> = Vec::new();
     // 新建轨道映射：target_track_idx → track_id
     let mut created_track_ids: std::collections::HashMap<usize, String> =
@@ -476,6 +491,8 @@ fn convert_reaper_items_to_existing_tracks(
                 &mut clips,
                 &mut skipped_files,
                 track_pitch_accum,
+                project_bpm,
+                &mut reaper_group_map,
             );
         }
     }
@@ -503,6 +520,7 @@ fn convert_reaper_items_to_existing_tracks(
                     pitch_orig: Vec::new(),
                     pitch_edit: Vec::new(),
                     pitch_edit_user_modified: false,
+                    has_pitch_adjustment_active: false,
                     tension_orig: Vec::new(),
                     tension_edit: Vec::new(),
                     pitch_orig_key: None,
@@ -514,7 +532,7 @@ fn convert_reaper_items_to_existing_tracks(
         }
     }
 
-    let timeline = TimelineState {
+    let mut timeline = TimelineState {
         tracks: new_tracks,
         clips,
         selected_track_id: None,
@@ -525,7 +543,13 @@ fn convert_reaper_items_to_existing_tracks(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: next_order,
+        disabled_group_ids: HashSet::new(),
     };
+
+    // 将相同 Reaper GROUP 编号的 clip 编组
+    for clip_ids in reaper_group_map.values() {
+        timeline.group_clips(clip_ids);
+    }
 
     Ok(ReaperImportResult {
         timeline,
@@ -580,15 +604,20 @@ fn compute_parent_ids(depths: &[i32], track_ids: &[String]) -> Vec<Option<String
 fn convert_reaper_data(
     data: ReaperData,
     base_dir: Option<&Path>,
+    fallback_bpm: f64,
 ) -> Result<ReaperImportResult, String> {
     let mut hs_tracks: Vec<Track> = Vec::new();
     let mut hs_clips: Vec<Clip> = Vec::new();
     let mut skipped_files: Vec<String> = Vec::new();
     let mut track_order: i32 = 0;
+    let mut reaper_group_map: HashMap<i32, Vec<String>> = HashMap::new();
 
     // track_id → pitch accumulator
     let mut pitch_data_by_track: std::collections::HashMap<String, Vec<PitchFrameAccumulator>> =
         std::collections::HashMap::new();
+
+    // 从解析的 TEMPO 中获取 BPM（无则用 fallback），后续 MIDI 转换需要
+    let bpm = data.tempo.as_ref().map(|t| t.bpm).unwrap_or(fallback_bpm);
 
     // 预分配 UUID、计算深度和父子关系（两道步）
     let track_ids: Vec<String> = (0..data.tracks.len()).map(|_| new_track_id()).collect();
@@ -633,6 +662,8 @@ fn convert_reaper_data(
                 &mut hs_clips,
                 &mut skipped_files,
                 &mut track_pitch_accum,
+                bpm,
+                &mut reaper_group_map,
             );
         }
 
@@ -670,6 +701,7 @@ fn convert_reaper_data(
                         pitch_orig: Vec::new(),
                         pitch_edit: Vec::new(),
                         pitch_edit_user_modified: false,
+                        has_pitch_adjustment_active: false,
                         tension_orig: Vec::new(),
                         tension_edit: Vec::new(),
                         pitch_orig_key: None,
@@ -682,10 +714,7 @@ fn convert_reaper_data(
         }
     }
 
-    // 从解析的 TEMPO 中获取 BPM（无则默认 120）
-    let bpm = data.tempo.as_ref().map(|t| t.bpm).unwrap_or(120.0);
-
-    let timeline = TimelineState {
+    let mut timeline = TimelineState {
         tracks: hs_tracks,
         clips: hs_clips,
         selected_track_id: None,
@@ -696,7 +725,13 @@ fn convert_reaper_data(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         next_track_order: track_order,
+        disabled_group_ids: HashSet::new(),
     };
+
+    // 将相同 Reaper GROUP 编号的 clip 编组
+    for clip_ids in reaper_group_map.values() {
+        timeline.group_clips(clip_ids);
+    }
 
     Ok(ReaperImportResult {
         timeline,
@@ -724,13 +759,25 @@ fn process_item(
     clips: &mut Vec<Clip>,
     skipped_files: &mut Vec<String>,
     pitch_accum: &mut Vec<PitchFrameAccumulator>,
+    project_bpm: f64,
+    reaper_group_map: &mut HashMap<i32, Vec<String>>,
 ) {
     let take = item.active_take();
+
+    // 检查 MIDI 源
+    if let Some(ref src) = take.source {
+        if src.source_type.eq_ignore_ascii_case("MIDI") {
+            if let Some(ref midi_data) = src.midi_source {
+                process_midi_item(item, take, track_id, time_offset, midi_data, project_bpm, clips, reaper_group_map);
+            }
+            return; // MIDI item 已处理或跳过（空 MIDI）
+        }
+    }
 
     // 获取音频文件路径
     let raw_path = match &take.source {
         Some(src) => src.resolved_path().to_string(),
-        None => return, // skip MIDI or empty items
+        None => return,
     };
     if raw_path.is_empty() {
         return;
@@ -854,7 +901,8 @@ fn process_item(
                 let start = (s_offs + cumulative_source_pos - actual_pre_src)
                     .max(source_min_bound)
                     .min(source_max_bound);
-                let raw_end = s_offs + cumulative_source_pos + seg_source_duration + actual_post_src;
+                let raw_end =
+                    s_offs + cumulative_source_pos + seg_source_duration + actual_post_src;
                 let end = raw_end.max(start).min(source_max_bound);
                 (start, end)
             };
@@ -867,7 +915,8 @@ fn process_item(
 
             clips.push(Clip {
                 id: clip_id.clone(),
-                track_id: track_id.to_string(),
+            group_id: None,
+            track_id: track_id.to_string(),
                 name: if seg_count > 1 {
                     format!("{} ({})", clip_name, seg_idx + 1)
                 } else {
@@ -898,7 +947,13 @@ fn process_item(
                 fade_out_curve: "sine".to_string(),
                 extra_curves: None,
                 extra_params: None,
+                formant_morph: None,
+                midi_note_data: None,
+                midi_fill_gaps: false,
             });
+            if let Some(gid) = item.group_id {
+                reaper_group_map.entry(gid).or_default().push(clip_id);
+            }
             segment_clip_indices.push(clip_index);
             segment_actual_pre_tl.push(actual_pre_tl);
             segment_actual_post_tl.push(actual_post_tl);
@@ -970,8 +1025,13 @@ fn process_item(
             let consumed = item_length * effective_rate;
             let (min_bound, max_bound, has_section) =
                 compute_take_source_bounds_sec(take, duration_sec);
-            let anchor =
-                compute_take_source_anchor_sec(take, min_bound, max_bound, has_section, item_reversed);
+            let anchor = compute_take_source_anchor_sec(
+                take,
+                min_bound,
+                max_bound,
+                has_section,
+                item_reversed,
+            );
             let (fallback_start, fallback_end) = if item_reversed {
                 let end = anchor;
                 let start = (end - consumed).max(min_bound).min(end);
@@ -992,6 +1052,7 @@ fn process_item(
 
         clips.push(Clip {
             id: clip_id.clone(),
+            group_id: None,
             track_id: track_id.to_string(),
             name: clip_name,
             start_sec: clip_start,
@@ -1019,7 +1080,14 @@ fn process_item(
             fade_out_curve,
             extra_curves: None,
             extra_params: None,
+            formant_morph: None,
+            midi_note_data: None,
+            midi_fill_gaps: false,
         });
+
+        if let Some(gid) = item.group_id {
+            reaper_group_map.entry(gid).or_default().push(clip_id);
+        }
 
         // 写入 pitch 偏移数据
         write_pitch_for_clip(
@@ -1182,4 +1250,231 @@ fn resolve_path(raw_path: &str, base_dir: Option<&Path>) -> String {
         return resolved.to_string_lossy().to_string();
     }
     raw_path.to_string()
+}
+
+// ─── MIDI 转换辅助函数 ───
+
+fn midi_ticks_to_seconds(ticks: u64, ticks_per_qn: u32, bpm: f64) -> f64 {
+    if ticks_per_qn == 0 || bpm <= 0.0 {
+        return 0.0;
+    }
+    ticks as f64 / ticks_per_qn as f64 * (60.0 / bpm)
+}
+
+fn resolve_midi_bpm(midi_source: &ReaperMidiSourceData, project_bpm: f64) -> f64 {
+    if let Some(ref igntempo) = midi_source.igntempo {
+        if igntempo.ignore_project {
+            return igntempo.tempo.max(1.0);
+        }
+    }
+    project_bpm.max(1.0)
+}
+
+fn reaper_midi_events_to_notes(
+    events: &[ReaperMidiEvent],
+    ticks_per_qn: u32,
+    bpm: f64,
+) -> Vec<MidiNoteEvent> {
+    let mut notes: Vec<MidiNoteEvent> = Vec::new();
+    // Key: (channel << 7) | note_number, Value: (cumulative_tick_start, velocity)
+    let mut active: std::collections::HashMap<u16, (u64, u8)> = std::collections::HashMap::new();
+    let mut cumulative_ticks: u64 = 0;
+
+    for event in events {
+        cumulative_ticks += event.tick_offset;
+        let channel = event.status & 0x0F;
+        let msg_type = event.status & 0xF0;
+
+        match msg_type {
+            0x90 => {
+                // Note On
+                let note = event.data1;
+                let velocity = event.data2;
+                let key = ((channel as u16) << 7) | (note as u16);
+
+                if velocity == 0 {
+                    // Note On with velocity 0 = Note Off
+                    if let Some((start_tick, start_vel)) = active.remove(&key) {
+                        let start_sec =
+                            midi_ticks_to_seconds(start_tick, ticks_per_qn, bpm);
+                        let end_sec =
+                            midi_ticks_to_seconds(cumulative_ticks, ticks_per_qn, bpm);
+                        notes.push(MidiNoteEvent {
+                            start_sec,
+                            end_sec,
+                            note: note as f32,
+                            velocity: start_vel,
+                            channel,
+                        });
+                    }
+                } else {
+                    // Note On: 如果已有同键活跃音符则先关闭
+                    if let Some((start_tick, start_vel)) = active.remove(&key) {
+                        let start_sec =
+                            midi_ticks_to_seconds(start_tick, ticks_per_qn, bpm);
+                        let end_sec =
+                            midi_ticks_to_seconds(cumulative_ticks, ticks_per_qn, bpm);
+                        notes.push(MidiNoteEvent {
+                            start_sec,
+                            end_sec,
+                            note: note as f32,
+                            velocity: start_vel,
+                            channel,
+                        });
+                    }
+                    active.insert(key, (cumulative_ticks, velocity));
+                }
+            }
+            0x80 => {
+                // Note Off
+                let note = event.data1;
+                let key = ((channel as u16) << 7) | (note as u16);
+                if let Some((start_tick, start_vel)) = active.remove(&key) {
+                    let start_sec = midi_ticks_to_seconds(start_tick, ticks_per_qn, bpm);
+                    let end_sec = midi_ticks_to_seconds(cumulative_ticks, ticks_per_qn, bpm);
+                    notes.push(MidiNoteEvent {
+                        start_sec,
+                        end_sec,
+                        note: note as f32,
+                        velocity: start_vel,
+                        channel,
+                    });
+                }
+            }
+            _ => {
+                // CC, pitch bend, program change 等暂不处理
+            }
+        }
+    }
+
+    // 关闭仍然活跃的音符
+    let remaining: Vec<(u16, u64, u8)> = active
+        .into_iter()
+        .map(|(k, (tick, vel))| (k, tick, vel))
+        .collect();
+    for (key, start_tick, velocity) in remaining {
+        let note = (key & 0x7F) as u8;
+        let channel = (key >> 7) as u8;
+        let start_sec = midi_ticks_to_seconds(start_tick, ticks_per_qn, bpm);
+        let end_sec = midi_ticks_to_seconds(cumulative_ticks, ticks_per_qn, bpm);
+        notes.push(MidiNoteEvent {
+            start_sec,
+            end_sec,
+            note: note as f32,
+            velocity,
+            channel,
+        });
+    }
+
+    notes.sort_by(|a, b| {
+        a.start_sec
+            .partial_cmp(&b.start_sec)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    notes
+}
+
+fn process_midi_item(
+    item: &ReaperItem,
+    take: &ReaperTake,
+    track_id: &str,
+    time_offset: f64,
+    midi_source: &ReaperMidiSourceData,
+    project_bpm: f64,
+    clips: &mut Vec<Clip>,
+    reaper_group_map: &mut HashMap<i32, Vec<String>>,
+) {
+    let bpm = resolve_midi_bpm(midi_source, project_bpm);
+
+    let mut notes = reaper_midi_events_to_notes(&midi_source.events, midi_source.ticks_per_qn, bpm);
+
+    if notes.is_empty() {
+        return;
+    }
+
+    // 应用 SOFFS 和 PLAYRATE
+    let soffs = take.s_offs.max(0.0);
+    let raw_play_rate = take.play_rate.first().copied().unwrap_or(1.0);
+    let play_rate = raw_play_rate.abs().max(0.01);
+
+    for note in &mut notes {
+        note.start_sec = note.start_sec - soffs;
+        note.end_sec = note.end_sec - soffs;
+    }
+
+    let item_length = item.length.max(0.0);
+
+    // 过滤掉完全在窗口外的音符（使用源时间窗口）
+    notes.retain(|n| n.end_sec > 0.0 && n.start_sec < item_length * play_rate);
+
+    if notes.is_empty() {
+        return;
+    }
+
+    // 归一化使最早音符的起始时间为 clip-relative 0
+    let first_start = notes
+        .iter()
+        .map(|n| n.start_sec)
+        .fold(f64::INFINITY, f64::min);
+    for note in &mut notes {
+        note.start_sec -= first_start;
+        note.end_sec -= first_start;
+    }
+
+    let min_note = notes.iter().fold(127.0f32, |m, n| m.min(n.note));
+    let max_note = notes.iter().fold(0.0f32, |m, n| m.max(n.note));
+
+    let item_muted = item.mute.first().copied().unwrap_or(0) != 0;
+    let take_gain = take_linear_gain(item, take);
+    let clip_start = item.position + time_offset;
+
+    let clip_id = new_clip_id();
+    let clip_name = if take.name.is_empty() {
+        let short_id = clip_id
+            .strip_prefix("clip_")
+            .unwrap_or(&clip_id);
+        format!("MIDI {}", short_id)
+    } else {
+        take.name.clone()
+    };
+
+    clips.push(Clip {
+        id: clip_id.clone(),
+            group_id: None,
+            track_id: track_id.to_string(),
+        name: clip_name,
+        start_sec: clip_start,
+        length_sec: item_length.max(0.1),
+        color: "cyan".to_string(),
+        source_path: None,
+        source_path_relative: None,
+        duration_sec: None,
+        duration_frames: None,
+        source_sample_rate: None,
+        waveform_preview: None,
+        pitch_range: Some(PitchRange {
+            min: min_note,
+            max: max_note,
+        }),
+        gain: convert_volume(take_gain),
+        muted: item_muted,
+        source_start_sec: 0.0,
+        source_end_sec: item_length * play_rate,
+        playback_rate: play_rate as f32,
+        reversed: false,
+        fade_in_sec: 0.0,
+        fade_out_sec: 0.0,
+        fade_in_curve: "sine".to_string(),
+        fade_out_curve: "sine".to_string(),
+        extra_curves: None,
+        extra_params: None,
+        formant_morph: None,
+        midi_note_data: Some(notes),
+        midi_fill_gaps: false,
+    });
+
+    if let Some(gid) = item.group_id {
+        reaper_group_map.entry(gid).or_default().push(clip_id);
+    }
 }

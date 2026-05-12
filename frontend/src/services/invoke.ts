@@ -189,6 +189,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 sourcePath: args[4],
             };
 
+        case "create_clips_bulk":
+            return { payload: args[0] };
+
         case "remove_clip":
             return { clipId: args[0] };
 
@@ -235,8 +238,18 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 fadeInCurve: args[12],
                 fadeOutCurve: args[13],
                 color: args[14],
-                checkpoint: args[15],
+                formantMorph: args[15],
+                checkpoint: args[16],
             };
+
+        case "set_clips_state_bulk":
+            return {
+                updates: args[0],
+                checkpoint: args[1],
+            };
+
+        case "duplicate_clips_bulk":
+            return { payload: args[0] };
 
         case "replace_clip_source":
             return {
@@ -248,7 +261,25 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "split_clip":
             return { clipId: args[0], splitSec: args[1] };
 
+        case "split_clips_at":
+            return { clipIds: args[0], splitSec: args[1] };
+
         case "glue_clips":
+            return { clipIds: args[0] };
+
+        case "group_clips":
+            return { clipIds: args[0] };
+
+        case "ungroup_clips":
+            return { clipIds: args[0] };
+
+        case "toggle_group_disabled":
+            return { groupId: args[0] };
+
+        case "convert_clips_to_pitch_reference":
+            return { clipIds: args[0] };
+
+        case "update_pitch_reference":
             return { clipIds: args[0] };
 
         case "select_clip":
@@ -275,6 +306,9 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
         case "preview_export_audio_plan":
             return { request: args[0] };
 
+        case "quick_export_selected_clips":
+            return { request: args[0] };
+
         case "play_original":
             return { startSec: args[0] };
 
@@ -292,6 +326,18 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "set_project_timeline_settings":
             return { beatsPerBar: args[0], gridSize: args[1] };
+
+        case "set_project_stretch_settings":
+            return {
+                stretchAlgorithmOverride: args[0],
+                hifiganMelStretchOverride: args[1],
+            };
+
+        case "save_project":
+            return args[0] === undefined ? undefined : { notesMarkdown: args[0] };
+
+        case "save_project_as":
+            return args[0] === undefined ? undefined : { notesMarkdown: args[0] };
 
         case "import_vocalshifter_project":
             return { vspPath: args[0] };
@@ -314,6 +360,12 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
 
         case "open_midi_dialog":
             return {};
+
+        case "pick_midi_output_path":
+            return {};
+
+        case "export_pitch_to_midi":
+            return { request: args[0] };
 
         case "get_waveform_mipmap_binary":
             return { sourcePath: args[0], level: args[1] };
@@ -393,14 +445,51 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { algo: args[0] };
 
         case "get_midi_tracks":
-            return { midiPath: args[0] };
+            return {
+                midiPath: args[0],
+                ...(args[1] != null ? { clipboardGuid: args[1] } : {}),
+            };
 
         case "import_midi_to_pitch":
             return {
                 midiPath: args[0],
-                ...(args[1] !== undefined ? { trackIndex: args[1] } : {}),
+                ...(args[1] !== undefined ? { trackIndices: args[1] } : {}),
                 ...(args[2] !== undefined ? { selectionStartFrame: args[2] } : {}),
                 ...(args[3] !== undefined ? { selectionMaxFrames: args[3] } : {}),
+                ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
+                ...(args[5] !== undefined ? { noteBpmMode: args[5] } : {}),
+                ...(args[6] !== undefined ? { specifiedBpm: args[6] } : {}),
+                ...(args[7] !== undefined ? { importMidiBpmAsProject: args[7] } : {}),
+                ...(args[8] != null ? { clipboardGuid: args[8] } : {}),
+                ...(args[9] !== undefined ? { closeLeadingGap: args[9] } : {}),
+            };
+
+        case "import_midi_as_clip":
+            return {
+                midiPath: args[0],
+                ...(args[1] !== undefined ? { trackIndices: args[1] } : {}),
+                ...(args[2] !== undefined ? { trackId: args[2] } : {}),
+                ...(args[3] !== undefined ? { startSec: args[3] } : {}),
+                ...(args[4] !== undefined ? { fillGaps: args[4] } : {}),
+                ...(args[5] !== undefined ? { multiTrackMerge: args[5] } : {}),
+                ...(args[6] !== undefined ? { noteBpmMode: args[6] } : {}),
+                ...(args[7] !== undefined ? { specifiedBpm: args[7] } : {}),
+                ...(args[8] !== undefined ? { importMidiBpmAsProject: args[8] } : {}),
+                ...(args[9] != null ? { clipboardGuid: args[9] } : {}),
+                ...(args[10] !== undefined ? { closeLeadingGap: args[10] } : {}),
+            };
+
+        case "replace_midi_clip_data":
+            return {
+                clipId: args[0],
+                midiPath: args[1],
+                ...(args[2] !== undefined ? { trackIndices: args[2] } : {}),
+                ...(args[3] !== undefined ? { fillGaps: args[3] } : {}),
+                ...(args[4] !== undefined ? { noteBpmMode: args[4] } : {}),
+                ...(args[5] !== undefined ? { specifiedBpm: args[5] } : {}),
+                ...(args[6] !== undefined ? { importMidiBpmAsProject: args[6] } : {}),
+                ...(args[7] != null ? { clipboardGuid: args[7] } : {}),
+                ...(args[8] !== undefined ? { closeLeadingGap: args[8] } : {}),
             };
 
         case "save_ui_settings":

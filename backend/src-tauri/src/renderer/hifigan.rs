@@ -203,11 +203,7 @@ impl HiFiGanRenderer {
         Ok(result)
     }
 
-    /// Mel stretch 路径：在 mel 域完成时间拉伸后推理。
-    ///
-    /// 与 [`render_with_formant`] 的区别：`mono_pcm` 是**未拉伸的源 PCM**，由本方法在 mel 域
-    /// 完成 `playback_rate` 对应的时间拉伸，然后经 HiFiGAN 合成拉伸后的波形。
-    pub fn render_mel_stretch(
+    pub fn render_mel_stretch_with_formant(
         &self,
         ctx: &RenderContext<'_>,
         playback_rate: f64,
@@ -219,20 +215,11 @@ impl HiFiGanRenderer {
         let clip_midi = ctx.clip_midi;
 
         if clip_midi.is_empty() {
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-                eprintln!(
-                    "HiFiGanRenderer::render_mel_stretch: clip_midi is empty, \
-                     skipping inference and returning original PCM"
-                );
-            }
             return Ok(ctx.mono_pcm.to_vec());
         }
 
-        let sr = ctx.sample_rate;
         let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
         let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
-
-        // 构造共振峰偏移回调
         let fp_local = fp.max(0.1);
         let time_to_idx_mul = 1000.0 / fp_local;
 
@@ -255,10 +242,10 @@ impl HiFiGanRenderer {
             a + (b - a) * frac
         };
 
-        let result = crate::nsf_hifigan_onnx::infer_pitch_edit_chunked_mel_stretch(
+        crate::nsf_hifigan_onnx::infer_pitch_edit_chunked_mel_stretch(
             ctx.mono_pcm,
-            sr,
-            playback_rate,
+            ctx.sample_rate,
+            playback_rate.max(1e-6),
             ctx.seg_start_sec,
             move |abs_time_sec| {
                 let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
@@ -278,8 +265,6 @@ impl HiFiGanRenderer {
             formant_shift_fn,
             chunk_sec,
             overlap_sec,
-        )?;
-
-        Ok(result)
+        )
     }
 }

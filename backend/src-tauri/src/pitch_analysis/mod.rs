@@ -101,7 +101,11 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
             | PitchAnalysisAlgo::NsfHifiganOnnx
             | PitchAnalysisAlgo::Unknown
     ) {
-        hasher.update(&[if crate::fcpe_onnx::is_available() { 1 } else { 0 }]);
+        hasher.update(&[if crate::fcpe_onnx::is_available() {
+            1
+        } else {
+            0
+        }]);
     }
 
     // Include each clip mapped to this root track.
@@ -120,6 +124,17 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
         hasher.update(&quantize_u32(c.playback_rate as f64, 10000.0).to_le_bytes());
         hasher.update(&quantize_i64(c.source_start_sec, 1000.0).to_le_bytes());
         hasher.update(&quantize_u32(c.source_end_sec, 1000.0).to_le_bytes());
+        hasher.update(&[if c.muted { 1 } else { 0 }]);
+        hasher.update(&[if c.midi_fill_gaps { 1 } else { 0 }]);
+        if let Some(notes) = c.midi_note_data.as_ref() {
+            for note in notes {
+                hasher.update(&quantize_u32(note.start_sec, 1000.0).to_le_bytes());
+                hasher.update(&quantize_u32(note.end_sec, 1000.0).to_le_bytes());
+                hasher.update(&quantize_i64(note.note as f64, 10000.0).to_le_bytes());
+                hasher.update(&[note.velocity]);
+                hasher.update(&[note.channel]);
+            }
+        }
         if let Some(sp) = c.source_path.as_deref() {
             hasher.update(sp.as_bytes());
             let p = Path::new(sp);

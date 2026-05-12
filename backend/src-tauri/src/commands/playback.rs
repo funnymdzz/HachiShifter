@@ -1,8 +1,8 @@
 use crate::models::PlaybackStatePayload;
 use crate::state::AppState;
 use tauri::Emitter;
-use tauri::State;
 use tauri::Manager;
+use tauri::State;
 
 use super::common::{guard_json_command, ok_bool, PlaybackRenderingStateEvent};
 
@@ -226,8 +226,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 for clip_render_info in &clips_to_render {
                     if rendered_count % 32 == 0 {
                         let sig_check_started_at = std::time::Instant::now();
-                        let changed =
-                            timeline_version_from_app(&app) != render_timeline_version;
+                        let changed = timeline_version_from_app(&app) != render_timeline_version;
                         timeline_sig_check_elapsed += sig_check_started_at.elapsed();
                         if changed {
                             cancelled = true;
@@ -250,8 +249,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         if cache_log {
                             eprintln!(
                                 "[play_original][cache] HIT clip_id={} hash={:#018x}",
-                                clip_render_info.clip.id,
-                                clip_render_info.cache_key.param_hash
+                                clip_render_info.clip.id, clip_render_info.cache_key.param_hash
                             );
                         }
                         crate::synth_clip_cache::register_pending_rendered_key(
@@ -266,8 +264,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         if cache_log {
                             eprintln!(
                                 "[play_original][cache] MISS clip_id={} hash={:#018x}",
-                                clip_render_info.clip.id,
-                                clip_render_info.cache_key.param_hash
+                                clip_render_info.clip.id, clip_render_info.cache_key.param_hash
                             );
                         }
                         if let Ok(mut state_mgr) =
@@ -753,6 +750,7 @@ fn collect_clips_needing_render(
             playback_rate,
             &entry.extra_curves,
             &entry.extra_params,
+            clip.formant_morph.as_ref().filter(|params| params.enabled),
             None,
         );
         let cache_key = crate::synth_clip_cache::RenderedClipCacheKey {
@@ -835,12 +833,8 @@ fn render_single_clip(
     }
 
     let segment = &pcm[(src_i0 * in_channels_usize)..(src_i1 * in_channels_usize)];
-    let mut segment = crate::mixdown::linear_resample_interleaved(
-        segment,
-        in_channels_usize,
-        in_rate,
-        out_rate,
-    );
+    let mut segment =
+        crate::mixdown::linear_resample_interleaved(segment, in_channels_usize, in_rate, out_rate);
 
     if clip.reversed {
         crate::mixdown::reverse_interleaved_frames(&mut segment, in_channels_usize);
@@ -863,23 +857,59 @@ fn render_single_clip(
     } else {
         return Err("unsupported channel count".to_string());
     };
+    let mut segment = segment;
+
+    if let Some(params) = clip.formant_morph.as_ref().filter(|params| params.enabled) {
+        let key = crate::formant_cache::make_formant_cache_key(
+            &clip.id,
+            std::path::Path::new(source_path),
+            out_rate,
+            clip.source_start_sec.max(0.0),
+            clip.source_end_sec,
+            clip.reversed,
+            params,
+        );
+        match crate::formant_cache::get_or_compute_formant_audio(key, &segment, out_rate, params) {
+            Ok(entry) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "render_single_clip using formant clip_id={} frames={} diff={:.8}",
+                    clip.id,
+                    entry.frames,
+                    crate::formant_cache::average_abs_diff(&segment, entry.pcm_stereo.as_ref())
+                ));
+                segment = entry.pcm_stereo.as_ref().clone();
+            }
+            Err(error) => {
+                crate::formant_cache::formant_debug_log(format!(
+                    "render_single_clip formant error clip_id={} error={}",
+                    clip.id, error
+                ));
+            }
+        }
+    }
 
     // 5. 时间拉伸（playback_rate != 1）
     // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
     // 则跳过此处的时间拉伸，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
-    let processor_handles_stretch = {
-        let clip_root = timeline.resolve_root_track_id(&clip.track_id);
-        clip_root
-            .and_then(|root| timeline.tracks.iter().find(|t| t.id == root))
-            .map(|t| {
-                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                crate::renderer::get_processor(kind)
-                    .capabilities()
-                    .handles_time_stretch
-            })
-            .unwrap_or(false)
-    };
-    let mut segment = segment;
+        let processor_handles_stretch = {
+            let clip_root = timeline.resolve_root_track_id(&clip.track_id);
+            clip_root
+                .and_then(|root| {
+                    let t = timeline.tracks.iter().find(|t| t.id == root)?;
+                    let kind =
+                        crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                    let has_adjustment = timeline
+                        .params_by_root_track
+                        .get(&root)
+                        .map(|e| e.has_pitch_adjustment_active)
+                        .unwrap_or(false);
+                    Some(crate::renderer::processor_handles_time_stretch(
+                        kind,
+                        t.compose_enabled || has_adjustment,
+                    ))
+                })
+                .unwrap_or(false)
+        };
     if (playback_rate - 1.0).abs() > 1e-6 && !processor_handles_stretch {
         let seg_frames_in = segment.len() / 2;
         let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
@@ -888,7 +918,7 @@ fn render_single_clip(
             2,
             out_rate,
             target_frames,
-            crate::time_stretch::StretchAlgorithm::SignalsmithStretch,
+            crate::time_stretch::resolved_external_stretch_algorithm(),
         );
     }
 
@@ -982,14 +1012,22 @@ fn render_single_clip(
     // ── 构造 BreathNoiseCache key（显式排除 formant_shift_cents）──
     let breath_noise_cache_key = {
         let clip_root = timeline.resolve_root_track_id(&clip.track_id);
-        let entry = clip_root.as_ref().and_then(|root| timeline.params_by_root_track.get(root));
-        let track = clip_root.as_ref().and_then(|root| timeline.tracks.iter().find(|t| &t.id == root));
+        let entry = clip_root
+            .as_ref()
+            .and_then(|root| timeline.params_by_root_track.get(root));
+        let track = clip_root
+            .as_ref()
+            .and_then(|root| timeline.tracks.iter().find(|t| &t.id == root));
         match (entry, track) {
             (Some(entry), Some(track)) => {
-                let kind = crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
+                let kind =
+                    crate::state::SynthPipelineKind::from_track_algo(&track.pitch_analysis_algo);
                 let renderer_id = crate::renderer::get_renderer(kind).id();
                 let start_frame = (clip.start_sec.max(0.0) * out_rate as f64).round() as u64;
-                let end_frame = start_frame + (clip.length_sec.max(0.0) * out_rate as f64).round().max(1.0) as u64;
+                let end_frame = start_frame
+                    + (clip.length_sec.max(0.0) * out_rate as f64)
+                        .round()
+                        .max(1.0) as u64;
                 let source_path = clip.source_path.as_deref().unwrap_or("");
                 let param_hash = crate::synth_clip_cache::compute_breath_noise_hash(
                     &clip.id,
@@ -1003,6 +1041,7 @@ fn render_single_clip(
                     playback_rate,
                     &entry.extra_curves,
                     &entry.extra_params,
+                    clip.formant_morph.as_ref().filter(|params| params.enabled),
                 );
                 Some(crate::synth_clip_cache::BreathNoiseCacheKey {
                     clip_id: clip.id.clone(),

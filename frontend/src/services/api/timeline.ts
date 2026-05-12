@@ -2,6 +2,7 @@ import type { TimelineResult, TrackSummaryResult } from "../../types/api";
 import type { LinkedParamCurves } from "../../features/session/sessionTypes";
 
 import { invoke } from "../invoke";
+import type { ClipTemplate } from "../../features/session/sessionTypes";
 
 export const timelineApi = {
     // Undo/Redo (backend-authoritative)
@@ -102,6 +103,9 @@ export const timelineApi = {
             payload.sourcePath,
         ),
 
+    createClipsBulk: (payload: { templates: ClipTemplate[]; selectCreatedClips?: boolean }) =>
+        invoke<TimelineResult>("create_clips_bulk", payload),
+
     removeClip: (clipId: string) => invoke<TimelineResult>("remove_clip", clipId),
 
     removeClips: (clipIds: string[]) => invoke<TimelineResult>("remove_clips", clipIds),
@@ -151,6 +155,12 @@ export const timelineApi = {
         fadeInCurve?: string;
         fadeOutCurve?: string;
         color?: string;
+        formantMorph?: {
+            enabled: boolean;
+            targetF1Hz: number;
+            targetF2Hz: number;
+            strength: number;
+        };
         /** 是否创建 undo checkpoint，默认为 true */
         checkpoint?: boolean;
     }) =>
@@ -171,8 +181,31 @@ export const timelineApi = {
             payload.fadeInCurve,
             payload.fadeOutCurve,
             payload.color,
+            payload.formantMorph,
             payload.checkpoint,
         ),
+
+    setClipsStateBulk: (payload: {
+        updates: Array<{
+            clipId: string;
+            gain?: number;
+            muted?: boolean;
+            fadeInSec?: number;
+            fadeOutSec?: number;
+        }>;
+        checkpoint?: boolean;
+    }) => invoke<TimelineResult>("set_clips_state_bulk", payload.updates, payload.checkpoint),
+
+    duplicateClipsBulk: (payload: {
+        sourceClipIds: string[];
+        deltaSec: number;
+        trackMode: Record<string, unknown>;
+        copyLinkedParams?: boolean;
+        selectCreatedClips?: boolean;
+        applyAutoCrossfade?: boolean;
+        placeOnSelectedTrack?: boolean;
+        renameCopies?: boolean;
+    }) => invoke<TimelineResult>("duplicate_clips_bulk", payload),
 
     replaceClipSource: (payload: {
         clipIds: string[];
@@ -189,7 +222,23 @@ export const timelineApi = {
     splitClip: (clipId: string, splitSec: number) =>
         invoke<TimelineResult>("split_clip", clipId, splitSec),
 
+    splitClipsAt: (clipIds: string[], splitSec: number) =>
+        invoke<TimelineResult>("split_clips_at", clipIds, splitSec),
+
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
+
+    groupClips: (clipIds: string[]) => invoke<TimelineResult>("group_clips", clipIds),
+
+    ungroupClips: (clipIds: string[]) => invoke<TimelineResult>("ungroup_clips", clipIds),
+
+    toggleGroupDisabled: (groupId: string) =>
+        invoke<TimelineResult>("toggle_group_disabled", groupId),
+
+    convertClipsToPitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
+
+    updatePitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("update_pitch_reference", clipIds),
 
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
 };

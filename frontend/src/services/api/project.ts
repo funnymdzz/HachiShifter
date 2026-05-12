@@ -1,4 +1,5 @@
 import type { TimelineResult } from "../../types/api";
+import type { StretchAlgorithmOption } from "./settings";
 
 import { invoke } from "../invoke";
 
@@ -20,6 +21,7 @@ export const projectApi = {
             path?: string | null;
             dirty: boolean;
             recent: string[];
+            notes_markdown?: string;
             base_scale?: string;
             use_custom_scale?: boolean;
             custom_scale?: {
@@ -29,6 +31,8 @@ export const projectApi = {
             } | null;
             beats_per_bar?: number;
             grid_size?: string;
+            stretch_algorithm_override?: StretchAlgorithmOption | null;
+            hifigan_mel_stretch_override?: boolean | null;
         }>("get_project_meta"),
 
     setProjectBaseScale: (baseScale: string) =>
@@ -57,6 +61,23 @@ export const projectApi = {
             project?: { beats_per_bar?: number; grid_size?: string; dirty?: boolean };
         }>("set_project_timeline_settings", beatsPerBar, gridSize),
 
+    setProjectStretchSettings: (payload: {
+        stretchAlgorithmOverride?: StretchAlgorithmOption | null;
+        hifiganMelStretchOverride?: boolean | null;
+    }) =>
+        invoke<{
+            ok: boolean;
+            project?: {
+                stretch_algorithm_override?: StretchAlgorithmOption | null;
+                hifigan_mel_stretch_override?: boolean | null;
+                dirty?: boolean;
+            };
+        }>(
+            "set_project_stretch_settings",
+            payload.stretchAlgorithmOverride ?? null,
+            payload.hifiganMelStretchOverride ?? null,
+        ),
+
     newProject: () => invoke<TimelineResult>("new_project"),
 
     openProjectDialog: () =>
@@ -64,9 +85,9 @@ export const projectApi = {
 
     openProject: (projectPath: string) => invoke<TimelineResult>("open_project", projectPath),
 
-    saveProject: () => invoke<any>("save_project"),
+    saveProject: (notesMarkdown?: string) => invoke<any>("save_project", notesMarkdown),
 
-    saveProjectAs: () => invoke<any>("save_project_as"),
+    saveProjectAs: (notesMarkdown?: string) => invoke<any>("save_project_as", notesMarkdown),
 
     getAutoBackupSettings: () => invoke<AutoBackupSettings>("get_auto_backup_settings"),
 
