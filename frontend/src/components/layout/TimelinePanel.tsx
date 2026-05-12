@@ -33,6 +33,7 @@ import {
     setClipFades,
     glueClipsRemote,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     removeClipsRemote,
     setTrackName,
     setTrackVolume,
@@ -45,6 +46,10 @@ import { getInsertBelowTargetIndex } from "./timeline/trackContextMenuPlacement"
 import { collectFadeContextClips } from "./timeline/clipFadeContext";
 import { emitExternalFileAction } from "../../features/session/projectOpenEvents";
 import { webApi } from "../../services/webviewApi";
+import { coreApi } from "../../services/api/core";
+import { paramsApi } from "../../services/api/params";
+import { resolveRootTrackId } from "../../features/session/trackUtils";
+import { SCALE_NOTES } from "../../utils/musicalScales";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
 
@@ -68,6 +73,7 @@ import { useTimelineState } from "./timeline/hooks/useTimelineState";
 import { useTimelineDragDrop } from "./timeline/hooks/useTimelineDragDrop";
 import { useTimelineClipActions } from "./timeline/hooks/useTimelineClipActions";
 import { useTimelineEventHandlers } from "./timeline/hooks/useTimelineEventHandlers";
+import { expandClipIdsWithGroups } from "./timeline/hooks/useGroupExpansion";
 import { useVisualPlayhead } from "../../hooks/useVisualPlayhead";
 import { computeAutoFollowScrollLeft } from "../../utils/autoFollowScroll";
 import { writeSystemClipboardObject } from "../../utils/systemClipboard";
@@ -166,6 +172,17 @@ interface TimelinePanelProps {
     onImportBpmAsProjectChange: (v: boolean) => void;
     onNoteBpmModeChange: (v: string) => void;
     onSpecifiedBpmChange: (v: number) => void;
+    midiClipClipboardGuid?: string | null;
+    importPosition: string;
+    onImportPositionChange: (position: string) => void;
+    closeLeadingGap: boolean;
+    onCloseLeadingGapChange: (v: boolean) => void;
+    midiDialogSource: "menu" | "dragDrop";
+    onMidiDialogSourceChange: (v: "menu" | "dragDrop") => void;
+    importTargetMenu?: string;
+    onImportTargetMenuChange?: (v: string) => void;
+    importTargetDragDrop?: string;
+    onImportTargetDragDropChange?: (v: string) => void;
 }
 
 export const TimelinePanel: React.FC<TimelinePanelProps> = ({
@@ -187,8 +204,24 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     onImportBpmAsProjectChange,
     onNoteBpmModeChange,
     onSpecifiedBpmChange,
+    midiClipClipboardGuid,
+    importPosition,
+    onImportPositionChange,
+    closeLeadingGap,
+    onCloseLeadingGapChange,
+    midiDialogSource,
+    onMidiDialogSourceChange,
+    importTargetMenu,
+    onImportTargetMenuChange,
+    importTargetDragDrop,
+    onImportTargetDragDropChange,
 }) => {
+    const importTarget = midiDialogSource === "dragDrop" ? importTargetDragDrop : importTargetMenu;
+    const onImportTargetChange =
+        midiDialogSource === "dragDrop" ? onImportTargetDragDropChange : onImportTargetMenuChange;
     const { t } = useI18n();
+    const ignoreGrouping = useAppSelector((state) => state.session.ignoreGrouping);
+    const disabledGroupIds = useAppSelector((state) => state.session.disabledGroupIds);
     const rulerPlayheadLineRef = React.useRef<HTMLDivElement | null>(null);
     const rulerPlayheadHeadRef = React.useRef<HTMLDivElement | null>(null);
     const [timelineScrollTop, setTimelineScrollTop] = React.useState(0);
@@ -280,6 +313,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         pxPerSec,
         pxPerBeat,
         rowHeight,
+        ignoreGrouping,
+        disabledGroupIds,
         dispatch,
         sameSourceConfirmResolverRef,
         setSameSourceConfirmOpen,
@@ -300,6 +335,9 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         onSelectionRectPointerDown,
         clipClipboardRef,
         buildClipClipboardTemplates,
+        groupClips,
+        ungroupClips,
+        toggleGroupDisabled,
         normalizeClips,
         replaceClipSources,
         splitClipIdsAtPlayhead,
@@ -351,6 +389,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             noteBpmMode?: string;
             specifiedBpm?: number;
             importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
         }) => {
             void dispatch(
                 importMidiAsClip({
@@ -363,6 +403,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     noteBpmMode: result.noteBpmMode,
                     specifiedBpm: result.specifiedBpm,
                     importBpmAsProject: result.importBpmAsProject,
+                    clipboardGuid: result.clipboardGuid,
+                    closeLeadingGap: result.closeLeadingGap,
                 }),
             );
         },
@@ -380,6 +422,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             noteBpmMode?: string;
             specifiedBpm?: number;
             importBpmAsProject?: boolean;
+            closeLeadingGap?: boolean;
         }) => {
             const clipId = replaceMidiDialog.clipId;
             if (!clipId) return;
@@ -392,6 +435,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     noteBpmMode: result.noteBpmMode,
                     specifiedBpm: result.specifiedBpm,
                     importMidiBpmAsProject: result.importBpmAsProject,
+                    closeLeadingGap: result.closeLeadingGap,
                 }),
             );
             setReplaceMidiDialog({ open: false, clipId: null, midiPath: null });
@@ -404,6 +448,88 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         if (!picked.ok || picked.canceled || !picked.path) return;
         setReplaceMidiDialog({ open: true, clipId, midiPath: picked.path });
     }, []);
+
+    const midiClipRootTrackComposeEnabled = React.useMemo(() => {
+        if (!midiClipTrackId) return true;
+        const rootId = resolveRootTrackId(s.tracks, midiClipTrackId);
+        if (!rootId) return true;
+        const rootTrack = s.tracks.find((t) => t.id === rootId);
+        return rootTrack?.composeEnabled ?? true;
+    }, [midiClipTrackId, s.tracks]);
+
+    const handleRequestEnableCompose = React.useCallback(() => {
+        if (!midiClipTrackId) return;
+        const rootId = resolveRootTrackId(s.tracks, midiClipTrackId);
+        if (!rootId) return;
+        dispatch(
+            setTrackStateRemote({
+                trackId: rootId,
+                composeEnabled: true,
+            }),
+        );
+    }, [dispatch, midiClipTrackId, s.tracks]);
+
+    const handleExportMidi = React.useCallback(
+        async (clipIds: string[]) => {
+            const saveResult = await coreApi.pickMidiOutputPath();
+            if (!saveResult.ok || saveResult.canceled || !saveResult.path) return;
+
+            const s = sessionRef.current;
+            const clipsMap = new Map(s.clips.map((c) => [c.id, c]));
+            const trackMap = new Map(s.tracks.map((t) => [t.id, t]));
+
+            const entries: Array<{
+                trackId: string;
+                rootTrackId: string;
+                name: string;
+                startSec: number;
+                endSec: number;
+                clipId?: string;
+            }> = [];
+            const seenComposeRoots = new Set<string>();
+
+            for (const id of clipIds) {
+                const clip = clipsMap.get(id);
+                if (!clip) continue;
+                const rootId = resolveRootTrackId(s.tracks, clip.trackId);
+                if (!rootId) continue;
+                const rootTrack = trackMap.get(rootId);
+                const isComposeEnabled = rootTrack?.composeEnabled ?? false;
+
+                if (isComposeEnabled) {
+                    // Compose 轨道：按 rootTrackId 去重（共享 track 级音高数据）
+                    if (seenComposeRoots.has(rootId)) continue;
+                    seenComposeRoots.add(rootId);
+                }
+
+                const track = trackMap.get(clip.trackId);
+                entries.push({
+                    trackId: clip.trackId,
+                    rootTrackId: rootId,
+                    name: track?.name ?? clip.name,
+                    startSec: clip.startSec,
+                    endSec: clip.startSec + clip.lengthSec,
+                    ...(isComposeEnabled ? {} : { clipId: clip.id }),
+                });
+            }
+
+            if (entries.length === 0) return;
+
+            const scaleNotes =
+                SCALE_NOTES[(s.project?.baseScale as keyof typeof SCALE_NOTES) ?? "C"] ??
+                SCALE_NOTES.C;
+
+            await paramsApi.exportPitchToMidi({
+                outputPath: saveResult.path,
+                tracks: entries,
+                bpm: s.bpm,
+                beatsPerBar: s.project?.beatsPerBar ?? 4,
+                baseScale: s.project?.baseScale ?? "C",
+                projectScaleNotes: scaleNotes,
+            });
+        },
+        [sessionRef],
+    );
 
     // ── 3. DragDrop (Tauri + 文件浏览器) ─────────────────────
     const { tauriDraggedPathRef, tauriLastDropPathRef, tauriDropHandledAtRef } =
@@ -425,6 +551,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
             pxPerSec,
             rowHeight,
             onMidiDrop: (payload) => {
+                onMidiDialogSourceChange("dragDrop");
                 onMidiClipPathChange(payload.midiPath);
                 onMidiClipStartSecChange(payload.startSec);
                 onMidiClipTrackIdChange(payload.trackId);
@@ -451,6 +578,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         pasteClipsAtPlayhead,
         splitSelectedAtPlayhead,
         normalizeClips,
+        groupClips,
+        ungroupClips,
         isEditableTarget,
         contextMenu,
         trackAreaMenu,
@@ -471,6 +600,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         beatFromClientX,
         noSnapKb,
         gridSnapEnabled: s.gridSnapEnabled,
+        ignoreGrouping,
     });
 
     const { slipDragRef: _slipDragRef, startSlipDrag } = useSlipDrag({
@@ -480,6 +610,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         multiSelectedClipIds,
         multiSelectedSet,
         beatFromClientX,
+        ignoreGrouping,
     });
 
     const {
@@ -505,6 +636,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         gridSnapEnabled: s.gridSnapEnabled,
         copyDragKb,
         autoCrossfadeEnabled: s.autoCrossfadeEnabled,
+        ignoreGrouping,
         onCtrlClick: toggleTrackLaneCtrlSelection,
     });
 
@@ -771,6 +903,18 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         ? (clipById.get(s.selectedClipId)?.trackId ?? null)
         : null;
     const visibleTrackCanvasHeight = Math.max(1, visibleTracks.length * rowHeight);
+    const activeGroupIds = useMemo(() => {
+        const ids = new Set<string>();
+        for (const cid of multiSelectedClipIds) {
+            const gid = clipById.get(cid)?.groupId;
+            if (gid && !disabledGroupIds.includes(gid)) ids.add(gid);
+        }
+        if (s.selectedClipId) {
+            const gid = clipById.get(s.selectedClipId)?.groupId;
+            if (gid && !disabledGroupIds.includes(gid)) ids.add(gid);
+        }
+        return ids.size > 0 ? ids : undefined;
+    }, [multiSelectedClipIds, clipById, s.selectedClipId, disabledGroupIds]);
     const sparseClipRenderModel = useMemo(
         () =>
             buildSparseClipRenderModel({
@@ -782,6 +926,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                 selectedClipId: s.selectedClipId,
                 multiSelectedClipIds,
                 renamingClipId,
+                disabledGroupIds,
             }),
         [
             multiSelectedClipIds,
@@ -797,8 +942,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
     const timelineCanvasModel = useMemo(
         () => ({
             drawClips: sparseClipRenderModel.drawClips,
+            activeGroupIds,
+            disabledGroupIds,
         }),
-        [sparseClipRenderModel.drawClips],
+        [sparseClipRenderModel.drawClips, activeGroupIds, disabledGroupIds],
     );
 
     // ═════════════════════════════════════════════════════════
@@ -1299,6 +1446,11 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                         onRenameDone={handleTrackLaneRenameDone}
                                         onGainCommit={commitTrackLaneGain}
                                         onFormantMorphCommit={commitTrackLaneFormantMorph}
+                                        activeGroupIds={activeGroupIds}
+                                        disabledGroupIds={disabledGroupIds}
+                                        onToggleGroupDisabled={(groupId) => {
+                                            toggleGroupDisabled(groupId);
+                                        }}
                                     />
                                 );
                             })}
@@ -1598,14 +1750,23 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCopy={(ids) => {
                                       void (async () => {
-                                          const templates = await buildClipClipboardTemplates(ids);
-                                          if (templates.length > 0) {
-                                              clipClipboardRef.current = templates;
+                                          const s = sessionRef.current;
+                                          const expandedIds = expandClipIdsWithGroups(
+                                              ids,
+                                              s.clips,
+                                              s.ignoreGrouping,
+                                              s.disabledGroupIds,
+                                          );
+                                          const result =
+                                              await buildClipClipboardTemplates(expandedIds);
+                                          if (result.templates.length > 0) {
+                                              clipClipboardRef.current = result;
                                               try {
                                                   await writeSystemClipboardObject({
                                                       version: 1,
                                                       kind: "clip",
-                                                      templates,
+                                                      templates: result.templates,
+                                                      groupIds: result.groupIds,
                                                   });
                                               } catch {
                                                   // ignore clipboard write errors
@@ -1615,21 +1776,30 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                   }}
                                   onCut={(ids) => {
                                       void (async () => {
-                                          const templates = await buildClipClipboardTemplates(ids);
-                                          if (templates.length === 0) return;
-                                          clipClipboardRef.current = templates;
+                                          const s = sessionRef.current;
+                                          const expandedIds = expandClipIdsWithGroups(
+                                              ids,
+                                              s.clips,
+                                              s.ignoreGrouping,
+                                              s.disabledGroupIds,
+                                          );
+                                          const result =
+                                              await buildClipClipboardTemplates(expandedIds);
+                                          if (result.templates.length === 0) return;
+                                          clipClipboardRef.current = result;
                                           try {
                                               await writeSystemClipboardObject({
                                                   version: 1,
                                                   kind: "clip",
-                                                  templates,
+                                                  templates: result.templates,
+                                                  groupIds: result.groupIds,
                                               });
                                           } catch {
                                               // ignore clipboard write errors
                                           }
                                           setContextMenu(null);
                                           setMultiSelectedClipIds([]);
-                                          void dispatch(removeClipsRemote(ids));
+                                          void dispatch(removeClipsRemote(expandedIds));
                                       })();
                                   }}
                                   onReplace={(ids) => {
@@ -1650,6 +1820,14 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                       setContextMenu(null);
                                       splitClipIdsAtPlayhead(clipIds);
                                   }}
+                                  onGroup={(ids) => {
+                                      setContextMenu(null);
+                                      groupClips(ids);
+                                  }}
+                                  onUngroup={(ids) => {
+                                      setContextMenu(null);
+                                      ungroupClips(ids);
+                                  }}
                                   onGlue={(ids) => {
                                       setContextMenu(null);
                                       if (ids.length >= 2) {
@@ -1661,6 +1839,15 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                       setContextMenu(null);
                                       void dispatch(convertClipsToPitchReferenceRemote(ids));
                                       setMultiSelectedClipIds([]);
+                                  }}
+                                  onUpdatePitchRef={(ids) => {
+                                      setContextMenu(null);
+                                      void dispatch(updatePitchReferenceRemote(ids));
+                                      setMultiSelectedClipIds([]);
+                                  }}
+                                  onExportMidi={(ids) => {
+                                      setContextMenu(null);
+                                      void handleExportMidi(ids);
                                   }}
                                   onFadeCurveChange={(clipId, target, curve) => {
                                       dispatch(
@@ -1710,7 +1897,7 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                         y={trackAreaMenu.y}
                         canPaste={
                             Boolean(clipClipboardRef.current) &&
-                            (clipClipboardRef.current?.length ?? 0) > 0
+                            (clipClipboardRef.current?.templates.length ?? 0) > 0
                         }
                         canSplit={(multiSelectedClipIds.length > 0
                             ? multiSelectedClipIds
@@ -1747,8 +1934,14 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     open={midiClipDialogOpen}
                     onOpenChange={onMidiClipDialogOpenChange}
                     midiPath={midiClipPath}
-                    mode="clip"
+                    importTarget={importTarget}
+                    onImportTargetChange={onImportTargetChange}
+                    clipboardGuid={midiClipClipboardGuid ?? null}
+                    rootTrackComposeEnabled={midiClipRootTrackComposeEnabled}
+                    onRequestEnableCompose={handleRequestEnableCompose}
                     onImportAsClip={handleMidiClipImport}
+                    importPosition={importPosition}
+                    onImportPositionChange={onImportPositionChange}
                     fillGaps={fillGaps}
                     onFillGapsChange={onFillGapsChange}
                     multiTrackMerge={multiTrackMerge}
@@ -1760,6 +1953,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onNoteBpmModeChange={onNoteBpmModeChange}
                     specifiedBpm={specifiedBpm}
                     onSpecifiedBpmChange={onSpecifiedBpmChange}
+                    closeLeadingGap={closeLeadingGap}
+                    onCloseLeadingGapChange={onCloseLeadingGapChange}
                 />
 
                 <MidiTrackSelectDialog
@@ -1780,6 +1975,8 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     onNoteBpmModeChange={onNoteBpmModeChange}
                     specifiedBpm={specifiedBpm}
                     onSpecifiedBpmChange={onSpecifiedBpmChange}
+                    closeLeadingGap={closeLeadingGap}
+                    onCloseLeadingGapChange={onCloseLeadingGapChange}
                 />
 
                 <Dialog.Root

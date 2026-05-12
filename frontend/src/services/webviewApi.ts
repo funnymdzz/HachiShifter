@@ -88,6 +88,7 @@ export const webApi = {
     importMidiAsClip: paramsApi.importMidiAsClip,
     replaceMidiClipData: paramsApi.replaceMidiClipData,
     getMidiTracks: paramsApi.getMidiTracks,
+    readMidiClipboardToMemory: paramsApi.readMidiClipboardToMemory,
 
     addTrack: timelineApi.addTrack,
     addTrackNested: timelineApi.addTrackNested,
@@ -111,8 +112,13 @@ export const webApi = {
     duplicateClipsBulk: timelineApi.duplicateClipsBulk,
     replaceClipSource: timelineApi.replaceClipSource,
     splitClip: timelineApi.splitClip,
+    splitClipsAt: timelineApi.splitClipsAt,
     glueClips: timelineApi.glueClips,
+    groupClips: timelineApi.groupClips,
+    ungroupClips: timelineApi.ungroupClips,
+    toggleGroupDisabled: timelineApi.toggleGroupDisabled,
     convertClipsToPitchReference: timelineApi.convertClipsToPitchReference,
+    updatePitchReference: timelineApi.updatePitchReference,
     selectClip: timelineApi.selectClip,
 
     setTransport: timelineApi.setTransport,

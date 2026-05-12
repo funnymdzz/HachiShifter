@@ -1,6 +1,7 @@
 import { createAsyncThunk } from "@reduxjs/toolkit";
 import { webApi } from "../../../services/webviewApi";
 import type { AdvancedExportRequest } from "../../../services/api/core";
+import type { SessionState } from "../sessionSlice";
 import { requestMissingFileReplacement } from "./missingFilePrompt";
 
 async function resolveMissingFilesInteractively(timeline: any, missingFiles: string[] | undefined) {
@@ -90,7 +91,7 @@ export const pasteVocalShifterClipboard = createAsyncThunk(
                   activeParam?: string;
               }
             | undefined,
-        { rejectWithValue },
+        { rejectWithValue, getState },
     ) => {
         let result = await webApi.pasteVocalShifterClipboard(
             arg?.selectionStartFrame,
@@ -101,7 +102,14 @@ export const pasteVocalShifterClipboard = createAsyncThunk(
             return rejectWithValue(result?.error ?? "paste_vocalshifter_clipboard_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
-        return result;
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
+        return { ...result, newClipIds };
     },
 );
 
@@ -109,7 +117,7 @@ export const pasteReaperClipboard = createAsyncThunk(
     "session/pasteReaperClipboard",
     async (
         arg: { selectionStartFrame?: number; selectionMaxFrames?: number } | undefined,
-        { rejectWithValue },
+        { rejectWithValue, getState },
     ) => {
         let result = await webApi.pasteReaperClipboard(
             arg?.selectionStartFrame,
@@ -119,10 +127,18 @@ export const pasteReaperClipboard = createAsyncThunk(
             return rejectWithValue(result?.error ?? "paste_reaper_clipboard_failed");
         }
         result = await resolveMissingFilesInteractively(result, (result as any)?.missing_files);
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const clips = (result as { clips?: Array<{ id?: string }> }).clips ?? [];
+        const newClipIds = clips
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             timeline: result,
             skippedFiles: result.skipped_files as string[] | undefined,
+            newClipIds,
         } as const;
     },
 );

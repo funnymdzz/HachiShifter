@@ -185,6 +185,9 @@ export const jaJP = {
         "ルートトラックで Compose（C）を有効にしてピッチカーブを生成してください",
     pitch_requires_algo:
         "ピッチ編集を有効にするには「なし」以外のピッチアルゴリズムを選択してください",
+    midi_compose_required_title: "Compose が無効です",
+    midi_compose_required_message:
+        "ルートトラックで Compose が有効になっていません。有効にしてピッチカーブのインポートを続行しますか？",
     pitch_backend_unavailable:
         "ピッチバックエンドが利用不可（WORLD DLL / ONNX モデルを確認してください）",
     pitch_edit_not_modified_hint: "まだ編集されていません：カーブは元のピッチと同じです",
@@ -263,6 +266,11 @@ export const jaJP = {
 
     menu_about: "HiFiShifter について",
     glue: "グルー",
+    group: "グループ化",
+    ungroup: "グループ解除",
+    ignore_grouping: "グループ化を無視",
+    disable_group: "グループ無効化",
+    enable_group: "グループ有効化",
     none: "なし",
     bpm: "BPM",
     repeat: "リピート",
@@ -406,6 +414,8 @@ export const jaJP = {
     kb_clip_paste: "クリップをペースト",
     kb_clip_split: "クリップを分割",
     kb_clip_normalize: "クリップをノーマライズ",
+    kb_clip_group: "クリップをグループ化",
+    kb_clip_ungroup: "クリップのグループ解除",
     qs_auto_normalize: "配置時に自動ノーマライズ",
     kb_group_pianoroll: "ピアノロール",
     kb_group_modifier: "修飾キー",
@@ -473,6 +483,7 @@ export const jaJP = {
     midi_select_all: "すべて選択",
     midi_deselect_all: "すべて解除",
     midi_multi_track_merge: "マルチトラック結合",
+    midi_close_leading_gap: "先頭の隙間を閉じる",
     midi_track_notes: "{count} 個のノート",
     midi_track_range: "範囲：{min} – {max}",
     midi_no_tracks: "MIDI ファイルにノートを含むトラックが見つかりません",
@@ -493,6 +504,7 @@ export const jaJP = {
     // MIDI import — BPM options
     midi_import_bpm_as_project: "MIDI BPM をプロジェクト BPM としてインポート",
     midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_no_bpm: "MIDI に BPM データがありません！",
     midi_note_bpm: "ノート BPM",
     midi_note_bpm_midi: "MIDI 自身の BPM",
     midi_note_bpm_project: "現在のプロジェクト BPM",
@@ -503,6 +515,12 @@ export const jaJP = {
     midi_clipboard_read_failed: "クリップボードから MIDI を読み取れませんでした",
     midi_clipboard_empty: "クリップボードに Standard MIDI File が見つかりません",
     midi_clipboard_parse_failed: "クリップボードの MIDI データを解析できませんでした",
+
+    // MIDI インポート対象選択
+    midi_import_target: "インポート対象",
+    midi_import_target_pitch_block: "音高リファレンスブロック",
+    midi_import_target_pitch_param: "音高パラメータ",
+    midi_clipboard_midi_prefix: "クリップボード MIDI：",
 
     // MIDI replace dialog
     midi_replace_title: "MIDI を置換",
@@ -802,5 +820,8 @@ export const jaJP = {
 
     // 音高リファレンスクリップ
     ctx_convert_to_pitch_ref: "音高リファレンスクリップに変換",
+    ctx_update_pitch_ref: "音高を更新",
+    ctx_export_midi: "MIDIとしてエクスポート",
     menu_save_as_pitch_ref: "音高リファレンスクリップとして保存",
+    menu_export_midi: "MIDIとしてエクスポート",
 } as const;

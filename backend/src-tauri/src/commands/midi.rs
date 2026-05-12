@@ -25,6 +25,7 @@ fn error_payload(error: &str) -> crate::models::TimelineStatePayload {
         project_sec: None,
         project: None,
         missing_files: Some(vec![error.to_string()]),
+        disabled_group_ids: vec![],
     }
 }
 
@@ -40,110 +41,160 @@ fn validate_midi_import_target(track: &Track) -> Result<(), &'static str> {
     Ok(())
 }
 
-/// 读取 MIDI 文件并返回轨道摘要列表。
-pub(super) fn get_midi_tracks(midi_path: String) -> serde_json::Value {
-    let path = std::path::Path::new(&midi_path);
-    midi_log(format!("get_midi_tracks: path={midi_path}"));
+/// 读取 MIDI 文件（或剪贴板缓存）并返回轨道摘要列表。
+pub(super) fn get_midi_tracks(
+    state: &AppState,
+    midi_path: String,
+    clipboard_guid: Option<String>,
+) -> serde_json::Value {
+    midi_log(format!(
+        "get_midi_tracks: path={midi_path} clipboard_guid={:?}",
+        clipboard_guid
+    ));
 
-    if !path.exists() {
-        midi_log("get_midi_tracks: file_not_found");
-        return serde_json::json!({"ok": false, "error": "file_not_found"});
-    }
-
-    match midi_import::parse_midi_file(path, None) {
-        Ok(result) => {
-            // 只返回有音符的轨道
-            let tracks_with_notes: Vec<&MidiTrackInfo> =
-                result.tracks.iter().filter(|t| t.note_count > 0).collect();
-
-            midi_log(format!(
-                "get_midi_tracks: parsed tracks_total={} tracks_with_notes={}",
-                result.tracks.len(),
-                tracks_with_notes.len()
-            ));
-
-            serde_json::json!({
-                "ok": true,
-                "tracks": tracks_with_notes,
-                "initial_bpm": result.initial_bpm,
-            })
-        }
+    let parse_result = match resolve_midi_source(
+        state,
+        Some(&midi_path).filter(|s| !s.is_empty()),
+        clipboard_guid.as_deref(),
+        None,
+    ) {
+        Ok((r, _)) => r,
         Err(e) => {
-            midi_log(format!("get_midi_tracks: parse_error={e}"));
-            serde_json::json!({"ok": false, "error": e})
+            midi_log(format!("get_midi_tracks: error={e}"));
+            return serde_json::json!({"ok": false, "error": e});
         }
-    }
+    };
+
+    let tracks_with_notes: Vec<&MidiTrackInfo> =
+        parse_result.tracks.iter().filter(|t| t.note_count > 0).collect();
+
+    midi_log(format!(
+        "get_midi_tracks: parsed tracks_total={} tracks_with_notes={}",
+        parse_result.tracks.len(),
+        tracks_with_notes.len()
+    ));
+
+    serde_json::json!({
+        "ok": true,
+        "tracks": tracks_with_notes,
+        "initial_bpm": parse_result.initial_bpm,
+        "has_bpm": parse_result.has_tempo,
+    })
 }
 
-/// 从系统剪贴板读取 "Standard MIDI File" 格式数据，写入临时文件并解析。
+/// 从系统剪贴板读取 "Standard MIDI File" 格式数据，存入内存缓存并解析。
 ///
-/// 返回临时文件路径、轨道列表和初始 BPM，供前端弹窗展示。
-pub(super) fn read_midi_clipboard_as_temp() -> serde_json::Value {
-    midi_log("read_midi_clipboard_as_temp: start");
+/// 不创建临时文件。返回 GUID、轨道列表和初始 BPM，供前端弹窗展示。
+/// MIDI 原始字节存储在 `AppState.clipboard_midi_cache` 中，后续导入命令通过 GUID 引用。
+pub(super) fn read_midi_clipboard_to_memory(state: &AppState) -> serde_json::Value {
+    midi_log("read_midi_clipboard_to_memory: start");
 
     let midi_data = match crate::commands::reaper_clipboard::read_midi_clipboard() {
         Ok(data) => data,
         Err(e) => {
-            midi_log(format!("read_midi_clipboard_as_temp: clipboard_error={e}"));
+            midi_log(format!("read_midi_clipboard_to_memory: clipboard_error={e}"));
             return serde_json::json!({"ok": false, "error": "midi_clipboard_empty"});
         }
     };
 
     if midi_data.is_empty() {
-        midi_log("read_midi_clipboard_as_temp: clipboard_empty");
+        midi_log("read_midi_clipboard_to_memory: clipboard_empty");
         return serde_json::json!({"ok": false, "error": "midi_clipboard_empty"});
     }
 
-    // 写入临时文件
-    let temp_dir = std::env::temp_dir();
-    let suffix: String = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| format!("_{:x}", d.as_nanos()))
-        .unwrap_or_else(|_| "_unknown".to_string());
-    let temp_path = temp_dir.join(format!("hifishifter_midi_clipboard{}.mid", suffix));
+    // 用 blake3 哈希生成 GUID（前 8 字节 → 16 位 hex）
+    let hash = blake3::hash(&midi_data);
+    let guid: String = hash.as_bytes()[..8]
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect();
 
-    if let Err(e) = std::fs::write(&temp_path, &midi_data) {
-        midi_log(format!(
-            "read_midi_clipboard_as_temp: write_error={}",
-            e
-        ));
-        return serde_json::json!({"ok": false, "error": format!("io_error: {}", e)});
+    midi_log(format!("read_midi_clipboard_to_memory: guid={guid}"));
+
+    // 解析 MIDI 数据
+    let parse_result = match midi_import::parse_midi_bytes(&midi_data, None) {
+        Ok(r) => r,
+        Err(e) => {
+            midi_log(format!("read_midi_clipboard_to_memory: parse_error={e}"));
+            return serde_json::json!({"ok": false, "error": format!("midi_parse_error: {}", e)});
+        }
+    };
+
+    // 存入内存缓存
+    {
+        let mut cache = state
+            .clipboard_midi_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        cache.insert(guid.clone(), midi_data);
+        // 限制缓存大小，防止无限增长
+        while cache.len() > 16 {
+            let oldest = cache.keys().next().cloned();
+            if let Some(k) = oldest {
+                cache.remove(&k);
+            } else {
+                break;
+            }
+        }
     }
 
+    let tracks_with_notes: Vec<&MidiTrackInfo> =
+        parse_result.tracks.iter().filter(|t| t.note_count > 0).collect();
+
     midi_log(format!(
-        "read_midi_clipboard_as_temp: temp_path={}",
-        temp_path.display()
+        "read_midi_clipboard_to_memory: parsed tracks_total={} tracks_with_notes={} initial_bpm={:.2}",
+        parse_result.tracks.len(),
+        tracks_with_notes.len(),
+        parse_result.initial_bpm
     ));
 
-    // 解析 MIDI 文件
-    match midi_import::parse_midi_file(&temp_path, None) {
-        Ok(result) => {
-            let tracks_with_notes: Vec<&MidiTrackInfo> =
-                result.tracks.iter().filter(|t| t.note_count > 0).collect();
+    serde_json::json!({
+        "ok": true,
+        "guid": guid,
+        "tracks": tracks_with_notes,
+        "initial_bpm": parse_result.initial_bpm,
+        "has_bpm": parse_result.has_tempo,
+    })
+}
 
-            midi_log(format!(
-                "read_midi_clipboard_as_temp: parsed tracks_total={} tracks_with_notes={} initial_bpm={:.2}",
-                result.tracks.len(),
-                tracks_with_notes.len(),
-                result.initial_bpm
-            ));
-
-            serde_json::json!({
-                "ok": true,
-                "temp_path": temp_path.to_string_lossy(),
-                "tracks": tracks_with_notes,
-                "initial_bpm": result.initial_bpm,
-            })
+/// 解析 MIDI 来源：可以是文件路径或剪贴板 GUID。
+///
+/// 返回 `(MidiParseResult, Option<显示名称>)`。显示名称仅在文件来源时有值（文件 stem）。
+fn resolve_midi_source(
+    state: &AppState,
+    midi_path: Option<&String>,
+    clipboard_guid: Option<&str>,
+    fallback_bpm: Option<f64>,
+) -> Result<(midi_import::MidiParseResult, Option<String>), String> {
+    if let Some(guid) = clipboard_guid {
+        if guid.is_empty() {
+            return Err("invalid_guid".to_string());
         }
-        Err(e) => {
-            midi_log(format!(
-                "read_midi_clipboard_as_temp: parse_error={}",
-                e
-            ));
-            // 清理临时文件
-            let _ = std::fs::remove_file(&temp_path);
-            serde_json::json!({"ok": false, "error": format!("midi_parse_error: {}", e)})
+        let cache = state
+            .clipboard_midi_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let bytes = cache
+            .get(guid)
+            .ok_or_else(|| "midi_clipboard_guid_not_found".to_string())?;
+        let result = midi_import::parse_midi_bytes(bytes, fallback_bpm)?;
+        Ok((result, None))
+    } else if let Some(path) = midi_path {
+        if path.is_empty() {
+            return Err("file_not_found".to_string());
         }
+        let p = std::path::Path::new(path.as_str());
+        if !p.exists() {
+            return Err("file_not_found".to_string());
+        }
+        let file_stem = p
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
+        let result = midi_import::parse_midi_file(p, fallback_bpm)?;
+        Ok((result, file_stem))
+    } else {
+        Err("no_source_specified".to_string())
     }
 }
 
@@ -163,17 +214,13 @@ pub(super) fn import_midi_to_pitch(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> serde_json::Value {
-    let path = std::path::Path::new(&midi_path);
     midi_log(format!(
-        "import_midi_to_pitch: path={} track_indices={:?} sel_start={:?} sel_max={:?} fill_gaps={:?} note_bpm_mode={:?} specified_bpm={:?} import_midi_bpm_as_project={:?}",
-        midi_path, track_indices, selection_start_frame, selection_max_frames, fill_gaps, note_bpm_mode, specified_bpm, import_midi_bpm_as_project
+        "import_midi_to_pitch: path={} clipboard_guid={:?} track_indices={:?} sel_start={:?} sel_max={:?} fill_gaps={:?} note_bpm_mode={:?} specified_bpm={:?} import_midi_bpm_as_project={:?} close_leading_gap={:?}",
+        midi_path, clipboard_guid, track_indices, selection_start_frame, selection_max_frames, fill_gaps, note_bpm_mode, specified_bpm, import_midi_bpm_as_project, close_leading_gap
     ));
-
-    if !path.exists() {
-        midi_log("import_midi_to_pitch: file_not_found");
-        return serde_json::json!({"ok": false, "error": "file_not_found"});
-    }
 
     // 先锁 timeline 读取 bpm / playhead / 选中轨道等信息（与 paste_midi_clipboard_inner 一致）
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
@@ -183,8 +230,13 @@ pub(super) fn import_midi_to_pitch(
     let frame_period_ms_raw = tl.frame_period_ms().max(0.1);
 
     // 使用工程 BPM 作为 fallback tempo（与 Reaper 剪贴板路径一致）
-    let parse_result = match midi_import::parse_midi_file(path, Some(project_bpm)) {
-        Ok(r) => r,
+    let parse_result = match resolve_midi_source(
+        state,
+        Some(&midi_path).filter(|s| !s.is_empty()),
+        clipboard_guid.as_deref(),
+        Some(project_bpm),
+    ) {
+        Ok((r, _)) => r,
         Err(e) => {
             midi_log(format!("import_midi_to_pitch: parse_error={e}"));
             return serde_json::json!({"ok": false, "error": e});
@@ -302,25 +354,34 @@ pub(super) fn import_midi_to_pitch(
     };
 
     // 计算对齐偏移量和写入范围
+    let close_gap = close_leading_gap.unwrap_or(true);
     let first_start = notes
         .iter()
         .map(|n| n.start_sec)
         .fold(f64::INFINITY, f64::min);
     let (align_offset, clamp_range_end) = if let Some(sel_start) = selection_start_frame {
         let offset_sec = (sel_start as f64 * frame_period_ms_raw) / 1000.0;
-        let ao = offset_sec - first_start;
+        let ao = if close_gap {
+            offset_sec - first_start
+        } else {
+            offset_sec
+        };
         let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
         let cl = max_frame.min(entry.pitch_edit.len());
         midi_log(format!(
-            "import_midi_to_pitch: selection mode offset_sec={:.3} align_offset={:.3} clamp_len={}",
-            offset_sec, ao, cl
+            "import_midi_to_pitch: selection mode offset_sec={:.3} align_offset={:.3} clamp_len={} close_gap={}",
+            offset_sec, ao, cl, close_gap
         ));
         (ao, Some(cl))
     } else {
-        let ao = playhead_sec - first_start;
+        let ao = if close_gap {
+            playhead_sec - first_start
+        } else {
+            playhead_sec
+        };
         midi_log(format!(
-            "import_midi_to_pitch: playhead mode offset_sec={:.3} align_offset={:.3}",
-            playhead_sec, ao
+            "import_midi_to_pitch: playhead mode offset_sec={:.3} align_offset={:.3} close_gap={}",
+            playhead_sec, ao, close_gap
         ));
         (ao, None)
     };
@@ -391,6 +452,13 @@ pub(super) fn import_midi_to_pitch(
 
     state.audio_engine.update_timeline(tl.clone());
 
+    if let Some(ref guid) = clipboard_guid {
+        if !guid.is_empty() {
+            let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.remove(guid);
+        }
+    }
+
     serde_json::json!({
         "ok": true,
         "notes_imported": notes.len(),
@@ -415,28 +483,31 @@ pub(super) fn import_midi_as_clip(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi_log(format!(
-        "import_midi_as_clip: path={} track_indices={:?} track_id={:?} start_sec={:.3} fill_gaps={:?} multi_track_merge={:?} note_bpm_mode={:?} specified_bpm={:?} import_midi_bpm_as_project={:?}",
-        midi_path, track_indices, track_id, start_sec, fill_gaps, multi_track_merge, note_bpm_mode, specified_bpm, import_midi_bpm_as_project
+        "import_midi_as_clip: path={} clipboard_guid={:?} track_indices={:?} track_id={:?} start_sec={:.3} fill_gaps={:?} multi_track_merge={:?} note_bpm_mode={:?} specified_bpm={:?} import_midi_bpm_as_project={:?} close_leading_gap={:?}",
+        midi_path, clipboard_guid, track_indices, track_id, start_sec, fill_gaps, multi_track_merge, note_bpm_mode, specified_bpm, import_midi_bpm_as_project, close_leading_gap
     ));
-
-    let path = std::path::Path::new(&midi_path);
-    if !path.exists() {
-        midi_log("import_midi_as_clip: file_not_found");
-        return error_payload("file_not_found");
-    }
 
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     let project_bpm = tl.bpm;
 
-    let mut parse_result = match midi_import::parse_midi_file(path, Some(project_bpm)) {
-        Ok(r) => r,
+    let (mut parse_result, source_stem) = match resolve_midi_source(
+        state,
+        Some(&midi_path).filter(|s| !s.is_empty()),
+        clipboard_guid.as_deref(),
+        Some(project_bpm),
+    ) {
+        Ok((r, stem)) => (r, stem),
         Err(e) => {
             midi_log(format!("import_midi_as_clip: parse_error={}", e));
             return error_payload(&e);
         }
     };
+
+    let file_stem = source_stem.unwrap_or_else(|| "MIDI".to_string());
 
     let initial_bpm = parse_result.initial_bpm;
 
@@ -476,14 +547,9 @@ pub(super) fn import_midi_as_clip(
         }
     }
 
-    let file_stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("MIDI")
-        .to_string();
-
     let fill = fill_gaps.unwrap_or(false);
     let multi = multi_track_merge.unwrap_or(true);
+    let close_gap = close_leading_gap.unwrap_or(true);
 
     if multi {
         // ── 合并模式：将所有选中轨道的音符合并为单个 clip ──
@@ -512,17 +578,29 @@ pub(super) fn import_midi_as_clip(
         }
 
         let last_end = notes.iter().map(|n| n.end_sec).fold(0.0f64, f64::max);
-        let length_sec = last_end.max(0.1);
 
         let first_start = notes
             .iter()
             .map(|n| n.start_sec)
             .fold(f64::INFINITY, f64::min);
+        let length_sec = if close_gap {
+            (last_end - first_start).max(0.1)
+        } else {
+            last_end.max(0.1)
+        };
         let normalized_notes: Vec<midi_import::MidiNoteEvent> = notes
             .into_iter()
             .map(|n| midi_import::MidiNoteEvent {
-                start_sec: n.start_sec - first_start,
-                end_sec: n.end_sec - first_start,
+                start_sec: if close_gap {
+                    n.start_sec - first_start
+                } else {
+                    n.start_sec
+                },
+                end_sec: if close_gap {
+                    n.end_sec - first_start
+                } else {
+                    n.end_sec
+                },
                 note: n.note,
                 velocity: n.velocity,
                 channel: n.channel,
@@ -645,8 +723,16 @@ pub(super) fn import_midi_as_clip(
                 let normalized: Vec<midi_import::MidiNoteEvent> = group
                     .iter()
                     .map(|n| midi_import::MidiNoteEvent {
-                        start_sec: n.start_sec - first_start,
-                        end_sec: n.end_sec - first_start,
+                        start_sec: if close_gap {
+                            n.start_sec - first_start
+                        } else {
+                            n.start_sec
+                        },
+                        end_sec: if close_gap {
+                            n.end_sec - first_start
+                        } else {
+                            n.end_sec
+                        },
                         note: n.note,
                         velocity: n.velocity,
                         channel: n.channel,
@@ -672,7 +758,11 @@ pub(super) fn import_midi_as_clip(
                     current_track_id.clone(),
                     Some(clip_name),
                     Some(start_sec),
-                    Some((last_end - first_start).max(0.1)),
+                    Some(if close_gap {
+                        (last_end - first_start).max(0.1)
+                    } else {
+                        last_end.max(0.1)
+                    }),
                     None,
                 );
 
@@ -720,6 +810,11 @@ pub(super) fn import_midi_as_clip(
             created_track_ids.len()
         ));
 
+        // Auto-group all created pitch reference clips when multi_track_merge is disabled
+        if created_clip_ids.len() >= 2 {
+            tl.group_clips(&created_clip_ids);
+        }
+
         let mut root_track_ids: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         for clip_id in &created_clip_ids {
@@ -738,6 +833,14 @@ pub(super) fn import_midi_as_clip(
         for root in &root_track_ids {
             crate::pitch_analysis::maybe_schedule_pitch_orig(state, root);
         }
+
+        if let Some(ref guid) = clipboard_guid {
+            if !guid.is_empty() {
+                let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+                cache.remove(guid);
+            }
+        }
+
         payload
     }
 }
@@ -757,23 +860,25 @@ pub(super) fn replace_midi_clip_data(
     note_bpm_mode: Option<String>,
     specified_bpm: Option<f64>,
     import_midi_bpm_as_project: Option<bool>,
+    clipboard_guid: Option<String>,
+    close_leading_gap: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     midi_log(format!(
-        "replace_midi_clip_data: clip_id={} path={} track_indices={:?} fill_gaps={:?}",
-        clip_id, midi_path, track_indices, fill_gaps
+        "replace_midi_clip_data: clip_id={} path={} track_indices={:?} fill_gaps={:?} close_leading_gap={:?}",
+        clip_id, midi_path, track_indices, fill_gaps, close_leading_gap
     ));
 
-    let path = std::path::Path::new(&midi_path);
-    if !path.exists() {
-        midi_log("replace_midi_clip_data: file_not_found");
-        return error_payload("file_not_found");
-    }
 
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     let project_bpm = tl.bpm;
 
-    let mut parse_result = match midi_import::parse_midi_file(path, Some(project_bpm)) {
-        Ok(r) => r,
+    let (mut parse_result, _source_stem) = match resolve_midi_source(
+        state,
+        Some(&midi_path).filter(|s| !s.is_empty()),
+        clipboard_guid.as_deref(),
+        Some(project_bpm),
+    ) {
+        Ok((r, stem)) => (r, stem),
         Err(e) => {
             midi_log(format!("replace_midi_clip_data: parse_error={}", e));
             return error_payload(&e);
@@ -807,11 +912,7 @@ pub(super) fn replace_midi_clip_data(
         }
     }
 
-    let file_stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("MIDI")
-        .to_string();
+    let file_stem = _source_stem.unwrap_or_else(|| "MIDI".to_string());
 
     let fill = fill_gaps.unwrap_or(false);
 
@@ -840,18 +941,30 @@ pub(super) fn replace_midi_clip_data(
         return error_payload("no_notes_in_track");
     }
 
+    let close_gap = close_leading_gap.unwrap_or(true);
     let last_end = notes.iter().map(|n| n.end_sec).fold(0.0f64, f64::max);
-    let length_sec = last_end.max(0.1);
-
     let first_start = notes
         .iter()
         .map(|n| n.start_sec)
         .fold(f64::INFINITY, f64::min);
+    let length_sec = if close_gap {
+        (last_end - first_start).max(0.1)
+    } else {
+        last_end.max(0.1)
+    };
     let normalized_notes: Vec<midi_import::MidiNoteEvent> = notes
         .into_iter()
         .map(|n| midi_import::MidiNoteEvent {
-            start_sec: n.start_sec - first_start,
-            end_sec: n.end_sec - first_start,
+            start_sec: if close_gap {
+                n.start_sec - first_start
+            } else {
+                n.start_sec
+            },
+            end_sec: if close_gap {
+                n.end_sec - first_start
+            } else {
+                n.end_sec
+            },
             note: n.note,
             velocity: n.velocity,
             channel: n.channel,
@@ -905,5 +1018,13 @@ pub(super) fn replace_midi_clip_data(
     if let Some(root) = root_track_id {
         crate::pitch_analysis::maybe_schedule_pitch_orig(state, &root);
     }
+
+    if let Some(ref guid) = clipboard_guid {
+        if !guid.is_empty() {
+            let mut cache = state.clipboard_midi_cache.lock().unwrap_or_else(|e| e.into_inner());
+            cache.remove(guid);
+        }
+    }
+
     payload
 }

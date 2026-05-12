@@ -16,12 +16,8 @@ export const ClipHeader: React.FC<{
     trackColor?: string;
     transparentVisuals?: boolean;
     isPitchAdjustment?: boolean;
-    ensureSelected: (clipId: string) => void;
-    selectClipRemote: (clipId: string) => void;
     startEditDrag: (e: React.PointerEvent, clipId: string, type: "gain") => void;
     toggleClipMuted: (clipId: string, nextMuted: boolean) => void;
-    isInMultiSelectedSet: boolean;
-    multiSelectedCount: number;
     /** 触发内联重命名（由 ClipContextMenu 的"重命名"菜单项调用） */
     triggerRename?: boolean;
     onRenameCommit?: (clipId: string, newName: string) => void;
@@ -29,22 +25,24 @@ export const ClipHeader: React.FC<{
     /** 增益双击输入框提交（dB 值，已 clamp 到 -24~+12） */
     onGainCommit?: (clipId: string, db: number) => void;
     onFormantMorphCommit?: (clipId: string, value: ClipFormantMorph, checkpoint: boolean) => void;
+    onToggleGroupDisabled?: (groupId: string) => void;
+    activeGroupIds?: Set<string>;
+    disabledGroupIds?: string[];
 }> = ({
     clip,
     clipWidthPx,
     trackColor,
     transparentVisuals = false,
     isPitchAdjustment = false,
-    ensureSelected,
-    selectClipRemote,
     startEditDrag,
     toggleClipMuted,
-    isInMultiSelectedSet,
-    multiSelectedCount,
     triggerRename = false,
     onRenameCommit,
     onRenameDone,
     onGainCommit,
+    onToggleGroupDisabled,
+    activeGroupIds,
+    disabledGroupIds,
 }) => {
     const { t } = useI18n();
     const { mode, fontFamily } = useAppTheme();
@@ -75,6 +73,7 @@ export const ClipHeader: React.FC<{
     // >= 152px: 全显示 | 116-152: 隐藏名称 | 96-116: 隐藏播放速率 | 68-96: 隐藏增益值+F | 52-68: 隐藏F | 32-52: 只留增益旋钮 | < 32px: 全隐藏
     const {
         showAny,
+        showChain,
         showMute,
         showFormant,
         showGainKnob,
@@ -162,11 +161,40 @@ export const ClipHeader: React.FC<{
                     onPointerDown={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        if (multiSelectedCount === 0 || !isInMultiSelectedSet) {
-                            ensureSelected(clip.id);
-                        }
-                        selectClipRemote(clip.id);
-                        startEditDrag(e, clip.id, "gain");
+
+                        const pointerId = e.pointerId;
+                        const targetEl = e.currentTarget as HTMLElement;
+                        const startX = e.clientX;
+                        const startY = e.clientY;
+                        let dragStarted = false;
+
+                        const onMove = (ev: PointerEvent) => {
+                            if (ev.pointerId !== pointerId || dragStarted) return;
+                            const dx = ev.clientX - startX;
+                            const dy = ev.clientY - startY;
+                            if (dx * dx + dy * dy < 9) return;
+                            dragStarted = true;
+                            startEditDrag(
+                                {
+                                    button: 0,
+                                    pointerId,
+                                    currentTarget: targetEl,
+                                } as unknown as React.PointerEvent,
+                                clip.id,
+                                "gain",
+                            );
+                        };
+
+                        const onEnd = (ev: PointerEvent) => {
+                            if (ev.pointerId !== pointerId) return;
+                            window.removeEventListener("pointermove", onMove, true);
+                            window.removeEventListener("pointerup", onEnd, true);
+                            window.removeEventListener("pointercancel", onEnd, true);
+                        };
+
+                        window.addEventListener("pointermove", onMove, true);
+                        window.addEventListener("pointerup", onEnd, true);
+                        window.addEventListener("pointercancel", onEnd, true);
                     }}
                     onDoubleClick={(e) => {
                         e.preventDefault();
@@ -232,6 +260,116 @@ export const ClipHeader: React.FC<{
                     </div>
                 </div>
             )}
+
+            {/* 编组链按钮 */}
+            {clip.groupId != null &&
+                showChain &&
+                (() => {
+                    const isGroupActive =
+                        activeGroupIds != null && activeGroupIds.has(clip.groupId);
+                    const isGroupDisabled =
+                        disabledGroupIds != null && disabledGroupIds.includes(clip.groupId);
+
+                    let bgColor: string;
+                    let borderColor: string;
+                    let iconColor: string;
+                    let boxShadow: string | undefined;
+                    let iconSvg: React.ReactNode;
+                    let title: string;
+
+                    if (isGroupDisabled) {
+                        bgColor = "rgba(220, 70, 70, 0.45)";
+                        borderColor = "rgba(200, 50, 50, 0.80)";
+                        iconColor = "rgba(180, 40, 40, 1)";
+                        boxShadow = "0 0 4px rgba(200, 50, 50, 0.50)";
+                        title = t("enable_group");
+                        iconSvg = (
+                            <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                <line x1="2" y1="2" x2="22" y2="22" />
+                            </svg>
+                        );
+                    } else if (isGroupActive) {
+                        bgColor = "rgba(255, 200, 50, 0.55)";
+                        borderColor = "rgba(255, 200, 50, 0.90)";
+                        iconColor = "rgba(200, 140, 20, 1)";
+                        boxShadow = "0 0 4px rgba(255, 200, 50, 0.50)";
+                        title = t("disable_group");
+                        iconSvg = (
+                            <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                        );
+                    } else {
+                        bgColor = visualStyle.muteBadgeFill;
+                        borderColor = visualStyle.muteBadgeStroke;
+                        iconColor = "rgba(200, 200, 210, 1)";
+                        boxShadow = undefined;
+                        title = t("disable_group");
+                        iconSvg = (
+                            <svg
+                                width="10"
+                                height="10"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                            >
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                            </svg>
+                        );
+                    }
+
+                    return (
+                        <button
+                            className="rounded flex items-center justify-center border transition-all text-[10px] font-bold"
+                            onPointerDown={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                            }}
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onToggleGroupDisabled?.(clip.groupId!);
+                            }}
+                            title={title}
+                            style={{
+                                opacity: hideVisuals ? 0 : 1,
+                                width: visualStyle.muteBadgeWidth,
+                                height: visualStyle.muteBadgeHeight,
+                                backgroundColor: bgColor,
+                                borderColor: borderColor,
+                                color: iconColor,
+                                boxShadow: boxShadow,
+                            }}
+                        >
+                            {iconSvg}
+                        </button>
+                    );
+                })()}
 
             {/* 静音按钮 */}
             {showMute && (

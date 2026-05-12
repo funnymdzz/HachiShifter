@@ -177,11 +177,17 @@ function AppInner() {
     const [midiClipPath, setMidiClipPath] = useState<string | null>(null);
     const [midiClipStartSec, setMidiClipStartSec] = useState(0);
     const [midiClipTrackId, setMidiClipTrackId] = useState<string | null>(null);
+    const [midiClipClipboardGuid, setMidiClipClipboardGuid] = useState<string | null>(null);
     const [fillGaps, setFillGaps] = useState(false);
     const [multiTrackMerge, setMultiTrackMerge] = useState(true);
     const [importBpmAsProject, setImportBpmAsProject] = useState(false);
     const [noteBpmMode, setNoteBpmMode] = useState<string>("midi");
     const [specifiedBpm, setSpecifiedBpm] = useState<number>(120);
+    const [importPosition, setImportPosition] = useState<string>("selection");
+    const [closeLeadingGap, setCloseLeadingGap] = useState(true);
+    const [midiImportTargetMenu, setMidiImportTargetMenu] = useState<string>("pitchRef");
+    const [midiImportTargetDragDrop, setMidiImportTargetDragDrop] = useState<string>("pitchRef");
+    const [midiDialogSource, setMidiDialogSource] = useState<"menu" | "dragDrop">("menu");
 
     // 加载 MIDI 相关设置
     useEffect(() => {
@@ -202,12 +208,30 @@ function AppInner() {
                 if (s?.midiSpecifiedBpm != null) {
                     setSpecifiedBpm(s.midiSpecifiedBpm);
                 }
+                if (s?.midiImportPosition != null) {
+                    setImportPosition(s.midiImportPosition);
+                }
+                if (s?.midiCloseLeadingGap != null) {
+                    setCloseLeadingGap(s.midiCloseLeadingGap);
+                }
+                if (s?.midiImportTargetMenu != null) {
+                    setMidiImportTargetMenu(s.midiImportTargetMenu);
+                } else if ((s as any)?.midiImportTarget != null) {
+                    setMidiImportTargetMenu((s as any).midiImportTarget);
+                }
+                if (s?.midiImportTargetDragDrop != null) {
+                    setMidiImportTargetDragDrop(s.midiImportTargetDragDrop);
+                } else if ((s as any)?.midiImportTarget != null) {
+                    setMidiImportTargetDragDrop((s as any).midiImportTarget);
+                }
             });
         });
     }, []);
 
     const handleImportMidiFromMenu = useCallback(() => {
+        setMidiDialogSource("menu");
         setMidiClipPath(null);
+        setMidiClipClipboardGuid(null);
         setMidiClipStartSec(playheadSec ?? 0);
         setMidiClipTrackId(selectedTrackId ?? null);
         setMidiClipDialogOpen(true);
@@ -245,6 +269,34 @@ function AppInner() {
         setSpecifiedBpm(v);
         void import("./services/api/settings").then(({ settingsApi }) =>
             settingsApi.saveUiSettings({ midiSpecifiedBpm: v } as any),
+        );
+    }, []);
+
+    const handleImportPositionChange = useCallback((position: string) => {
+        setImportPosition(position);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportPosition: position } as any),
+        );
+    }, []);
+
+    const handleCloseLeadingGapChange = useCallback((v: boolean) => {
+        setCloseLeadingGap(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiCloseLeadingGap: v } as any),
+        );
+    }, []);
+
+    const handleImportTargetMenuChange = useCallback((v: string) => {
+        setMidiImportTargetMenu(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportTargetMenu: v } as any),
+        );
+    }, []);
+
+    const handleImportTargetDragDropChange = useCallback((v: string) => {
+        setMidiImportTargetDragDrop(v);
+        void import("./services/api/settings").then(({ settingsApi }) =>
+            settingsApi.saveUiSettings({ midiImportTargetDragDrop: v } as any),
         );
     }, []);
 
@@ -1521,11 +1573,14 @@ function AppInner() {
                             midiClipPath={midiClipPath}
                             midiClipStartSec={midiClipStartSec}
                             midiClipTrackId={midiClipTrackId}
+                            midiClipClipboardGuid={midiClipClipboardGuid}
                             fillGaps={fillGaps}
                             multiTrackMerge={multiTrackMerge}
                             importBpmAsProject={importBpmAsProject}
                             noteBpmMode={noteBpmMode}
                             specifiedBpm={specifiedBpm}
+                            importPosition={importPosition}
+                            closeLeadingGap={closeLeadingGap}
                             onMidiClipDialogOpenChange={setMidiClipDialogOpen}
                             onMidiClipPathChange={setMidiClipPath}
                             onMidiClipStartSecChange={setMidiClipStartSec}
@@ -1535,6 +1590,14 @@ function AppInner() {
                             onImportBpmAsProjectChange={handleImportBpmAsProjectChange}
                             onNoteBpmModeChange={handleNoteBpmModeChange}
                             onSpecifiedBpmChange={handleSpecifiedBpmChange}
+                            onImportPositionChange={handleImportPositionChange}
+                            onCloseLeadingGapChange={handleCloseLeadingGapChange}
+                            midiDialogSource={midiDialogSource}
+                            onMidiDialogSourceChange={setMidiDialogSource}
+                            importTargetMenu={midiImportTargetMenu}
+                            onImportTargetMenuChange={handleImportTargetMenuChange}
+                            importTargetDragDrop={midiImportTargetDragDrop}
+                            onImportTargetDragDropChange={handleImportTargetDragDropChange}
                         />
                     </Box>
 

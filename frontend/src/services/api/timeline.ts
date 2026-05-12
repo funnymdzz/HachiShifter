@@ -222,10 +222,23 @@ export const timelineApi = {
     splitClip: (clipId: string, splitSec: number) =>
         invoke<TimelineResult>("split_clip", clipId, splitSec),
 
+    splitClipsAt: (clipIds: string[], splitSec: number) =>
+        invoke<TimelineResult>("split_clips_at", clipIds, splitSec),
+
     glueClips: (clipIds: string[]) => invoke<TimelineResult>("glue_clips", clipIds),
+
+    groupClips: (clipIds: string[]) => invoke<TimelineResult>("group_clips", clipIds),
+
+    ungroupClips: (clipIds: string[]) => invoke<TimelineResult>("ungroup_clips", clipIds),
+
+    toggleGroupDisabled: (groupId: string) =>
+        invoke<TimelineResult>("toggle_group_disabled", groupId),
 
     convertClipsToPitchReference: (clipIds: string[]) =>
         invoke<TimelineResult>("convert_clips_to_pitch_reference", clipIds),
+
+    updatePitchReference: (clipIds: string[]) =>
+        invoke<TimelineResult>("update_pitch_reference", clipIds),
 
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
 };

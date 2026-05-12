@@ -9,6 +9,7 @@ import {
     endInteraction,
 } from "../../../../features/session/sessionSlice";
 import { webApi } from "../../../../services/webviewApi";
+import { expandClipIdsWithGroups } from "./useGroupExpansion";
 
 export type SlipDragState = {
     pointerId: number;
@@ -34,6 +35,7 @@ export function useSlipDrag(deps: {
     multiSelectedClipIds: string[];
     multiSelectedSet: Set<string>;
     beatFromClientX: (clientX: number, bounds: DOMRect, xScroll: number) => number;
+    ignoreGrouping: boolean;
 }) {
     const {
         scrollRef,
@@ -42,6 +44,7 @@ export function useSlipDrag(deps: {
         multiSelectedClipIds,
         multiSelectedSet,
         beatFromClientX,
+        ignoreGrouping,
     } = deps;
 
     const slipDragRef = useRef<SlipDragState | null>(null);
@@ -59,10 +62,19 @@ export function useSlipDrag(deps: {
         const bounds = scroller.getBoundingClientRect();
         const beatAtPointer = beatFromClientX(e.clientX, bounds, scroller.scrollLeft);
 
-        const clipIds =
+        // Expand to include selected clips and their group members
+        const initialIds =
             multiSelectedClipIds.length > 0 && multiSelectedSet.has(clipId)
                 ? [...multiSelectedClipIds]
                 : [clipId];
+        const clipIds = ignoreGrouping
+            ? initialIds
+            : expandClipIdsWithGroups(
+                  initialIds,
+                  sessionRef.current.clips,
+                  false,
+                  sessionRef.current.disabledGroupIds,
+              );
 
         const initialById: SlipDragState["initialById"] = {};
         for (const id of clipIds) {

@@ -37,9 +37,7 @@
             "resources/models/nsf_hifigan/config.json": "models/nsf_hifigan/config.json",
             "resources/models/hnsep/hnsep.onnx": "models/hnsep/hnsep.onnx",
             "resources/models/hnsep/config.yaml": "models/hnsep/config.yaml",
-            "resources/models/fcpe/fcpe.onnx": "models/fcpe/fcpe.onnx",
-            "third_party/vslib/vslib_x64.dll": "vslib_x64.dll",
-            "third_party/soundtouch/SoundTouchDLL_x64.dll": "SoundTouchDLL_x64.dll"
+            "resources/models/fcpe/fcpe.onnx": "models/fcpe/fcpe.onnx"
         },
         "icon": [
             "icons/32x32.png",

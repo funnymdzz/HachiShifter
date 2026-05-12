@@ -72,6 +72,7 @@ pub struct ReaperItem {
     // 首个 take 的属性（item 自身也是一个隐式 take）
     pub default_take: ReaperTake,
     pub stretch_markers: Vec<ReaperStretchMarker>,
+    pub group_id: Option<i32>,
 }
 
 impl Default for ReaperItem {
@@ -90,6 +91,7 @@ impl Default for ReaperItem {
             takes: Vec::new(),
             default_take: ReaperTake::default(),
             stretch_markers: Vec::new(),
+            group_id: None,
         }
     }
 }
@@ -156,6 +158,8 @@ pub struct ReaperSource {
     /// Reaper SECTION SOURCE 的长度（秒）。
     pub section_length_sec: Option<f64>,
     file_path_full: Option<String>,
+    /// MIDI 源数据（仅当 source_type == "MIDI" 时填充）
+    pub midi_source: Option<ReaperMidiSourceData>,
 }
 
 impl ReaperSource {
@@ -167,6 +171,7 @@ impl ReaperSource {
             section_start_sec: None,
             section_length_sec: None,
             file_path_full: None,
+            midi_source: None,
         }
     }
 
@@ -188,6 +193,32 @@ impl ReaperSource {
             self.file_path_full = Some(joined.to_string_lossy().to_string());
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaperMidiEvent {
+    pub tick_offset: u64,
+    pub status: u8,
+    pub data1: u8,
+    pub data2: u8,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaperIgnTempo {
+    /// true = 使用自身 BPM 而非工程 BPM
+    pub ignore_project: bool,
+    pub tempo: f64,
+    #[allow(dead_code)]
+    pub beats: u32,
+    #[allow(dead_code)]
+    pub beat_note: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReaperMidiSourceData {
+    pub ticks_per_qn: u32,
+    pub events: Vec<ReaperMidiEvent>,
+    pub igntempo: Option<ReaperIgnTempo>,
 }
 
 #[derive(Debug, Clone)]
@@ -446,6 +477,10 @@ fn parse_double_array(tokens: &[&str]) -> Vec<f64> {
 
 fn parse_int_array(tokens: &[&str]) -> Vec<i32> {
     tokens[1..].iter().map(|s| parse_int(s)).collect()
+}
+
+fn parse_hex_byte(s: &str) -> u8 {
+    u8::from_str_radix(s, 16).unwrap_or(0)
 }
 
 /// 解析 FADEIN/FADEOUT 参数，并将有效淡入淡出长度标准化到索引 1。
@@ -771,6 +806,12 @@ fn parse_item_block(block: &Block) -> ReaperItem {
                     take.chan_mode = v;
                 }
             }
+            "GROUP" if tokens.len() >= 2 => {
+                let gid = parse_int(&tokens[1]);
+                if gid > 0 {
+                    item.group_id = Some(gid);
+                }
+            }
             _ => {}
         }
     }
@@ -887,6 +928,9 @@ fn parse_take_block(block: &Block) -> (ReaperTake, Vec<ReaperEnvelope>) {
 
 fn parse_source_block(block: &Block) -> ReaperSource {
     let mut source = ReaperSource::new();
+    let mut midi_events: Vec<ReaperMidiEvent> = Vec::new();
+    let mut midi_ticks_per_qn: u32 = 960;
+    let mut midi_igntempo: Option<ReaperIgnTempo> = None;
 
     for line in &block.lines {
         let tokens = split_tokens(line);
@@ -909,8 +953,53 @@ fn parse_source_block(block: &Block) -> ReaperSource {
             "LENGTH" if tokens.len() >= 2 => {
                 source.section_length_sec = Some(parse_double(tokens[1]));
             }
+            // ─── MIDI 源 ───
+            "HASDATA" if tokens.len() >= 3 => {
+                midi_ticks_per_qn = tokens[2].parse::<u32>().unwrap_or(960);
+            }
+            "IGNTEMPO" if tokens.len() >= 5 => {
+                midi_igntempo = Some(ReaperIgnTempo {
+                    ignore_project: parse_bool(tokens[1]),
+                    tempo: parse_double(tokens[2]),
+                    beats: tokens[3].parse::<u32>().unwrap_or(4),
+                    beat_note: tokens[4].parse::<u32>().unwrap_or(4),
+                });
+            }
+            "E" | "e" if tokens.len() >= 4 => {
+                let tick_offset = tokens[1].parse::<u64>().unwrap_or(0);
+                midi_events.push(ReaperMidiEvent {
+                    tick_offset,
+                    status: parse_hex_byte(tokens[2]),
+                    data1: parse_hex_byte(tokens[3]),
+                    data2: if tokens.len() >= 5 {
+                        parse_hex_byte(tokens[4])
+                    } else {
+                        0
+                    },
+                });
+            }
+            "X" | "x" if tokens.len() >= 6 => {
+                let hi = tokens[1].parse::<u64>().unwrap_or(0);
+                let lo = tokens[2].parse::<u64>().unwrap_or(0);
+                let tick_offset = (hi << 32) | lo;
+                midi_events.push(ReaperMidiEvent {
+                    tick_offset,
+                    status: parse_hex_byte(tokens[3]),
+                    data1: parse_hex_byte(tokens[4]),
+                    data2: parse_hex_byte(tokens[5]),
+                });
+            }
             _ => {}
         }
+    }
+
+    // 组装 MIDI 源数据
+    if source.source_type.eq_ignore_ascii_case("MIDI") && !midi_events.is_empty() {
+        source.midi_source = Some(ReaperMidiSourceData {
+            ticks_per_qn: midi_ticks_per_qn,
+            events: midi_events,
+            igntempo: midi_igntempo,
+        });
     }
 
     // 处理 SECTION 类型的嵌套 SOURCE

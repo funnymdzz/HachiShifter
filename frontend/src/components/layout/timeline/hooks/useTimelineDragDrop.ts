@@ -383,46 +383,16 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
                     const beat = beatFromClientX(detail.clientX, bounds!, scroller.scrollLeft);
                     const trackId = trackIdFromClientY(detail.clientY);
                     const filePaths: string[] = (detail as any).filePaths;
-                    const isRightDrag = !!(detail as any).isRightDrag;
                     const isMulti = Array.isArray(filePaths) && filePaths.length > 1;
 
-                    if (isRightDrag) {
-                        const suppressCtx = (ev: Event) => {
-                            ev.preventDefault();
-                            ev.stopImmediatePropagation();
-                            window.removeEventListener("contextmenu", suppressCtx, true);
-                        };
-                        window.addEventListener("contextmenu", suppressCtx, true);
-
+                    if (isMulti) {
                         setImportModeMenu({
                             x: detail.clientX,
                             y: detail.clientY,
-                            audioPaths: isMulti ? filePaths : [detail.filePath],
+                            audioPaths: filePaths,
                             trackId,
                             startSec: beat,
                         });
-                    } else if (isMulti) {
-                        const externalAction = findFirstExternalPathAction(filePaths);
-                        if (externalAction?.kind === "importMidi") {
-                            onMidiDrop?.({
-                                midiPath: externalAction.path,
-                                trackId,
-                                startSec: beat,
-                            });
-                            return;
-                        }
-                        if (externalAction && externalAction.kind !== "importAudio") {
-                            emitExternalFileAction(externalAction.kind, externalAction.path);
-                            return;
-                        }
-                        void dispatch(
-                            importMultipleAudioAtPosition({
-                                audioPaths: filePaths,
-                                mode: "across-time",
-                                trackId,
-                                startSec: beat,
-                            }),
-                        );
                     } else {
                         const actionKind = detectExternalPathAction(detail.filePath);
                         if (actionKind === "importMidi") {

@@ -12,7 +12,7 @@ sudo apt-get update -y || true
 
 # Core packages used by native crates
 # Also install libfuse2 and fuse so AppImages can run in CI (provides libfuse.so.2)
-sudo apt-get install -y pkg-config libglib2.0-dev libgirepository1.0-dev gobject-introspection libssl-dev build-essential libgtk-3-dev libgdk-pixbuf2.0-dev libasound2-dev libfuse2 fuse || true
+sudo apt-get install -y pkg-config cmake libglib2.0-dev libgirepository1.0-dev gobject-introspection libssl-dev build-essential libgtk-3-dev libgdk-pixbuf2.0-dev libasound2-dev libfuse2 fuse || true
 
 # Additional dev packages commonly required by linuxdeploy and the GTK/GStreamer plugins
 # (helps Tauri's bundler find webkit/gstreamer and related girs at build time)

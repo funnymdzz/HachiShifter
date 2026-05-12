@@ -113,7 +113,7 @@ export const importAudioFromDialog = createAsyncThunk(
 
 export const importAudioFromPath = createAsyncThunk(
     "session/importAudioFromPath",
-    async (audioPath: string, { dispatch, rejectWithValue }) => {
+    async (audioPath: string, { dispatch, rejectWithValue, getState }) => {
         dispatch(setAudioPathAction(audioPath));
         const imported = await webApi.importAudioItem(audioPath);
         if (!(imported as { ok?: boolean }).ok) {
@@ -122,10 +122,18 @@ export const importAudioFromPath = createAsyncThunk(
                     "import_audio_item_failed",
             );
         }
+        const beforeClipIds = new Set(
+            (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+        );
+        const result = imported as { clips?: Array<{ id?: string }> };
+        const newClipIds = (result.clips ?? [])
+            .map((c) => c.id)
+            .filter((id): id is string => !!id && !beforeClipIds.has(id));
         return {
             ok: true,
             path: audioPath,
             imported,
+            newClipIds,
         };
     },
 );
@@ -747,6 +755,8 @@ export const importMidiAsClip = createAsyncThunk(
             noteBpmMode?: string;
             specifiedBpm?: number;
             importBpmAsProject?: boolean;
+            clipboardGuid?: string;
+            closeLeadingGap?: boolean;
         },
         { dispatch, rejectWithValue, getState },
     ) => {
@@ -778,6 +788,8 @@ export const importMidiAsClip = createAsyncThunk(
                 payload.noteBpmMode,
                 payload.specifiedBpm,
                 payload.importBpmAsProject,
+                payload.clipboardGuid,
+                payload.closeLeadingGap,
             );
             if (!(imported as { ok?: boolean }).ok) {
                 const errMsg =
@@ -785,7 +797,14 @@ export const importMidiAsClip = createAsyncThunk(
                     "import_midi_clip_failed";
                 return rejectWithValue(errMsg);
             }
-            return { ok: true, imported };
+            const beforeClipIds = new Set(
+                (getState() as { session: SessionState }).session.clips.map((c) => c.id),
+            );
+            const result = imported as { clips?: Array<{ id?: string }> };
+            const newClipIds = (result.clips ?? [])
+                .map((c) => c.id)
+                .filter((id): id is string => !!id && !beforeClipIds.has(id));
+            return { ok: true, imported, newClipIds };
         } catch (err) {
             return rejectWithValue(err instanceof Error ? err.message : "import_midi_clip_failed");
         } finally {

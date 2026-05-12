@@ -11,7 +11,7 @@ use std::fmt::{Display, Formatter};
 
 type Handle = *mut c_void;
 
-#[link(name = "SoundTouchDLL_x64")]
+#[link(name = "SoundTouchDLL")]
 extern "C" {
     fn soundtouch_createInstance() -> Handle;
     fn soundtouch_destroyInstance(handle: Handle);
@@ -57,12 +57,18 @@ impl Display for SoundTouchError {
 impl std::error::Error for SoundTouchError {}
 
 pub fn runtime_library_name() -> &'static str {
-    "SoundTouchDLL_x64.dll"
+    if cfg!(target_os = "windows") {
+        "SoundTouchDLL.dll"
+    } else if cfg!(target_os = "macos") {
+        "libSoundTouchDLL.dylib"
+    } else {
+        "libSoundTouchDLL.so"
+    }
 }
 
 #[allow(dead_code)]
 pub fn import_library_name() -> &'static str {
-    "SoundTouchDLL_x64.lib"
+    "SoundTouchDLL.lib"
 }
 
 pub fn normalize_output_len(mut output: Vec<f32>, channels: usize, out_frames: usize) -> Vec<f32> {
@@ -73,7 +79,7 @@ pub fn normalize_output_len(mut output: Vec<f32>, channels: usize, out_frames: u
 }
 
 pub fn is_available() -> bool {
-    cfg!(all(target_os = "windows", target_arch = "x86_64"))
+    true
 }
 
 fn tempo_from_time_ratio(time_ratio: f64) -> f32 {
@@ -368,13 +374,18 @@ mod tests {
 
     #[test]
     fn runtime_library_name_is_pinned() {
-        assert_eq!(runtime_library_name(), "SoundTouchDLL_x64.dll");
+        let name = runtime_library_name();
+        if cfg!(target_os = "windows") {
+            assert_eq!(name, "SoundTouchDLL.dll");
+        } else if cfg!(target_os = "macos") {
+            assert_eq!(name, "libSoundTouchDLL.dylib");
+        } else {
+            assert_eq!(name, "libSoundTouchDLL.so");
+        }
     }
 
     #[test]
     fn availability_does_not_depend_on_current_working_directory_dll_probe() {
-        if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            assert!(super::is_available());
-        }
+        assert!(super::is_available());
     }
 }

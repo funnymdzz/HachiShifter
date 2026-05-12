@@ -26,7 +26,11 @@ import {
     duplicateTrackRemote,
     fetchSelectedTrackSummary,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     glueClipsRemote,
+    groupClipsRemote,
+    ungroupClipsRemote,
+    toggleGroupDisabledRemote,
     moveClipRemote,
     moveClipsRemote,
     moveTrackRemote,
@@ -41,6 +45,7 @@ import {
     setClipsStateBulkRemote,
     setProjectLengthRemote,
     splitClipRemote,
+    splitClipsAtRemote,
 } from "./thunks/timelineThunks";
 
 import {
@@ -181,6 +186,10 @@ export interface SessionState {
     playheadZoomEnabled: boolean;
     /** 自动滚动（播放时跟随播放头） */
     autoScrollEnabled: boolean;
+    /** 忽略编组（启用后编组同步编辑操作不生效） */
+    ignoreGrouping: boolean;
+    /** 被禁用的编组 ID 列表（禁用后该编组内同步编辑不生效） */
+    disabledGroupIds: string[];
     /** 允许参数编辑器点击时调整播放头 */
     paramEditorSeekPlayheadEnabled: boolean;
     /** 剪贴板预览（在参数编辑器选区内显示剪贴板曲线预览） */
@@ -733,6 +742,7 @@ function applyTimelineState(
                 }),
             ),
             midiFillGaps: clip.midi_fill_gaps ?? false,
+            groupId: clip.group_id ?? undefined,
         };
 
         return parsed;
@@ -755,6 +765,9 @@ function applyTimelineState(
     state.bpm = clamp(Number(timeline.bpm ?? state.bpm), 10, 300);
     state.playheadSec = Math.max(0, Number(timeline.playhead_sec ?? 0));
     state.projectSec = Math.max(4, Number(timeline.project_sec ?? state.projectSec));
+    state.disabledGroupIds = Array.isArray(timeline.disabled_group_ids)
+        ? [...timeline.disabled_group_ids]
+        : [];
 
     const project = (timeline as any).project as
         | {
@@ -952,6 +965,8 @@ const initialState: SessionState = {
     scaleHighlightMode: "always",
     playheadZoomEnabled: false,
     autoScrollEnabled: false,
+    ignoreGrouping: false,
+    disabledGroupIds: [],
     paramEditorSeekPlayheadEnabled: true,
     showClipboardPreview: true,
     showParamValuePopup: true,
@@ -1097,7 +1112,9 @@ export {
     replaceClipSourceRemote,
     replaceMidiClipDataRemote,
     splitClipRemote,
+    splitClipsAtRemote,
     convertClipsToPitchReferenceRemote,
+    updatePitchReferenceRemote,
     glueClipsRemote,
     selectClipRemote,
 } from "./thunks/timelineThunks";
@@ -1281,6 +1298,17 @@ const sessionSlice = createSlice({
         },
         toggleAutoScroll(state) {
             state.autoScrollEnabled = !state.autoScrollEnabled;
+        },
+        toggleIgnoreGrouping(state) {
+            state.ignoreGrouping = !state.ignoreGrouping;
+        },
+        toggleGroupDisabledLocal(state, action: PayloadAction<string>) {
+            const idx = state.disabledGroupIds.indexOf(action.payload);
+            if (idx >= 0) {
+                state.disabledGroupIds.splice(idx, 1);
+            } else {
+                state.disabledGroupIds.push(action.payload);
+            }
         },
         toggleParamEditorSeekPlayhead(state) {
             state.paramEditorSeekPlayheadEnabled = !state.paramEditorSeekPlayheadEnabled;
@@ -1471,6 +1499,17 @@ const sessionSlice = createSlice({
             const clip = state.clips.find((entry) => entry.id === action.payload.clipId);
             if (!clip) return;
             clip.muted = Boolean(action.payload.muted);
+        },
+        setClipsGroupId(
+            state,
+            action: PayloadAction<{ clipIds: string[]; groupId: string | null }>,
+        ) {
+            const ids = new Set(action.payload.clipIds);
+            for (const clip of state.clips) {
+                if (ids.has(clip.id)) {
+                    clip.groupId = action.payload.groupId ?? undefined;
+                }
+            }
         },
         /** 乐观更新 clip 颜色（立即反映到 UI，后端确认前先行生效�?*/
         optimisticUpdateClipColor(
@@ -1796,6 +1835,8 @@ const sessionSlice = createSlice({
                     state.showParamValuePopup = Boolean((s as any).showParamValuePopup);
                 if (s.scaleHighlightMode != null)
                     state.scaleHighlightMode = s.scaleHighlightMode === "always" ? "always" : "off";
+                if ((s as any).ignoreGrouping != null)
+                    state.ignoreGrouping = Boolean((s as any).ignoreGrouping);
                 if (s.lockParamLines != null)
                     state.lockParamLinesEnabled = Boolean(s.lockParamLines);
                 if ((s as any).quickSearchAutoNormalize != null)
@@ -1904,6 +1945,7 @@ const sessionSlice = createSlice({
                     canceled?: boolean;
                     path?: string;
                     imported?: { ok?: boolean } & TimelineState;
+                    newClipIds?: string[];
                 };
                 if (payload.canceled) {
                     state.status = "Import canceled";
@@ -1913,6 +1955,10 @@ const sessionSlice = createSlice({
                     state.audioPath = payload.path;
                     if (payload.imported?.ok) {
                         applyTimelineState(state, payload.imported, { force: true });
+                        if (payload.newClipIds && payload.newClipIds.length > 0) {
+                            state.multiSelectedClipIds = payload.newClipIds;
+                            state.selectedClipId = payload.newClipIds[0] ?? null;
+                        }
                     }
                 }
                 state.status = payload.imported?.ok ? "Audio imported" : "Import audio failed";
@@ -1928,11 +1974,16 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     path?: string;
                     imported?: { ok?: boolean } & TimelineState;
+                    newClipIds?: string[];
                 };
                 if (payload.path) {
                     state.audioPath = payload.path;
                     if (payload.imported?.ok) {
                         applyTimelineState(state, payload.imported, { force: true });
+                        if (payload.newClipIds && payload.newClipIds.length > 0) {
+                            state.multiSelectedClipIds = payload.newClipIds;
+                            state.selectedClipId = payload.newClipIds[0] ?? null;
+                        }
                     }
                 }
                 state.status = payload.imported?.ok
@@ -1956,9 +2007,10 @@ const sessionSlice = createSlice({
                 state.status = ok ? "Import done" : "Import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
-                    // Apply auto-crossfade for newly imported clips
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -1981,6 +2033,8 @@ const sessionSlice = createSlice({
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -2003,6 +2057,8 @@ const sessionSlice = createSlice({
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
                     if (payload.newClipIds && payload.newClipIds.length > 0) {
                         applyAutoCrossfadeInReducer(state, payload.newClipIds);
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
                     }
                 }
             })
@@ -2044,11 +2100,16 @@ const sessionSlice = createSlice({
                 const payload = action.payload as {
                     ok?: boolean;
                     imported?: TimelineState;
+                    newClipIds?: string[];
                 };
                 const ok = Boolean(payload.ok);
                 state.status = ok ? "MIDI clip created" : "MIDI import failed";
                 if (ok && payload.imported && (payload.imported as any).tracks) {
                     applyTimelineStatePreservingPitchVisuals(state, payload.imported as any);
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
             })
             .addCase(importMidiAsClip.rejected, setRejected)
@@ -2175,6 +2236,10 @@ const sessionSlice = createSlice({
                 const payload = action.payload as any;
                 if (payload?.tracks) {
                     applyTimelineState(state, payload, { force: true });
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
                 state.lastResult = payload;
                 state.paramsEpoch = (Number(state.paramsEpoch) || 0) + 1;
@@ -2195,6 +2260,10 @@ const sessionSlice = createSlice({
                 const payload = action.payload as any;
                 if (payload?.timeline) {
                     applyTimelineState(state, payload.timeline, { force: true });
+                    if (payload.newClipIds && payload.newClipIds.length > 0) {
+                        state.multiSelectedClipIds = payload.newClipIds;
+                        state.selectedClipId = payload.newClipIds[0] ?? null;
+                    }
                 }
                 const skippedFiles = payload?.skippedFiles;
                 state.reaperSkippedFilesDialog =
@@ -2448,6 +2517,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2483,6 +2557,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.vocalShifterSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2518,6 +2597,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2551,6 +2635,11 @@ const sessionSlice = createSlice({
                     force: true,
                     preserveProjectNotes: false,
                 });
+                const newClipIds = (payload as any).newClipIds;
+                if (newClipIds && newClipIds.length > 0) {
+                    state.multiSelectedClipIds = newClipIds;
+                    state.selectedClipId = newClipIds[0] ?? null;
+                }
                 const skippedFiles = (payload as any).skippedFiles;
                 state.reaperSkippedFilesDialog =
                     Array.isArray(skippedFiles) && skippedFiles.length > 0 ? skippedFiles : null;
@@ -2856,6 +2945,16 @@ const sessionSlice = createSlice({
                 applyTimelineState(state, payload, { force: true });
             })
 
+            .addCase(splitClipsAtRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
             .addCase(glueClipsRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
@@ -2867,7 +2966,47 @@ const sessionSlice = createSlice({
                 state.status = "Glue done";
             })
 
+            .addCase(groupClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(ungroupClipsRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(toggleGroupDisabledRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
             .addCase(convertClipsToPitchReferenceRemote.fulfilled, (state, action) => {
+                const payload = action.payload as {
+                    ok?: boolean;
+                } & TimelineState;
+                if (!payload.ok) {
+                    return;
+                }
+                applyTimelineState(state, payload, { force: true });
+            })
+
+            .addCase(updatePitchReferenceRemote.fulfilled, (state, action) => {
                 const payload = action.payload as {
                     ok?: boolean;
                 } & TimelineState;
@@ -3139,6 +3278,7 @@ export const {
     setPitchSnapScale,
     togglePlayheadZoom,
     toggleAutoScroll,
+    toggleIgnoreGrouping,
     toggleParamEditorSeekPlayhead,
     toggleClipboardPreview,
     toggleParamValuePopup,
@@ -3174,6 +3314,7 @@ export const {
     setClipFades,
     setClipGain,
     setClipMuted,
+    setClipsGroupId,
     optimisticUpdateClipColor,
     rollbackClipColor,
     addClip,

@@ -1,3 +1,4 @@
+use crate::pitch_analysis;
 use crate::state::AppState;
 use crate::vocalshifter_clipboard::ClipboardFileKind;
 
@@ -479,6 +480,20 @@ fn paste_vsp_project(state: &AppState, path: &std::path::Path) -> serde_json::Va
         tl.project_sec = max_end;
 
         state.audio_engine.update_timeline(tl.clone());
+
+        // 为导入的 MIDI 音高参考块触发 pitch 分析
+        let midi_root_tracks: Vec<String> = tl
+            .clips
+            .iter()
+            .filter(|c| c.midi_note_data.is_some())
+            .filter_map(|c| tl.resolve_root_track_id(&c.track_id))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        drop(tl);
+        for root_id in &midi_root_tracks {
+            pitch_analysis::maybe_schedule_pitch_orig(state, root_id);
+        }
     }
 
     let payload = get_timeline_state_from_ref(state);

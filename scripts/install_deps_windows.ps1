@@ -8,6 +8,12 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "choco or NSIS install failed or not available"
 }
 
+Write-Host "[install_deps_windows] Installing CMake via chocolatey (if available)"
+choco install cmake -y
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "choco or cmake install failed or not available"
+}
+
 Write-Host "[install_deps_windows] Installing LLVM/Clang via chocolatey (if available)"
 choco install llvm -y
 if ($LASTEXITCODE -ne 0) {

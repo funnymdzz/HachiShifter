@@ -88,6 +88,9 @@ export const coreApi = {
     openMidiDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string }>("open_midi_dialog"),
 
+    pickMidiOutputPath: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string }>("pick_midi_output_path"),
+
     clearWaveformCache: () =>
         invoke<{
             ok: boolean;

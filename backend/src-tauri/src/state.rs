@@ -250,6 +250,8 @@ pub struct Track {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Clip {
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<String>,
     pub track_id: String,
     pub name: String,
     pub start_sec: f64,
@@ -351,6 +353,9 @@ pub struct TimelineState {
     pub project_scale_notes: Vec<u8>,
 
     pub next_track_order: i32,
+
+    #[serde(default)]
+    pub disabled_group_ids: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -424,6 +429,7 @@ impl Default for TimelineState {
             params_by_root_track: BTreeMap::new(),
             project_scale_notes: default_project_scale_notes(),
             next_track_order: 1,
+            disabled_group_ids: HashSet::new(),
         }
     }
 }
@@ -873,6 +879,9 @@ pub struct AppState {
     pub waveform_inflight: std::sync::Mutex<std::collections::HashSet<String>>,
     pub waveform_inflight_cv: std::sync::Condvar,
 
+    /// In-memory cache of clipboard MIDI bytes, keyed by GUID (first 8 bytes of blake3 hash as hex).
+    pub clipboard_midi_cache: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+
     // Set in Tauri setup. Used for async notifications.
     pub app_handle: OnceLock<tauri::AppHandle>,
 
@@ -920,6 +929,7 @@ impl Default for AppState {
 
             waveform_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
             waveform_inflight_cv: std::sync::Condvar::new(),
+            clipboard_midi_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
 
             app_handle: OnceLock::new(),
             pitch_inflight: std::sync::Mutex::new(std::collections::HashSet::new()),
@@ -1399,6 +1409,8 @@ mod tests {
                     fade_in_curve: Some("sine".into()),
                     fade_out_curve: Some("logarithmic".into()),
                     linked_params: None,
+                    midi_fill_gaps: Some(false),
+                    midi_note_data: None,
                 },
                 CreateClipTemplatePayload {
                     track_id,
@@ -1418,6 +1430,8 @@ mod tests {
                     fade_in_curve: Some("linear".into()),
                     fade_out_curve: Some("scurve".into()),
                     linked_params: None,
+                    midi_fill_gaps: Some(false),
+                    midi_note_data: None,
                 },
             ],
             select_created_clips: true,
@@ -1498,6 +1512,8 @@ mod tests {
                 fade_in_curve: Some("linear".into()),
                 fade_out_curve: Some("scurve".into()),
                 linked_params: None,
+                midi_fill_gaps: Some(false),
+                midi_note_data: None,
             }],
             select_created_clips: true,
         });
@@ -1674,6 +1690,129 @@ mod tests {
         assert_eq!(morph.target_f2_hz, 1400.0);
         assert!((morph.strength - 0.50).abs() < 1e-6);
     }
+
+    // ── split_clips_at tests ──────────────────────────────────────
+
+    /// Split a grouped clip: left half keeps original group_id, right half gets new group_id.
+    #[test]
+    fn split_clips_at_basic() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("A".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("B".into()), Some(3.0), Some(2.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+        assert!(orig_group.is_some());
+
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // Left half (start_sec ≈ 0.0) keeps original group
+        let left = tl.clips.iter().find(|c| c.start_sec < 0.5 && c.id != c2).unwrap();
+        assert_eq!(left.group_id, orig_group);
+
+        // Right half (start_sec ≈ 1.0) gets new group
+        let right = tl.clips.iter().find(|c| c.start_sec >= 0.5 && c.id != c2).unwrap();
+        assert!(right.group_id.is_some());
+        assert_ne!(right.group_id, orig_group);
+    }
+
+    /// Right-side group with only 1 member gets dissolved after split.
+    #[test]
+    fn split_clips_at_dissolves_small_groups() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        // c1 at 0.0..2.0, c2 at 0.5..0.8 (entirely left of split point at 1.0)
+        let c1 = tl.add_clip(Some(tid.clone()), Some("A".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("B".into()), Some(0.5), Some(0.3), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        // Split c1 at 1.0. c2 starts at 0.5 < 1.0 so stays in original (left) group.
+        // Left group: left half of c1 + c2 = 2 members → survives.
+        // Right group: right half of c1 only → 1 member → dissolved.
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // Right half of c1 should have no group (dissolved)
+        let right_half = tl.clips.iter().find(|c| c.start_sec >= 0.9 && c.id != c2).unwrap();
+        assert!(right_half.group_id.is_none(), "right half should have no group");
+
+        // Left half and c2 should still be in the original group
+        let left_half = tl.clips.iter().find(|c| c.start_sec < 0.5 && c.id != c2).unwrap();
+        assert!(left_half.group_id.is_some(), "left half should keep group");
+        assert!(tl.clips.iter().find(|c| c.id == c2).unwrap().group_id.is_some(), "c2 should keep group");
+    }
+
+    /// Unsplit clip entirely to the right of the split point moves to the new group.
+    #[test]
+    fn split_clips_at_unsplit_member_to_right() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("left".into()), Some(0.0), Some(2.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("right".into()), Some(2.5), Some(1.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+
+        // Split c1 at 1.0; c2 is at 2.5 > 1.0 so it goes to the right group
+        tl.split_clips_at(&[c1.clone()], 1.0);
+
+        // c2 should have moved to the new right group
+        let c2_after = tl.clips.iter().find(|c| c.id == c2).unwrap();
+        assert!(c2_after.group_id.is_some());
+        assert_ne!(c2_after.group_id, orig_group);
+    }
+
+    /// Unsplit clip to the left of the split point keeps the original group.
+    #[test]
+    fn split_clips_at_unsplit_member_stays_left() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+        let c1 = tl.add_clip(Some(tid.clone()), Some("early".into()), Some(0.0), Some(1.0), None);
+        let c2 = tl.add_clip(Some(tid), Some("later".into()), Some(3.0), Some(2.0), None);
+        tl.group_clips(&[c1.clone(), c2.clone()]);
+
+        let orig_group = tl.clips.iter().find(|c| c.id == c1).unwrap().group_id.clone();
+
+        // Split c2 at 4.0; c1 is at 0.0 < 4.0 so it stays in original group
+        tl.split_clips_at(&[c2.clone()], 4.0);
+
+        let c1_after = tl.clips.iter().find(|c| c.id == c1).unwrap();
+        assert_eq!(c1_after.group_id, orig_group);
+    }
+
+    /// Splitting clips from different groups simultaneously assigns distinct right-side groups.
+    #[test]
+    fn split_clips_at_mixed_groups() {
+        let mut tl = TimelineState::default();
+        let tid = tl.add_track(Some("T1".into()), None, None);
+
+        // Group A
+        let a1 = tl.add_clip(Some(tid.clone()), Some("A1".into()), Some(0.0), Some(2.0), None);
+        let a2 = tl.add_clip(Some(tid.clone()), Some("A2".into()), Some(3.0), Some(1.0), None);
+        tl.group_clips(&[a1.clone(), a2.clone()]);
+        let group_a = tl.clips.iter().find(|c| c.id == a1).unwrap().group_id.clone();
+
+        // Group B
+        let b1 = tl.add_clip(Some(tid), Some("B1".into()), Some(5.0), Some(2.0), None);
+        let b2 = tl.add_clip(None, Some("B2".into()), Some(8.0), Some(1.0), None);
+        tl.group_clips(&[b1.clone(), b2.clone()]);
+        let group_b = tl.clips.iter().find(|c| c.id == b1).unwrap().group_id.clone();
+
+        assert_ne!(group_a, group_b);
+
+        // Split one clip from each group
+        tl.split_clips_at(&[a1.clone(), b1.clone()], 1.0);
+
+        // Each group should have at least 2 distinct group_ids after split (original + new)
+        let mut groups: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for clip in &tl.clips {
+            if let Some(ref gid) = clip.group_id {
+                groups.insert(gid.clone());
+            }
+        }
+        // Original group_a, new right group for A, original group_b, new right group for B
+        assert!(groups.len() >= 4, "expected >=4 groups, got {}", groups.len());
+    }
 }
 
 fn new_id(prefix: &str) -> String {
@@ -1723,6 +1862,7 @@ impl TimelineState {
             .iter()
             .map(|c| TimelineClip {
                 id: c.id.clone(),
+                group_id: c.group_id.clone(),
                 track_id: c.track_id.clone(),
                 name: c.name.clone(),
                 start_sec: c.start_sec,
@@ -1772,6 +1912,11 @@ impl TimelineState {
             project_sec: Some(self.project_sec),
             project: None,
             missing_files: None,
+            disabled_group_ids: {
+                let mut ids: Vec<String> = self.disabled_group_ids.iter().cloned().collect();
+                ids.sort();
+                ids
+            },
         }
     }
 
@@ -2153,6 +2298,7 @@ impl TimelineState {
 
         let clip = Clip {
             id: id.clone(),
+            group_id: None,
             track_id: track_id.clone(),
             name: name.unwrap_or_else(|| "Clip".to_string()),
             start_sec: ss,
@@ -2465,6 +2611,7 @@ impl TimelineState {
                 {
                     let mut duplicated = source_clip.clone();
                     duplicated.id = new_id("clip");
+                    duplicated.group_id = None;
                     duplicated.track_id = template.track_id.clone();
                     duplicated.name = template.name.clone();
                     duplicated.start_sec = template.start_sec;
@@ -2569,6 +2716,9 @@ impl TimelineState {
         if source_clips.is_empty() {
             return Vec::new();
         }
+
+        // Capture original group IDs before source_clips is consumed
+        let original_group_ids: Vec<Option<String>> = source_clips.iter().map(|c| c.group_id.clone()).collect();
 
         let source_track_order = self
             .tracks
@@ -2703,6 +2853,28 @@ impl TimelineState {
             }
         }
 
+        // Remap group IDs: each original group gets a new unique group ID
+        // so duplicates are in independent groups from the originals.
+        {
+            let mut group_remap: HashMap<String, String> = HashMap::new();
+            for gid_opt in &original_group_ids {
+                if let Some(ref gid) = gid_opt {
+                    group_remap.entry(gid.clone()).or_insert_with(|| Uuid::new_v4().to_string());
+                }
+            }
+            if !group_remap.is_empty() {
+                for clip in &mut self.clips {
+                    if created_clip_ids.contains(&clip.id) {
+                        if let Some(ref old_gid) = clip.group_id {
+                            if let Some(new_gid) = group_remap.get(old_gid) {
+                                clip.group_id = Some(new_gid.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if payload.select_created_clips {
             self.selected_clip_id = created_clip_ids.first().cloned();
             if let Some(first_created_clip) = created_clip_ids
@@ -2791,7 +2963,97 @@ impl TimelineState {
             right.source_start_sec =
                 (right.source_start_sec + left_len * rate).clamp(-1_000_000.0, 1_000_000.0);
         }
+        // Propagate group_id to the split-off right clip
+        right.group_id = self.clips[idx].group_id.clone();
         self.clips.push(right);
+    }
+
+    /// Split multiple clips at the same position.
+    /// - Left halves keep the original group_id.
+    /// - Right halves get a new group_id (per original group).
+    /// - Unsplit clips in affected groups are assigned to left or right side by position.
+    /// - Groups with fewer than 2 members after reassignment are dissolved.
+    pub fn split_clips_at(&mut self, clip_ids: &[String], split_sec: f64) {
+        // 1. Collect affected group IDs from input clips
+        let affected_groups: HashSet<Option<String>> = clip_ids
+            .iter()
+            .filter_map(|cid| {
+                self.clips
+                    .iter()
+                    .find(|c| c.id == *cid)
+                    .map(|c| c.group_id.clone())
+            })
+            .collect();
+
+        // 2. Record clip IDs before split
+        let before_ids: HashSet<String> = self.clips.iter().map(|c| c.id.clone()).collect();
+
+        // 3. Split each input clip
+        for cid in clip_ids {
+            self.split_clip(cid, split_sec);
+        }
+
+        // 4. Identify newly created clip IDs (right halves)
+        let new_ids: HashSet<String> = self
+            .clips
+            .iter()
+            .map(|c| c.id.clone())
+            .filter(|id| !before_ids.contains(id))
+            .collect();
+
+        if new_ids.is_empty() {
+            return;
+        }
+
+        // 5. For each affected group, generate a new group UUID for right-side clips
+        let mut right_group_map: HashMap<Option<String>, Option<String>> = HashMap::new();
+        for gid_opt in &affected_groups {
+            let new_gid = gid_opt
+                .as_ref()
+                .map(|_| Some(new_id("group")))
+                .unwrap_or(None);
+            right_group_map.insert(gid_opt.clone(), new_gid);
+        }
+
+        // 6. Assign new group_id to right-side clips (new clips and unsplit clips to the right)
+        for gid_opt in affected_groups.iter().filter(|g| g.is_some()) {
+            let Some(ref gid) = gid_opt else {
+                continue;
+            };
+            let new_gid = right_group_map
+                .get(gid_opt)
+                .and_then(|g| g.clone());
+
+            for clip in self.clips.iter_mut() {
+                if clip.group_id.as_ref() != Some(gid) {
+                    continue;
+                }
+                if new_ids.contains(&clip.id) {
+                    // Newly created right-half clip → assign new group
+                    clip.group_id = new_gid.clone();
+                } else if clip.start_sec >= split_sec - 1e-6 {
+                    // Unsplit clip entirely to the right → move to new group
+                    clip.group_id = new_gid.clone();
+                }
+                // else: unsplit clip to the left → keep original group
+            }
+        }
+
+        // 7. Dissolve single-member groups
+        let mut group_counts: HashMap<String, usize> = HashMap::new();
+        for clip in &self.clips {
+            if let Some(ref gid) = clip.group_id {
+                *group_counts.entry(gid.clone()).or_default() += 1;
+            }
+        }
+
+        for clip in &mut self.clips {
+            if let Some(ref gid) = clip.group_id {
+                if group_counts.get(gid).copied().unwrap_or(0) < 2 {
+                    clip.group_id = None;
+                }
+            }
+        }
     }
 
     pub fn glue_clips(&mut self, clip_ids: &[String]) {
@@ -2834,6 +3096,7 @@ impl TimelineState {
 
         let mut glued = first.clone();
         glued.id = new_id("clip");
+        glued.group_id = None; // Glued clip starts a new identity, not part of any group
         glued.name = "Glued".to_string();
         glued.start_sec = start;
         glued.length_sec = (end - start).max(0.01);
@@ -2914,6 +3177,73 @@ impl TimelineState {
         self.selected_clip_id = Some(glued.id);
     }
 
+    /// 将选中的音频块编入同一组。
+    pub fn group_clips(&mut self, clip_ids: &[String]) {
+        if clip_ids.len() < 2 {
+            return;
+        }
+        let clip_id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
+        let group_id = Uuid::new_v4().to_string();
+        for c in &mut self.clips {
+            if clip_id_set.contains(c.id.as_str()) {
+                c.group_id = Some(group_id.clone());
+            }
+        }
+    }
+
+    /// 将选中音频块从其所属组中移除（解组）。
+    /// 仅移除指定音频块的组关系，若某组剩余成员 ≤1 则自动解散该组。
+    pub fn ungroup_clips(&mut self, clip_ids: &[String]) {
+        let clip_id_set: HashSet<&str> = clip_ids.iter().map(|s| s.as_str()).collect();
+
+        // 收集受影响的组 ID
+        let affected_groups: HashSet<String> = self
+            .clips
+            .iter()
+            .filter(|c| clip_id_set.contains(c.id.as_str()) && c.group_id.is_some())
+            .filter_map(|c| c.group_id.clone())
+            .collect();
+
+        if affected_groups.is_empty() {
+            return;
+        }
+
+        // 仅移除指定音频块的 group_id
+        for c in &mut self.clips {
+            if clip_id_set.contains(c.id.as_str()) {
+                c.group_id = None;
+            }
+        }
+
+        // 自动解散成员数 ≤1 的组
+        for gid in &affected_groups {
+            let count = self
+                .clips
+                .iter()
+                .filter(|c| c.group_id.as_deref() == Some(gid.as_str()))
+                .count();
+            if count <= 1 {
+                for c in &mut self.clips {
+                    if c.group_id.as_deref() == Some(gid.as_str()) {
+                        c.group_id = None;
+                    }
+                }
+                self.disabled_group_ids.remove(gid);
+            }
+        }
+    }
+
+    /// 切换编组的禁用状态。返回新的状态（true = 已禁用）。
+    pub fn toggle_group_disabled(&mut self, group_id: &str) -> bool {
+        if self.disabled_group_ids.contains(group_id) {
+            self.disabled_group_ids.remove(group_id);
+            false
+        } else {
+            self.disabled_group_ids.insert(group_id.to_string());
+            true
+        }
+    }
+
     /// 将指定的常规音频块转换为音高参考块。
     /// 获取每个音频块的原始音高数据，转换为 midi_note_data，
     /// 并清除 source_path 使其成为纯音高参考块。
@@ -2961,16 +3291,251 @@ impl TimelineState {
                 clip.duration_frames = None;
                 clip.waveform_preview = None;
                 clip.color = "cyan".to_string();
-                // 重置 source trim，使 midiNoteData 完整映射到 clip 时间轴
-                clip.source_start_sec = 0.0;
-                clip.source_end_sec = clip.length_sec;
-                clip.playback_rate = 1.0;
-                clip.reversed = false;
                 clip.pitch_range = Some(PitchRange {
                     min: 0.0,
                     max: 127.0,
                 });
             }
+        }
+    }
+
+    /// 将所选音高参考块的 midi_note_data 更新为轨道上对应范围内的 pitch_edit 曲线。
+    /// 对未编辑区域（pitch_edit 中为 0 的帧）回退到 clip 原有的 midi_note_data。
+    /// 正确处理 stretch（playback_rate）和倒放（reversed）的时间映射。
+    pub fn update_pitch_reference_from_track_params(&mut self, clip_ids: &[String]) {
+        let fp = self.frame_period_ms();
+        let fp_sec = fp / 1000.0;
+
+        // 先收集每个 clip 的必要信息，避免同时持有不可变借用和可变借用
+        struct ClipMeta {
+            clip_id: String,
+            root: String,
+            start_sec: f64,
+            length_sec: f64,
+            playback_rate: f32,
+            reversed: bool,
+            src_start: f64,
+            src_end: f64,
+            original_midi: Option<Vec<MidiNoteEvent>>,
+        }
+
+        let clip_infos: Vec<ClipMeta> = clip_ids
+            .iter()
+            .filter_map(|clip_id| {
+                let clip = self.clips.iter().find(|c| c.id == *clip_id)?;
+                if clip.midi_note_data.is_none() {
+                    return None;
+                }
+                let root = self.resolve_root_track_id(&clip.track_id)?;
+                let src_end = if clip.source_end_sec > 0.0 {
+                    clip.source_end_sec
+                } else {
+                    clip.length_sec
+                };
+                Some(ClipMeta {
+                    clip_id: clip_id.clone(),
+                    root,
+                    start_sec: clip.start_sec,
+                    length_sec: clip.length_sec,
+                    playback_rate: clip.playback_rate,
+                    reversed: clip.reversed,
+                    src_start: clip.source_start_sec.max(0.0),
+                    src_end,
+                    original_midi: clip.midi_note_data.clone(),
+                })
+            })
+            .collect();
+
+        for info in &clip_infos {
+            // Step 1: 从 clip 原有的 midi_note_data 构建回退音高曲线
+            let fallback_curve = Self::build_fallback_pitch_from_midi(
+                info.length_sec,
+                fp,
+                info.original_midi.as_deref().unwrap_or(&[]),
+                info.playback_rate,
+                info.reversed,
+                info.src_start,
+                info.src_end,
+            );
+
+            // Step 2: 同步 params 并读取 pitch_edit
+            self.ensure_params_for_root(&info.root);
+
+            let entry = match self.params_by_root_track.get(&info.root) {
+                Some(e) => e,
+                None => continue,
+            };
+
+            let (start_frame, end_frame) =
+                self.clip_frame_bounds(info.start_sec, info.length_sec, fp);
+
+            let extracted: Vec<f32> = entry
+                .pitch_edit
+                .get(start_frame..end_frame)
+                .unwrap_or(&[])
+                .to_vec();
+
+            if extracted.is_empty() {
+                continue;
+            }
+
+            // Step 3: 合并 pitch_edit 与回退曲线 ——
+            // 帧中 pitch_edit 值 <= 0 表示未被编辑或无效，回退到原有 midi 数据
+            let merged: Vec<f32> = extracted
+                .iter()
+                .enumerate()
+                .map(|(i, &e)| {
+                    if e > 0.0 {
+                        e
+                    } else {
+                        fallback_curve.get(i).copied().unwrap_or(0.0)
+                    }
+                })
+                .collect();
+
+            // Step 4: 转换为 MIDI 音符事件
+            let mut midi_notes =
+                Self::pitch_curve_to_midi_notes(&merged, fp_sec, info.length_sec);
+
+            // Step 5: 根据 stretch / reverse 重映射音符时间
+            Self::remap_midi_note_times(
+                &mut midi_notes,
+                info.length_sec,
+                info.src_start,
+                info.src_end,
+                info.playback_rate,
+                info.reversed,
+            );
+
+            // Step 6: 写回 clip，同时重新计算 pitch_range
+            if let Some(clip) = self.clips.iter_mut().find(|c| c.id == info.clip_id) {
+                let min_note = midi_notes
+                    .iter()
+                    .fold(127.0f32, |m, n| m.min(n.note));
+                let max_note = midi_notes
+                    .iter()
+                    .fold(0.0f32, |m, n| m.max(n.note));
+                let padding = 2.0f32;
+                clip.pitch_range = Some(PitchRange {
+                    min: (min_note - padding).max(0.0),
+                    max: (max_note + padding).min(127.0),
+                });
+                clip.midi_note_data = Some(midi_notes);
+            }
+        }
+
+        // Step 7: 为每个受影响的 root track 立即重组 pitch_orig / pitch_edit
+        let roots: std::collections::HashSet<&str> =
+            clip_infos.iter().map(|info| info.root.as_str()).collect();
+        for root in &roots {
+            let (curve, _all_cache_hit, has_pitch_adjustment) =
+                match crate::pitch_analysis::schedule::assemble_pitch_orig_from_cache(self, root) {
+                    Some(v) => v,
+                    None => continue,
+                };
+
+            self.ensure_params_for_root(root);
+            let key = crate::pitch_analysis::build_root_pitch_key(self, root);
+
+            if let Some(entry) = self.params_by_root_track.get_mut(*root) {
+                entry.pitch_orig = curve;
+                entry.pitch_orig_key = Some(key);
+                entry.has_pitch_adjustment_active = has_pitch_adjustment;
+                if !entry.pitch_edit_user_modified {
+                    entry.pitch_edit.clone_from(&entry.pitch_orig);
+                }
+            }
+        }
+    }
+
+    /// 从 midi_note_data 构建一段 clip 时长内的回退音高曲线（单位：MIDI note number）。
+    /// 时间映射与 `assemble_pitch_orig_from_cache` 中的 MIDI clip 路径保持一致。
+    fn build_fallback_pitch_from_midi(
+        length_sec: f64,
+        fp: f64,
+        midi_notes: &[MidiNoteEvent],
+        playback_rate: f32,
+        reversed: bool,
+        src_start: f64,
+        src_end: f64,
+    ) -> Vec<f32> {
+        let fp_sec = fp / 1000.0;
+        let total_frames = ((length_sec.max(0.0) * 1000.0) / fp).ceil().max(1.0) as usize;
+        let mut curve = vec![0.0f32; total_frames];
+        let pr = if playback_rate.is_finite() && playback_rate > 0.0 {
+            playback_rate as f64
+        } else {
+            1.0
+        };
+        let src_total = src_end - src_start;
+
+        for note in midi_notes {
+            let rel_start = (note.start_sec - src_start).max(0.0);
+            let rel_end = (note.end_sec - src_start).min(src_total);
+            if rel_end <= rel_start {
+                continue;
+            }
+
+            let (eff_start, eff_end) = if reversed {
+                (
+                    (src_total - rel_end).max(0.0),
+                    (src_total - rel_start).min(src_total),
+                )
+            } else {
+                (rel_start, rel_end)
+            };
+            if eff_end <= eff_start {
+                continue;
+            }
+
+            let frame_start = ((eff_start / pr) / fp_sec).round() as usize;
+            let frame_end = (((eff_end / pr) / fp_sec).round() as usize).min(total_frames);
+            if frame_start < frame_end {
+                let note_value = note.note as f32;
+                for f in frame_start..frame_end {
+                    if note_value > curve[f] || curve[f] <= 0.0 {
+                        curve[f] = note_value;
+                    }
+                }
+            }
+        }
+
+        curve
+    }
+
+    /// 将 pitch_curve_to_midi_notes 输出的"提取时间"坐标重映射为 source-time 坐标，
+    /// 以匹配 stretch（playback_rate）和倒放（reversed）参数。
+    fn remap_midi_note_times(
+        notes: &mut [MidiNoteEvent],
+        length_sec: f64,
+        src_start: f64,
+        src_end: f64,
+        playback_rate: f32,
+        reversed: bool,
+    ) {
+        let pr = if playback_rate.is_finite() && playback_rate > 0.0 {
+            playback_rate as f64
+        } else {
+            1.0
+        };
+        let src_total = src_end - src_start;
+
+        for note in notes.iter_mut() {
+            let proj_start = note.start_sec; // 当前为提取时间（相对 clip 起点的项目时间）
+            let proj_end = note.end_sec;
+
+            let (new_start, new_end) = if reversed {
+                let eff_start = (length_sec - proj_end) * pr;
+                let eff_end = (length_sec - proj_start) * pr;
+                let src_note_start = (src_total - eff_end).max(0.0);
+                let src_note_end = (src_total - eff_start).min(src_total);
+                (src_note_start + src_start, src_note_end + src_start)
+            } else {
+                (proj_start * pr + src_start, proj_end * pr + src_start)
+            };
+
+            note.start_sec = new_start;
+            note.end_sec = new_end;
         }
     }
 

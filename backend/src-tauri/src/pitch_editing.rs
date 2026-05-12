@@ -311,6 +311,9 @@ mod tests {
             extra_curves: None,
             extra_params: None,
             formant_morph: None,
+            group_id: None,
+            midi_fill_gaps: false,
+            midi_note_data: None,
         }
     }
 
@@ -376,7 +379,7 @@ fn child_pitch_offset_curve_key(mode: ChildPitchOffsetParamMode, track_id: &str)
     }
 }
 
-fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
+pub(crate) fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
     if scale_notes.is_empty() {
         return vec![0, 2, 4, 5, 7, 9, 11];
     }
@@ -399,7 +402,7 @@ fn ordered_scale_semitone_offsets(scale_notes: &[u8]) -> Vec<i32> {
     out
 }
 
-fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
+pub(crate) fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
     let degree_count = offsets.len() as i32;
     if degree_count <= 0 {
         return 0.0;
@@ -409,7 +412,7 @@ fn scale_degree_to_midi_integer(abs_degree: i32, offsets: &[i32]) -> f64 {
     (oct * 12 + offsets[idx]) as f64
 }
 
-fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
+pub(crate) fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
     if !abs_degree.is_finite() {
         return 0.0;
     }
@@ -423,7 +426,7 @@ fn scale_degree_to_midi(abs_degree: f64, offsets: &[i32]) -> f64 {
     lower + (upper - lower) * frac
 }
 
-fn transpose_midi_by_scale_steps(midi: f64, degree_steps: f64, scale_notes: &[u8]) -> f64 {
+pub(crate) fn transpose_midi_by_scale_steps(midi: f64, degree_steps: f64, scale_notes: &[u8]) -> f64 {
     if !midi.is_finite() || degree_steps.abs() <= 1e-9 {
         return midi;
     }

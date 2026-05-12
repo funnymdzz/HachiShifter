@@ -177,6 +177,8 @@ export const zhTW = {
     param_editor: "參數編輯器",
     pitch_requires_compose: "請在根軌開啟 Compose（C）以產生音高曲線",
     pitch_requires_algo: "請選擇演算法以啟用編輯",
+    midi_compose_required_title: "根軌未開啟合成",
+    midi_compose_required_message: "目前根軌未開啟 Compose 合成，是否開啟以繼續匯入音高曲線？",
     pitch_backend_unavailable: "音高後端不可用（請檢查 WORLD DLL / ONNX 模型）",
     pitch_edit_not_modified_hint: "尚未修改曲線：目前等同原始音高",
     pitch_status_label: "音高",
@@ -252,6 +254,11 @@ export const zhTW = {
 
     menu_about: "關於 HiFiShifter",
     glue: "膠合",
+    group: "編組",
+    ungroup: "解組",
+    ignore_grouping: "忽略編組",
+    disable_group: "禁用編組",
+    enable_group: "啟用編組",
     none: "無",
     bpm: "BPM",
     repeat: "重複",
@@ -394,6 +401,8 @@ export const zhTW = {
     kb_clip_paste: "貼上音訊片段",
     kb_clip_split: "分割音訊片段",
     kb_clip_normalize: "正規化音訊片段",
+    kb_clip_group: "編組音訊片段",
+    kb_clip_ungroup: "解組音訊片段",
     qs_auto_normalize: "放置時自動正規化",
     kb_group_pianoroll: "鋼琴捲簾",
     kb_group_modifier: "修飾鍵",
@@ -458,6 +467,7 @@ export const zhTW = {
     midi_select_all: "全選",
     midi_deselect_all: "全不選",
     midi_multi_track_merge: "多軌合併",
+    midi_close_leading_gap: "關閉開頭空隙",
     midi_track_notes: "{count} 個音符",
     midi_track_range: "範圍：{min} – {max}",
     midi_no_tracks: "MIDI 檔案中沒有包含音符的軌道",
@@ -477,6 +487,7 @@ export const zhTW = {
     // MIDI import — BPM options
     midi_import_bpm_as_project: "將 MIDI BPM 匯入為專案 BPM",
     midi_midi_bpm_label: "MIDI BPM：{bpm}",
+    midi_no_bpm: "MIDI 不存在 BPM！",
     midi_note_bpm: "音符 BPM",
     midi_note_bpm_midi: "MIDI 自身 BPM",
     midi_note_bpm_project: "目前專案 BPM",
@@ -487,6 +498,12 @@ export const zhTW = {
     midi_clipboard_read_failed: "從剪貼簿讀取 MIDI 失敗",
     midi_clipboard_empty: "剪貼簿中未找到 Standard MIDI File 資料",
     midi_clipboard_parse_failed: "解析剪貼簿中的 MIDI 資料失敗",
+
+    // MIDI 匯入目標選擇
+    midi_import_target: "匯入目標",
+    midi_import_target_pitch_block: "音高參考塊",
+    midi_import_target_pitch_param: "音高參數",
+    midi_clipboard_midi_prefix: "剪貼簿 MIDI：",
 
     // MIDI replace dialog
     midi_replace_title: "替換 MIDI",
@@ -785,5 +802,8 @@ export const zhTW = {
 
     // 音高參考塊
     ctx_convert_to_pitch_ref: "轉換為音高參考塊",
+    ctx_update_pitch_ref: "更新音高",
+    ctx_export_midi: "匯出為 MIDI",
     menu_save_as_pitch_ref: "儲存為音高參考塊",
+    menu_export_midi: "匯出為 MIDI",
 } as const;

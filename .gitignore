@@ -172,3 +172,5 @@ build_and_run.bat
 
 .hifigan_optimization.md
 .tension_analysis.md
+# Cloned third-party sources (built at compile time)
+backend/src-tauri/third_party/soundtouch-static/soundtouch/

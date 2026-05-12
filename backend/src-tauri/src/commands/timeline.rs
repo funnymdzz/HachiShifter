@@ -1,5 +1,6 @@
 use crate::state::AppState;
 use base64::Engine;
+use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 use tauri::Emitter;
@@ -713,6 +714,32 @@ pub(super) fn split_clip(
     payload
 }
 
+pub(super) fn split_clips_at(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+    split_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|cid| tl.clips.iter().find(|c| c.id == *cid))
+        .map(|c| c.track_id.clone())
+        .filter_map(|tid| tl.resolve_root_track_id(&tid))
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.split_clips_at(&clip_ids, split_sec);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
 pub(super) fn glue_clips(
     state: State<'_, AppState>,
     clip_ids: Vec<String>,
@@ -763,6 +790,36 @@ pub(super) fn convert_clips_to_pitch_reference(
         .into_iter()
         .collect();
     tl.convert_clips_to_pitch_reference(&clip_ids);
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    drop(tl);
+    for root_id in root_ids {
+        crate::pitch_analysis::maybe_schedule_pitch_orig(&state, &root_id);
+    }
+    payload
+}
+
+pub(super) fn update_pitch_reference(
+    state: State<'_, AppState>,
+    clip_ids: Vec<String>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    state.checkpoint_timeline(&tl);
+    // 收集 root track IDs 用于后续 pitch 分析调度
+    let root_ids: Vec<String> = clip_ids
+        .iter()
+        .filter_map(|clip_id| {
+            tl.clips
+                .iter()
+                .find(|c| c.id == *clip_id)
+                .map(|c| c.track_id.clone())
+                .and_then(|tid| tl.resolve_root_track_id(&tid))
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    tl.update_pitch_reference_from_track_params(&clip_ids);
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

@@ -11,6 +11,7 @@ export interface UiSettings {
     pitchSnapScale?: string;
     pitchSnapToleranceCents?: number;
     scaleHighlightMode?: string;
+    ignoreGrouping?: boolean;
     playheadZoom: boolean;
     autoScroll: boolean;
     paramEditorSeekPlayhead?: boolean;
@@ -31,6 +32,11 @@ export interface UiSettings {
     midiImportBpmAsProject?: boolean;
     midiNoteBpmMode?: string;
     midiSpecifiedBpm?: number;
+    midiCloseLeadingGap?: boolean;
+    midiImportTargetMenu?: string;
+    midiImportTargetDragDrop?: string;
+    midiImportTargetReaperClipboard?: string;
+    midiImportTargetParamEditor?: string;
     customScalePresets?: Array<{
         id: string;
         name: string;

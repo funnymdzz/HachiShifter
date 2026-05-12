@@ -3,6 +3,7 @@ export function resolveTimelineClipHeaderVisibility(
     isPitchAdjustment?: boolean,
 ): {
     showAny: boolean;
+    showChain: boolean;
     showMute: boolean;
     showFormant: boolean;
     showGainKnob: boolean;
@@ -15,6 +16,7 @@ export function resolveTimelineClipHeaderVisibility(
     if (isPitchAdjustment) {
         return {
             showAny: width >= 52,
+            showChain: width >= 52,
             showMute: width >= 52,
             showFormant: false,
             showGainKnob: false,
@@ -26,6 +28,7 @@ export function resolveTimelineClipHeaderVisibility(
 
     return {
         showAny: width >= 32,
+        showChain: width >= 36,
         showMute: width >= 52,
         showFormant: width >= 68,
         showGainKnob: width >= 32,

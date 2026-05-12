@@ -5,7 +5,7 @@
 // 优先检测 "Standard MIDI File" 格式并作为 MIDI 导入。
 // 支持 Windows / macOS / Linux (X11 & Wayland)。
 
-use crate::midi_import;
+use crate::pitch_analysis;
 use crate::reaper_import;
 use crate::state::AppState;
 
@@ -200,137 +200,16 @@ pub(crate) fn read_midi_clipboard() -> Result<Vec<u8>, String> {
     Err("clipboard_unsupported_platform".to_string())
 }
 
-// ---------------------------------------------------------------------------
-// MIDI 剪贴板粘贴实现
-// ---------------------------------------------------------------------------
-
-/// 将 MIDI 剪贴板数据写入当前选中轨道的 pitch_edit。
-///
-/// 使用工程 BPM 作为 Tempo 回退，导入起始点为当前光标位置。
-/// 若提供了 selection_start_frame / selection_max_frames，则以选区起始帧作为偏移起点，
-/// 超出选区范围的音符不写入。
-fn paste_midi_clipboard_inner(
-    state: &AppState,
-    midi_data: &[u8],
-    selection_start_frame: Option<usize>,
-    selection_max_frames: Option<usize>,
-) -> serde_json::Value {
-    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
-
-    let bpm = tl.bpm;
-    let playhead_sec = tl.playhead_sec;
-    let frame_period_ms_raw = tl.frame_period_ms().max(0.1);
-
-    // 解析 MIDI 数据，使用工程 BPM 作为 fallback tempo
-    let parse_result = match midi_import::parse_midi_bytes(midi_data, Some(bpm)) {
-        Ok(r) => r,
-        Err(e) => {
-            return serde_json::json!({"ok": false, "error": format!("midi_parse_failed: {}", e)});
-        }
-    };
-
-    // 合并所有轨道的音符
-    let mut all_notes: Vec<midi_import::MidiNoteEvent> =
-        parse_result.track_notes.into_iter().flatten().collect();
-    all_notes.sort_by(|a, b| {
-        a.start_sec
-            .partial_cmp(&b.start_sec)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    if all_notes.is_empty() {
-        return serde_json::json!({"ok": false, "error": "midi_no_notes"});
-    }
-
-    // 确定目标轨道
-    let Some(selected_track_id) = tl.selected_track_id.clone() else {
-        return serde_json::json!({"ok": false, "error": "no_track_selected"});
-    };
-
-    let Some(root_track_id) = tl.resolve_root_track_id(&selected_track_id) else {
-        return serde_json::json!({"ok": false, "error": "no_track_selected"});
-    };
-
-    tl.ensure_params_for_root(&root_track_id);
-    let frame_period_ms = tl.frame_period_ms().max(0.1);
-
-    state.checkpoint_timeline(&tl);
-
-    let Some(entry) = tl.params_by_root_track.get_mut(&root_track_id) else {
-        return serde_json::json!({"ok": false, "error": "params_missing"});
-    };
-
-    // 根据是否有选区约束决定偏移和写入范围
-    let touched = if let Some(sel_start) = selection_start_frame {
-        // 以选区起始帧对应秒作为偏移
-        let offset_sec = (sel_start as f64 * frame_period_ms_raw) / 1000.0;
-        let max_frame = sel_start + selection_max_frames.unwrap_or(usize::MAX - sel_start);
-        // 限制 pitch_edit 的写入范围
-        let clamp_len = max_frame.min(entry.pitch_edit.len());
-        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
-        midi_import::clear_pitch_edit_range_for_notes(
-            &all_notes,
-            frame_period_ms,
-            &mut entry.pitch_edit[..clamp_len],
-            offset_sec,
-        );
-        midi_import::write_notes_to_pitch_edit(
-            &all_notes,
-            frame_period_ms,
-            &mut entry.pitch_edit[..clamp_len],
-            offset_sec,
-        )
-    } else {
-        // 默认以光标位置作为偏移写入 pitch_edit
-        // 先清除目标范围，避免已有编辑阻挡新导入的 MIDI 音符
-        midi_import::clear_pitch_edit_range_for_notes(
-            &all_notes,
-            frame_period_ms,
-            &mut entry.pitch_edit,
-            playhead_sec,
-        );
-        midi_import::write_notes_to_pitch_edit(
-            &all_notes,
-            frame_period_ms,
-            &mut entry.pitch_edit,
-            playhead_sec,
-        )
-    };
-
-    if touched > 0 {
-        entry.pitch_edit_user_modified = true;
-    }
-
-    state.audio_engine.update_timeline(tl.clone());
-    drop(tl);
-
-    let payload = get_timeline_state_from_ref(state);
-    let mut json = serde_json::to_value(&payload).unwrap_or_default();
-    json["midi_imported"] = serde_json::json!({
-        "notes": all_notes.len(),
-        "frames_touched": touched,
-    });
-    json
-}
-
 /// 粘贴 Reaper 剪贴板数据到当前选中的轨道。
-/// 优先检测 "Standard MIDI File" 格式，若存在则作为 MIDI 导入到当前轨道的 pitch_edit。
+///
+/// 不再自动处理 MIDI 剪贴板；前端应先通过 `read_midi_clipboard_to_memory` 检测
+/// Standard MIDI File 并弹出统一导入弹窗。
 pub(super) fn paste_reaper_clipboard(
     state: &AppState,
-    selection_start_frame: Option<usize>,
-    selection_max_frames: Option<usize>,
+    _selection_start_frame: Option<usize>,
+    _selection_max_frames: Option<usize>,
 ) -> serde_json::Value {
-    // 优先尝试 MIDI 剪贴板
-    if let Ok(midi_data) = read_midi_clipboard() {
-        return paste_midi_clipboard_inner(
-            state,
-            &midi_data,
-            selection_start_frame,
-            selection_max_frames,
-        );
-    }
-
-    // 回退到 REAPERMedia 剪贴板
+    // REAPERMedia 剪贴板
     let data = match read_reaper_clipboard() {
         Ok(d) => d,
         Err(e) => {
@@ -338,8 +217,8 @@ pub(super) fn paste_reaper_clipboard(
         }
     };
 
-    // 从当前 timeline 读取光标位置、选中轨道、轨道顺序
-    let (playhead_sec, selected_track_idx, ordered_track_ids) = {
+    // 从当前 timeline 读取光标位置、选中轨道、轨道顺序、BPM
+    let (playhead_sec, selected_track_idx, ordered_track_ids, project_bpm) = {
         let tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
         // 按 order 排序的轨道 ID
@@ -354,7 +233,7 @@ pub(super) fn paste_reaper_clipboard(
             .and_then(|sel| ordered.iter().position(|id| id == sel))
             .unwrap_or(0);
 
-        (tl.playhead_sec, sel_idx, ordered)
+        (tl.playhead_sec, sel_idx, ordered, tl.bpm)
     };
 
     // 解析并转换
@@ -363,6 +242,7 @@ pub(super) fn paste_reaper_clipboard(
         playhead_sec,
         selected_track_idx,
         &ordered_track_ids,
+        project_bpm,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -436,6 +316,20 @@ pub(super) fn paste_reaper_clipboard(
         tl.project_sec = max_end;
 
         state.audio_engine.update_timeline(tl.clone());
+
+        // 为导入的 MIDI 音高参考块触发 pitch 分析
+        let midi_root_tracks: Vec<String> = tl
+            .clips
+            .iter()
+            .filter(|c| c.midi_note_data.is_some())
+            .filter_map(|c| tl.resolve_root_track_id(&c.track_id))
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect();
+        drop(tl);
+        for root_id in &midi_root_tracks {
+            pitch_analysis::maybe_schedule_pitch_orig(state, root_id);
+        }
     }
     let _ = state.end_undo_group();
 
