@@ -158,9 +158,9 @@ npm --prefix frontend install
 
 ### 3. SoundTouch 原始碼
 
-SoundTouch 音訊時間拉伸函式庫在編譯時從原始碼構建。首次構建時會**自動複製**，無需手動操作。
+SoundTouch 音訊時間拉伸函式庫在編譯時從原始碼構建。首次構建時會**自動克隆**，無需手動操作。
 
-如需離線構建，可提前手動複製：
+如需離線構建，可提前手動克隆：
 
 ```bash
 cd backend/src-tauri/third_party/soundtouch-static

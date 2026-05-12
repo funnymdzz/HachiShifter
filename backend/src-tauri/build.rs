@@ -407,10 +407,20 @@ fn build_soundtouch() {
     println!("cargo:rerun-if-changed={}", st_src);
 
     let target = std::env::var("TARGET").unwrap_or_default();
-    println!("cargo:warning=[soundtouch] TARGET={}", target);
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| {
+        target
+            .split('-')
+            .nth(2)
+            .unwrap_or_default()
+            .to_string()
+    });
+    println!(
+        "cargo:warning=[soundtouch] TARGET={} TARGET_OS={}",
+        target, target_os
+    );
 
-    let is_windows = cfg!(target_os = "windows");
-    let is_apple = cfg!(target_os = "macos");
+    let is_windows = target_os == "windows";
+    let is_apple = target_os == "macos";
 
     // Patch SoundTouchDLL.rc to use windows.h instead of afxres.h (MFC header not always available)
     if is_windows {
@@ -505,8 +515,11 @@ fn build_soundtouch() {
     println!("cargo:rustc-link-search=native={}", lib_search.display());
     println!("cargo:rustc-link-lib=dylib={}", lib_name);
 
-    // Set rpath so the binary finds the shared library in its own directory at runtime
-    if !is_windows {
+    // Set rpath so the binary finds the shared library in its own directory at runtime.
+    // Linux/ELF uses `$ORIGIN`, while macOS uses dyld-specific loader paths.
+    if is_apple {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path");
+    } else if !is_windows {
         println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN");
     }
 
