@@ -2,6 +2,7 @@ use ndarray::Array2;
 use num_complex::Complex32;
 use ort::ep;
 use ort::session::Session;
+use ort::session::builder::GraphOptimizationLevel;
 use ort::value::Tensor;
 use rustfft::Fft;
 use rustfft::FftPlanner;
@@ -97,6 +98,21 @@ fn build_session_with_ep(onnx_path: &Path) -> Result<Session, String> {
     if debug_enabled() {
         eprintln!("nsf_hifigan_onnx: ort ep={selected} (HIFISHIFTER_ORT_EP={:?}, cuda_device_id={device_id})", choice);
     }
+
+    // 启用全图优化：算子融合、常量折叠、layout 优化
+    builder = builder
+        .with_optimization_level(GraphOptimizationLevel::Level3)
+        .map_err(|e| format!("set graph optimization level failed: {e}"))?;
+
+    // 线程配置：GPU 下减少 CPU 线程避免竞争，CPU 下用一半核心
+    let threads = if selected == "cpu" {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).max(2)
+    } else {
+        1
+    };
+    builder = builder
+        .with_intra_threads(threads)
+        .map_err(|e| format!("set intra op threads failed: {e}"))?;
 
     builder
         .commit_from_file(onnx_path)
@@ -518,6 +534,11 @@ pub struct NsfHifiganOnnx {
     audio_resample_buf: Vec<f32>,
     /// 共享的 ORT Session，Arc<Mutex<>> 保证多线程安全复用。
     session: Arc<Mutex<Session>>,
+    /// 分块推理用的 tensor 数据暂存（避免 per-chunk 堆分配）。
+    mel_scratch: Vec<f32>,
+    f0_scratch: Vec<f32>,
+    /// mel 切片暂存，容量 = CHUNK_MAX_FRAMES * num_mels，分块循环中复用。
+    mel_seg_buf: Vec<f32>,
 }
 
 impl NsfHifiganOnnx {
@@ -544,6 +565,7 @@ impl NsfHifiganOnnx {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(cfg.n_fft);
         let fft_buf: Vec<Complex32> = vec![Complex32::new(0.0, 0.0); cfg.n_fft];
+        let mel_seg_cap = CHUNK_MAX_FRAMES * cfg.num_mels;
 
         Ok(Self {
             cfg,
@@ -554,6 +576,9 @@ impl NsfHifiganOnnx {
             pad_buf: Vec::new(),
             audio_resample_buf: Vec::new(),
             session,
+            mel_scratch: Vec::new(),
+            f0_scratch: Vec::new(),
+            mel_seg_buf: Vec::with_capacity(mel_seg_cap),
         })
     }
 
@@ -715,6 +740,64 @@ impl NsfHifiganOnnx {
             data.to_vec()
         };
         Ok(result)
+    }
+
+    /// 从预提取的 mel/f0 切片直接推理，复用 scratch buffer 避免 per-chunk 堆分配。
+    ///
+    /// `mel_slice`: `[n_mels * t]` 列主序 mel 数据（借用，不转移所有权）。
+    /// `f0_slice`: `[t]` F0 数据。
+    fn run_model_from_slices(&mut self, mel_slice: &[f32], f0_slice: &[f32], t: usize) -> Result<Vec<f32>, String> {
+        // resize + copy 复用已分配容量，避免 per-chunk realloc
+        self.mel_scratch.resize(mel_slice.len(), 0.0);
+        self.mel_scratch.copy_from_slice(mel_slice);
+        self.f0_scratch.resize(f0_slice.len(), 0.0);
+        self.f0_scratch.copy_from_slice(f0_slice);
+
+        // take 转移所有权，scratch 保留空 Vec + 原容量
+        let mel_buf = std::mem::take(&mut self.mel_scratch);
+        let f0_buf = std::mem::take(&mut self.f0_scratch);
+
+        let mel_tensor =
+            Tensor::from_array(([1usize, self.cfg.num_mels, t], mel_buf.into_boxed_slice()))
+                .map_err(|e| format!("build mel tensor failed: {e}"))?;
+        let f0_tensor = Tensor::from_array(([1usize, t], f0_buf.into_boxed_slice()))
+            .map_err(|e| format!("build f0 tensor failed: {e}"))?;
+
+        let result: Vec<f32> = {
+            let mut session_guard = self
+                .session
+                .lock()
+                .map_err(|e| format!("ort session lock poisoned: {e}"))?;
+            let outputs = session_guard
+                .run(ort::inputs![mel_tensor, f0_tensor])
+                .map_err(|e| format!("ort run failed: {e}"))?;
+            let output0 = outputs
+                .into_iter()
+                .next()
+                .ok_or_else(|| "onnx returned no outputs".to_string())?;
+            let (_shape, data) = output0
+                .1
+                .try_extract_tensor::<f32>()
+                .map_err(|e| format!("ort output type mismatch: {e}"))?;
+            data.to_vec()
+        };
+        Ok(result)
+    }
+
+    /// 从全 mel 矩阵切片并推理，复用 `mel_seg_buf` 避免 per-chunk 堆分配。
+    fn run_model_chunk(&mut self, mel_full: &[f32], t: usize, frame_off: usize, chunk_t: usize, f0_slice: &[f32]) -> Result<Vec<f32>, String> {
+        let n_mels = self.cfg.num_mels;
+        self.mel_seg_buf.clear();
+        for m in 0..n_mels {
+            let src_start = m * t + frame_off;
+            let src_end = src_start + chunk_t;
+            self.mel_seg_buf.extend_from_slice(&mel_full[src_start..src_end]);
+        }
+        // take 转移所有权为局部变量，避开 &self 与 &mut self 冲突
+        let mel_data = std::mem::take(&mut self.mel_seg_buf);
+        let result = self.run_model_from_slices(&mel_data, f0_slice, chunk_t);
+        self.mel_seg_buf = mel_data;
+        result
     }
 
     pub fn infer_from_audio_and_midi(
@@ -1013,6 +1096,15 @@ pub fn env_overlap_sec() -> f64 {
         .unwrap_or(0.1)
 }
 
+// ─── 帧级分块常量────────────────────────────────────────────
+
+/// 单块最大 mel 帧数：512 帧（≈5.9s @ hop=512, sr=44100）。
+/// 每个 chunk 的 mel 输入约 262KB，波形输出约 1MB，所有后端安全。
+const CHUNK_MAX_FRAMES: usize = 512;
+/// 相邻块重叠帧数：16 帧（≈186ms），线性 crossfade 足够平滑。
+const OVERLAP_FRAMES: usize = 16;
+const CHUNK_STEP: usize = CHUNK_MAX_FRAMES - OVERLAP_FRAMES;
+
 // ─── 分块推理（任务 2.1-2.4）──────────────────────────────────────────────────
 
 /// 对长 clip 进行分块推理，每块调用 [`infer_pitch_edit_mono`]，
@@ -1144,6 +1236,180 @@ pub fn infer_pitch_edit_chunked(
     }
 
     Ok(out)
+}
+
+// ─── 帧级分块推理优化──────────────────────────────────────
+
+/// 优化版长音频分块推理：预提取全段 mel 一次，按帧切片推理，线性 crossfade 拼接。
+///
+/// 与 [`infer_pitch_edit_chunked`] 的区别：
+/// - mel 只提取一次，按帧切片（而非每块独立提取）
+/// - 使用帧级常量 [`CHUNK_MAX_FRAMES`]/[`OVERLAP_FRAMES`] 分块
+/// - 线性 crossfade
+/// - 支持分块级缓存回调，参数变动时只重渲染脏 chunk
+///
+/// `chunk_cache_get(mel_start_frame, mel_end_frame)` → 命中时返回缓存的 mono PCM，
+/// `chunk_cache_put(mel_start_frame, mel_end_frame, waveform)` → 写入波形到缓存。
+/// 帧号相对于 `mono_pcm` 的起始（0-based mel frame index）。
+pub fn infer_pitch_edit_chunked_optimized(
+    mono_pcm: &[f32],
+    sample_rate: u32,
+    start_sec: f64,
+    midi_at_time: impl Fn(f64) -> f64 + Clone,
+    formant_shift_at_time: impl Fn(f64) -> f32 + Clone,
+    chunk_cache_get: &dyn Fn(usize, usize) -> Option<Vec<f32>>,
+    chunk_cache_put: &dyn Fn(usize, usize, Vec<f32>),
+) -> Result<Vec<f32>, String> {
+    if mono_pcm.is_empty() {
+        return Ok(vec![]);
+    }
+    if let Err(e) = probe() {
+        return Err(e.clone());
+    }
+
+    TLS_SESSION.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(NsfHifiganOnnx::load());
+        }
+        let sess = opt
+            .as_mut()
+            .expect("TLS_SESSION just initialized")
+            .as_mut()
+            .map_err(|e| e.clone())?;
+
+        let model_sr = sess.cfg.sampling_rate;
+        let hop = sess.cfg.hop_size;
+
+        // 1. 重采样到模型采样率，提取完整 mel
+        let mut mel_full = if sample_rate == model_sr {
+            sess.mel_from_audio_fast(mono_pcm)?
+        } else {
+            let mut resample_buf = std::mem::take(&mut sess.audio_resample_buf);
+            linear_resample_mono_into(mono_pcm, sample_rate, model_sr, &mut resample_buf);
+            let mel = sess.mel_from_audio_fast(&resample_buf);
+            sess.audio_resample_buf = resample_buf;
+            mel?
+        };
+
+        let t = mel_full.len() / sess.cfg.num_mels;
+        if t == 0 {
+            return Ok(vec![0.0; mono_pcm.len()]);
+        }
+
+        // 2. 构建 F0 + 共振峰偏移
+        let hop_sec = (hop as f64) / (model_sr.max(1) as f64);
+        let f0_full: Vec<f32> = (0..t)
+            .map(|i| {
+                let abs_t = start_sec + (i as f64) * hop_sec;
+                midi_to_hz(midi_at_time(abs_t))
+            })
+            .collect();
+
+        // 3. 应用共振峰偏移（原地修改 mel_full）
+        let formant_shifts: Vec<f32> = (0..t)
+            .map(|i| {
+                let abs_t = start_sec + (i as f64) * hop_sec;
+                formant_shift_at_time(abs_t)
+            })
+            .collect();
+        let has_formant_shift = formant_shifts.iter().any(|s| s.abs() >= 0.5);
+        if has_formant_shift {
+            shift_mel_formant(
+                &mut mel_full,
+                sess.cfg.num_mels,
+                t,
+                &formant_shifts,
+                sess.cfg.fmin,
+                sess.cfg.fmax,
+            );
+        }
+
+        // 短音频回退：单次推理
+        if t <= CHUNK_MAX_FRAMES {
+            return sess.run_model(mel_full, f0_full, t);
+        }
+
+        // 4. 分块迭代
+        let total_samples = mono_pcm.len().max(t * hop);
+        let mut out = vec![0.0f32; total_samples];
+
+        let mut frame_off = 0usize;
+        while frame_off < t {
+            let chunk_end = (frame_off + CHUNK_MAX_FRAMES).min(t);
+            let chunk_t = chunk_end - frame_off;
+
+            // 4a. 查询分块缓存
+            let chunk_wf = if let Some(cached) = chunk_cache_get(frame_off, chunk_end) {
+                cached
+            } else {
+                // 4b. 切片 mel + 推理（复用 mel_seg_buf）
+                let f0_seg = &f0_full[frame_off..chunk_end];
+                let wf = sess.run_model_chunk(&mel_full, t, frame_off, chunk_t, f0_seg)?;
+
+                // 4c. 写入缓存
+                chunk_cache_put(frame_off, chunk_end, wf.clone());
+
+                wf
+            };
+
+            let chunk_samples = chunk_wf.len();
+            let base_out = frame_off * hop;
+
+            if frame_off == 0 {
+                // 第一块：直接拷贝
+                let copy_len = chunk_samples.min(out.len() - base_out);
+                out[base_out..base_out + copy_len]
+                    .copy_from_slice(&chunk_wf[..copy_len]);
+            } else {
+                                // 后续块：线性 crossfade
+                let overlap_samples = OVERLAP_FRAMES * hop;
+                let xfade_len = overlap_samples.min(chunk_samples);
+
+                for i in 0..xfade_len {
+                    let g = base_out + i;
+                    if g >= out.len() {
+                        break;
+                    }
+                    let t_frac = i as f32 / xfade_len.max(1) as f32;
+                    let prev_val = out[g];
+                    let curr_val = chunk_wf.get(i).copied().unwrap_or(0.0);
+                    out[g] = prev_val * (1.0 - t_frac) + curr_val * t_frac;
+                }
+
+                // 非重叠尾部直接拷贝
+                for i in xfade_len..chunk_samples {
+                    let g = base_out + i;
+                    if g >= out.len() {
+                        break;
+                    }
+                    out[g] = chunk_wf.get(i).copied().unwrap_or(0.0);
+                }
+            }
+
+            if chunk_end >= t {
+                break;
+            }
+            frame_off += CHUNK_STEP;
+        }
+
+        // 5. 重采样回原始采样率
+        let mut out = if model_sr == sample_rate {
+            out
+        } else {
+            linear_resample_mono(&out, model_sr, sample_rate)
+        };
+
+        // 对齐到输入长度
+        let target = mono_pcm.len();
+        if out.len() > target {
+            out.truncate(target);
+        } else if out.len() < target {
+            out.resize(target, 0.0);
+        }
+
+        Ok(out)
+    })
 }
 
 // ─── Mel 共振峰偏移（频率轴线性插值）──────────────────────────────────────────

@@ -8,10 +8,40 @@
 //!
 //! 两条链路切换时无需重新分析，直接复用已有的 `clip_midi`。
 //! 若 `clip_midi` 为空（Harvest 尚未完成），则跳过推理并返回原始 PCM。
+//!
+//! # 分块缓存
+//!
+//! 长音频推理使用独立的分块缓存，靠 `param_hash` 比对自然失效，
+//! 不受 clip 级 `invalidate_clip_all_caches` 影响。
 
 use super::traits::{RenderContext, Renderer, RendererCapabilities};
 use super::utils::{clip_midi_at_time, edit_midi_at_time_or_none};
 use crate::state::SynthPipelineKind;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
+// ─── 分块缓存（独立于 SynthClipCache，靠 hash 比对自然失效）───────────────────
+
+struct ChunkCacheEntry {
+    param_hash: u64,
+    waveform: Vec<f32>,
+}
+
+static CHUNK_CACHE: OnceLock<Mutex<HashMap<(String, usize), ChunkCacheEntry>>> = OnceLock::new();
+
+fn global_chunk_cache() -> &'static Mutex<HashMap<(String, usize), ChunkCacheEntry>> {
+    CHUNK_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn debug_enabled() -> bool {
+    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+}
+
+fn chunk_debug(msg: &str) {
+    if debug_enabled() {
+        eprintln!("[hifigan-chunk] {msg}");
+    }
+}
 
 /// 基于 NSF-HiFiGAN ONNX 的渲染器。
 pub struct HiFiGanRenderer;
@@ -98,7 +128,7 @@ impl HiFiGanRenderer {
             sr,
             self.id(),
             &curves_snapshot,
-            extra_curves,
+            extra_curves.clone(),
             &std::collections::HashMap::new(),
         );
         let cache_key = crate::synth_clip_cache::SynthClipCacheKey {
@@ -126,9 +156,6 @@ impl HiFiGanRenderer {
         // 未命中：推理后写入缓存
         // midi_at_time 回调使用 clip_midi_at_time + edit_midi_at_time_or_none
         // 的组合逻辑，与 WorldRenderer 共用同一套 F0 查询语义。
-        // 区别：WORLD 返回 semitone shift，ONNX 返回目标绝对 MIDI（模型输入语义不同）。
-        let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
-        let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
 
         // 构造共振峰偏移回调
         let fp_local = fp.max(0.1);
@@ -153,27 +180,117 @@ impl HiFiGanRenderer {
             a + (b - a) * frac
         };
 
+        let midi_fn = move |abs_time_sec| {
+            let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
+            if !(orig.is_finite() && orig > 0.0) {
+                return 0.0;
+            }
+            let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
+                Some(v) => v,
+                None => orig,
+            };
+            if target.is_finite() && target > 0.0 {
+                target
+            } else {
+                0.0
+            }
+        };
+
+        // ── 长音频阈值判断 ─────────────────────────────────────────────────
+        // PC-NSF-HiFiGAN hop_size = 512, CHUNK_MAX_FRAMES = 512
+        // > 512*512 = 262,144 样本（≈5.9s @ 44.1kHz）时走优化分块路径
+        const LONG_CHUNK_SAMPLES: usize = 512 * 512;
+        let model_hop: u64 = 512;
+
+        if ctx.mono_pcm.len() > LONG_CHUNK_SAMPLES {
+            // 长音频：帧级分块 + 逐块缓存（独立 cache，不受 clip 级失效影响）
+            let clip_id = ctx.clip_id.to_string();
+            let seg_start = seg_start_frame;
+            chunk_debug(&format!(
+                "long audio path: clip={} samples={} seg_start_frame={}",
+                clip_id,
+                ctx.mono_pcm.len(),
+                seg_start
+            ));
+
+            let result = crate::nsf_hifigan_onnx::infer_pitch_edit_chunked_optimized(
+                ctx.mono_pcm,
+                sr,
+                ctx.seg_start_sec,
+                midi_fn,
+                formant_shift_fn,
+                &|mel_start: usize, mel_end: usize| -> Option<Vec<f32>> {
+                    let chunk_start = seg_start + mel_start as u64 * model_hop;
+                    let chunk_end = seg_start + mel_end as u64 * model_hop;
+                    let hash = crate::synth_clip_cache::compute_param_hash(
+                        &clip_id, chunk_start, chunk_end, sr, "nsf_hifigan_onnx",
+                        &curves_snapshot,
+                        extra_curves.iter().map(|(k, v)| (*k, *v)),
+                        &std::collections::HashMap::new(),
+                    );
+                    let cache_key = (clip_id.clone(), mel_start);
+
+                    let mut cache = global_chunk_cache()
+                        .lock().unwrap_or_else(|e| e.into_inner());
+                    match cache.get(&cache_key) {
+                        Some(entry) if entry.param_hash == hash => {
+                            chunk_debug(&format!(
+                                "  chunk [{mel_start}..{mel_end}) HIT (hash={hash:016x})",
+                            ));
+                            Some(entry.waveform.clone())
+                        }
+                        Some(entry) => {
+                            chunk_debug(&format!(
+                                "  chunk [{mel_start}..{mel_end}) STALE (cached={:016x} current={hash:016x})",
+                                entry.param_hash,
+                            ));
+                            cache.remove(&cache_key);
+                            None
+                        }
+                        None => {
+                            chunk_debug(&format!(
+                                "  chunk [{mel_start}..{mel_end}) MISS",
+                            ));
+                            None
+                        }
+                    }
+                },
+                &|mel_start: usize, mel_end: usize, wf: Vec<f32>| {
+                    let chunk_start = seg_start + mel_start as u64 * model_hop;
+                    let chunk_end = seg_start + mel_end as u64 * model_hop;
+                    let hash = crate::synth_clip_cache::compute_param_hash(
+                        &clip_id, chunk_start, chunk_end, sr, "nsf_hifigan_onnx",
+                        &curves_snapshot,
+                        extra_curves.iter().map(|(k, v)| (*k, *v)),
+                        &std::collections::HashMap::new(),
+                    );
+                    let cache_key = (clip_id.clone(), mel_start);
+
+                    chunk_debug(&format!(
+                        "  chunk [{mel_start}..{mel_end}) PUT (hash={hash:016x} samples={})",
+                        wf.len(),
+                    ));
+
+                    let mut cache = global_chunk_cache()
+                        .lock().unwrap_or_else(|e| e.into_inner());
+                    cache.insert(cache_key, ChunkCacheEntry {
+                        param_hash: hash,
+                        waveform: wf,
+                    });
+                },
+            )?;
+            return Ok(result);
+        }
+
+        // 短音频：现有分块路径 + 全段缓存
+        let chunk_sec = crate::nsf_hifigan_onnx::env_chunk_sec();
+        let overlap_sec = crate::nsf_hifigan_onnx::env_overlap_sec();
+
         let result = crate::nsf_hifigan_onnx::infer_pitch_edit_chunked(
             ctx.mono_pcm,
             sr,
             ctx.seg_start_sec,
-            move |abs_time_sec| {
-                // 原始 MIDI（来自 Harvest，与 WORLD 链路共用同一数据源）
-                let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
-                if !(orig.is_finite() && orig > 0.0) {
-                    return 0.0;
-                }
-                // 目标 MIDI：有编辑时用编辑值，否则用原始值（保持音高不变）
-                let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
-                    Some(v) => v,
-                    None => orig,
-                };
-                if target.is_finite() && target > 0.0 {
-                    target
-                } else {
-                    0.0
-                }
-            },
+            midi_fn,
             formant_shift_fn,
             chunk_sec,
             overlap_sec,

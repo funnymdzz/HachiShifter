@@ -82,24 +82,42 @@ pub fn apply_formant_morph_mono(
     let mut lpc_fail_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
     let mut modify_fail_reasons: BTreeMap<&'static str, usize> = BTreeMap::new();
 
+    // ── 预分配 per-frame buffer，循环内复用（避免 per-frame 堆分配）───────────
+    let mut windowed_buf: Vec<f32> = Vec::with_capacity(frame_len);
+    // LPC 内部 buffer 复用
+    let mut lpc_ef: Vec<f32> = Vec::with_capacity(frame_len);
+    let mut lpc_eb: Vec<f32> = Vec::with_capacity(frame_len);
+    let mut lpc_next_ef: Vec<f32> = Vec::with_capacity(frame_len);
+    let mut lpc_next_eb: Vec<f32> = Vec::with_capacity(frame_len);
+
     for start in (0..=padded.len().saturating_sub(frame_len)).step_by(hop_len) {
         let frame = &padded[start..start + frame_len];
 
-        let windowed: Vec<f32> = frame
-            .iter()
-            .zip(window.iter())
-            .map(|(sample, win)| sample * win)
-            .collect();
+        // ── 提前能量检查：跳过静音/低能量帧，避免无谓的 window+collect ──────
+        let mean_energy = frame_energy(frame) / frame_len as f32;
+        if mean_energy < 1.0e-8_f32 {
+            low_energy_frames += 1;
+            continue;
+        }
 
-        let mean_energy = frame_energy(&windowed) / frame_len as f32;
-        let confidence = voiced_confidence(&windowed, mean_energy);
+        // 复用 windowed_buf，clear + 填充替代重新分配
+        windowed_buf.clear();
+        for (&sample, &win) in frame.iter().zip(window.iter()) {
+            windowed_buf.push(sample * win);
+        }
+
+        let confidence = voiced_confidence(&windowed_buf, mean_energy);
         let effective_strength = strength * confidence;
 
-        let mut wet_windowed = if mean_energy < 1.0e-8_f32 || effective_strength < 0.015_f32 {
+        if effective_strength < 0.015_f32 {
             low_energy_frames += 1;
-            windowed.clone()
+            // 跳过 LPC 管线，直接用原始 windowed 做 OLA
+            for idx in 0..frame_len {
+                overlap[start + idx] += windowed_buf[idx] * window[idx];
+                window_sum[start + idx] += window[idx] * window[idx];
+            }
         } else {
-            match lpc_coefficients_with_reason(&windowed, order) {
+            match lpc_coefficients_reuse(&windowed_buf, order, &mut lpc_ef, &mut lpc_eb, &mut lpc_next_ef, &mut lpc_next_eb) {
                 Ok(a_orig) => {
                     lpc_ok_frames += 1;
 
@@ -111,18 +129,18 @@ pub fn apply_formant_morph_mono(
                         effective_strength,
                     ) {
                         Ok(a_target) => {
-                            let residual = fir_filter(&windowed, &a_orig);
+                            let residual = fir_filter(&windowed_buf, &a_orig);
 
                             match all_pole_filter_checked(&residual, &a_target, MAX_IIR_ABS) {
                                 Some(mut synthesized) => {
                                     match_energy_limited(
-                                        &windowed,
+                                        &windowed_buf,
                                         &mut synthesized,
                                         MIN_FRAME_GAIN,
                                         MAX_FRAME_GAIN,
                                     );
 
-                                    let dry_peak = peak_abs(&windowed).max(0.01_f32);
+                                    let dry_peak = peak_abs(&windowed_buf).max(0.01_f32);
                                     limit_frame(
                                         &mut synthesized,
                                         (dry_peak * 3.2_f32).clamp(0.05_f32, 0.98_f32),
@@ -130,48 +148,43 @@ pub fn apply_formant_morph_mono(
 
                                     let wet_amount = effective_strength.clamp(0.0_f32, 1.0_f32).powf(0.40_f32);
 
-                                    let mut mixed = vec![0.0_f32; frame_len];
+                                    // 复用预分配 windowed_buf 做混合，避免另分配 mixed Vec
                                     for idx in 0..frame_len {
-                                        mixed[idx] = windowed[idx]
-                                            + wet_amount * (synthesized[idx] - windowed[idx]);
+                                        windowed_buf[idx] = windowed_buf[idx]
+                                            + wet_amount * (synthesized[idx] - windowed_buf[idx]);
                                     }
 
                                     limit_frame(
-                                        &mut mixed,
+                                        &mut windowed_buf,
                                         (dry_peak * 3.0_f32).clamp(0.05_f32, 0.98_f32),
                                     );
 
                                     processed_frames += 1;
                                     modify_ok_frames += 1;
-
-                                    mixed
                                 }
                                 None => {
                                     *modify_fail_reasons
                                         .entry("unstable_synthesis")
                                         .or_default() += 1;
-                                    windowed.clone()
                                 }
                             }
                         }
                         Err(reason) => {
                             *modify_fail_reasons.entry(reason).or_default() += 1;
-                            windowed.clone()
                         }
                     }
                 }
                 Err(reason) => {
                     *lpc_fail_reasons.entry(reason).or_default() += 1;
-                    windowed.clone()
                 }
+            };
+
+            // ── OLA（无论 LPC 成功或失败都执行）───────────────────────────────
+            remove_bad_samples(&mut windowed_buf);
+            for idx in 0..frame_len {
+                overlap[start + idx] += windowed_buf[idx] * window[idx];
+                window_sum[start + idx] += window[idx] * window[idx];
             }
-        };
-
-        remove_bad_samples(&mut wet_windowed);
-
-        for idx in 0..frame_len {
-            overlap[start + idx] += wet_windowed[idx] * window[idx];
-            window_sum[start + idx] += window[idx] * window[idx];
         }
     }
 
@@ -488,6 +501,22 @@ fn lpc_coefficients(frame: &[f32], order: usize) -> Option<Vec<f32>> {
 }
 
 fn lpc_coefficients_with_reason(frame: &[f32], order: usize) -> Result<Vec<f32>, &'static str> {
+    let mut ef = Vec::with_capacity(frame.len());
+    let mut eb = Vec::with_capacity(frame.len());
+    let mut next_ef = Vec::new();
+    let mut next_eb = Vec::new();
+    lpc_coefficients_reuse(frame, order, &mut ef, &mut eb, &mut next_ef, &mut next_eb)
+}
+
+/// LPC 系数计算，复用预分配的 buffer（避免 per-frame 堆分配）。
+fn lpc_coefficients_reuse(
+    frame: &[f32],
+    order: usize,
+    ef: &mut Vec<f32>,
+    eb: &mut Vec<f32>,
+    next_ef: &mut Vec<f32>,
+    next_eb: &mut Vec<f32>,
+) -> Result<Vec<f32>, &'static str> {
     if frame.len() <= order + 2 {
         return Err("too_short");
     }
@@ -495,8 +524,11 @@ fn lpc_coefficients_with_reason(frame: &[f32], order: usize) -> Result<Vec<f32>,
     let mut a = vec![0.0_f32; order + 1];
     a[0] = 1.0_f32;
 
-    let mut ef = frame[1..].to_vec();
-    let mut eb = frame[..frame.len() - 1].to_vec();
+    // 复用外部传入的 buffer
+    ef.clear();
+    ef.extend_from_slice(&frame[1..]);
+    eb.clear();
+    eb.extend_from_slice(&frame[..frame.len() - 1]);
 
     let mut error = frame.iter().map(|sample| sample * sample).sum::<f32>() / frame.len() as f32;
 
@@ -535,19 +567,18 @@ fn lpc_coefficients_with_reason(frame: &[f32], order: usize) -> Result<Vec<f32>,
 
         a[m + 1] = reflection;
 
-        let mut ef_next = Vec::with_capacity(ef.len().saturating_sub(1));
-        let mut eb_next = Vec::with_capacity(eb.len().saturating_sub(1));
-
+        // 复用 next_ef/next_eb，clear + push 替代 Vec::new()
+        next_ef.clear();
+        next_eb.clear();
         for i in 1..ef.len() {
-            ef_next.push(ef[i] + reflection * eb[i]);
+            next_ef.push(ef[i] + reflection * eb[i]);
         }
-
         for i in 0..eb.len().saturating_sub(1) {
-            eb_next.push(eb[i] + reflection * ef[i]);
+            next_eb.push(eb[i] + reflection * ef[i]);
         }
 
-        ef = ef_next;
-        eb = eb_next;
+        std::mem::swap(ef, next_ef);
+        std::mem::swap(eb, next_eb);
 
         error *= 1.0_f32 - reflection * reflection;
 
