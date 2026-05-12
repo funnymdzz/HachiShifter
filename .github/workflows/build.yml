@@ -181,7 +181,7 @@ jobs:
         run: |
           set -euxo pipefail
           sudo apt-get update -y
-          sudo apt-get install -y jq libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 librsvg2-dev patchelf pkg-config libasound2-dev
+          sudo apt-get install -y jq cmake libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libwebkit2gtk-4.1-0 libjavascriptcoregtk-4.1-0 librsvg2-dev patchelf pkg-config libasound2-dev
           sudo apt-get install -y libappindicator3-dev || sudo apt-get install -y libayatana-appindicator3-dev
 
           PKG_DIRS=""
@@ -253,10 +253,20 @@ jobs:
             echo "No WebKit runtime files discovered for AppImage bundling."
             exit 1
           fi
+          
 
-          jq -n --argjson files "$FILES_JSON" '{bundle:{linux:{appimage:{files:$files}}}}' > tauri.linux.conf.json
+          # Add SoundTouch shared library to AppImage files (built later by cargo build)
+          # NOTE: working-directory for this step is backend/src-tauri, so use GITHUB_WORKSPACE
+          ST_SO_PATH="$GITHUB_WORKSPACE/backend/src-tauri/third_party/soundtouch-static/soundtouch/libSoundTouchDLL.so"
+          FILES_JSON="$(jq -c --arg k "usr/bin/libSoundTouchDLL.so" --arg v "$ST_SO_PATH" '. + {($k): $v}' <<<"$FILES_JSON")"
 
-          echo "Generated tauri.linux.conf.json with $COUNT WebKit entries"
+          jq -n --argjson files "$FILES_JSON" '{
+            bundle: {
+              linux: { appimage: { files: $files } }
+            }
+          }' > tauri.linux.conf.json
+
+          echo "Generated tauri.linux.conf.json with $COUNT WebKit entries + SoundTouch"
           jq '.bundle.linux.appimage.files | keys' tauri.linux.conf.json
         shell: bash
 
@@ -295,6 +305,17 @@ jobs:
       - name: Install frontend deps
         run: |
           npm --prefix frontend ci
+
+      - name: Clone SoundTouch source
+        run: |
+          ST_DIR="backend/src-tauri/third_party/soundtouch-static"
+          mkdir -p "$ST_DIR"
+          if [ ! -f "$ST_DIR/soundtouch/CMakeLists.txt" ]; then
+            git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.git "$ST_DIR/soundtouch"
+          else
+            echo "SoundTouch source already exists, skipping clone"
+          fi
+        shell: bash
 
       - name: Build (cargo check) on Unix
         if: ${{ runner.os != 'Windows' && env.HIFISHIFTER_SKIP_CARGO_CHECK != '1' }}

@@ -148,11 +148,23 @@ cd HiFiShifter
 - **Node.js**（建议 18+）及 npm
 - **Rust 工具链**（参见 `rust-toolchain.toml`）
 - **Tauri 2 CLI**：`cargo install tauri-cli --version "^2"`
+- **CMake**（用于编译 SoundTouch 库）
 
 安装前端依赖：
 
 ```bash
 npm --prefix frontend install
+```
+
+### 3. SoundTouch 源码
+
+SoundTouch 音频时间拉伸库在编译时从源码构建。首次构建时会**自动克隆**，无需手动操作。
+
+如需离线构建，可提前手动克隆：
+
+```bash
+cd backend/src-tauri/third_party/soundtouch-static
+git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.git soundtouch
 ```
 
 ## 快速开始
@@ -195,6 +207,7 @@ $env:TAURI_UI_MODE='build'; cargo tauri dev
 本项目使用了以下开源库的代码或模型结构：
 
 - [WORLD](https://github.com/mmorise/World) — 高质量语音分析与合成系统
+- [SoundTouch](https://www.surina.net/soundtouch/) — 音频时间拉伸与变调库（LGPL）
 - [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) — 高质量音频时间拉伸库（MIT）
 - [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) — 音声解析与合成库
 - [SingingVocoders](https://github.com/openvpi/SingingVocoders) — 歌声合成声码器（OpenVPI）
