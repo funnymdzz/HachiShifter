@@ -79,6 +79,29 @@ fn tension_center_hz(midi: f32) -> f64 {
     midi_to_hz(midi).clamp(100.0, 1000.0) * 2.0
 }
 
+/// 快速扫描 tension 曲线，检查时间范围内是否有活跃编辑（HachiTune §3.5）。
+///
+/// 若所有值均 ≈ 0（默认中性），则跳过整个 STFT 管线。
+fn has_active_tension_edits(
+    tension_curve: Option<&Vec<f32>>,
+    start_sec: f64,
+    end_sec: f64,
+    frame_period_ms: f64,
+) -> bool {
+    let Some(curve) = tension_curve else {
+        return false;
+    };
+    if curve.is_empty() {
+        return false;
+    }
+    let fp = frame_period_ms.max(0.1);
+    let start_idx = ((start_sec.max(0.0) * 1000.0) / fp).floor().max(0.0) as usize;
+    let end_idx = ((end_sec.max(0.0) * 1000.0) / fp).ceil() as usize;
+    let lo = start_idx.min(curve.len());
+    let hi = end_idx.min(curve.len());
+    curve[lo..hi].iter().any(|&v| v.abs() > 0.001)
+}
+
 fn apply_tension_to_channel(
     samples: &[f32],
     sample_rate: u32,
@@ -94,6 +117,12 @@ fn apply_tension_to_channel(
     if samples.is_empty() || sample_rate == 0 {
         return samples.to_vec();
     }
+
+    // ── RMS 能量记录（HachiTune §4.3.5）────────────────────────────────────
+    let original_rms = {
+        let sum_sq: f32 = samples.iter().map(|s| s * s).sum();
+        (sum_sq / samples.len().max(1) as f32).sqrt()
+    };
 
     let mut output = vec![0.0f32; samples.len() + WINDOW_SIZE];
     let mut norm = vec![0.0f32; samples.len() + WINDOW_SIZE];
@@ -129,14 +158,12 @@ fn apply_tension_to_channel(
                 let freq_bin = freq_hz * WINDOW_SIZE as f64 / sample_rate.max(1) as f64;
                 if freq_bin.is_finite() && freq_bin > 1e-3 {
                     let clamp_db = max_gain_db.abs();
-                    // 仅计算正半轴频率，并对称映射到负半轴， powf 减半
                     for bin in 0..=WINDOW_SIZE / 2 {
                         let shaped_db = (max_gain_db * ((bin as f64) / freq_bin - 1.0))
                             .clamp(-clamp_db, clamp_db);
                         let linear = 10.0f32.powf(shaped_db as f32 / 20.0);
 
                         spectrum[bin] *= linear;
-                        // 镜像覆盖负半轴
                         if bin > 0 && bin < WINDOW_SIZE / 2 {
                             spectrum[WINDOW_SIZE - bin] *= linear;
                         }
@@ -164,6 +191,20 @@ fn apply_tension_to_channel(
         } else {
             samples[index]
         };
+    }
+
+    // ── RMS 能量归一化（HachiTune §4.3.5）─────────────────────────────────
+    if original_rms > 1e-10 {
+        let filtered_rms = {
+            let sum_sq: f32 = normalized.iter().map(|s| s * s).sum();
+            (sum_sq / normalized.len().max(1) as f32).sqrt()
+        };
+        if filtered_rms > 1e-10 {
+            let scale = original_rms / filtered_rms;
+            for s in &mut normalized {
+                *s *= scale;
+            }
+        }
     }
 
     normalized
@@ -197,13 +238,19 @@ pub fn apply_tension_to_stereo(
         return Ok(Vec::new());
     }
 
+    // ── hasActiveEdits 预检查：无编辑时跳过整个 STFT 管线 ──────────────────
+    let frames = stereo_pcm.len() / 2;
+    let end_sec = clip_start_sec + frames as f64 / sample_rate.max(1) as f64;
+    if !has_active_tension_edits(tension_curve, clip_start_sec, end_sec, frame_period_ms) {
+        return Ok(stereo_pcm.to_vec());
+    }
+
     // 整个立体声处理共享同一个 Planner 和 Window，消除冗余分配
     let mut planner = FftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(WINDOW_SIZE);
     let ifft = planner.plan_fft_inverse(WINDOW_SIZE);
     let window = hann_window();
 
-    let frames = stereo_pcm.len() / 2;
     let mut left = Vec::with_capacity(frames);
     let mut right = Vec::with_capacity(frames);
     for frame in 0..frames {

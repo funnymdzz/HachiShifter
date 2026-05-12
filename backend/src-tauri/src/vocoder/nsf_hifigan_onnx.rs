@@ -104,6 +104,16 @@ fn build_session_with_ep(onnx_path: &Path) -> Result<Session, String> {
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| format!("set graph optimization level failed: {e}"))?;
 
+    // 线程配置：GPU 下减少 CPU 线程避免竞争，CPU 下用一半核心
+    let threads = if selected == "cpu" {
+        std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4).max(2)
+    } else {
+        1
+    };
+    builder = builder
+        .with_intra_threads(threads)
+        .map_err(|e| format!("set intra op threads failed: {e}"))?;
+
     builder
         .commit_from_file(onnx_path)
         .map_err(|e| format!("load onnx into ort session failed: {e}"))
@@ -524,9 +534,11 @@ pub struct NsfHifiganOnnx {
     audio_resample_buf: Vec<f32>,
     /// 共享的 ORT Session，Arc<Mutex<>> 保证多线程安全复用。
     session: Arc<Mutex<Session>>,
-    /// 分块推理用的 tensor 数据暂存（避免 per-chunk 堆分配，避免 per-chunk 堆分配）。
+    /// 分块推理用的 tensor 数据暂存（避免 per-chunk 堆分配）。
     mel_scratch: Vec<f32>,
     f0_scratch: Vec<f32>,
+    /// mel 切片暂存，容量 = CHUNK_MAX_FRAMES * num_mels，分块循环中复用。
+    mel_seg_buf: Vec<f32>,
 }
 
 impl NsfHifiganOnnx {
@@ -553,6 +565,7 @@ impl NsfHifiganOnnx {
         let mut planner = FftPlanner::<f32>::new();
         let fft = planner.plan_fft_forward(cfg.n_fft);
         let fft_buf: Vec<Complex32> = vec![Complex32::new(0.0, 0.0); cfg.n_fft];
+        let mel_seg_cap = CHUNK_MAX_FRAMES * cfg.num_mels;
 
         Ok(Self {
             cfg,
@@ -565,6 +578,7 @@ impl NsfHifiganOnnx {
             session,
             mel_scratch: Vec::new(),
             f0_scratch: Vec::new(),
+            mel_seg_buf: Vec::with_capacity(mel_seg_cap),
         })
     }
 
@@ -733,13 +747,15 @@ impl NsfHifiganOnnx {
     /// `mel_slice`: `[n_mels * t]` 列主序 mel 数据（借用，不转移所有权）。
     /// `f0_slice`: `[t]` F0 数据。
     fn run_model_from_slices(&mut self, mel_slice: &[f32], f0_slice: &[f32], t: usize) -> Result<Vec<f32>, String> {
-        // 复用 scratch buffer（std::mem::take 避免 realloc）
-        let mut mel_buf = std::mem::take(&mut self.mel_scratch);
-        let mut f0_buf = std::mem::take(&mut self.f0_scratch);
-        mel_buf.clear();
-        f0_buf.clear();
-        mel_buf.extend_from_slice(mel_slice);
-        f0_buf.extend_from_slice(f0_slice);
+        // resize + copy 复用已分配容量，避免 per-chunk realloc
+        self.mel_scratch.resize(mel_slice.len(), 0.0);
+        self.mel_scratch.copy_from_slice(mel_slice);
+        self.f0_scratch.resize(f0_slice.len(), 0.0);
+        self.f0_scratch.copy_from_slice(f0_slice);
+
+        // take 转移所有权，scratch 保留空 Vec + 原容量
+        let mel_buf = std::mem::take(&mut self.mel_scratch);
+        let f0_buf = std::mem::take(&mut self.f0_scratch);
 
         let mel_tensor =
             Tensor::from_array(([1usize, self.cfg.num_mels, t], mel_buf.into_boxed_slice()))
@@ -766,6 +782,22 @@ impl NsfHifiganOnnx {
             data.to_vec()
         };
         Ok(result)
+    }
+
+    /// 从全 mel 矩阵切片并推理，复用 `mel_seg_buf` 避免 per-chunk 堆分配。
+    fn run_model_chunk(&mut self, mel_full: &[f32], t: usize, frame_off: usize, chunk_t: usize, f0_slice: &[f32]) -> Result<Vec<f32>, String> {
+        let n_mels = self.cfg.num_mels;
+        self.mel_seg_buf.clear();
+        for m in 0..n_mels {
+            let src_start = m * t + frame_off;
+            let src_end = src_start + chunk_t;
+            self.mel_seg_buf.extend_from_slice(&mel_full[src_start..src_end]);
+        }
+        // take 转移所有权为局部变量，避开 &self 与 &mut self 冲突
+        let mel_data = std::mem::take(&mut self.mel_seg_buf);
+        let result = self.run_model_from_slices(&mel_data, f0_slice, chunk_t);
+        self.mel_seg_buf = mel_data;
+        result
     }
 
     pub fn infer_from_audio_and_midi(
@@ -1311,19 +1343,11 @@ pub fn infer_pitch_edit_chunked_optimized(
             let chunk_wf = if let Some(cached) = chunk_cache_get(frame_off, chunk_end) {
                 cached
             } else {
-                // 4b. 切片 mel: [n_mels, T] → [n_mels, chunk_t]（列主序）
-                let mut mel_seg = Vec::with_capacity(sess.cfg.num_mels * chunk_t);
-                for m in 0..sess.cfg.num_mels {
-                    let src_start = m * t + frame_off;
-                    let src_end = m * t + chunk_end;
-                    mel_seg.extend_from_slice(&mel_full[src_start..src_end]);
-                }
+                // 4b. 切片 mel + 推理（复用 mel_seg_buf）
                 let f0_seg = &f0_full[frame_off..chunk_end];
+                let wf = sess.run_model_chunk(&mel_full, t, frame_off, chunk_t, f0_seg)?;
 
-                // 4c. 推理
-                let wf = sess.run_model_from_slices(&mel_seg, f0_seg, chunk_t)?;
-
-                // 4d. 写入缓存
+                // 4c. 写入缓存
                 chunk_cache_put(frame_off, chunk_end, wf.clone());
 
                 wf
