@@ -45,7 +45,7 @@ The `Edit` menu allows various editing operations. Besides regular track and par
 - **Paste Reaper Clipboard Data**: After you copy Items, tracks, or MIDI notes in Reaper, this function quickly imports the Reaper clipboard data into HiFiShifter.
     - Item data: Imports as note clips in HiFiShifter, preserving tuning data (both global tuning and pitch envelopes) from Reaper.
     - Track data: Imports tracks along with their items as tracks and audio clips in HiFiShifter, preserving track groups.
-    - MIDI note data: After selecting a pitch curve segment with the `Select` tool in the Parameter Editor, you can import Reaper clipboard MIDI note data into that segment. Note that Reaper clipboard MIDI note data does not contain tempo information; HiFiShifter will import it using the project BPM. Therefore, ensure the HiFiShifter project BPM matches your expected BPM before importing.
+    - MIDI note data: After exporting note data from other DAWs (Reaper, FL Studio, etc.) to the clipboard as MIDI note data, use the `Select` tool in the Parameter Editor to select a pitch curve segment in HiFiShifter, then you can import the clipboard MIDI note data into that segment. For a detailed introduction to MIDI import, see the [Pitch Reference Clip](#pitch-reference-clip) section.
 
 - **Paste VocalShifter Clipboard Data**: After you copy parameter curves, audio clips, or tracks in VocalShifter or VocalShifter LE, this function quickly imports the data into HiFiShifter.
     - Parameter curve data: After selecting a parameter curve segment with the `Select` tool in the Parameter Editor, you can import VocalShifter clipboard parameter curve data into that segment.
@@ -65,6 +65,8 @@ Common shortcuts:
 - `Space`: Play / Pause (does not return to start)
 - `Enter`: Play / Stop (returns to start)
 - `S`: Split
+- `G`: Group
+- `U`: Ungroup
 - `Ctrl + C`: Copy
 - `Ctrl + V`: Paste
 - `Ctrl + Z`: Undo
@@ -79,7 +81,9 @@ Common shortcuts:
 
 The small circle at the top-left of a clip is a volume adjustment knob, the `M` button can mute that clip individually, and the `F` button can open that clip's formant editing menu. The left and right edges of a clip allow adjusting fade-in/fade-out envelope lengths.
 
-Right-click a clip to open the context menu, which includes functions like `Reverse`, `Normalize`, `Fade Curve Type`, `Convert to Pitch Reference Clip`. If you select multiple clips on the same track, the context menu allows `Glue` to merge them into a single audio clip.
+Right-click a clip to open the context menu, which includes functions like `Reverse`, `Normalize`, `Convert to Pitch Reference Clip`, `Export MIDI`, `Fade Curve Type`. If you select multiple clips on the same track, the context menu allows `Glue` to merge them into a single audio clip.
+
+Select multiple clips, then choose `Group` (or press `G`) in the context menu to group them. Similar to Reaper or VEGAS Pro, clips in the same group are linked during edits. Click the chain button at the top-left of a clip to temporarily disable or enable the group's linked editing. Select grouped clips and choose `Ungroup` (or press `U`) to remove them from the group.
 
 On the left side of the track view is the track header area, where you can add or delete tracks, adjust track parameters, etc. Right-click a track to clone it.
 
@@ -99,6 +103,7 @@ Track view toolbar buttons:
 - `Zoom at Playhead`: When enabled, horizontal zoom centers on the playhead; otherwise, centers on the mouse cursor.
 - `Allow Param Editor to Move Playhead`: When disabled, clicking in the parameter editor will not move the playhead; only clicking the track view or the timecode area of the parameter editor moves the playhead.
 - `Auto Scroll`: When enabled, the view automatically scrolls horizontally during playback to follow the playhead.
+- `Ignore Grouping`: When enabled, edits to grouped audio clips will globally ignore group-linked editing.
 
 ### 2.3 File Browser
 
@@ -220,7 +225,7 @@ Pitch Reference Clips can be created through the following methods:
 
 - Import MIDI via the `File` menu or by dragging a file. This opens the MIDI Import dialog.
     - MIDI File: Allows you to select a MIDI file to import. Also supports parsing MIDI data exported to the system clipboard by other DAWs. DAWs confirmed to support system clipboard MIDI data transfer include Reaper and FL Studio.
-        - Reaper: In Reaper's MIDI Editor, select notes and copy them to export the selected note data to the system clipboard for HiFiShifter to read. Note that since Reaper's clipboard note data does not include BPM information, when importing, do not select `MIDI own BPM` for `Note BPM`; instead, use the project BPM or specify one manually.
+        - Reaper: In Reaper's MIDI Editor, select notes and copy them to export the selected note data to the system clipboard for HiFiShifter to read. Note that since Reaper's clipboard note data does not include BPM information, when importing, you can use the current project BPM or specify one manually.
         - FL Studio: In FL Studio's Piano Roll, click the small triangle in the top-left corner and select `File` -> `Copy to MIDI Clipboard` to export all notes of the current channel to the system clipboard for HiFiShifter to read.
     - Track Selection: Allows you to select which MIDI tracks to import.
     - Import MIDI BPM as Project BPM: When enabled, imports the MIDI's initial BPM as the project BPM. HiFiShifter still does not support variable BPM.
@@ -242,6 +247,8 @@ Pitch Reference Clips have the following common uses:
     - If a pitch curve segment within the track group has never been edited, its pitch parameters will be directly overwritten by the Pitch Reference Clip's pitch curve, triggering re-rendering of the audio pitch.
     - When using `Initialize`-related functions — for example, right-dragging with the Draw tool in the Parameter Editor — the initialized pitch curve uses the Pitch Reference Clip's pitch curve data rather than the original pitch of the audio clips within the track group's child tracks.
     - If the Pitch Reference Clip is muted, the track group will not reference that Pitch Reference Clip when processing pitch.
+
+Select a Pitch Reference Clip and choose `Update Pitch` from the context menu to update the Pitch Reference Clip with the existing pitch parameters within its range.
 
 ##### Other Features
 
