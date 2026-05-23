@@ -25,11 +25,7 @@ Download the HiFiShifter installer corresponding to your operating system and ar
 - **macOS**: WebKit is provided by the system, no extra installation is required.
 - **Linux**: Requires WebKitGTK. Most major distributions (e.g., Ubuntu, Fedora, Arch Linux) include it by default. If you see a missing component error, use your package manager to install `webkit2gtk` (e.g., `sudo apt install webkit2gtk`). Refer to your distribution's documentation for specifics.
 
-## 2. Feature Introduction
-
-The general operation logic and shortcuts can be referenced from DAWs like Reaper, VocalShifter, VEGAS Pro. You can customize your shortcut preferences via `View -> Keyboard Shortcuts`. The following descriptions are based on default shortcuts.
-
-### 2.1 Menu
+## 2. Menu
 
 The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`*.rpp`), import VocalShifter projects (`*.vshp` or `*.vsp`), import MIDI files, and export audio.
 
@@ -54,7 +50,9 @@ The `Edit` menu allows various editing operations. Besides regular track and par
 
 The `Stretch` menu allows you to modify the current project and global stretching algorithms.
 
-### 2.2 Track View
+## 3. Track View
+
+The general operation logic and shortcuts can be referenced from DAWs like Reaper, VocalShifter, VEGAS Pro. You can customize your shortcut preferences via `View -> Keyboard Shortcuts`. The following descriptions are based on default shortcuts.
 
 The track view is one of HiFiShifter's core features, allowing you to crop, splice, and edit audio clips. Its operation logic is largely based on Reaper.
 
@@ -105,19 +103,19 @@ Track view toolbar buttons:
 - `Auto Scroll`: When enabled, the view automatically scrolls horizontally during playback to follow the playhead.
 - `Ignore Grouping`: When enabled, edits to grouped audio clips will globally ignore group-linked editing.
 
-### 2.3 File Browser
+## 4. File Browser
 
 The file browser allows you to open a specific folder, search and sort audio files within it, and drag them into the HiFiShifter track view. Search supports regular expressions. Clicking an audio file automatically plays a preview. You can hold `Ctrl` and `Shift` for multi-selection. Left-dragging files adds one or more audio files across time into the timeline. Right-dragging files brings up a menu with `Add Across Time` / `Add Across Tracks`. `Add Across Tracks` allows you to add multiple audio clips vertically across multiple tracks.
 
 When the track view has focus, press `Ctrl + F` to open the Quick Search window. This is a simplified version of the file browser, allowing you to quickly search and preview audio files within a folder and add them to the timeline.
 
-### 2.4 Parameter Editor
+## 5. Parameter Editor
 
 The parameter editor is one of HiFiShifter's core features, allowing you to edit various parameters of the currently selected track.
 
 To enable parameter editing for a track, you must first press the track's `C` (Compose) button and wait for audio analysis to complete. HiFiShifter uses offline rendering; after each parameter edit, you must wait for the parameters to re-render before auditioning.
 
-#### Algorithms and Parameters
+### 1. Algorithms and Parameters
 
 The current version of HiFiShifter supports three vocal tuning algorithms and their parameters:
 
@@ -146,9 +144,7 @@ A track group shares a single set of parameters, with child tracks inheriting pa
 
 After copying a `Pitch` segment using the Select tool, you can paste it onto `Cents Offset` or `Degree Offset`, and HiFiShifter will automatically calculate and apply the appropriate offset.
 
-#### Editing Tools
-
-##### Select Tool
+### 2. Select Tool
 
 The Select tool allows you to select a segment of a parameter curve, drag it, or right-click to open a context menu for parameter adjustments.
 
@@ -173,7 +169,7 @@ Hold `Alt` to enter four-point editing mode for the selected curve. Similar to t
 
 Hold `Alt` and drag the edge of the selection area to stretch the parameter curve within the selection.
 
-##### Draw Tool
+### 3. Draw Tool
 
 The Draw tool allows you to draw parameter curves.
 
@@ -181,7 +177,7 @@ Left-drag to draw freely or horizontally, depending on the `Drag Direction` sett
 
 Right-drag resets the current curve.
 
-##### Line/Vibrato Tool
+### 4. Line/Vibrato Tool
 
 Right-click the Draw tool button to switch to the Line/Vibrato tool. This tool allows you to draw straight lines or vibrato.
 
@@ -193,7 +189,7 @@ Right-drag resets the current curve.
 
 Press `Tab` to cycle through editing tools (Select / Draw-type tools).
 
-##### Pitch Snap
+### 5. Pitch Snap
 
 When editing pitch parameters with any tool, Pitch Snap allows you to snap edits to semitones or scale degrees. Hold `Shift` to temporarily toggle snap.
 
@@ -217,7 +213,7 @@ Alternatively, use the `Cents Offset` and `Degree Offset` parameters on child tr
 
 This quickly creates harmonies by degree transposition.
 
-##### Pitch Reference Clip
+### 6. Pitch Reference Clip
 
 A Pitch Reference Clip on a track is a special type of audio clip that stores a pitch curve on the timeline.
 
@@ -250,7 +246,7 @@ Pitch Reference Clips have the following common uses:
 
 Select a Pitch Reference Clip and choose `Update Pitch` from the context menu to update the Pitch Reference Clip with the existing pitch parameters within its range.
 
-##### Other Features
+### 7. Other Features
 
 Additional convenient features of the parameter editor:
 
@@ -261,7 +257,7 @@ Additional convenient features of the parameter editor:
 - `Reference Track Group`: When the parameter is `Pitch`, lets you choose other tracks and display pitch curves from other track groups as references in the pitch editor.
 - `Import MIDI`: Allows you to select a MIDI file and import notes from one or more tracks as a pitch curve.
 
-### 2.5 Export Audio
+## 6. Export Audio
 
 After completing all edits, use the `Export Audio` function in the `File` menu to export the HiFiShifter project as a wav audio file.
 
