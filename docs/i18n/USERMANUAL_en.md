@@ -27,13 +27,13 @@ Download the HiFiShifter installer corresponding to your operating system and ar
 
 ## 2. Menu
 
-The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`*.rpp`), import VocalShifter projects (`*.vshp` or `*.vsp`), import MIDI files, and export audio.
+The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`.rpp`), import VocalShifter projects (`.vshp` or `.vsp`), import MIDI files, and export audio.
 
-HiFiShifter project files have the extensions `*.hshp` or `*.hsp`. Additionally, `Save As` supports saving the project as a plain text `json` file, or packaging the current project together with all used media files into an archive zip `*.zip`. Currently, HiFiShifter only supports importing regular audio files, not video files.
+HiFiShifter project files have the extensions `.hshp` or `.hsp`. Additionally, `Save As` supports saving the project as a plain text `json` file, or packaging the current project together with all used media files into an archive zip `.zip`. Currently, HiFiShifter only supports importing regular audio files, not video files.
 
 The automatic backup feature allows you to configure backups for your project files, with two modes: `Backup on save` and `Timed backups`.
 
-- `Backup on save`: When you overwrite the project file via save, the previous project file will automatically be renamed to a backup file with `-bak` appended to the original filename (for example, `*.hshp-bak` or `*.hsp-bak`). Enabled by default.
+- `Backup on save`: When you overwrite the project file via save, the previous project file will automatically be renamed to a backup file with `-bak` appended to the original filename (for example, `.hshp-bak` or `.hsp-bak`). Enabled by default.
 - `Timed backups`: Automatically create backup project files at the interval and path you set while you edit the project. Disabled by default.
 
 The `Edit` menu allows various editing operations. Besides regular track and parameter editing, there are two special items: `Paste Reaper Clipboard Data` and `Paste VocalShifter Clipboard Data`.
