@@ -49,7 +49,7 @@ pub(crate) fn ok_bool() -> serde_json::Value {
 }
 
 pub(crate) fn ensure_temp_dir() -> std::io::Result<PathBuf> {
-    let dir = std::env::temp_dir().join("hifishifter");
+    let dir = std::env::temp_dir().join("hachishifter");
     fs::create_dir_all(&dir)?;
     Ok(dir)
 }

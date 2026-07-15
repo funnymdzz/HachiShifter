@@ -2,7 +2,7 @@
 
 ## 引言
 
-HiFiShifter 的音高修改链路（Pitch Pipeline）存在三类核心问题：
+HachiShifter 的音高修改链路（Pitch Pipeline）存在三类核心问题：
 
 1. **前后端显示不同步**：前端参数面板的音高曲线刷新与后端 `pitch_orig_updated` 事件之间存在竞争，导致用户看到的曲线与实际处理状态不一致。
 2. **延迟长**：`pitch_clip.rs` 中的 `get_or_compute_clip_pitch_midi_global` 在 pitch-stream worker 线程中同步执行 WORLD F0 分析，阻塞 ring buffer 写入，造成首次播放时长时间静音。
@@ -105,7 +105,7 @@ HiFiShifter 的音高修改链路（Pitch Pipeline）存在三类核心问题：
 #### 验收标准
 
 1. WHEN `crossfade_into_ring` 执行 crossfade 时 THEN 系统 SHALL 将线性权重 `w` 替换为等功率权重：`w_curr = sin(w * π/2)`，`w_prev = cos(w * π/2)`，确保过渡区域能量守恒。
-2. WHEN 默认 crossfade 时长时 THEN 系统 SHALL 将 `HIFISHIFTER_ONNX_VAD_XFADE_MS` 的默认值从 `40ms` 增大到 `80ms`，给过渡区域更多时间。
+2. WHEN 默认 crossfade 时长时 THEN 系统 SHALL 将 `HACHISHIFTER_ONNX_VAD_XFADE_MS` 的默认值从 `40ms` 增大到 `80ms`，给过渡区域更多时间。
 3. IF `prev_tail` 或 `curr_preroll` 长度不足 `xfade_frames` 时 THEN 系统 SHALL 使用实际可用长度进行 crossfade，不产生越界访问。
 4. WHEN voiced 段推理完成后 THEN 系统 SHALL 对推理结果的首尾各做一次短时能量归一化（约 20ms 窗口），使其与原音的能量包络更平滑衔接，减少突然的音量跳变。
 
@@ -128,5 +128,5 @@ HiFiShifter 的音高修改链路（Pitch Pipeline）存在三类核心问题：
 - 所有后端改动必须保持与现有 `EngineCommand` 枚举的向后兼容性（新增命令变体，不修改现有变体）。
 - `vocode_pitch_shift_chunked` 的公开函数签名不变，仅修改内部实现。
 - 前端改动不引入新的外部依赖，使用现有的 Tauri 事件 API。
-- 所有改动必须通过现有的 `HIFISHIFTER_DEBUG_COMMANDS=1` 环境变量开关输出调试日志。
+- 所有改动必须通过现有的 `HACHISHIFTER_DEBUG_COMMANDS=1` 环境变量开关输出调试日志。
 - 不修改 WORLD DLL 的调用接口（`world_vocoder.rs` 中的 FFI 绑定保持不变）。

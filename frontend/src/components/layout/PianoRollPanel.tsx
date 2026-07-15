@@ -489,7 +489,7 @@ export const PianoRollPanel: React.FC = () => {
 
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.paramPxPerSec"));
+        const stored = Number(localStorage.getItem("hachishifter.paramPxPerSec"));
         return Number.isFinite(stored) && stored > 0
             ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
             : DEFAULT_PX_PER_SEC;
@@ -531,7 +531,7 @@ export const PianoRollPanel: React.FC = () => {
         pxPerBeatRef.current = pxPerBeat;
         pxPerSecRef.current = pxPerSec;
         const timer = setTimeout(() => {
-            localStorage.setItem("hifishifter.paramPxPerSec", String(pxPerSec));
+            localStorage.setItem("hachishifter.paramPxPerSec", String(pxPerSec));
         }, 500);
         return () => clearTimeout(timer);
     }, [pxPerBeat, pxPerSec]);

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-gpu-linux.sh
-# Build the HiFiShifter Linux CUDA binary and stage shared libraries.
+# Build the HachiShifter Linux CUDA binary and stage shared libraries.
 #
 # Usage:
 #   ./scripts/build-gpu-linux.sh

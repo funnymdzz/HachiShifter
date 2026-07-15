@@ -467,7 +467,7 @@ fn mix_into_scratch_stereo(
         // 调试：每隔约 1s 打印一次
         static DEBUG_LOG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         if *DEBUG_LOG.get_or_init(|| {
-            std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+            std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
         }) {
             static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
             let now = pos0 / 44100; // rough seconds

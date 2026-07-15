@@ -229,7 +229,7 @@ export function useTimelineState(): TimelineStateResult {
     // ── State 声明 ────────────────────────────────────────────
     const [scrollLeft, setScrollLeft] = useState(0);
     const [pxPerSec, setPxPerSec] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.pxPerSec"));
+        const stored = Number(localStorage.getItem("hachishifter.pxPerSec"));
         return Number.isFinite(stored) && stored > 0
             ? Math.min(MAX_PX_PER_SEC, Math.max(MIN_PX_PER_SEC, stored))
             : DEFAULT_PX_PER_SEC;
@@ -335,7 +335,7 @@ export function useTimelineState(): TimelineStateResult {
 
     // ── rowHeight ────────────────────────────────────────────
     const [rowHeight, setRowHeight] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.rowHeight"));
+        const stored = Number(localStorage.getItem("hachishifter.rowHeight"));
         return Number.isFinite(stored)
             ? Math.min(MAX_ROW_HEIGHT, Math.max(MIN_ROW_HEIGHT, stored))
             : DEFAULT_ROW_HEIGHT;

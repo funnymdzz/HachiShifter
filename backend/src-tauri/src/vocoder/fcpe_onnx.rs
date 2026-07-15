@@ -46,7 +46,7 @@ static LOGGED_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
 fn ensure_ort_init() -> Result<(), String> {
     match ORT_INIT.get_or_init(|| {
-        ort::init().with_name("hifishifter").commit();
+        ort::init().with_name("hachishifter").commit();
         Ok(())
     }) {
         Ok(()) => Ok(()),
@@ -55,7 +55,7 @@ fn ensure_ort_init() -> Result<(), String> {
 }
 
 fn debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+    std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -101,7 +101,7 @@ fn resolve_model_path() -> Result<PathBuf, String> {
         return Ok(onnx);
     }
 
-    if let Some(dir) = env_path("HIFISHIFTER_FCPE_MODEL_DIR") {
+    if let Some(dir) = env_path("HACHISHIFTER_FCPE_MODEL_DIR") {
         let p = dir.join("fcpe.onnx");
         if p.is_file() {
             return Ok(p);
@@ -109,7 +109,7 @@ fn resolve_model_path() -> Result<PathBuf, String> {
     }
 
     default_model_guess().ok_or_else(|| {
-        "FCPE ONNX model not found. Set HIFISHIFTER_FCPE_ONNX or HIFISHIFTER_FCPE_MODEL_DIR."
+        "FCPE ONNX model not found. Set HACHISHIFTER_FCPE_ONNX or HACHISHIFTER_FCPE_MODEL_DIR."
             .to_string()
     })
 }
@@ -212,7 +212,7 @@ static CACHED_FCPE_FMAX: OnceLock<f32> = OnceLock::new();
 
 fn env_fcpe_sr() -> u32 {
     *CACHED_FCPE_SR.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_SAMPLE_RATE")
+        std::env::var("HACHISHIFTER_FCPE_SAMPLE_RATE")
             .ok()
             .and_then(|s| s.trim().parse::<u32>().ok())
             .filter(|&v| v > 0)
@@ -222,7 +222,7 @@ fn env_fcpe_sr() -> u32 {
 
 fn env_fcpe_hop() -> usize {
     *CACHED_FCPE_HOP.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_HOP")
+        std::env::var("HACHISHIFTER_FCPE_HOP")
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
             .filter(|&v| v > 0)
@@ -232,7 +232,7 @@ fn env_fcpe_hop() -> usize {
 
 fn env_fcpe_n_fft() -> usize {
     *CACHED_FCPE_N_FFT.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_N_FFT")
+        std::env::var("HACHISHIFTER_FCPE_N_FFT")
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
             .filter(|&v| v > 0)
@@ -242,7 +242,7 @@ fn env_fcpe_n_fft() -> usize {
 
 fn env_fcpe_win() -> usize {
     *CACHED_FCPE_WIN.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_WIN_SIZE")
+        std::env::var("HACHISHIFTER_FCPE_WIN_SIZE")
             .ok()
             .and_then(|s| s.trim().parse::<usize>().ok())
             .filter(|&v| v > 0)
@@ -252,7 +252,7 @@ fn env_fcpe_win() -> usize {
 
 fn env_fcpe_fmin() -> f32 {
     *CACHED_FCPE_FMIN.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_FMIN")
+        std::env::var("HACHISHIFTER_FCPE_FMIN")
             .ok()
             .and_then(|s| s.trim().parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= 0.0)
@@ -262,7 +262,7 @@ fn env_fcpe_fmin() -> f32 {
 
 fn env_fcpe_fmax(sr: u32) -> f32 {
     *CACHED_FCPE_FMAX.get_or_init(|| {
-        std::env::var("HIFISHIFTER_FCPE_FMAX")
+        std::env::var("HACHISHIFTER_FCPE_FMAX")
             .ok()
             .and_then(|s| s.trim().parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v > 0.0)

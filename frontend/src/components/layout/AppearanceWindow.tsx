@@ -134,8 +134,8 @@ const SECONDARY_BUTTON_CLASS =
     "px-3 py-1.5 text-[11px] font-medium rounded border border-qt-border bg-qt-surface text-qt-text-muted hover:bg-qt-hover hover:text-qt-text transition-colors cursor-pointer select-none";
 const PRIMARY_BUTTON_CLASS =
     "px-4 py-1.5 text-[11px] font-semibold rounded bg-qt-highlight text-white hover:brightness-110 transition-colors cursor-pointer select-none";
-const PREVIEW_SETTINGS_KEY = "hifishifter.appearance.preview";
-const PREVIEW_COLORS_KEY = "hifishifter.appearance.preview.colors";
+const PREVIEW_SETTINGS_KEY = "hachishifter.appearance.preview";
+const PREVIEW_COLORS_KEY = "hachishifter.appearance.preview.colors";
 
 const COMMON_SYSTEM_FONT_CANDIDATES = [
     "Segoe UI",
@@ -537,7 +537,7 @@ export const AppearanceWindow: React.FC = () => {
             if (document.visibilityState === "visible") syncFromStorage();
         };
         const onStorage = (e: StorageEvent) => {
-            if (!e.key || e.key.startsWith("hifishifter.")) syncFromStorage();
+            if (!e.key || e.key.startsWith("hachishifter.")) syncFromStorage();
         };
 
         window.addEventListener("focus", onWindowFocus);

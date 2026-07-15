@@ -252,7 +252,7 @@ export const zhTW = {
     dropped_audio_imported: "已匯入拖放音訊",
     import_audio_failed: "匯入音訊失敗",
 
-    menu_about: "關於 HiFiShifter",
+    menu_about: "關於 HachiShifter",
     glue: "膠合",
     group: "編組",
     ungroup: "解組",

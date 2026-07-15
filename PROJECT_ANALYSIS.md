@@ -1,4 +1,4 @@
-# HiFiShifter 项目结构分析
+# HachiShifter 项目结构分析
 
 > 文档生成时间：2026-03-16  
 > 项目版本：v0.1.0-beta.6
@@ -7,7 +7,7 @@
 
 ## 一、项目概述
 
-**HiFiShifter** 是一个图形化人声编辑与合成工具，基于 **Tauri 2** 桌面应用框架构建，采用前后端分离架构：
+**HachiShifter** 是一个图形化人声编辑与合成工具，基于 **Tauri 2** 桌面应用框架构建，采用前后端分离架构：
 - **前端**：React 19 + TypeScript + Redux Toolkit + Vite
 - **后端**：Rust + Tauri 2 + cpal/rodio 音频引擎
 
@@ -19,7 +19,7 @@
 
 ```mermaid
 flowchart TB
-    subgraph Root["HiFiShifter/"]
+    subgraph Root["HachiShifter/"]
         direction TB
         A[backend/]
         B[frontend/]

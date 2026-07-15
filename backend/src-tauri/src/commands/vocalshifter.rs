@@ -14,7 +14,7 @@ use super::core::get_timeline_state_from_ref;
 
 fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let suffix = if dirty { "*" } else { "" };
-    let title = format!("HiFiShifter - {}{}", name, suffix);
+    let title = format!("HachiShifter - {}{}", name, suffix);
     let _ = window.set_title(&title);
 }
 
@@ -32,7 +32,7 @@ pub(super) fn open_vocalshifter_dialog() -> serde_json::Value {
     }
 }
 
-/// 解析 VocalShifter 工程并导入到 HiFiShifter。
+/// 解析 VocalShifter 工程并导入到 HachiShifter。
 ///
 /// 返回 JSON 对象，包含 timeline 数据。失败时 `ok=false` 并附带 `error` 字段。
 /// 若有跳过的文件，附带 `skipped_files` 数组。

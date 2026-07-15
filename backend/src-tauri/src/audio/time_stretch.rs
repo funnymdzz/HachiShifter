@@ -163,7 +163,7 @@ fn preserve_hard_silence_after_stretch(
         return;
     }
 
-    let silence_rms = env_f32("HIFISHIFTER_STRETCH_SILENCE_RMS")
+    let silence_rms = env_f32("HACHISHIFTER_STRETCH_SILENCE_RMS")
         .unwrap_or(STRETCH_SILENCE_RMS)
         .max(0.0);
     let window_frames = ((sample_rate.max(1) as f64) * (STRETCH_SILENCE_WINDOW_MS / 1000.0))
@@ -303,7 +303,7 @@ pub fn time_stretch_interleaved(
                     out
                 }
                 Err(e) => {
-                    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                         eprintln!("time_stretch: SignalsmithStretch failed, falling back: {e}");
                     }
                     linear_time_stretch_interleaved(input, channels, out_frames)
@@ -349,7 +349,7 @@ pub fn time_stretch_interleaved(
                     out
                 }
                 Err(e) => {
-                    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                         eprintln!("time_stretch: SoundTouch failed, falling back: {e}");
                     }
                     linear_time_stretch_interleaved(input, channels, out_frames)

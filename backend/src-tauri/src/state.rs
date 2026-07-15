@@ -790,7 +790,7 @@ impl TimelineState {
                 entry.pitch_edit.clear();
             }
 
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
                     "state: [INVALIDATE] Cleared stale pitch curves for root_track={} (key changed, user_modified={})",
                     root_track_id, entry.pitch_edit_user_modified
@@ -1233,7 +1233,7 @@ impl AppState {
                 if let Some(handle) = self.app_handle.get() {
                     use tauri::Manager;
                     if let Some(win) = handle.get_webview_window("main") {
-                        let title = format!("HiFiShifter - {}*", name);
+                        let title = format!("HachiShifter - {}*", name);
                         let _ = win.set_title(&title);
                     }
                 }
@@ -1265,7 +1265,7 @@ impl AppState {
             if let Some(handle) = self.app_handle.get() {
                 use tauri::Manager;
                 if let Some(win) = handle.get_webview_window("main") {
-                    let title = format!("HiFiShifter - {}*", name);
+                    let title = format!("HachiShifter - {}*", name);
                     let _ = win.set_title(&title);
                 }
             }
@@ -3177,7 +3177,7 @@ impl TimelineState {
         // not only the first clip's source payload.
         let selected_id_set: HashSet<String> = selected.iter().map(|c| c.id.clone()).collect();
 
-        let temp_glue_path = crate::temp_manager::hifishifter_temp_dir()
+        let temp_glue_path = crate::temp_manager::hachishifter_temp_dir()
             .map(|dir| dir.join(format!("glue_{}.wav", Uuid::new_v4().simple())));
 
         if let Ok(glue_path) = temp_glue_path {
@@ -3788,7 +3788,7 @@ impl TimelineState {
 
         match try_read_wav_info(Path::new(audio_path), 4096) {
             Some(info) => {
-                if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                     let mut max_amp = 0.0f32;
                     for &v in info.waveform_preview.iter() {
                         if v.is_finite() {
@@ -3817,7 +3817,7 @@ impl TimelineState {
                 waveform_preview = Some(info.waveform_preview);
             }
             None => {
-                if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                     let exists = Path::new(audio_path).exists();
                     eprintln!(
                         "import_audio_item: audio_info FAILED: path_exists={} path={}",
@@ -3844,7 +3844,7 @@ impl TimelineState {
         );
 
         // DEBUG: 打印导入clip时的关键参数
-        if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+        if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
             eprintln!(
                 "import_audio_item: clip created: clip_id={}, duration_frames={:?}, sample_rate={:?}, computed_length_sec={:.6}",
                 &clip_id[..8.min(clip_id.len())],

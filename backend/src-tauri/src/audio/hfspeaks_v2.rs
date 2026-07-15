@@ -1297,7 +1297,7 @@ pub fn default_cache_dir() -> PathBuf {
         }
     }
     std::env::temp_dir()
-        .join("hifishifter")
+        .join("hachishifter")
         .join("waveform_peaks_cache")
 }
 

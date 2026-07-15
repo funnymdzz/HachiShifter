@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+  HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
   RUSTFLAGS: "-Awarnings"
 
 jobs:
@@ -107,24 +107,24 @@ jobs:
         run: |
           set -euo pipefail
           release_dir="backend/src-tauri/target/x86_64-unknown-linux-gnu/release"
-          test -x "$release_dir/HiFiShifter"
+          test -x "$release_dir/HachiShifter"
           test -f "$release_dir/libSoundTouchDLL.so"
-          if ldd "$release_dir/HiFiShifter" | grep -q "not found"; then
-            ldd "$release_dir/HiFiShifter"
+          if ldd "$release_dir/HachiShifter" | grep -q "not found"; then
+            ldd "$release_dir/HachiShifter"
             exit 1
           fi
 
-          package_dir="dist/HiFiShifter-linux-x86_64"
+          package_dir="dist/HachiShifter-linux-x86_64"
           mkdir -p "$package_dir"
-          cp "$release_dir/HiFiShifter" "$package_dir/"
+          cp "$release_dir/HachiShifter" "$package_dir/"
           cp "$release_dir/libSoundTouchDLL.so" "$package_dir/"
           cp LICENSE "$package_dir/"
           cp -R backend/src-tauri/resources/models "$package_dir/models"
-          tar -czf dist/HiFiShifter-linux-x86_64.tar.gz -C dist HiFiShifter-linux-x86_64
+          tar -czf dist/HachiShifter-linux-x86_64.tar.gz -C dist HachiShifter-linux-x86_64
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v7
         with:
-          name: HiFiShifter-linux-x86_64
-          path: dist/HiFiShifter-linux-x86_64.tar.gz
+          name: HachiShifter-linux-x86_64
+          path: dist/HachiShifter-linux-x86_64.tar.gz
           if-no-files-found: error

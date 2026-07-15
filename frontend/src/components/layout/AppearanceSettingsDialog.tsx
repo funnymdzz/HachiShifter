@@ -31,8 +31,8 @@ export const AppearanceSettingsDialog = ({ open, onOpenChange }: AppearanceSetti
 
     const applyPreviewFromStorage = useCallback(() => {
         try {
-            const settingsRaw = localStorage.getItem("hifishifter.appearance.preview");
-            const colorsRaw = localStorage.getItem("hifishifter.appearance.preview.colors");
+            const settingsRaw = localStorage.getItem("hachishifter.appearance.preview");
+            const colorsRaw = localStorage.getItem("hachishifter.appearance.preview.colors");
             if (!settingsRaw && !colorsRaw) return;
 
             if (settingsRaw) {
@@ -196,8 +196,8 @@ export const AppearanceSettingsDialog = ({ open, onOpenChange }: AppearanceSetti
     useEffect(() => {
         const onStorage = (e: StorageEvent) => {
             if (
-                e.key === "hifishifter.appearance.preview" ||
-                e.key === "hifishifter.appearance.preview.colors"
+                e.key === "hachishifter.appearance.preview" ||
+                e.key === "hachishifter.appearance.preview.colors"
             ) {
                 applyPreviewFromStorage();
             }

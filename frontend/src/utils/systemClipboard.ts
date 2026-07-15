@@ -6,9 +6,9 @@
 import type { ClipTemplate } from "../features/session/sessionTypes";
 import type { ParamName } from "../components/layout/pianoRoll/types";
 
-const CLIP_MIME = "application/x-hifishifter-clip+json";
-const PARAM_MIME = "application/x-hifishifter-param+json";
-const TEXT_PREFIX = "hifishifter_clipboard_v1:";
+const CLIP_MIME = "application/x-hachishifter-clip+json";
+const PARAM_MIME = "application/x-hachishifter-param+json";
+const TEXT_PREFIX = "hachishifter_clipboard_v1:";
 
 type ClipboardKind = "clip" | "param";
 

@@ -48,7 +48,7 @@ pub fn active_ep() -> String {
 
 fn ensure_ort_init() -> Result<(), String> {
     match ORT_INIT.get_or_init(|| {
-        ort::init().with_name("hifishifter").commit();
+        ort::init().with_name("hachishifter").commit();
         Ok(())
     }) {
         Ok(()) => Ok(()),
@@ -112,9 +112,9 @@ fn default_model_dir_guess() -> Option<PathBuf> {
 
 fn resolve_model_paths() -> Result<(PathBuf, PathBuf), String> {
     // Returns (onnx_path, config_path)
-    if let Some(onnx) = env_path("HIFISHIFTER_NSF_HIFIGAN_ONNX") {
+    if let Some(onnx) = env_path("HACHISHIFTER_NSF_HIFIGAN_ONNX") {
         let dir = onnx.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-        let cfg = env_path("HIFISHIFTER_NSF_HIFIGAN_CONFIG")
+        let cfg = env_path("HACHISHIFTER_NSF_HIFIGAN_CONFIG")
             .or_else(|| {
                 let p = dir.join("config.json");
                 if p.is_file() {
@@ -128,7 +128,7 @@ fn resolve_model_paths() -> Result<(PathBuf, PathBuf), String> {
     }
 
     if let Some(dir) =
-        env_path("HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR").or_else(default_model_dir_guess)
+        env_path("HACHISHIFTER_NSF_HIFIGAN_MODEL_DIR").or_else(default_model_dir_guess)
     {
         let onnx = dir.join("pc_nsf_hifigan.onnx");
         let cfg = dir.join("config.json");
@@ -138,7 +138,7 @@ fn resolve_model_paths() -> Result<(PathBuf, PathBuf), String> {
     }
 
     Err(
-        "NSF-HiFiGAN ONNX model not found. Set HIFISHIFTER_NSF_HIFIGAN_ONNX (or HIFISHIFTER_NSF_HIFIGAN_MODEL_DIR)."
+        "NSF-HiFiGAN ONNX model not found. Set HACHISHIFTER_NSF_HIFIGAN_ONNX (or HACHISHIFTER_NSF_HIFIGAN_MODEL_DIR)."
             .to_string(),
     )
 }
@@ -921,8 +921,8 @@ impl NsfHifiganOnnx {
         // Optional experimental segmented inference (stream-like).
         // This can reduce peak latency / memory for very long buffers at the cost of extra overlap compute.
         // Disabled by default to avoid boundary artifacts.
-        let seg_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
-        let overlap_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
+        let seg_frames = Self::env_usize("HACHISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
+        let overlap_frames = Self::env_usize("HACHISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
 
         let y_vec: Vec<f32> = if seg_frames >= 16 && t > seg_frames {
             let overlap_frames = overlap_frames.min(seg_frames.saturating_sub(1));
@@ -1033,7 +1033,7 @@ pub fn is_available() -> bool {
     match probe() {
         Ok(()) => true,
         Err(e) => {
-            let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+            let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
             if debug && !LOGGED_UNAVAILABLE.swap(true, Ordering::Relaxed) {
                 eprintln!("nsf_hifigan_onnx: unavailable: {e}");
             }
@@ -1112,7 +1112,7 @@ pub fn model_load_error() -> Option<String> {
 }
 
 pub fn ep_choice() -> String {
-    std::env::var("HIFISHIFTER_ORT_EP")
+    std::env::var("HACHISHIFTER_ORT_EP")
         .ok()
         .unwrap_or_else(|| "auto".to_string())
         .trim()
@@ -1243,18 +1243,18 @@ pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
 
 // ─── 分块推理环境变量辅助（任务 2.5）──────────────────────────────────────────
 
-/// 从环境变量 `HIFISHIFTER_ONNX_CHUNK_SEC` 读取单块最大时长（秒），默认 10.0。
+/// 从环境变量 `HACHISHIFTER_ONNX_CHUNK_SEC` 读取单块最大时长（秒），默认 10.0。
 pub fn env_chunk_sec() -> f64 {
-    std::env::var("HIFISHIFTER_ONNX_CHUNK_SEC")
+    std::env::var("HACHISHIFTER_ONNX_CHUNK_SEC")
         .ok()
         .and_then(|s| s.trim().parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or(10.0)
 }
 
-/// 从环境变量 `HIFISHIFTER_ONNX_OVERLAP_SEC` 读取相邻块重叠时长（秒），默认 0.1。
+/// 从环境变量 `HACHISHIFTER_ONNX_OVERLAP_SEC` 读取相邻块重叠时长（秒），默认 0.1。
 pub fn env_overlap_sec() -> f64 {
-    std::env::var("HIFISHIFTER_ONNX_OVERLAP_SEC")
+    std::env::var("HACHISHIFTER_ONNX_OVERLAP_SEC")
         .ok()
         .and_then(|s| s.trim().parse::<f64>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
@@ -1792,8 +1792,8 @@ impl NsfHifiganOnnx {
             .collect();
 
         // 6. 分段推理（复用现有环境变量控制的段式推理逻辑）
-        let seg_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
-        let overlap_frames = Self::env_usize("HIFISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
+        let seg_frames = Self::env_usize("HACHISHIFTER_NSF_HIFIGAN_SEGMENT_FRAMES").unwrap_or(0);
+        let overlap_frames = Self::env_usize("HACHISHIFTER_NSF_HIFIGAN_OVERLAP_FRAMES").unwrap_or(8);
 
         let y_vec: Vec<f32> = if seg_frames >= 16 && t_new > seg_frames {
             let overlap_frames = overlap_frames.min(seg_frames.saturating_sub(1));

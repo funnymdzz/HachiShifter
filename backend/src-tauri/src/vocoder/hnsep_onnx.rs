@@ -13,12 +13,12 @@ static PROBE: OnceLock<Result<(), String>> = OnceLock::new();
 static LOGGED_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
 
 const HNSEP_MODEL_SR: u32 = 44_100;
-/// HNSEP 分离缓存默认容量（可通过环境变量 HIFISHIFTER_HNSEP_CACHE_CAPACITY 覆盖）。
+/// HNSEP 分离缓存默认容量（可通过环境变量 HACHISHIFTER_HNSEP_CACHE_CAPACITY 覆盖）。
 const HNSEP_CACHE_CAPACITY_DEFAULT: usize = 128;
 
 /// 读取环境变量或使用默认值获取 HNSEP 缓存初始容量。
 fn hnsep_cache_initial_capacity() -> usize {
-    std::env::var("HIFISHIFTER_HNSEP_CACHE_CAPACITY")
+    std::env::var("HACHISHIFTER_HNSEP_CACHE_CAPACITY")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|v| *v > 0)
@@ -27,7 +27,7 @@ fn hnsep_cache_initial_capacity() -> usize {
 
 fn ensure_ort_init() -> Result<(), String> {
     match ORT_INIT.get_or_init(|| {
-        ort::init().with_name("hifishifter").commit();
+        ort::init().with_name("hachishifter").commit();
         Ok(())
     }) {
         Ok(()) => Ok(()),
@@ -36,7 +36,7 @@ fn ensure_ort_init() -> Result<(), String> {
 }
 
 fn debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+    std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
 }
 
 fn env_path(name: &str) -> Option<PathBuf> {
@@ -68,7 +68,7 @@ fn default_model_dir_guess() -> Option<PathBuf> {
 }
 
 fn resolve_model_path() -> Result<PathBuf, String> {
-    if let Some(onnx) = env_path("HIFISHIFTER_HNSEP_ONNX") {
+    if let Some(onnx) = env_path("HACHISHIFTER_HNSEP_ONNX") {
         return Ok(onnx);
     }
 
@@ -80,7 +80,7 @@ fn resolve_model_path() -> Result<PathBuf, String> {
     }
 
     Err(
-        "HNSEP ONNX model not found. Set HIFISHIFTER_HNSEP_ONNX or HIFISHIFTER_HNSEP_MODEL_DIR."
+        "HNSEP ONNX model not found. Set HACHISHIFTER_HNSEP_ONNX or HACHISHIFTER_HNSEP_MODEL_DIR."
             .to_string(),
     )
 }

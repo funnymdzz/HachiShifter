@@ -189,7 +189,7 @@ pub(crate) fn decode_resampled_stereo(path: &Path, out_rate: u32) -> Option<Resa
     let (in_rate, in_channels, pcm) = match decode_audio_f32_interleaved(path) {
         Ok(v) => v,
         Err(e) => {
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
                     "AudioEngine: decode failed: path={} err={} ",
                     path.display(),

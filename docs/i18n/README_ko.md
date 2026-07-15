@@ -1,8 +1,8 @@
-# HiFiShifter
+# HachiShifter
 
 [简体中文](../../README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
-HiFiShifter는 그래픽 보컬 편집 및 합성 도구입니다. 멀티트랙 오디오 클립 처리를 지원하며, 트랙 그룹 단위로 여러 보코더를 사용하여 보컬의 피치 보정 및 파라미터 조정을 수행하여 Jinriki VOCALOID 제작의 편집과 튜닝을 통합합니다.
+HachiShifter는 그래픽 보컬 편집 및 합성 도구입니다. 멀티트랙 오디오 클립 처리를 지원하며, 트랙 그룹 단위로 여러 보코더를 사용하여 보컬의 피치 보정 및 파라미터 조정을 수행하여 Jinriki VOCALOID 제작의 편집과 튜닝을 통합합니다.
 
 **이 프로젝트는 아직 개발 중입니다. 전체 체인 테스트가 완료되지 않았으므로 많은 버그나 불안정한 문제가 존재할 수 있습니다.**
 
@@ -14,37 +14,37 @@ HiFiShifter는 그래픽 보컬 편집 및 합성 도구입니다. 멀티트랙 
 
 ## 기본 원리
 
-HiFiShifter는 UTAU와 유사한 오프라인 렌더링 방식을 사용하여 타임라인의 각 오디오 클립을 처리, 렌더링, 캐싱한 후 재생 시스템에 공급하므로 짧은 클립의 처리 효율이 높습니다.
+HachiShifter는 UTAU와 유사한 오프라인 렌더링 방식을 사용하여 타임라인의 각 오디오 클립을 처리, 렌더링, 캐싱한 후 재생 시스템에 공급하므로 짧은 클립의 처리 효율이 높습니다.
 
-HiFiShifter는 통합 렌더링 인터페이스를 제공하여 향후 알고리즘 추가를 용이하게 합니다.
+HachiShifter는 통합 렌더링 인터페이스를 제공하여 향후 알고리즘 추가를 용이하게 합니다.
 
 ## 권장 워크플로우
 
 권장 워크플로우는 다음과 같습니다:
 
 1. 다른 DAW 또는 슬라이싱 소프트웨어를 사용하여 인간 보컬에 필요한 짧은 클립 소스를 준비합니다.
-2. HiFiShifter에서 오디오 스플라이싱 및 튜닝을 완료합니다.
+2. HachiShifter에서 오디오 스플라이싱 및 튜닝을 완료합니다.
 
-HiFiShifter는 다른 소프트웨어에서 프로젝트를 마이그레이션하기 쉽도록 다음 작업도 지원합니다:
+HachiShifter는 다른 소프트웨어에서 프로젝트를 마이그레이션하기 쉽도록 다음 작업도 지원합니다:
 
 1. VocalShifter 프로젝트를 직접 엽니다.
 2. Reaper 프로젝트를 직접 엽니다.
-3. VocalShifter 클립보드 내용을 구문 분석하여 VocalShifter의 매개변수를 HiFiShifter의 매개변수 영역에 붙여넣을 수 있습니다.
-4. Reaper 클립보드 내용을 구문 분석하여 Reaper 항목을 HiFiShifter에 직접 붙여넣을 수 있습니다.
+3. VocalShifter 클립보드 내용을 구문 분석하여 VocalShifter의 매개변수를 HachiShifter의 매개변수 영역에 붙여넣을 수 있습니다.
+4. Reaper 클립보드 내용을 구문 분석하여 Reaper 항목을 HachiShifter에 직접 붙여넣을 수 있습니다.
 
 ## 기능 소개
 
 ### 레이아웃
 
-HiFiShifter는 크게 두 가지 기능 영역으로 나뉩니다. 상단의 트랙 패널과 하단의 파라미터 패널입니다. 트랙 패널은 주로 오디오 클립 처리를 담당하고, 파라미터 패널은 파라미터 조정을 담당합니다.
+HachiShifter는 크게 두 가지 기능 영역으로 나뉩니다. 상단의 트랙 패널과 하단의 파라미터 패널입니다. 트랙 패널은 주로 오디오 클립 처리를 담당하고, 파라미터 패널은 파라미터 조정을 담당합니다.
 
 ### 트랙 패널
 
-HiFiShifter는 대부분의 현대 DAW와 유사하게 상당히 완벽한 트랙 패널 및 오디오 클립 편집 기능을 제공합니다.
+HachiShifter는 대부분의 현대 DAW와 유사하게 상당히 완벽한 트랙 패널 및 오디오 클립 편집 기능을 제공합니다.
 
 #### 오디오 가져오기
 
-HiFiShifter는 세 가지 방법으로 오디오를 가져올 수 있습니다:
+HachiShifter는 세 가지 방법으로 오디오를 가져올 수 있습니다:
 
 1. 시스템 파일 관리자에서 트랙으로 오디오를 직접 드래그 앤 드롭합니다.
 2. 도구 모음의 폴더 아이콘을 클릭하여 내장 파일 브라우저를 열고 오디오를 트랙으로 드래그합니다.
@@ -69,15 +69,15 @@ HiFiShifter는 세 가지 방법으로 오디오를 가져올 수 있습니다:
 
 ### 파라미터 패널
 
-HiFiShifter의 파라미터 패널은 VocalShifter와 유사한 작업을 지원하여 매개변수 조정을 용이하게 합니다.
+HachiShifter의 파라미터 패널은 VocalShifter와 유사한 작업을 지원하여 매개변수 조정을 용이하게 합니다.
 
 각 트랙에는 특수한 `C` 버튼이 있습니다. 이 버튼이 눌려진 트랙의 오디오만 이후 매개변수 조정의 대상이 됩니다.
 
-매개변수 조정 시 HiFiShifter는 트랙 그룹을 단위로 작동합니다. 루트 트랙의 `C` 버튼이 그룹 전체의 알고리즘과 파라미터 곡선을 결정합니다. 파라미터 곡선은 각 오디오 클립의 위치에 따라 적용됩니다.
+매개변수 조정 시 HachiShifter는 트랙 그룹을 단위로 작동합니다. 루트 트랙의 `C` 버튼이 그룹 전체의 알고리즘과 파라미터 곡선을 결정합니다. 파라미터 곡선은 각 오디오 클립의 위치에 따라 적용됩니다.
 
 각 알고리즘에는 다양한 조정 가능한 매개변수가 있습니다. 공통 매개변수는 피치입니다.
 
-처음 실행 시 HiFiShifter는 클립의 피치 분석에 시간이 걸립니다. 분석 후 패널의 실선은 그룹의 현재 전체 피치를, 점선은 원래 전체 피치를, 색상 선은 각 클립의 원래 피치를 나타냅니다.
+처음 실행 시 HachiShifter는 클립의 피치 분석에 시간이 걸립니다. 분석 후 패널의 실선은 그룹의 현재 전체 피치를, 점선은 원래 전체 피치를, 색상 선은 각 클립의 원래 피치를 나타냅니다.
 
 다른 매개변수 패널은 피치 패널과 유사하지만 개별 클립의 원래 피치는 표시되지 않습니다.
 
@@ -85,7 +85,7 @@ HiFiShifter의 파라미터 패널은 VocalShifter와 유사한 작업을 지원
 
 ### 알고리즘
 
-HiFiShifter는 현재 세 가지 알고리즘을 지원합니다.
+HachiShifter는 현재 세 가지 알고리즘을 지원합니다.
 
 #### World 알고리즘
 
@@ -137,15 +137,15 @@ VocalShifter가 제공하는 알고리즘 라이브러리입니다.
 ### 1. 리포지토리 클론
 
 ```bash
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HiFiShifter
+git clone https://github.com/funnymdzz/HachiShifter.git
+cd HachiShifter
 ```
 
 ### 2. 종속성 설치
 
 #### Windows
 
-HiFiShifter는 ONNX Runtime과 CUDA 런타임을 자동으로 설치하는 **원클릭 환경 설정 스크립트**를 제공합니다 (Rust 도구 체인은 **기본적으로 건너뜁니다**. `-InstallRust`로 활성화하세요):
+HachiShifter는 ONNX Runtime과 CUDA 런타임을 자동으로 설치하는 **원클릭 환경 설정 스크립트**를 제공합니다 (Rust 도구 체인은 **기본적으로 건너뜁니다**. `-InstallRust`로 활성화하세요):
 
 ```powershell
 .\scripts\setup-windows.ps1
@@ -223,7 +223,7 @@ git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.gi
 
 ### 4. GPU 가속 빌드 (CUDA)
 
-HiFiShifter는 NVIDIA CUDA를 통한 GPU 가속 추론을 지원합니다.
+HachiShifter는 NVIDIA CUDA를 통한 GPU 가속 추론을 지원합니다.
 
 #### Windows (CUDA)
 

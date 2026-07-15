@@ -16,13 +16,13 @@ impl PitchAnalysisConfig {
     pub fn global() -> &'static Self {
         static CFG: OnceLock<PitchAnalysisConfig> = OnceLock::new();
         CFG.get_or_init(|| PitchAnalysisConfig {
-            analysis_sr: env_u32("HIFISHIFTER_PITCH_ANALYSIS_SR").unwrap_or(16000),
+            analysis_sr: env_u32("HACHISHIFTER_PITCH_ANALYSIS_SR").unwrap_or(16000),
             // Task 4.6: VAD RMS threshold configurable (default 0.02)
-            silence_rms_threshold: env_f64("HIFISHIFTER_VAD_RMS_THRESHOLD").unwrap_or(0.02),
+            silence_rms_threshold: env_f64("HACHISHIFTER_VAD_RMS_THRESHOLD").unwrap_or(0.02),
             // Task 4.3: Merge gap threshold (default 50ms)
-            vad_merge_gap_ms: env_f64("HIFISHIFTER_VAD_MERGE_GAP_MS").unwrap_or(50.0),
-            chunk_sec: env_f64("HIFISHIFTER_PITCH_CHUNK_SEC").unwrap_or(30.0),
-            chunk_ctx_sec: env_f64("HIFISHIFTER_PITCH_CHUNK_CTX_SEC").unwrap_or(0.3),
+            vad_merge_gap_ms: env_f64("HACHISHIFTER_VAD_MERGE_GAP_MS").unwrap_or(50.0),
+            chunk_sec: env_f64("HACHISHIFTER_PITCH_CHUNK_SEC").unwrap_or(30.0),
+            chunk_ctx_sec: env_f64("HACHISHIFTER_PITCH_CHUNK_CTX_SEC").unwrap_or(0.3),
         })
     }
 }

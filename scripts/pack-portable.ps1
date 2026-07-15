@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    将 HiFiShifter 打包为便携版压缩包（Portable ZIP）
+    将 HachiShifter 打包为便携版压缩包（Portable ZIP）
 
 .DESCRIPTION
     此脚本在 `cargo tauri build` 构建完成后，从产物目录中收集 exe、
@@ -95,7 +95,7 @@ $ZipName = "$ProductName-v$Version-portable-win-$ArchShort.zip"
 $ZipPath = Join-Path $OutputDir $ZipName
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  HiFiShifter 便携版打包工具" -ForegroundColor Cyan
+Write-Host "  HachiShifter 便携版打包工具" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  产品名称: $ProductName"

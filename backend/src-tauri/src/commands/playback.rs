@@ -146,7 +146,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
             let engine_for_sr = state.audio_engine.clone();
 
             std::thread::spawn(move || {
-                let cache_log = std::env::var("HIFISHIFTER_RENDER_CACHE_LOG")
+                let cache_log = std::env::var("HACHISHIFTER_RENDER_CACHE_LOG")
                     .ok()
                     .as_deref()
                     == Some("1");
@@ -367,7 +367,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 // render_single_clip 涵盖解码、resample、可选 stretch、pitch processor。
                                 render_elapsed += render_started_at.elapsed();
                                 let stereo_pcm = rendered.rendered_stereo;
-                                if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref()
+                                if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref()
                                     == Some("1")
                                 {
                                     let nonzero =
@@ -743,7 +743,7 @@ fn collect_clips_needing_render(
     timeline: &crate::state::TimelineState,
     engine_sr: u32,
 ) -> Vec<ClipRenderInfo> {
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let mut out = Vec::new();
     let sr = if engine_sr > 0 { engine_sr } else { 44100 };
 
@@ -853,7 +853,7 @@ fn render_single_clip(
         .as_deref()
         .ok_or_else(|| "clip has no source_path".to_string())?;
 
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     // 1. 解码源文件
     let (in_rate, in_channels, pcm) =
@@ -1376,7 +1376,7 @@ pub(crate) fn start_background_render(app: tauri::AppHandle) -> serde_json::Valu
 
     // 后台渲染线程
     std::thread::spawn(move || {
-        let cache_log = std::env::var("HIFISHIFTER_RENDER_CACHE_LOG")
+        let cache_log = std::env::var("HACHISHIFTER_RENDER_CACHE_LOG")
             .ok()
             .as_deref()
             == Some("1");

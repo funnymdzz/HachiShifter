@@ -223,7 +223,7 @@ pub(crate) fn build_snapshot(
     cache: &Arc<Mutex<LruCache<(PathBuf, u32), ResampledStereo>>>,
     stretch_cache: &Arc<Mutex<HashMap<StretchKey, ResampledStereo>>>,
 ) -> EngineSnapshot {
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let stretch_algorithm = crate::time_stretch::resolved_user_external_stretch_algorithm();
     let bpm = if timeline.bpm.is_finite() && timeline.bpm > 0.0 {
         timeline.bpm
@@ -762,7 +762,7 @@ pub(crate) fn build_snapshot(
 
     clips_out.sort_by_key(|c| c.start_frame);
 
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "AudioEngine: snapshot built: tracks={} clips_in_timeline={} clips_audible={} duration_frames={} sr={}",
             timeline.tracks.len(),

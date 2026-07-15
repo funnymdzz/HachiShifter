@@ -189,7 +189,7 @@ if ($LocalPackage) {
         exit 1
     }
 
-    $TempDir = Join-Path $env:TEMP "hifishifter-ort-local-$PID"
+    $TempDir = Join-Path $env:TEMP "hachishifter-ort-local-$PID"
     New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
     try {
@@ -237,7 +237,7 @@ if ((Test-Path $primaryDll) -and -not (Test-Path $headerFile)) {
     Write-Host "  Status:    DLLs present but include/ headers missing - re-downloading" -ForegroundColor Yellow
 }
 
-$TempDir = Join-Path $env:TEMP "hifishifter-ort-dl-$PID"
+$TempDir = Join-Path $env:TEMP "hachishifter-ort-dl-$PID"
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 $ZipFile = Join-Path $TempDir $archiveName

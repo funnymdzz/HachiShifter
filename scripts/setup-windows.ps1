@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    One-stop Windows development environment setup for HiFiShifter.
+    One-stop Windows development environment setup for HachiShifter.
 
 .DESCRIPTION
-    Installs and configures everything needed for HiFiShifter development on Windows:
+    Installs and configures everything needed for HachiShifter development on Windows:
     - Portable Rust toolchain (opt-in: -InstallRust, project-local at .rust/)
     - ONNX Runtime GPU (downloaded from GitHub, or from a local source)
     - CUDA runtime DLLs (cuBLAS, cuDNN, etc.)
@@ -122,7 +122,7 @@ if ($LoadEnv) {
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  HiFiShifter - Windows Development Environment Setup" -ForegroundColor Cyan
+Write-Host "  HachiShifter - Windows Development Environment Setup" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 

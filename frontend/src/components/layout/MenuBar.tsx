@@ -829,7 +829,7 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     <DropdownMenu.Item
                         onSelect={async () => {
                             const { openUrl } = await import("@tauri-apps/plugin-opener");
-                            openUrl("https://github.com/ARounder-183/HiFiShifter");
+                            openUrl("https://github.com/funnymdzz/HachiShifter");
                         }}
                     >
                         {t("menu_about")}

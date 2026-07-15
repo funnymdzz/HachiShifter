@@ -1,6 +1,6 @@
 import type { KeybindingOverrides } from "./types";
 
-const STORAGE_KEY = "hifishifter.keybindings";
+const STORAGE_KEY = "hachishifter.keybindings";
 
 /**
  * 从 localStorage 加载用户自定义的快捷键覆盖项

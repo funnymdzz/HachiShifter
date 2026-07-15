@@ -15,7 +15,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 /// Runtime override for EP choice. Set by `set_runtime_ep_override()`.
-/// Takes precedence over the `HIFISHIFTER_ORT_EP` env var.
+/// Takes precedence over the `HACHISHIFTER_ORT_EP` env var.
 static RUNTIME_EP_OVERRIDE: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
 /// Set the runtime EP override. Pass `None` to clear the override.
@@ -26,7 +26,7 @@ pub fn set_runtime_ep_override(ep: Option<String>) {
 }
 
 /// Runtime override for CUDA device ID. Set by `set_runtime_cuda_device_id()`.
-/// Takes precedence over the `HIFISHIFTER_ORT_CUDA_DEVICE_ID` env var.
+/// Takes precedence over the `HACHISHIFTER_ORT_CUDA_DEVICE_ID` env var.
 static RUNTIME_CUDA_DEVICE_ID: OnceLock<Mutex<Option<i32>>> = OnceLock::new();
 
 /// Set the runtime CUDA device ID override. Pass `None` to clear the override.
@@ -58,7 +58,7 @@ fn cuda_device_id() -> i32 {
         .lock()
         .ok()
         .and_then(|g| *g)
-        .unwrap_or_else(|| env_i32("HIFISHIFTER_ORT_CUDA_DEVICE_ID").unwrap_or(0))
+        .unwrap_or_else(|| env_i32("HACHISHIFTER_ORT_CUDA_DEVICE_ID").unwrap_or(0))
 }
 
 /// Returns the runtime EP override if set, otherwise falls back to env var.
@@ -72,7 +72,7 @@ fn ep_choice() -> String {
 }
 
 fn env_ep_choice() -> String {
-    std::env::var("HIFISHIFTER_ORT_EP")
+    std::env::var("HACHISHIFTER_ORT_EP")
         .ok()
         .unwrap_or_else(|| "auto".to_string())
         .trim()
@@ -95,10 +95,10 @@ fn env_i32(name: &str) -> Option<i32> {
         .and_then(|s| s.trim().parse::<i32>().ok())
 }
 
-/// Read `HIFISHIFTER_ORT_CUDA_MEM_LIMIT_MB` (default 8192 = 8 GB).
+/// Read `HACHISHIFTER_ORT_CUDA_MEM_LIMIT_MB` (default 8192 = 8 GB).
 /// Returns bytes.
 fn env_cuda_mem_limit_bytes() -> u64 {
-    let mb = std::env::var("HIFISHIFTER_ORT_CUDA_MEM_LIMIT_MB")
+    let mb = std::env::var("HACHISHIFTER_ORT_CUDA_MEM_LIMIT_MB")
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)

@@ -19,8 +19,8 @@ interface FileBrowserState {
     audioOnly: boolean; // 仅显示音频文件
 }
 
-const STORAGE_KEY = "hifishifter.fileBrowser.lastPath";
-const AUDIO_ONLY_KEY = "hifishifter.fileBrowser.audioOnly";
+const STORAGE_KEY = "hachishifter.fileBrowser.lastPath";
+const AUDIO_ONLY_KEY = "hachishifter.fileBrowser.audioOnly";
 
 function getInitialPath(): string {
     return localStorage.getItem(STORAGE_KEY) || "";

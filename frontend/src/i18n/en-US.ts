@@ -263,7 +263,7 @@ export const enUS = {
     dropped_audio_imported: "Dropped audio imported",
     import_audio_failed: "Import audio failed",
 
-    menu_about: "About HiFiShifter",
+    menu_about: "About HachiShifter",
     glue: "Glue",
     group: "Group",
     ungroup: "Ungroup",

@@ -148,12 +148,12 @@ export const WaveformTrackCanvas = React.memo(
 
             // ========================================
             // 性能诊断探针（通过 localStorage 开关）
-            // 开启: localStorage.setItem('hifishifter.debugWaveformPerf', '1')
-            // 关闭: localStorage.removeItem('hifishifter.debugWaveformPerf')
+            // 开启: localStorage.setItem('hachishifter.debugWaveformPerf', '1')
+            // 关闭: localStorage.removeItem('hachishifter.debugWaveformPerf')
             // ========================================
             const __perfDebug =
                 typeof window !== "undefined" &&
-                window.localStorage?.getItem("hifishifter.debugWaveformPerf") === "1";
+                window.localStorage?.getItem("hachishifter.debugWaveformPerf") === "1";
             const __t0 = __perfDebug ? performance.now() : 0;
             let __tSetup = 0,
                 __clipTimings: {

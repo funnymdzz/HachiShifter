@@ -107,7 +107,7 @@ function drawCurveTimed(args: {
     // Check debug flag
     const debugEnabled =
         typeof window !== "undefined" &&
-        window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+        window.localStorage?.getItem("hachishifter.debugPianoRoll") === "1";
 
     // DEBUG: 验证曲线时间参数（使用统一转换函数�?
     const curveStartSec = framesToTime(startFrame, fp);

@@ -16,7 +16,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+  HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
   RUSTFLAGS: "-Awarnings"
 
 jobs:
@@ -107,6 +107,6 @@ jobs:
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v7
         with:
-          name: HiFiShifter-windows-11-x86_64
+          name: HachiShifter-windows-11-x86_64
           path: dist/*portable-win-x64.zip
           if-no-files-found: error

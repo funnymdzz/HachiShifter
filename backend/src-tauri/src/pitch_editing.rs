@@ -7,7 +7,7 @@ thread_local! {
 }
 
 fn pitch_edit_algo_from_env() -> Option<String> {
-    std::env::var("HIFISHIFTER_PITCH_EDIT_ALGO")
+    std::env::var("HACHISHIFTER_PITCH_EDIT_ALGO")
         .ok()
         .map(|s| s.trim().to_ascii_lowercase())
         .filter(|s| !s.is_empty())

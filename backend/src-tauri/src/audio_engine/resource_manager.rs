@@ -35,7 +35,7 @@ impl ResourceManager {
             thread::spawn(move || {
                 // 在进入循环前只读取一次环境变量
                 let debug_commands =
-                    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+                    std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
                 while let Ok(key) = request_rx.recv() {
                     let (path, out_rate) = key.clone();

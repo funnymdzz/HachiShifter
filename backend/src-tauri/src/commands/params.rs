@@ -160,7 +160,7 @@ pub(super) fn get_param_frames(
     frame_count: u32,
     stride: Option<u32>,
 ) -> crate::models::ParamFramesPayload {
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "get_param_frames(track_id={}, param={}, start_frame={}, frame_count={}, stride={:?})",
             track_id, param, start_frame, frame_count, stride
@@ -379,7 +379,7 @@ pub(super) fn set_param_frames(
         }
     };
 
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
     let extra_curve_default = is_extra_curve
         .then_some(param_reference_value)
         .unwrap_or(0.0);

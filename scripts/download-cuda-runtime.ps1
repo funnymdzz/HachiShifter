@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Download CUDA runtime DLLs required for GPU acceleration in HiFiShifter.
+    Download CUDA runtime DLLs required for GPU acceleration in HachiShifter.
 
 .DESCRIPTION
     Downloads cuBLAS 12 and cuDNN 9 from NVIDIA's official redistribution CDN and
@@ -47,7 +47,7 @@ if (-not (Test-Path $DestDir)) {
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  HiFiShifter CUDA Runtime Downloader" -ForegroundColor Cyan
+Write-Host "  HachiShifter CUDA Runtime Downloader" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  Output: $DestDir" -ForegroundColor White
 Write-Host ""
@@ -111,7 +111,7 @@ function Expand-WithBestTool([string]$ZipPath, [string]$DestPath) {
 }
 
 # Main download loop
-$TempDir = Join-Path $env:TEMP "hifishifter-cuda-dl-$PID"
+$TempDir = Join-Path $env:TEMP "hachishifter-cuda-dl-$PID"
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 $totalStaged = 0

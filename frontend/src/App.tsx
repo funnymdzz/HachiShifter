@@ -101,7 +101,7 @@ const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
     timedBackupEnabled: false,
     timedBackupIntervalSec: 300,
     timedBackupPathTemplate:
-        "<ProjectFolder>/HiFiShifter Backup/<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp",
+        "<ProjectFolder>/HachiShifter Backup/<ProjectName>_%Y-%m-%d-%H-%M-%S.hshp",
 };
 
 function detectExternalActionKindFromPath(path: string): ExternalFileActionKind | null {
@@ -151,7 +151,7 @@ function AppInner() {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const dragRef = useRef<{ pointerId: number } | null>(null);
     const [splitRatio, setSplitRatio] = useState(() => {
-        const stored = Number(localStorage.getItem("hifishifter.splitRatio"));
+        const stored = Number(localStorage.getItem("hachishifter.splitRatio"));
         return Number.isFinite(stored) ? Math.min(0.85, Math.max(0.15, stored)) : 0.6;
     });
     const splitRatioRef = useRef(splitRatio);
@@ -349,7 +349,7 @@ function AppInner() {
 
             // 只在松开鼠标的最后一刻，才把最终状态同步给 React 并持久化
             setSplitRatio(splitRatioRef.current);
-            localStorage.setItem("hifishifter.splitRatio", String(splitRatioRef.current));
+            localStorage.setItem("hachishifter.splitRatio", String(splitRatioRef.current));
 
             window.removeEventListener("pointermove", onPointerMove);
             window.removeEventListener("pointerup", endDrag);

@@ -1,12 +1,12 @@
-# HiFiShifter User Manual
+# HachiShifter User Manual
 
 [简体中文](USERMANUAL.md) | [繁體中文](USERMANUAL_zh-TW.md) | [English](USERMANUAL_en.md) | [日本語](USERMANUAL_ja.md) | [한국어](USERMANUAL_ko.md)
 
-HiFiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for human voice, integrating splicing and tuning for human VOCALOID production.
+HachiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for human voice, integrating splicing and tuning for human VOCALOID production.
 
 ## 1. Installation
 
-Download the HiFiShifter installer corresponding to your operating system and architecture. By OS, there are `Windows`, `macOS`, and `Linux`. By architecture, there are `x86_64` and `arm64`.
+Download the HachiShifter installer corresponding to your operating system and architecture. By OS, there are `Windows`, `macOS`, and `Linux`. By architecture, there are `x86_64` and `arm64`.
 
 - For Windows, NSIS installer (`installer`) and portable zip (`portable`) are provided. General users can directly use the installer.  
   If you are a Windows user and do not know the difference between `x86_64` and `arm64`, choose `x86_64`. Only if you clearly understand `arm64` and have a Windows ARM device, you may download the `arm64` version.
@@ -14,19 +14,19 @@ Download the HiFiShifter installer corresponding to your operating system and ar
 - For macOS, an unsigned dmg installer is provided. Since it is not signed, installation requires a few extra steps to allow the app to run.  
   macOS users with M-series chips should install the `arm64` version. Only older Intel users need the `x86_64` version.  
   If you see a "file is damaged" error after double-clicking the dmg, follow these steps:
-    1. Run `xattr -cr /Applications/HiFiShifter.app` in Terminal;
+    1. Run `xattr -cr /Applications/HachiShifter.app` in Terminal;
     2. Allow the app to run via `System Settings` -> `Privacy & Security` -> click `Open Anyway`.
 
 - For Linux, an AppImage package is provided. You need to go to file `Properties -> Permissions` and check `Allow executing file as program`, then you can run it directly.
 
-**About CUDA GPU Acceleration**: HiFiShifter provides NVIDIA CUDA GPU-accelerated builds for Windows and Linux (download filenames include the `-cuda` suffix). These builds leverage NVIDIA GPUs for inference acceleration. CUDA builds require:
+**About CUDA GPU Acceleration**: HachiShifter provides NVIDIA CUDA GPU-accelerated builds for Windows and Linux (download filenames include the `-cuda` suffix). These builds leverage NVIDIA GPUs for inference acceleration. CUDA builds require:
 
 - An NVIDIA graphics card with CUDA support (GTX 10 series or newer recommended)
 - Recent [NVIDIA display drivers](https://www.nvidia.com/drivers) (version 545 or newer recommended)
 
 macOS does not support CUDA GPU acceleration at this time.
 
-**WebView Information**: HiFiShifter is built with the Rust + Tauri framework and requires a WebView component to display its interface.
+**WebView Information**: HachiShifter is built with the Rust + Tauri framework and requires a WebView component to display its interface.
 
 - **Windows**: Requires Edge WebView2. Windows 10 (version 1803 and later) and Windows 11 have it preinstalled, so no additional action is needed. If you are using an older Windows version or the component is missing, the installer will prompt you to download it automatically. You can also refer to the [Tauri official documentation](https://tauri.app/start/prerequisites/#webview2) for details. General users can simply run the installer without worry.
 - **macOS**: WebKit is provided by the system, no extra installation is required.
@@ -34,9 +34,9 @@ macOS does not support CUDA GPU acceleration at this time.
 
 ## 2. Menu
 
-The `File` menu allows you to open and save HiFiShifter project files, as well as import audio files, import Reaper projects (`.rpp`), import VocalShifter projects (`.vshp` or `.vsp`), import MIDI files, and export audio.
+The `File` menu allows you to open and save HachiShifter project files, as well as import audio files, import Reaper projects (`.rpp`), import VocalShifter projects (`.vshp` or `.vsp`), import MIDI files, and export audio.
 
-HiFiShifter project files have the extensions `.hshp` or `.hsp`. Additionally, `Save As` supports saving the project as a plain text `json` file, or packaging the current project together with all used media files into an archive zip `.zip`. Currently, HiFiShifter only supports importing regular audio files, not video files.
+HachiShifter project files have the extensions `.hshp` or `.hsp`. Additionally, `Save As` supports saving the project as a plain text `json` file, or packaging the current project together with all used media files into an archive zip `.zip`. Currently, HachiShifter only supports importing regular audio files, not video files.
 
 The automatic backup feature allows you to configure backups for your project files, with two modes: `Backup on save` and `Timed backups`.
 
@@ -45,29 +45,29 @@ The automatic backup feature allows you to configure backups for your project fi
 
 The `Edit` menu allows various editing operations. Besides regular track and parameter editing, there are two special items: `Paste Reaper Clipboard Data` and `Paste VocalShifter Clipboard Data`.
 
-- **Paste Reaper Clipboard Data**: After you copy Items, tracks, or MIDI notes in Reaper, this function quickly imports the Reaper clipboard data into HiFiShifter.
-    - Item data: Imports as note clips in HiFiShifter, preserving tuning data (both global tuning and pitch envelopes) from Reaper.
-    - Track data: Imports tracks along with their items as tracks and audio clips in HiFiShifter, preserving track groups.
-    - MIDI note data: After exporting note data from other DAWs (Reaper, FL Studio, etc.) to the clipboard as MIDI note data, use the `Select` tool in the Parameter Editor to select a pitch curve segment in HiFiShifter, then you can import the clipboard MIDI note data into that segment. For a detailed introduction to MIDI import, see the [Pitch Reference Clip](#pitch-reference-clip) section.
+- **Paste Reaper Clipboard Data**: After you copy Items, tracks, or MIDI notes in Reaper, this function quickly imports the Reaper clipboard data into HachiShifter.
+    - Item data: Imports as note clips in HachiShifter, preserving tuning data (both global tuning and pitch envelopes) from Reaper.
+    - Track data: Imports tracks along with their items as tracks and audio clips in HachiShifter, preserving track groups.
+    - MIDI note data: After exporting note data from other DAWs (Reaper, FL Studio, etc.) to the clipboard as MIDI note data, use the `Select` tool in the Parameter Editor to select a pitch curve segment in HachiShifter, then you can import the clipboard MIDI note data into that segment. For a detailed introduction to MIDI import, see the [Pitch Reference Clip](#pitch-reference-clip) section.
 
-- **Paste VocalShifter Clipboard Data**: After you copy parameter curves, audio clips, or tracks in VocalShifter or VocalShifter LE, this function quickly imports the data into HiFiShifter.
+- **Paste VocalShifter Clipboard Data**: After you copy parameter curves, audio clips, or tracks in VocalShifter or VocalShifter LE, this function quickly imports the data into HachiShifter.
     - Parameter curve data: After selecting a parameter curve segment with the `Select` tool in the Parameter Editor, you can import VocalShifter clipboard parameter curve data into that segment.
-    - Audio clip data: Imports as note clips in HiFiShifter, preserving various parameter curve data.
-    - Track data: Imports tracks along with their audio clips into HiFiShifter. Note that HiFiShifter currently cannot distinguish whether your last copied content was an audio clip or a track. If you intend to import a track, before performing the copy track operation in VocalShifter, ensure that no audio clip is selected in the VocalShifter project; otherwise, only the selected audio clips will be imported.
+    - Audio clip data: Imports as note clips in HachiShifter, preserving various parameter curve data.
+    - Track data: Imports tracks along with their audio clips into HachiShifter. Note that HachiShifter currently cannot distinguish whether your last copied content was an audio clip or a track. If you intend to import a track, before performing the copy track operation in VocalShifter, ensure that no audio clip is selected in the VocalShifter project; otherwise, only the selected audio clips will be imported.
 
-The `Options` menu allows you to modify various settings of HiFiShifter.
+The `Options` menu allows you to modify various settings of HachiShifter.
 
 - `Project Stretch Override`: Allows you to modify the current project's stretching algorithm.
 - `Global Stretch Default`: Allows you to modify the default global stretching algorithm.
-- `Inference Device`: Allows you to set the inference device used for rendering. Currently supports `Auto`, `CPU`, and `GPU (CUDA)`. You can run a benchmark from this menu to test the performance of each device. `GPU (CUDA)` is only available in the CUDA build of HiFiShifter.
+- `Inference Device`: Allows you to set the inference device used for rendering. Currently supports `Auto`, `CPU`, and `GPU (CUDA)`. You can run a benchmark from this menu to test the performance of each device. `GPU (CUDA)` is only available in the CUDA build of HachiShifter.
 - `Background Pre-render`: When enabled, after opening a project or editing parameters, the edited parameters are automatically pre-rendered in the background, and you can play the already-rendered portions even while rendering is still in progress. When disabled, rendering only begins when playback starts, and you must wait for rendering to complete before the timeline plays normally. Enabled by default. Disabling it reduces rendering frequency and saves performance.
-- `Keyboard Shortcuts`: Allows you to configure HiFiShifter's keybindings. Several presets are available.
+- `Keyboard Shortcuts`: Allows you to configure HachiShifter's keybindings. Several presets are available.
 
 ## 3. Track View
 
 The general operation logic and shortcuts can be referenced from DAWs like Reaper, VocalShifter, VEGAS Pro. You can customize your shortcut preferences via `Options -> Keyboard Shortcuts`. The following descriptions are based on default shortcuts.
 
-The track view is one of HiFiShifter's core features, allowing you to crop, splice, and edit audio clips. Its operation logic is largely based on Reaper.
+The track view is one of HachiShifter's core features, allowing you to crop, splice, and edit audio clips. Its operation logic is largely based on Reaper.
 
 For view navigation, drag the middle mouse button (hold the scroll wheel) to pan. Horizontal/vertical zoom or scrolling can be done by holding modifiers like `Ctrl`, `Alt`, `Shift` while scrolling the mouse wheel. These modifiers can be adjusted in the shortcut settings.
 
@@ -98,17 +98,17 @@ Select multiple clips, then choose `Group` (or press `G`) in the context menu to
 
 On the left side of the track view is the track header area, where you can add or delete tracks, adjust track parameters, etc. Right-click a track to clone it.
 
-Similar to Reaper, HiFiShifter tracks support track groups. Drag one track header onto another in the track header area to create a track group. A track group shares a single parameter panel. In practice, it is recommended to organize by "one voice part per track group".
+Similar to Reaper, HachiShifter tracks support track groups. Drag one track header onto another in the track header area to create a track group. A track group shares a single parameter panel. In practice, it is recommended to organize by "one voice part per track group".
 
 Track view toolbar buttons:
 
-- `BPM`: Adjust the global tempo BPM of the project. HiFiShifter currently does not support variable BPM.
+- `BPM`: Adjust the global tempo BPM of the project. HachiShifter currently does not support variable BPM.
 - `Beats Per Bar`: Set the number of beats per bar for the project.
 - `Grid`: Set the grid spacing for the project.
 - `Base Scale`: Adjust the global base scale setting for the project, supports custom scales. The scale function is mainly used with `Pitch Snap` and other pitch-related adjustments.
 - `Stop` and `Play/Pause` buttons: Control playback.
-- `File Browser`: Open the HiFiShifter file browser window.
-- `Notepad`: Open the HiFiShifter notepad window, which records and displays Markdown-formatted text.
+- `File Browser`: Open the HachiShifter file browser window.
+- `Notepad`: Open the HachiShifter notepad window, which records and displays Markdown-formatted text.
 - `Auto Crossfade`: Similar to Reaper/VEGAS Pro, when enabled, moving clips that overlap will automatically adjust crossfade envelopes.
 - `Grid Snap`: When enabled, all clip adjustments attempt to snap to grid. Hold `Shift` to temporarily toggle snap.
 - `Zoom at Playhead`: When enabled, horizontal zoom centers on the playhead; otherwise, centers on the mouse cursor.
@@ -118,21 +118,21 @@ Track view toolbar buttons:
 
 ## 4. File Browser
 
-The file browser allows you to open a specific folder, search and sort audio files within it, and drag them into the HiFiShifter track view. Search supports regular expressions. Clicking an audio file automatically plays a preview. You can hold `Ctrl` and `Shift` for multi-selection. Left-dragging files adds one or more audio files across time into the timeline. Right-dragging files brings up a menu with `Add Across Time` / `Add Across Tracks`. `Add Across Tracks` allows you to add multiple audio clips vertically across multiple tracks.
+The file browser allows you to open a specific folder, search and sort audio files within it, and drag them into the HachiShifter track view. Search supports regular expressions. Clicking an audio file automatically plays a preview. You can hold `Ctrl` and `Shift` for multi-selection. Left-dragging files adds one or more audio files across time into the timeline. Right-dragging files brings up a menu with `Add Across Time` / `Add Across Tracks`. `Add Across Tracks` allows you to add multiple audio clips vertically across multiple tracks.
 
 When the track view has focus, press `Ctrl + F` to open the Quick Search window. This is a simplified version of the file browser, allowing you to quickly search and preview audio files within a folder and add them to the timeline.
 
 ## 5. Parameter Editor
 
-The parameter editor is one of HiFiShifter's core features, allowing you to edit various parameters of the currently selected track.
+The parameter editor is one of HachiShifter's core features, allowing you to edit various parameters of the currently selected track.
 
-To enable parameter editing for a track, you must first press the track's `C` (Compose) button and wait for audio analysis to complete. HiFiShifter uses offline rendering; after each parameter edit, you must wait for the parameters to re-render before auditioning.
+To enable parameter editing for a track, you must first press the track's `C` (Compose) button and wait for audio analysis to complete. HachiShifter uses offline rendering; after each parameter edit, you must wait for the parameters to re-render before auditioning.
 
 ### 1. Algorithms and Parameters
 
-The current version of HiFiShifter supports three vocal tuning algorithms and their parameters:
+The current version of HachiShifter supports three vocal tuning algorithms and their parameters:
 
-- **PC-NSF-HiFiGAN**: OpenVPI's open-source hifigan vocoder specialized for singing voices, also HiFiShifter's default algorithm.
+- **PC-NSF-HiFiGAN**: OpenVPI's open-source hifigan vocoder specialized for singing voices, also HachiShifter's default algorithm.
     - `Pitch`: Adjust the pitch of the voice.
     - `Breath Gain`: After enabling breath, allows adjusting the breath volume, based on the VR-hnsep model.
     - `Tension`: Adjust the tension of the voice.
@@ -155,7 +155,7 @@ A track can only use one algorithm; if you want to use multiple algorithms, sepa
 
 A track group shares a single set of parameters, with child tracks inheriting parameters from the root track. Additionally, child tracks have two extra parameters: `Cents Offset` and `Degree Offset`, which conveniently adjust pitch relative to the root track. The `Degree Offset` uses the project's scale setting as its reference.
 
-After copying a `Pitch` segment using the Select tool, you can paste it onto `Cents Offset` or `Degree Offset`, and HiFiShifter will automatically calculate and apply the appropriate offset.
+After copying a `Pitch` segment using the Select tool, you can paste it onto `Cents Offset` or `Degree Offset`, and HachiShifter will automatically calculate and apply the appropriate offset.
 
 ### 2. Select Tool
 
@@ -234,10 +234,10 @@ Pitch Reference Clips can be created through the following methods:
 
 - Import MIDI via the `File` menu or by dragging a file. This opens the MIDI Import dialog.
     - MIDI File: Allows you to select a MIDI file to import. Also supports parsing MIDI data exported to the system clipboard by other DAWs. DAWs confirmed to support system clipboard MIDI data transfer include Reaper and FL Studio.
-        - Reaper: In Reaper's MIDI Editor, select notes and copy them to export the selected note data to the system clipboard for HiFiShifter to read. Note that since Reaper's clipboard note data does not include BPM information, when importing, you can use the current project BPM or specify one manually.
-        - FL Studio: In FL Studio's Piano Roll, click the small triangle in the top-left corner and select `File` -> `Copy to MIDI Clipboard` to export all notes of the current channel to the system clipboard for HiFiShifter to read.
+        - Reaper: In Reaper's MIDI Editor, select notes and copy them to export the selected note data to the system clipboard for HachiShifter to read. Note that since Reaper's clipboard note data does not include BPM information, when importing, you can use the current project BPM or specify one manually.
+        - FL Studio: In FL Studio's Piano Roll, click the small triangle in the top-left corner and select `File` -> `Copy to MIDI Clipboard` to export all notes of the current channel to the system clipboard for HachiShifter to read.
     - Track Selection: Allows you to select which MIDI tracks to import.
-    - Import MIDI BPM as Project BPM: When enabled, imports the MIDI's initial BPM as the project BPM. HiFiShifter still does not support variable BPM.
+    - Import MIDI BPM as Project BPM: When enabled, imports the MIDI's initial BPM as the project BPM. HachiShifter still does not support variable BPM.
     - Note BPM: Configures the BPM mapping for imported notes.
         - MIDI own BPM: Import directly with the MIDI's own BPM without BPM mapping.
         - Current Project BPM: Map note BPM to the current project BPM before importing.
@@ -265,14 +265,14 @@ Additional convenient features of the parameter editor:
 
 - `Clipboard Preview`: After copying a parameter curve with the Select tool, the clipboard curve is displayed in real-time within the selection area to help with paste positioning.
 - `Popup Param Values`: Shows parameter values when the mouse is near the curve or during drawing edits.
-- `Lock Param Lines`: When dragging an audio clip on the track, whether to also move its corresponding parameter curves. All parameter editing in HiFiShifter is track-based; if not locked, edited curves will not follow the clip.
+- `Lock Param Lines`: When dragging an audio clip on the track, whether to also move its corresponding parameter curves. All parameter editing in HachiShifter is track-based; if not locked, edited curves will not follow the clip.
 - `Smoothness`: Whether to automatically smooth parameter edits and the smoothing strength.
 - `Reference Track Group`: When the parameter is `Pitch`, lets you choose other tracks and display pitch curves from other track groups as references in the pitch editor.
 - `Import MIDI`: Allows you to select a MIDI file and import notes from one or more tracks as a pitch curve.
 
 ## 6. Export Audio
 
-After completing all edits, use the `Export Audio` function in the `File` menu to export the HiFiShifter project as a wav audio file.
+After completing all edits, use the `Export Audio` function in the `File` menu to export the HachiShifter project as a wav audio file.
 
 Parameters:
 

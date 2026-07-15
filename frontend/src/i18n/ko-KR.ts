@@ -334,7 +334,7 @@ export const koKR = {
     dropped_audio_imported: "드롭된 오디오를 가져왔습니다",
     import_audio_failed: "오디오 가져오기에 실패했습니다",
 
-    menu_about: "HiFiShifter 정보",
+    menu_about: "HachiShifter 정보",
     glue: "붙이기",
     group: "그룹화",
     ungroup: "그룹 해제",

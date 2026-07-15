@@ -264,7 +264,7 @@ export const jaJP = {
     dropped_audio_imported: "ドロップされたオーディオをインポートしました",
     import_audio_failed: "オーディオのインポートに失敗しました",
 
-    menu_about: "HiFiShifter について",
+    menu_about: "HachiShifter について",
     glue: "グルー",
     group: "グループ化",
     ungroup: "グループ解除",

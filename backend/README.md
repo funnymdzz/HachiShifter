@@ -1,6 +1,6 @@
-# HiFiShifter Backend (Tauri 2.0)
+# HachiShifter Backend (Tauri 2.0)
 
-本目录用于承载 HiFiShifter 的 Rust 后端与桌面壳，基于 **Tauri 2.0**。
+本目录用于承载 HachiShifter 的 Rust 后端与桌面壳，基于 **Tauri 2.0**。
 
 当前阶段目标：
 

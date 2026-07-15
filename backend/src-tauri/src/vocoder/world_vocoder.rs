@@ -157,7 +157,7 @@ enum WorldF0Method {
 fn world_f0_method() -> WorldF0Method {
     static METHOD: OnceLock<WorldF0Method> = OnceLock::new();
     *METHOD.get_or_init(|| {
-        match std::env::var("HIFISHIFTER_WORLD_F0")
+        match std::env::var("HACHISHIFTER_WORLD_F0")
             .ok()
             .as_deref()
             .map(|s| s.trim().to_ascii_lowercase())
@@ -200,7 +200,7 @@ fn blend_unvoiced_regions_with_silence_gate(
 ) {
     static SILENCE_RMS: OnceLock<f64> = OnceLock::new();
     let silence_rms = *SILENCE_RMS.get_or_init(|| {
-        env_f64("HIFISHIFTER_WORLD_DRY_SILENCE_RMS")
+        env_f64("HACHISHIFTER_WORLD_DRY_SILENCE_RMS")
             .unwrap_or(WORLD_DRY_SILENCE_RMS)
             .max(0.0)
     });
@@ -301,9 +301,9 @@ fn cleanup_f0_inplace(f0: &mut [f64], frame_period_ms: f64, f0_floor: f64, f0_ce
 
     // 2) Fill short unvoiced gaps inside voiced regions.
     // This reduces analysis/synthesis instability ("gargling") when f0 flickers to 0 for a few frames.
-    // Default: 15ms; set HIFISHIFTER_WORLD_F0_GAP_MS=0 to disable.
+    // Default: 15ms; set HACHISHIFTER_WORLD_F0_GAP_MS=0 to disable.
     static GAP_MS: OnceLock<f64> = OnceLock::new();
-    let gap_ms = *GAP_MS.get_or_init(|| env_f64("HIFISHIFTER_WORLD_F0_GAP_MS").unwrap_or(15.0));
+    let gap_ms = *GAP_MS.get_or_init(|| env_f64("HACHISHIFTER_WORLD_F0_GAP_MS").unwrap_or(15.0));
     if gap_ms <= 0.0 {
         return;
     }
@@ -634,7 +634,7 @@ fn vocode_one(
     // NOTE: This is not a low-pass on the control curve; it is voiced/unvoiced gating.
     let mut out = y;
     if !voiced.is_empty() {
-        let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+        let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
         if debug {
             let voiced_n = voiced.iter().filter(|&&b| b).count();
             let ratio = (voiced_n as f64) / (voiced.len().max(1) as f64);

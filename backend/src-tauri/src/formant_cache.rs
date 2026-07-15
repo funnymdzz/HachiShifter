@@ -62,7 +62,7 @@ pub fn global_formant_cache() -> &'static Mutex<FormantCache> {
 }
 
 pub fn formant_debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_FORMANT").ok().as_deref() == Some("1")
+    std::env::var("HACHISHIFTER_DEBUG_FORMANT").ok().as_deref() == Some("1")
 }
 
 pub fn average_abs_diff(a: &[f32], b: &[f32]) -> f32 {
@@ -84,7 +84,7 @@ pub fn formant_debug_log(message: impl AsRef<str>) {
     }
     let line = format!("[formant] {}", message.as_ref());
     eprintln!("{line}");
-    let log_path = std::env::temp_dir().join("hifishifter-formant-debug.log");
+    let log_path = std::env::temp_dir().join("hachishifter-formant-debug.log");
     if let Ok(mut file) = OpenOptions::new()
         .create(true)
         .append(true)

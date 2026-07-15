@@ -1,16 +1,16 @@
 //! 临时文件统一管理模块。
 //!
-//! 所有 HiFiShifter 产生的临时文件统一放在 `%TEMP%/hifishifter/` 下，
+//! 所有 HachiShifter 产生的临时文件统一放在 `%TEMP%/hachishifter/` 下，
 //! 应用启动时自动清理上次遗留的临时文件。
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// 返回 HiFiShifter 统一临时目录：`%TEMP%/hifishifter/`。
+/// 返回 HachiShifter 统一临时目录：`%TEMP%/hachishifter/`。
 ///
 /// 若目录不存在会自动创建。
-pub fn hifishifter_temp_dir() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("hifishifter");
+pub fn hachishifter_temp_dir() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("hachishifter");
     fs::create_dir_all(&dir).map_err(|e| format!("创建临时目录失败: {e}"))?;
     Ok(dir)
 }
@@ -41,8 +41,8 @@ pub fn remove_old_synth_temp(old_path: Option<&str>) {
 /// 应用启动时清理遗留的临时文件。
 ///
 /// 清理范围：
-/// - `%TEMP%/hifishifter/synth_*.wav`（合成临时文件）
-/// - `%TEMP%/hifishifter/import_*.*`（导入临时文件）
+/// - `%TEMP%/hachishifter/synth_*.wav`（合成临时文件）
+/// - `%TEMP%/hachishifter/import_*.*`（导入临时文件）
 /// - `%TEMP%/hs_vslib_*.wav`（vslib 崩溃残留）
 ///
 /// 此函数不会阻塞，内部 spawn 后台线程执行。
@@ -51,8 +51,8 @@ pub fn cleanup_stale_temp_files() {
         let mut total_removed = 0u64;
         let mut total_bytes = 0u64;
 
-        // 1. 清理 %TEMP%/hifishifter/ 下的 synth_*.wav 和 import_*.*
-        if let Ok(hs_dir) = hifishifter_temp_dir() {
+        // 1. 清理 %TEMP%/hachishifter/ 下的 synth_*.wav 和 import_*.*
+        if let Ok(hs_dir) = hachishifter_temp_dir() {
             let (removed, bytes) = cleanup_dir_by_prefix(&hs_dir, &["synth_", "import_"]);
             total_removed += removed;
             total_bytes += bytes;

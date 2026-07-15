@@ -23,10 +23,10 @@ import {
 
 /* ─────────── Storage Keys ─────────── */
 
-const APPEARANCE_KEY = "hifishifter.appearance";
-const CUSTOM_THEMES_KEY = "hifishifter.customThemes";
+const APPEARANCE_KEY = "hachishifter.appearance";
+const CUSTOM_THEMES_KEY = "hachishifter.customThemes";
 /** 兼容旧版的主题模式 key */
-const LEGACY_THEME_KEY = "hifishifter.theme";
+const LEGACY_THEME_KEY = "hachishifter.theme";
 
 /* ─────────── 外观设置 ─────────── */
 
@@ -42,7 +42,7 @@ export function loadAppearance(): AppearanceSettings {
         // fallthrough
     }
 
-    // 兼容旧版 hifishifter.theme
+    // 兼容旧版 hachishifter.theme
     const legacyMode = localStorage.getItem(LEGACY_THEME_KEY);
     if (legacyMode === "light" || legacyMode === "dark") {
         return { ...DEFAULT_APPEARANCE, mode: legacyMode };

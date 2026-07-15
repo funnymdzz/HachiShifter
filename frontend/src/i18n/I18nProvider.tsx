@@ -17,7 +17,7 @@ interface I18nContextValue {
 
 const I18nContext = createContext<I18nContextValue | null>(null);
 
-const STORAGE_KEY = "hifishifter.locale";
+const STORAGE_KEY = "hachishifter.locale";
 
 function getDefaultLocale(): Locale {
     const stored = localStorage.getItem(STORAGE_KEY);

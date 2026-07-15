@@ -3,7 +3,7 @@
 //! Wraps `lru::LruCache` with byte-weight tracking. When the total estimated
 //! bytes exceeds the budget, the least-recently-used entries are evicted.
 //!
-//! Default budget: 1 GB (configurable via `HIFISHIFTER_PCM_CACHE_BUDGET_MB`).
+//! Default budget: 1 GB (configurable via `HACHISHIFTER_PCM_CACHE_BUDGET_MB`).
 
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -11,9 +11,9 @@ use std::num::NonZeroUsize;
 /// Default byte budget for all PCM caches combined (1 GB).
 const DEFAULT_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
 
-/// Read `HIFISHIFTER_PCM_CACHE_BUDGET_MB` or return default budget in bytes.
+/// Read `HACHISHIFTER_PCM_CACHE_BUDGET_MB` or return default budget in bytes.
 pub fn env_cache_budget_bytes() -> u64 {
-    let mb = std::env::var("HIFISHIFTER_PCM_CACHE_BUDGET_MB")
+    let mb = std::env::var("HACHISHIFTER_PCM_CACHE_BUDGET_MB")
         .ok()
         .and_then(|s| s.trim().parse::<u64>().ok())
         .filter(|v| *v > 0)

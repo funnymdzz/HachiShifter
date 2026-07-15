@@ -5,7 +5,7 @@
 
 ## 背景
 
-HiFiShifter 的波形渲染系统已从 V1（单级峰值缓存）全面升级到 V2（三级 Mipmap 峰值系统 HFSPeaks v2）。
+HachiShifter 的波形渲染系统已从 V1（单级峰值缓存）全面升级到 V2（三级 Mipmap 峰值系统 HFSPeaks v2）。
 但 V1 代码仍残留在项目中，增加了维护负担和代码复杂度。本次变更删除所有 V1 旧版代码。
 
 ---

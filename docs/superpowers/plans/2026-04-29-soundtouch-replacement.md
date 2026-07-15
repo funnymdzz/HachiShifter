@@ -264,7 +264,7 @@ StretchAlgorithm::SoundTouchDll => {
             out
         }
         Err(e) => {
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!("time_stretch: SoundTouch failed, falling back: {e}");
             }
             linear_time_stretch_interleaved(input, channels, out_frames)

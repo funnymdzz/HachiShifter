@@ -34,7 +34,7 @@ pub fn global_chunk_cache_ref() -> &'static Mutex<HashMap<(String, usize), Chunk
 }
 
 fn debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+    std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
 }
 
 fn chunk_debug(msg: &str) {
@@ -97,7 +97,7 @@ impl HiFiGanRenderer {
         // clip_midi 为空时明确跳过，与 WORLD 链路行为一致。
         // Harvest 分析尚未完成时 clip_midi 可能为空，此时返回原始 PCM。
         if clip_midi.is_empty() {
-            if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
                 eprintln!(
                     "HiFiGanRenderer::render: clip_midi is empty (Harvest not ready?), \
                      skipping inference and returning original PCM"

@@ -192,7 +192,7 @@ export function usePianoRollData(args: {
     function computeVisibleRequest() {
         const debug =
             typeof window !== "undefined" &&
-            window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+            window.localStorage?.getItem("hachishifter.debugPianoRoll") === "1";
 
         const trackId = rootTrackId;
         if (!trackId) {
@@ -252,7 +252,7 @@ export function usePianoRollData(args: {
         // DEBUG: Log data request parameters
         const debugEnabled =
             typeof window !== "undefined" &&
-            window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+            window.localStorage?.getItem("hachishifter.debugPianoRoll") === "1";
 
         if (debugEnabled) {
             console.log("[usePianoRollData] Request params:", {
@@ -512,7 +512,7 @@ export function usePianoRollData(args: {
             void (async () => {
                 const debugEnabled =
                     typeof window !== "undefined" &&
-                    window.localStorage?.getItem("hifishifter.debugPianoRoll") === "1";
+                    window.localStorage?.getItem("hachishifter.debugPianoRoll") === "1";
                 beginLoading();
                 try {
                     if (debugEnabled) {

@@ -324,7 +324,7 @@ pub fn render_mixdown_interleaved(
         return Err("export_cancelled".to_string());
     }
 
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     let mut clips_considered: u32 = 0;
     let mut clips_decoded: u32 = 0;

@@ -7,15 +7,15 @@ fn main() {
     build_frontend();
 
     // Allow skipping expensive native builds in CI checks via env var
-    // Set HIFISHIFTER_SKIP_NATIVE_BUILD=1 to skip WORLD/Signalsmith/VSLIB builds
-    let skip_native = std::env::var("HIFISHIFTER_SKIP_NATIVE_BUILD").unwrap_or_default();
+    // Set HACHISHIFTER_SKIP_NATIVE_BUILD=1 to skip WORLD/Signalsmith/VSLIB builds
+    let skip_native = std::env::var("HACHISHIFTER_SKIP_NATIVE_BUILD").unwrap_or_default();
     if skip_native != "1" {
         build_world_static();
         build_signalsmith_stretch();
         build_vslib();
         build_soundtouch();
     } else {
-        println!("cargo:warning=[build.rs] Skipping native library builds (HIFISHIFTER_SKIP_NATIVE_BUILD=1)");
+        println!("cargo:warning=[build.rs] Skipping native library builds (HACHISHIFTER_SKIP_NATIVE_BUILD=1)");
         // Create placeholder files so tauri_build resource validation passes
         for placeholder in &[
             "third_party/soundtouch-static/soundtouch/SoundTouchDLL.dll",
@@ -66,11 +66,11 @@ fn build_frontend() {
     println!("cargo:rerun-if-changed=../../frontend/vite.config.js");
 
     // Allow CI to skip frontend build if artifact is provided.
-    // Set HIFISHIFTER_SKIP_FRONTEND_BUILD=1 to skip building frontend here.
-    let skip_frontend = std::env::var("HIFISHIFTER_SKIP_FRONTEND_BUILD").unwrap_or_default();
+    // Set HACHISHIFTER_SKIP_FRONTEND_BUILD=1 to skip building frontend here.
+    let skip_frontend = std::env::var("HACHISHIFTER_SKIP_FRONTEND_BUILD").unwrap_or_default();
     if skip_frontend == "1" {
         println!(
-            "cargo:warning=[Frontend] HIFISHIFTER_SKIP_FRONTEND_BUILD=1 -> skipping frontend build"
+            "cargo:warning=[Frontend] HACHISHIFTER_SKIP_FRONTEND_BUILD=1 -> skipping frontend build"
         );
         return;
     }

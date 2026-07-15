@@ -178,7 +178,7 @@ pub fn run() {
                 .path()
                 .app_cache_dir()
                 .unwrap_or_else(|_| hfspeaks_v2::default_cache_dir());
-            let dir = base.join("hifishifter").join("waveform_peaks_cache");
+            let dir = base.join("hachishifter").join("waveform_peaks_cache");
             {
                 let mut d = state
                     .waveform_cache_dir
@@ -190,7 +190,7 @@ pub fn run() {
 
             // 加载持久化的最近工程列表
             if let Ok(cfg_base) = app.path().app_config_dir() {
-                let cfg_dir = cfg_base.join("HiFiShifter");
+                let cfg_dir = cfg_base.join("HachiShifter");
                 let _ = std::fs::create_dir_all(&cfg_dir);
                 let recent = crate::config::load_recent(&cfg_dir);
                 {

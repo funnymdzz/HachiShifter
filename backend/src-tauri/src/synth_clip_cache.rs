@@ -302,7 +302,7 @@ static RENDERED_CLIP_CAPACITY: OnceLock<usize> = OnceLock::new();
 
 fn rendered_clip_capacity() -> usize {
     *RENDERED_CLIP_CAPACITY.get_or_init(|| {
-        std::env::var("HIFISHIFTER_RENDERED_CLIP_CACHE_CAPACITY")
+        std::env::var("HACHISHIFTER_RENDERED_CLIP_CACHE_CAPACITY")
             .ok()
             .and_then(|raw| raw.trim().parse::<usize>().ok())
             .filter(|v| *v > 0)

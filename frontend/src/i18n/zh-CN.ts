@@ -251,7 +251,7 @@ export const zhCN = {
     dropped_audio_imported: "已导入拖拽音频",
     import_audio_failed: "导入音频失败",
 
-    menu_about: "关于 HiFiShifter",
+    menu_about: "关于 HachiShifter",
     glue: "胶合",
     group: "编组",
     ungroup: "解组",

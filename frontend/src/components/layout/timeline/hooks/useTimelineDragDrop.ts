@@ -87,7 +87,7 @@ export function useTimelineDragDrop(args: UseTimelineDragDropArgs): UseTimelineD
         let disposed = false;
         let unlisten: null | (() => void) = null;
 
-        const debugDnd = localStorage.getItem("hifishifter.debugDnd") === "1";
+        const debugDnd = localStorage.getItem("hachishifter.debugDnd") === "1";
 
         async function setup() {
             try {

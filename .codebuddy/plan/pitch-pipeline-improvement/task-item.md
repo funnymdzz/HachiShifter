@@ -54,7 +54,7 @@
 
 - [ ] 8. 增强 `pitch_stream_onnx.rs` 中的 voiced/unvoiced 边界 crossfade
    - 在 `crossfade_into_ring` 中将线性权重替换为等功率权重：`w_curr = sin(w * π/2)`，`w_prev = cos(w * π/2)`
-   - 将 `HIFISHIFTER_ONNX_VAD_XFADE_MS` 默认值从 `40ms` 增大到 `80ms`
+   - 将 `HACHISHIFTER_ONNX_VAD_XFADE_MS` 默认值从 `40ms` 增大到 `80ms`
    - 处理边界情况：`prev_tail` 或 `curr_preroll` 长度不足 `xfade_frames` 时使用实际可用长度，不产生越界
    - 在 voiced 段推理结果的首尾各做约 20ms 窗口的短时能量归一化，平滑衔接原音能量包络
    - _需求：5.1、5.2、5.3、5.4_

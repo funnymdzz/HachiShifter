@@ -1,6 +1,6 @@
 # SoundTouch Vendor Assets
 
-This directory contains the pinned Windows x64 SoundTouch runtime assets used by HiFiShifter:
+This directory contains the pinned Windows x64 SoundTouch runtime assets used by HachiShifter:
 
 - `SoundTouchDLL_x64.dll`
 - `SoundTouchDLL_x64.lib`

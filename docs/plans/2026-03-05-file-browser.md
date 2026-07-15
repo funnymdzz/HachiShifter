@@ -316,7 +316,7 @@ interface FileBrowserState {
     searchQuery: string;        // 搜索过滤关键词
 }
 
-const STORAGE_KEY = "hifishifter.fileBrowser.lastPath";
+const STORAGE_KEY = "hachishifter.fileBrowser.lastPath";
 
 function getInitialPath(): string {
     return localStorage.getItem(STORAGE_KEY) || "";
@@ -645,11 +645,11 @@ const fileBrowserVisible = useAppSelector((state) => state.fileBrowser.visible);
 **Files:**
 - Modify: `frontend/src/components/layout/TimelinePanel.tsx`
 
-在现有的 `onDrop` 处理中，优先检查自定义 MIME type `application/x-hifishifter-file`：
+在现有的 `onDrop` 处理中，优先检查自定义 MIME type `application/x-hachishifter-file`：
 
 ```typescript
 // 在 onDrop 回调的开头添加
-const internalPath = dt?.getData?.("application/x-hifishifter-file");
+const internalPath = dt?.getData?.("application/x-hachishifter-file");
 if (internalPath) {
     e.preventDefault();
     const el = e.currentTarget as HTMLDivElement;
@@ -670,9 +670,9 @@ if (internalPath) {
 
 同样在 `onDragOver` 中识别内部拖拽：
 ```typescript
-const internalPath = dt?.getData?.("application/x-hifishifter-file");
+const internalPath = dt?.getData?.("application/x-hachishifter-file");
 // 注意：某些浏览器在 dragover 时无法读取 getData，所以还需检查 types
-const hasInternal = dt?.types?.includes("application/x-hifishifter-file");
+const hasInternal = dt?.types?.includes("application/x-hachishifter-file");
 if (hasInternal) {
     e.preventDefault();
     // 更新 ghost 预览...

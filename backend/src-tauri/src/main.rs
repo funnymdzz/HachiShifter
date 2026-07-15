@@ -78,7 +78,7 @@ fn init_file_log() {
             .expect("failed to open log file");
         let _ = writeln!(
             out_file,
-            "==== HiFiShifter log started at {} ====",
+            "==== HachiShifter log started at {} ====",
             chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f")
         );
         let _ = out_file.flush();

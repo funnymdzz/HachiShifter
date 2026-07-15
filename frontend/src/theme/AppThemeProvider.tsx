@@ -30,8 +30,8 @@ import { QT_COLOR_TOKENS } from "./themeTypes";
 import { loadAppearance, saveAppearance, loadCustomThemes } from "./themeStorage";
 
 export type ThemeMode = "dark" | "light";
-const PREVIEW_SETTINGS_KEY = "hifishifter.appearance.preview";
-const PREVIEW_COLORS_KEY = "hifishifter.appearance.preview.colors";
+const PREVIEW_SETTINGS_KEY = "hachishifter.appearance.preview";
+const PREVIEW_COLORS_KEY = "hachishifter.appearance.preview.colors";
 
 interface ThemeContextValue {
     mode: ThemeMode;

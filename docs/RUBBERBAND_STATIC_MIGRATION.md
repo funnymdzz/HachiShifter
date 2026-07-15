@@ -2,7 +2,7 @@
 
 ## 概述
 
-HifiShifter 的 Rubber Band Library 集成已于 2026.03 从动态链接（DLL）迁移到编译时静态链接，与 WORLD vocoder 的集成方式保持一致。
+HachiShifter 的 Rubber Band Library 集成已于 2026.03 从动态链接（DLL）迁移到编译时静态链接，与 WORLD vocoder 的集成方式保持一致。
 
 ## 主要变更
 
@@ -66,7 +66,7 @@ cargo build --release
 **文档更新待办**：
 - [ ] 更新 `README.md` 移除 DLL 构建说明
 - [ ] 更新 `DEVELOPMENT_zh.md` 中的 Rubber Band 章节
-- [ ] 标注旧的环境变量（`HIFISHIFTER_RUBBERBAND_DLL`）已废弃
+- [ ] 标注旧的环境变量（`HACHISHIFTER_RUBBERBAND_DLL`）已废弃
 
 ## 使用说明
 
@@ -74,8 +74,8 @@ cargo build --release
 
 ```bash
 # 1. 克隆主仓库
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HifiShifter
+git clone https://github.com/funnymdzz/HachiShifter.git
+cd HachiShifter
 
 # 2. 克隆 Rubber Band 源码
 cd backend/src-tauri/third_party/rubberband-static

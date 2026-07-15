@@ -14,7 +14,7 @@ use super::core::get_timeline_state_from_ref;
 
 fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let suffix = if dirty { "*" } else { "" };
-    let title = format!("HiFiShifter - {}{}", name, suffix);
+    let title = format!("HachiShifter - {}{}", name, suffix);
     let _ = window.set_title(&title);
 }
 
@@ -32,7 +32,7 @@ pub(super) fn open_reaper_dialog() -> serde_json::Value {
     }
 }
 
-/// 解析 Reaper 工程并导入到 HiFiShifter。
+/// 解析 Reaper 工程并导入到 HachiShifter。
 pub(super) fn import_reaper_project(
     state: &AppState,
     window: &Window,

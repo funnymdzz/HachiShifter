@@ -45,7 +45,7 @@ fn segment_overlap_sec(left_timeline_sec: f64, right_timeline_sec: f64) -> f64 {
         .min(SEGMENT_OVERLAP_MAX_SEC * 0.5)
 }
 
-/// HiFiShifter 支持的音频格式扩展名
+/// HachiShifter 支持的音频格式扩展名
 const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
 
 /// 标准 MIDI 文件扩展名
@@ -490,7 +490,7 @@ fn algo_pair_suffix(is_world: bool, synth_mode: i32) -> &'static str {
     }
 }
 
-// ─── 转换为 HiFiShifter 工程 ───
+// ─── 转换为 HachiShifter 工程 ───
 
 fn new_track_id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -500,7 +500,7 @@ fn new_clip_id() -> String {
     format!("clip_{}", uuid::Uuid::new_v4())
 }
 
-/// 判断音频文件扩展名是否被 HiFiShifter 支持。
+/// 判断音频文件扩展名是否被 HachiShifter 支持。
 fn is_audio_supported(path: &str) -> bool {
     Path::new(path)
         .extension()
@@ -612,8 +612,8 @@ fn create_midi_clip_from_file(
     })
 }
 
-/// 将 VocalShifter 音量倍率（1.0 = 0 dB）转换为 HiFiShifter 的 0.0–1.0 音量范围。
-/// HiFiShifter 默认音量为 0.9，VocalShifter 1.0 对应全音量。
+/// 将 VocalShifter 音量倍率（1.0 = 0 dB）转换为 HachiShifter 的 0.0–1.0 音量范围。
+/// HachiShifter 默认音量为 0.9，VocalShifter 1.0 对应全音量。
 fn convert_volume(vs_volume: f64) -> f32 {
     (vs_volume as f32).clamp(0.0, 1.0)
 }
@@ -627,7 +627,7 @@ fn clip_color() -> String {
     "#4fc3f7".to_string()
 }
 
-/// 将解析后的 VocalShifter 数据转换为 HiFiShifter TimelineState。
+/// 将解析后的 VocalShifter 数据转换为 HachiShifter TimelineState。
 pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, String> {
     let (project, vsp_tracks, item_bases, item_exts) = parse_vsp_file(data)?;
 
@@ -678,7 +678,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         }
     }
 
-    // 为每个 VspTrack 创建 HiFiShifter 轨道
+    // 为每个 VspTrack 创建 HachiShifter 轨道
     for (vsp_idx, vsp_track) in vsp_tracks.iter().enumerate() {
         let idx = vsp_idx as i32;
         let algos = track_algos.get(&idx);
@@ -1974,7 +1974,7 @@ fn import_vsp_clipboard_selected_tracks(
 
     let mut track_order = ordered_track_ids.len() as i32;
 
-    // 原始轨道索引 + (is_world, synth_mode) → 新建的 HiFiShifter 轨道 ID
+    // 原始轨道索引 + (is_world, synth_mode) → 新建的 HachiShifter 轨道 ID
     let mut vsp_to_hs_track: std::collections::HashMap<(i32, bool, i32), String> =
         std::collections::HashMap::new();
 

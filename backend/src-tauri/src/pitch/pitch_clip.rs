@@ -118,7 +118,7 @@ const DEFAULT_CLIP_PITCH_CACHE_MAX_ENTRIES: usize = 4096;
 
 fn clip_pitch_cache_max_entries() -> Option<usize> {
     *CLIP_PITCH_CACHE_MAX_ENTRIES.get_or_init(|| {
-        let parsed = std::env::var("HIFISHIFTER_CLIP_PITCH_CACHE_MAX_ENTRIES")
+        let parsed = std::env::var("HACHISHIFTER_CLIP_PITCH_CACHE_MAX_ENTRIES")
             .ok()
             .and_then(|raw| raw.trim().parse::<usize>().ok());
         match parsed {
@@ -773,7 +773,7 @@ pub fn compute_clip_pitch_midi(
     // 和组装（assemble_pitch_orig_from_cache）阶段按需执行。
 
     // Small gap fill.
-    let gap_ms = std::env::var("HIFISHIFTER_FCPE_F0_GAP_MS")
+    let gap_ms = std::env::var("HACHISHIFTER_FCPE_F0_GAP_MS")
         .ok()
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0)

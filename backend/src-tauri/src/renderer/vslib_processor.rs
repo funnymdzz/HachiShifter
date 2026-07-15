@@ -71,8 +71,8 @@ impl Renderer for VslibRenderer {
 fn vslib_temp_dir() -> std::path::PathBuf {
     let t = std::env::temp_dir();
     if t.to_string_lossy().bytes().all(|b| b.is_ascii()) {
-        // %TEMP% 是纯 ASCII，优先使用 hifishifter/vslib/ 子目录统一管理
-        let unified = t.join("hifishifter").join("vslib");
+        // %TEMP% 是纯 ASCII，优先使用 hachishifter/vslib/ 子目录统一管理
+        let unified = t.join("hachishifter").join("vslib");
         if std::fs::create_dir_all(&unified).is_ok() {
             return unified;
         }
@@ -200,7 +200,7 @@ fn curve_at_abs_sec(curve: Option<&[f32]>, abs_sec: f64, frame_period_ms: f64) -
 
 #[cfg(feature = "vslib")]
 fn vslib_debug_enabled() -> bool {
-    std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
+    std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1")
 }
 
 #[cfg(feature = "vslib")]

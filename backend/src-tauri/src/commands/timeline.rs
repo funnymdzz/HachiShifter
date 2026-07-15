@@ -138,7 +138,7 @@ pub(super) fn import_audio_bytes(
     track_id: Option<Option<String>>,
     start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "import_audio_bytes(file_name={}, base64_len={}, track_id={:?}, start_sec={:?})",
             file_name,
@@ -189,7 +189,7 @@ pub(super) fn import_audio_item(
     track_id: Option<Option<String>>,
     start_sec: Option<f64>,
 ) -> crate::models::TimelineStatePayload {
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "import_audio_item(audio_path={}, track_id={:?}, start_sec={:?})",
             audio_path, track_id, start_sec

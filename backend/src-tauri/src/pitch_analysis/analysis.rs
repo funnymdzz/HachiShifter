@@ -1238,7 +1238,7 @@ fn fuse_clip_pitches_optimized(
 pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f32)) -> Vec<f32> {
     use std::sync::Arc;
 
-    let debug = std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+    let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
 
     on_progress(0.02);
 

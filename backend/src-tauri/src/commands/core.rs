@@ -89,7 +89,7 @@ pub(super) fn set_transport(
     playhead_sec: Option<f64>,
     bpm: Option<f64>,
 ) -> serde_json::Value {
-    if std::env::var("HIFISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
         eprintln!(
             "set_transport(playhead_sec={:?}, bpm={:?})",
             playhead_sec, bpm

@@ -1,8 +1,8 @@
-# HiFiShifter
+# HachiShifter
 
 [简体中文](../../README.md) | [繁體中文](README_zh-TW.md) | [English](README_en.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 
-HiFiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for vocal, integrating splicing and tuning for Jinriki VOCALOID production.
+HachiShifter is a graphical vocal editing and synthesis tool. It supports multi-track audio clip processing and uses various vocoders to achieve pitch correction and parameter adjustment for vocal, integrating splicing and tuning for Jinriki VOCALOID production.
 
 **The project is still under active development. Full-chain testing has not been completed, so there may be many bugs or instability issues.**
 
@@ -14,37 +14,37 @@ Download and install the appropriate release version for your system from the si
 
 ## Basic Principle
 
-HiFiShifter uses an offline rendering approach similar to UTAU, processing, rendering, and caching each audio clip on the timeline before feeding it into the playback system, resulting in faster processing for short clips.
+HachiShifter uses an offline rendering approach similar to UTAU, processing, rendering, and caching each audio clip on the timeline before feeding it into the playback system, resulting in faster processing for short clips.
 
-HiFiShifter provides a unified rendering interface to facilitate future algorithm additions.
+HachiShifter provides a unified rendering interface to facilitate future algorithm additions.
 
 ## Recommended Workflow
 
 Our recommended workflow is:
 
 1. Prepare short clip sources needed for vocal using other DAWs or slicing software.
-2. Complete audio splicing and tuning in HiFiShifter.
+2. Complete audio splicing and tuning in HachiShifter.
 
-HiFiShifter also supports the following operations to facilitate migration from other software:
+HachiShifter also supports the following operations to facilitate migration from other software:
 
 1. Directly open VocalShifter projects.
 2. Directly open Reaper projects.
-3. Parse VocalShifter clipboard content, allowing parameters from VocalShifter to be pasted into HiFiShifter's parameter area.
-4. Parse Reaper clipboard content, allowing Reaper items to be pasted directly into HiFiShifter.
+3. Parse VocalShifter clipboard content, allowing parameters from VocalShifter to be pasted into HachiShifter's parameter area.
+4. Parse Reaper clipboard content, allowing Reaper items to be pasted directly into HachiShifter.
 
 ## Feature Introduction
 
 ### Layout
 
-HiFiShifter can be roughly divided into two functional areas: the upper track panel and the lower parameter panel. The track panel is mainly responsible for audio clip processing, while the parameter panel handles parameter adjustments.
+HachiShifter can be roughly divided into two functional areas: the upper track panel and the lower parameter panel. The track panel is mainly responsible for audio clip processing, while the parameter panel handles parameter adjustments.
 
 ### Track Panel
 
-HiFiShifter provides a fairly complete track panel and audio clip editing functionality, similar to most modern DAWs.
+HachiShifter provides a fairly complete track panel and audio clip editing functionality, similar to most modern DAWs.
 
 #### Importing Audio
 
-HiFiShifter supports three ways to import audio:
+HachiShifter supports three ways to import audio:
 
 1. Drag and drop audio from the system file manager directly onto a track.
 2. Click the folder icon on the toolbar to open the built-in file browser and drag audio onto a track.
@@ -69,15 +69,15 @@ Note that tracks support nesting: you can drag a track under another track to fo
 
 ### Parameter Panel
 
-HiFiShifter's parameter panel provides operation support similar to VocalShifter for convenient parameter adjustment.
+HachiShifter's parameter panel provides operation support similar to VocalShifter for convenient parameter adjustment.
 
 Note that there is a special `C` button on each track. Only when this button is pressed can audio on that track be processed by subsequent parameter adjustments.
 
-During parameter adjustment, HiFiShifter operates on track groups. The root track's `C` button determines the algorithm and parameter curve shared by the entire group. The parameter curve applies to each audio clip based on its position.
+During parameter adjustment, HachiShifter operates on track groups. The root track's `C` button determines the algorithm and parameter curve shared by the entire group. The parameter curve applies to each audio clip based on its position.
 
-Each algorithm in HiFiShifter offers different adjustable parameters; the common parameter is pitch.
+Each algorithm in HachiShifter offers different adjustable parameters; the common parameter is pitch.
 
-When first opened, HiFiShifter takes some time to analyze the pitch of clips. After analysis, the solid line in the panel represents the group's current overall pitch, the dashed line represents the original overall pitch, and the colored lines represent each clip's own original pitch.
+When first opened, HachiShifter takes some time to analyze the pitch of clips. After analysis, the solid line in the panel represents the group's current overall pitch, the dashed line represents the original overall pitch, and the colored lines represent each clip's own original pitch.
 
 Other parameter panels are similar to the pitch panel but do not display individual clip original pitches.
 
@@ -85,7 +85,7 @@ The small eye icon next to a panel toggles its visibility when not selected.
 
 ### Algorithms
 
-HiFiShifter currently supports three algorithms.
+HachiShifter currently supports three algorithms.
 
 #### World Algorithm
 
@@ -137,15 +137,15 @@ This section is for developers; regular users can skip it.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HiFiShifter
+git clone https://github.com/funnymdzz/HachiShifter.git
+cd HachiShifter
 ```
 
 ### 2. Install Dependencies
 
 #### Windows
 
-HiFiShifter provides a **one-click environment setup script** that automatically installs ONNX Runtime and the CUDA runtime (Rust toolchain is **disabled by default** — add `-InstallRust` to opt in):
+HachiShifter provides a **one-click environment setup script** that automatically installs ONNX Runtime and the CUDA runtime (Rust toolchain is **disabled by default** — add `-InstallRust` to opt in):
 
 ```powershell
 .\scripts\setup-windows.ps1
@@ -223,7 +223,7 @@ git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.gi
 
 ### 4. GPU-Accelerated Build (CUDA)
 
-HiFiShifter supports GPU-accelerated inference via NVIDIA CUDA.
+HachiShifter supports GPU-accelerated inference via NVIDIA CUDA.
 
 #### Windows (CUDA)
 

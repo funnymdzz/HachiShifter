@@ -11,7 +11,7 @@
 
     Optional updates:
     - frontend\package-lock.json (all JSON "version" lines)
-    - backend\src-tauri\Cargo.lock (HiFiShifter package entry)
+    - backend\src-tauri\Cargo.lock (HachiShifter package entry)
 
     Supported inputs:
     1) Full version, for example: 0.1.0-beta.9
@@ -158,7 +158,7 @@ function Set-CargoLockVersion {
     )
 
     $raw = Read-TextFile -FilePath $FilePath
-    $pattern = '(?ms)(\[\[package\]\]\s*name\s*=\s*"HiFiShifter"\s*version\s*=\s*")([^"]+)(")'
+    $pattern = '(?ms)(\[\[package\]\]\s*name\s*=\s*"HachiShifter"\s*version\s*=\s*")([^"]+)(")'
     $updated = [regex]::Replace(
         $raw,
         $pattern,
@@ -206,5 +206,5 @@ if (Test-Path $frontendLockPath) {
     Write-Host "  - frontend\package-lock.json" -ForegroundColor Green
 }
 if (Test-Path $cargoLockPath) {
-    Write-Host "  - backend\src-tauri\Cargo.lock (HiFiShifter package)" -ForegroundColor Green
+    Write-Host "  - backend\src-tauri\Cargo.lock (HachiShifter package)" -ForegroundColor Green
 }

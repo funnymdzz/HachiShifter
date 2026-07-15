@@ -1,6 +1,6 @@
-// Reaper 工程 / 剪贴板数据转换为 HiFiShifter 工程
+// Reaper 工程 / 剪贴板数据转换为 HachiShifter 工程
 //
-// 将 reaper_parser 解析出的 ReaperData 转换为 HiFiShifter 的 TimelineState。
+// 将 reaper_parser 解析出的 ReaperData 转换为 HachiShifter 的 TimelineState。
 
 use crate::audio_utils::try_read_audio_header_only;
 use crate::models::PitchRange;
@@ -13,7 +13,7 @@ use crate::midi_import::MidiNoteEvent;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
-/// HiFiShifter 支持的音频格式扩展名
+/// HachiShifter 支持的音频格式扩展名
 const SUPPORTED_AUDIO_EXTS: &[&str] = &["wav", "flac", "mp3", "ogg", "m4a"];
 
 /// 帧周期（秒）
@@ -60,7 +60,7 @@ fn is_audio_supported(path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// 将 Reaper 音量倍率转换为 HiFiShifter 的 0.0–1.0 范围。
+/// 将 Reaper 音量倍率转换为 HachiShifter 的 0.0–1.0 范围。
 fn convert_volume(vol: f64) -> f32 {
     (vol as f32).clamp(0.0, 1.0)
 }
@@ -445,7 +445,7 @@ fn convert_reaper_items_to_existing_tracks(
     };
 
     for (track_idx, reaper_track) in data.tracks.iter().enumerate() {
-        // 查找此 Reaper track 对应的 HiFiShifter 轨道
+        // 查找此 Reaper track 对应的 HachiShifter 轨道
         let track_offset = data
             .track_offsets
             .get(track_idx)
@@ -748,7 +748,7 @@ struct PitchFrameAccumulator {
     weight: f64,
 }
 
-/// 处理一个 Reaper Item，生成一个或多个 HiFiShifter Clip。
+/// 处理一个 Reaper Item，生成一个或多个 HachiShifter Clip。
 ///
 /// `time_offset`: 时间偏移量（用于将剪贴板数据对齐到光标位置），.rpp 导入时为 0。
 fn process_item(
@@ -1165,12 +1165,12 @@ fn interpolate_pitch_envelope(points: &[(f64, f64)], time_sec: f64) -> f64 {
 
 /// 将 pitch 数据写入帧级别的 accumulator。
 /// Reaper 的音高是"相对于原始"的半音偏移，要叠加到原始音高上。
-/// 但由于 HiFiShifter 导入时还没有分析原始音高，这里先记录偏移量，
+/// 但由于 HachiShifter 导入时还没有分析原始音高，这里先记录偏移量，
 /// 后续在 pitch params 构建阶段会将它写入 pitch_edit。
 ///
-/// 实现策略：由于 Reaper 的音高是偏移量（相对原始），而 HiFiShifter 的 pitch_edit 是绝对值，
-/// 在导入时我们暂时记录偏移量，等 HiFiShifter 进行音高分析后会用 pitch_orig + offset 来计算。
-/// 如果没有偏移（0半音），则不写入 pitch 数据，让 HiFiShifter 的后续音高分析流程来处理。
+/// 实现策略：由于 Reaper 的音高是偏移量（相对原始），而 HachiShifter 的 pitch_edit 是绝对值，
+/// 在导入时我们暂时记录偏移量，等 HachiShifter 进行音高分析后会用 pitch_orig + offset 来计算。
+/// 如果没有偏移（0半音），则不写入 pitch 数据，让 HachiShifter 的后续音高分析流程来处理。
 fn write_pitch_for_clip(
     accum: &mut Vec<PitchFrameAccumulator>,
     clip_start_sec: f64,
@@ -1182,7 +1182,7 @@ fn write_pitch_for_clip(
     item_start_sec: f64,
     item_length_sec: f64,
 ) {
-    // 如果没有任何音高偏移，跳过（让 HiFiShifter 默认处理）
+    // 如果没有任何音高偏移，跳过（让 HachiShifter 默认处理）
     let has_pitch_shift = item_pitch_semitones.abs() > 1e-6;
     let has_envelope = pitch_envelope.map(|e| !e.is_empty()).unwrap_or(false);
 

@@ -82,7 +82,7 @@ use super::core::{get_timeline_state, get_timeline_state_from_ref};
 
 fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let suffix = if dirty { "*" } else { "" };
-    let title = format!("HiFiShifter - {}{}", name, suffix);
+    let title = format!("HachiShifter - {}{}", name, suffix);
     let _ = window.set_title(&title);
 }
 
@@ -137,7 +137,7 @@ fn sync_runtime_stretch_settings(state: &AppState) {
     );
 }
 
-fn is_hifishifter_project_path(path: &Path) -> bool {
+fn is_hachishifter_project_path(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| matches!(ext.to_ascii_lowercase().as_str(), "hshp" | "hsp"))
@@ -704,7 +704,7 @@ pub(crate) fn save_project_to_path_inner(
 
     let auto_backup_settings = load_auto_backup_settings(state);
     let rotated_backup =
-        if auto_backup_settings.save_on_save_enabled && is_hifishifter_project_path(&path) {
+        if auto_backup_settings.save_on_save_enabled && is_hachishifter_project_path(&path) {
             rotate_existing_project_file_for_backup(&path)?
         } else {
             None
@@ -829,7 +829,7 @@ pub(super) fn new_project(
 
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("HachiShifter Project", &["hshp", "hsp"])
         .add_filter("JSON Project", &["json"])
         .pick_file();
     match picked {
@@ -957,7 +957,7 @@ pub(super) fn save_project_as(
         }
     };
     let picked = rfd::FileDialog::new()
-        .add_filter("HiFiShifter Project", &["hshp", "hsp"])
+        .add_filter("HachiShifter Project", &["hshp", "hsp"])
         .add_filter("JSON Project", &["json"])
         .add_filter("Archive Zip", &["zip"])
         .set_file_name(format!("{}.hshp", default_name))
@@ -1025,7 +1025,7 @@ pub(super) fn set_project_base_scale(
         if let Some(handle) = state.app_handle.get() {
             use tauri::Manager;
             if let Some(win) = handle.get_webview_window("main") {
-                let title = format!("HiFiShifter - {}*", name);
+                let title = format!("HachiShifter - {}*", name);
                 let _ = win.set_title(&title);
             }
         }
@@ -1065,7 +1065,7 @@ pub(super) fn set_project_custom_scale(
         if let Some(handle) = state.app_handle.get() {
             use tauri::Manager;
             if let Some(win) = handle.get_webview_window("main") {
-                let title = format!("HiFiShifter - {}*", name);
+                let title = format!("HachiShifter - {}*", name);
                 let _ = win.set_title(&title);
             }
         }
@@ -1105,7 +1105,7 @@ pub(super) fn set_project_timeline_settings(
         if let Some(handle) = state.app_handle.get() {
             use tauri::Manager;
             if let Some(win) = handle.get_webview_window("main") {
-                let title = format!("HiFiShifter - {}*", name);
+                let title = format!("HachiShifter - {}*", name);
                 let _ = win.set_title(&title);
             }
         }
@@ -1137,7 +1137,7 @@ pub(super) fn set_project_stretch_settings(
         if let Some(handle) = state.app_handle.get() {
             use tauri::Manager;
             if let Some(win) = handle.get_webview_window("main") {
-                let title = format!("HiFiShifter - {}*", name);
+                let title = format!("HachiShifter - {}*", name);
                 let _ = win.set_title(&title);
             }
         }

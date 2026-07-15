@@ -1,4 +1,4 @@
-name: HiFiShifter Cross-Platform Build (Windows, macOS, Linux)
+name: HachiShifter Cross-Platform Build (Windows, macOS, Linux)
 
 on:
   workflow_dispatch:
@@ -47,11 +47,11 @@ jobs:
       # Prevent CI environment from converting warnings into errors.
       RUSTFLAGS: "-Awarnings"
       # Set to '1' to skip cargo check steps for faster CI.
-      HIFISHIFTER_SKIP_CARGO_CHECK: "1"
+      HACHISHIFTER_SKIP_CARGO_CHECK: "1"
       # Frontend dist is provided via artifact and should not be rebuilt by build.rs.
-      HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+      HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
       # Keep Linux WebKit ABI consistent with the dependency script and AppImage runtime.
-      HIFISHIFTER_WEBKIT_ABI: "4.1"
+      HACHISHIFTER_WEBKIT_ABI: "4.1"
       # Helps AppImage tools run in CI environments without FUSE mounts.
       APPIMAGE_EXTRACT_AND_RUN: "1"
     strategy:
@@ -390,11 +390,11 @@ jobs:
         shell: bash
 
       - name: Build (cargo check) on Unix
-        if: ${{ runner.os != 'Windows' && env.HIFISHIFTER_SKIP_CARGO_CHECK != '1' }}
+        if: ${{ runner.os != 'Windows' && env.HACHISHIFTER_SKIP_CARGO_CHECK != '1' }}
         working-directory: backend/src-tauri
         env:
-          HIFISHIFTER_SKIP_NATIVE_BUILD: "1"
-          HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+          HACHISHIFTER_SKIP_NATIVE_BUILD: "1"
+          HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
           RUST_BACKTRACE: "1"
         run: |
           if [ "${{ matrix.cargo_no_default_features }}" = "1" ]; then
@@ -405,11 +405,11 @@ jobs:
         shell: bash
 
       - name: Build (cargo check) on Windows
-        if: ${{ runner.os == 'Windows' && env.HIFISHIFTER_SKIP_CARGO_CHECK != '1' }}
+        if: ${{ runner.os == 'Windows' && env.HACHISHIFTER_SKIP_CARGO_CHECK != '1' }}
         working-directory: backend/src-tauri
         env:
-          HIFISHIFTER_SKIP_NATIVE_BUILD: "1"
-          HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+          HACHISHIFTER_SKIP_NATIVE_BUILD: "1"
+          HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
         run: |
           if ("${{ matrix.cargo_no_default_features }}" -eq "1") {
             cargo check --lib --all-targets --target "${{ matrix.cargo_target }}" --no-default-features --features "${{ matrix.cargo_features }}" --verbose
@@ -431,8 +431,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
-          HIFISHIFTER_ORT_EP: ${{ matrix.ort_ep }}
+          HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
+          HACHISHIFTER_ORT_EP: ${{ matrix.ort_ep }}
           ORT_USE_CUDA: ${{ matrix.ort_lib == 'gpu' && '1' || '0' }}
         with:
           projectPath: backend/src-tauri
@@ -459,8 +459,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0.6.2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
-          HIFISHIFTER_ORT_EP: ${{ matrix.ort_ep }}
+          HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
+          HACHISHIFTER_ORT_EP: ${{ matrix.ort_ep }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
           NO_APPSTREAM: "1"
         with:
@@ -470,7 +470,7 @@ jobs:
       - name: Build Linux CUDA binary (cargo)
         if: runner.os == 'Linux' && matrix.ort_lib == 'gpu'
         env:
-          HIFISHIFTER_SKIP_FRONTEND_BUILD: "1"
+          HACHISHIFTER_SKIP_FRONTEND_BUILD: "1"
           CARGO_TARGET: ${{ matrix.cargo_target }}
           CARGO_FEATURES: ${{ matrix.cargo_features }}
         shell: bash
@@ -497,7 +497,7 @@ jobs:
         if: runner.os != 'Windows'
         id: determine-non-windows-bundles-name
         run: |
-          $prod = 'HiFiShifter'
+          $prod = 'HachiShifter'
           $ver = '0.0.0'
           $conf = 'backend/src-tauri/tauri.conf.json'
           if (Test-Path $conf) {
@@ -537,7 +537,7 @@ jobs:
         with:
           name: ${{ steps.determine-non-windows-bundles-name.outputs.artifact-name }}
           path: |
-            backend/src-tauri/target/${{ matrix.cargo_target }}/release/HiFiShifter
+            backend/src-tauri/target/${{ matrix.cargo_target }}/release/HachiShifter
             backend/src-tauri/target/${{ matrix.cargo_target }}/release/*.so*
           if-no-files-found: error
 
@@ -554,7 +554,7 @@ jobs:
         if: runner.os == 'Windows'
         id: determine-windows-installer-name
         run: |
-          $prod = 'HiFiShifter'
+          $prod = 'HachiShifter'
           $ver = '0.0.0'
           $conf = 'backend/src-tauri/tauri.conf.json'
           if (Test-Path $conf) {
@@ -611,7 +611,7 @@ jobs:
         if: runner.os == 'Windows'
         id: determine-windows-portable-name
         run: |
-          $prod = 'HiFiShifter'
+          $prod = 'HachiShifter'
           $ver = '0.0.0'
           $conf = 'backend/src-tauri/tauri.conf.json'
           if (Test-Path $conf) {

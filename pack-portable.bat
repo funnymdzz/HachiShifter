@@ -1,6 +1,6 @@
 @echo off
 chcp 65001 >nul 2>&1
-title HiFiShifter 便携版打包
+title HachiShifter 便携版打包
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\pack-portable.ps1" %*
 if %ERRORLEVEL% neq 0 (
     echo.

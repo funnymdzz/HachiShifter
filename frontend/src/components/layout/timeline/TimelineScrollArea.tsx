@@ -145,11 +145,11 @@ export const TimelineScrollArea: React.FC<
     }, [rowHeight, scrollRef]);
 
     useEffect(() => {
-        localStorage.setItem("hifishifter.pxPerSec", String(pxPerSec));
+        localStorage.setItem("hachishifter.pxPerSec", String(pxPerSec));
     }, [pxPerSec]);
 
     useEffect(() => {
-        localStorage.setItem("hifishifter.rowHeight", String(rowHeight));
+        localStorage.setItem("hachishifter.rowHeight", String(rowHeight));
     }, [rowHeight]);
 
     useEffect(() => {

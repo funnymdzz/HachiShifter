@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Build or run HiFiShifter with CUDA/GPU acceleration on Windows.
+    Build or run HachiShifter with CUDA/GPU acceleration on Windows.
 
 .DESCRIPTION
     Default (no flags): fast release build - compiles the binary and stages
@@ -55,7 +55,7 @@ if ($Log)   { $ModeLabel += " + log" }
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  HiFiShifter GPU - $ModeLabel" -ForegroundColor Cyan
+Write-Host "  HachiShifter GPU - $ModeLabel" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -119,7 +119,7 @@ $env:ORT_LIB_LOCATION = $BundleDir
 
 if ($Dev) {
     $env:ORT_PREFER_DYNAMIC_LINK = "1"
-    $env:HIFISHIFTER_DEBUG_COMMANDS = "1"
+    $env:HACHISHIFTER_DEBUG_COMMANDS = "1"
 }
 
 # Count what we have
@@ -223,7 +223,7 @@ try {
             Write-Host "[build-gpu] Cleaned up $configPath" -ForegroundColor DarkGray
         }
 
-        Write-Host "[build-gpu] Release binary : $releaseDir\HiFiShifter.exe" -ForegroundColor Cyan
+        Write-Host "[build-gpu] Release binary : $releaseDir\HachiShifter.exe" -ForegroundColor Cyan
         Write-Host "[build-gpu] NSIS installer : $releaseDir\bundle\nsis" -ForegroundColor Cyan
     }
     else {
@@ -264,7 +264,7 @@ try {
             Write-Host "[build-gpu] All critical CUDA DLLs verified in release dir." -ForegroundColor Green
         }
 
-        Write-Host "[build-gpu] Release binary : $releaseDir\HiFiShifter.exe" -ForegroundColor Cyan
+        Write-Host "[build-gpu] Release binary : $releaseDir\HachiShifter.exe" -ForegroundColor Cyan
         Write-Host "[build-gpu] To create an NSIS installer, re-run with -Bundle" -ForegroundColor DarkGray
         Write-Host "[build-gpu] To create a portable ZIP, run: .\scripts\pack-portable.ps1 -SkipBuild" -ForegroundColor DarkGray
     }

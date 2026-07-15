@@ -1,8 +1,8 @@
-# HiFiShifter
+# HachiShifter
 
 [简体中文](README.md) | [繁體中文](docs/i18n/README_zh-TW.md) | [English](docs/i18n/README_en.md) | [日本語](docs/i18n/README_ja.md) | [한국어](docs/i18n/README_ko.md)
 
-HiFiShifter 是一个图形化人声编辑与合成工具。它支持多轨道音频切片处理，并以轨道组为单位，使用多种声码器完成人声修音、人力调参功能，实现人力VOCALOID制作的拼调一体化。
+HachiShifter 是一个图形化人声编辑与合成工具。它支持多轨道音频切片处理，并以轨道组为单位，使用多种声码器完成人声修音、人力调参功能，实现人力VOCALOID制作的拼调一体化。
 
 **当前项目仍在开发迭代中，未对全链路进行测试，可能存在诸多 BUG 或不稳定问题。**
 
@@ -14,37 +14,37 @@ HiFiShifter 是一个图形化人声编辑与合成工具。它支持多轨道�
 
 ## 基本原理
 
-HiFiShifter 使用类似 UTAU 的离线渲染方式，对时间线中的每个音频切片进行处理、渲染、缓存，最后再输入到播放系统中，因此其对短切片有着更快的处理效率。
+HachiShifter 使用类似 UTAU 的离线渲染方式，对时间线中的每个音频切片进行处理、渲染、缓存，最后再输入到播放系统中，因此其对短切片有着更快的处理效率。
 
-HiFiShifter 提供了一个统一的渲染接口，以便未来增添更多的算法支持。
+HachiShifter 提供了一个统一的渲染接口，以便未来增添更多的算法支持。
 
 ## 工作流推荐
 
 我们推荐的工作流是：
 
 1. 通过其他 DAW 或切片软件准备好人力所需的短切片音源
-2. 在 HiFiShifter 中完成音频的拼贴和调音
+2. 在 HachiShifter 中完成音频的拼贴和调音
 
-当然，HiFiShifter 也支持以下操作方便从其他软件的工程迁移：
+当然，HachiShifter 也支持以下操作方便从其他软件的工程迁移：
 
 1. 直接打开 VocalShifter 工程
 2. 直接打开 Reaper 工程
-3. 解析 VocalShifter 剪贴板内容，支持将 VocalShifter 中的参数粘贴到 HiFiShifter 参数区中。
-4. 解析 Reaper 剪贴板内容，支持直接将 Reaper 的 Items 粘贴到 HiFiShifter 中
+3. 解析 VocalShifter 剪贴板内容，支持将 VocalShifter 中的参数粘贴到 HachiShifter 参数区中。
+4. 解析 Reaper 剪贴板内容，支持直接将 Reaper 的 Items 粘贴到 HachiShifter 中
 
 ## 功能介绍
 
 ### 布局介绍
 
-HiFiShifter 可以大致的分为两个功能区，分别是上部的轨道面板和下部的参数面板。轨道面板主要负责对音频的切片处理，参数面板则负责对音频进行调参处理。
+HachiShifter 可以大致的分为两个功能区，分别是上部的轨道面板和下部的参数面板。轨道面板主要负责对音频的切片处理，参数面板则负责对音频进行调参处理。
 
 ### 轨道面板
 
-HiFiShifter 提供了一个基本完备的轨道面板与音频切片功能。该功能与大多数现代 DAW 类似。
+HachiShifter 提供了一个基本完备的轨道面板与音频切片功能。该功能与大多数现代 DAW 类似。
 
 #### 音频导入
 
-HiFiShifter 支持三种方式导入音频：
+HachiShifter 支持三种方式导入音频：
 
 1. 直接从系统文件管理器中拖拽音频到轨道上
 2. 点击工具栏的文件夹图标，打开内置文件管理器并拖拽音频到轨道上
@@ -69,15 +69,15 @@ HiFiShifter 支持三种方式导入音频：
 
 ### 参数面板
 
-HiFiShifter 的参数面板提供了类似 VocalShifter 的操作支持以方便用户调整参数。
+HachiShifter 的参数面板提供了类似 VocalShifter 的操作支持以方便用户调整参数。
 
-需要注意的是，HiFiShifter 的轨道上有一个特殊的 `C` 按钮，只有按下这个按钮，该轨道上的音频才能被后续调参处理。
+需要注意的是，HachiShifter 的轨道上有一个特殊的 `C` 按钮，只有按下这个按钮，该轨道上的音频才能被后续调参处理。
 
-在调参中，HiFiShifter 以轨道组为单位，通过根轨道开启 `C` 来决定，一个轨道组共用一个算法和一套参数线。参数线会按位置作用到每一个音频切片上。
+在调参中，HachiShifter 以轨道组为单位，通过根轨道开启 `C` 来决定，一个轨道组共用一个算法和一套参数线。参数线会按位置作用到每一个音频切片上。
 
-HiFiShifter 中的每个算法都有不同的参数可供调整，其中通用参数为音高。
+HachiShifter 中的每个算法都有不同的参数可供调整，其中通用参数为音高。
 
-在首次打开时，HiFiShifter 需要一些时间对切片的音高进行分析。分析完成后，面板中的实线表示该轨道组的整体当前音高，虚线表示整体原始音高，彩线表示每个切片自己的原始音高。
+在首次打开时，HachiShifter 需要一些时间对切片的音高进行分析。分析完成后，面板中的实线表示该轨道组的整体当前音高，虚线表示整体原始音高，彩线表示每个切片自己的原始音高。
 
 其他面板与音高面板类似，只是不会显示切片自己的原始音高。
 
@@ -85,7 +85,7 @@ HiFiShifter 中的每个算法都有不同的参数可供调整，其中通用�
 
 ### 算法
 
-目前 HiFiShifter 支持三种算法进行处理。
+目前 HachiShifter 支持三种算法进行处理。
 
 #### World 算法
 
@@ -137,15 +137,15 @@ VocalShifter 提供的算法库。
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/ARounder-183/HiFiShifter.git
-cd HiFiShifter
+git clone https://github.com/funnymdzz/HachiShifter.git
+cd HachiShifter
 ```
 
 ### 2. 安装依赖
 
 #### Windows
 
-HiFiShifter 提供了**一键式环境配置脚本**，可自动安装 ONNX Runtime 和 CUDA 运行时（Rust 工具链**默认跳过**，需手动添加 `-InstallRust` 启用）：
+HachiShifter 提供了**一键式环境配置脚本**，可自动安装 ONNX Runtime 和 CUDA 运行时（Rust 工具链**默认跳过**，需手动添加 `-InstallRust` 启用）：
 
 ```powershell
 .\scripts\setup-windows.ps1
@@ -231,7 +231,7 @@ git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.gi
 
 ### 4. GPU 加速构建（CUDA）
 
-HiFiShifter 支持通过 NVIDIA CUDA 实现 GPU 加速推理。
+HachiShifter 支持通过 NVIDIA CUDA 实现 GPU 加速推理。
 
 #### Windows（CUDA）
 
