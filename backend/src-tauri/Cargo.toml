@@ -62,7 +62,10 @@ objc2-app-kit = { version = "0.3", features = ["NSPasteboard"] }
 objc2 = "0.6"
 
 [features]
-default = ["onnx", "vslib"]
+default = ["onnx", "vslib", "custom-protocol"]
+# Required for standalone release binaries built with `cargo build`.
+# Without this feature Tauri loads `build.devUrl` (localhost:5173) at runtime.
+custom-protocol = ["tauri/custom-protocol"]
 logging = []
 onnx = ["dep:ort", "dep:ndarray", "dep:ort-tract"]
 cuda = ["onnx", "ort/cuda"]

@@ -215,7 +215,7 @@ SKIP_FRONTEND=0 bash ./scripts/install_deps_linux.sh
 
 ```bash
 cd backend/src-tauri
-cargo build --target x86_64-unknown-linux-gnu --no-default-features --features onnx
+cargo build --target x86_64-unknown-linux-gnu --no-default-features --features onnx,custom-protocol
 ```
 
 ### 3. SoundTouch 源码

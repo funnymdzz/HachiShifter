@@ -11,7 +11,8 @@
 #
 # Environment (optional):
 #   CARGO_TARGET      - Rust target triple (default: x86_64-unknown-linux-gnu)
-#   CARGO_FEATURES    - Cargo features (default: onnx,cuda)
+#   CARGO_FEATURES    - Cargo features (default: onnx,cuda). The script always
+#                       adds custom-protocol for a standalone Tauri binary.
 
 set -euxo pipefail
 
@@ -56,7 +57,7 @@ echo "=== ORT lib directory (with CUDA symlinks) ==="
 ls -la "${ORT_LIB_LOCATION}/"
 
 cd "${SRC_TAURI}"
-cargo build --release --target "${CARGO_TARGET}" --no-default-features --features "${CARGO_FEATURES}"
+cargo build --release --target "${CARGO_TARGET}" --no-default-features --features "${CARGO_FEATURES},custom-protocol"
 
 # Copy ORT + cuDNN shared libraries alongside the binary for distribution
 BIN_DIR="target/${CARGO_TARGET}/release"
