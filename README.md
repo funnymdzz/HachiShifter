@@ -210,6 +210,14 @@ chmod +x ./scripts/install_deps_linux.sh
 SKIP_FRONTEND=0 bash ./scripts/install_deps_linux.sh
 ```
 
+本仓库的默认 feature 包含仅用于 Windows VocalShifter 的 `vslib`。Linux/WSL2
+构建时应显式关闭默认 feature，并仅启用 ONNX：
+
+```bash
+cd backend/src-tauri
+cargo build --target x86_64-unknown-linux-gnu --no-default-features --features onnx
+```
+
 ### 3. SoundTouch 源码
 
 SoundTouch 音频时间拉伸库在编译时从源码构建。首次构建时会**自动克隆**，无需手动操作。
@@ -297,7 +305,14 @@ cargo tauri dev
 - `dev`：开发模式（默认，使用 Vite dev server，支持热更新）
 - `build`：构建模式（先构建前端静态资源，再启动）
 
-Linux/macOS（bash/zsh）：
+Linux/WSL2（bash）：
+
+```bash
+cd backend/src-tauri
+TAURI_UI_MODE=build cargo tauri dev --target x86_64-unknown-linux-gnu --no-default-features --features onnx
+```
+
+macOS（bash/zsh）：
 
 ```bash
 cd backend/src-tauri
@@ -316,6 +331,7 @@ $env:TAURI_UI_MODE='build'; cargo tauri dev
 ## 文档
 
 - [使用手册](docs/i18n/USERMANUAL.md)
+- [采样分段、自动音符与 UTAU oto 转换](docs/SAMPLE_ANNOTATIONS.md)
 - [更新计划](todo.md)
 
 ## 致谢

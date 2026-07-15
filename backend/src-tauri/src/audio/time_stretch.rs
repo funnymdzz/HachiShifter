@@ -364,25 +364,82 @@ pub fn time_stretch_interleaved(
     }
 }
 
+/// Preserve the source prefix at 1:1 speed and apply the selected stretcher
+/// only to the remainder. This implements UTAU-style fixed consonants while
+/// keeping the existing clip length contract.
+pub fn time_stretch_with_fixed_prefix(
+    input_interleaved: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    target_frames: usize,
+    fixed_prefix_frames: usize,
+    algorithm: StretchAlgorithm,
+) -> Vec<f32> {
+    let channels = channels.max(1);
+    let input_frames = input_interleaved.len() / channels;
+    if input_frames == 0 || target_frames == 0 {
+        return Vec::new();
+    }
+    let fixed_frames = fixed_prefix_frames
+        .min(input_frames.saturating_sub(1))
+        .min(target_frames.saturating_sub(1));
+    if fixed_frames == 0 {
+        return time_stretch_interleaved(
+            input_interleaved,
+            channels,
+            sample_rate,
+            target_frames,
+            algorithm,
+        );
+    }
+
+    let fixed_samples = fixed_frames * channels;
+    let tail_target_frames = target_frames - fixed_frames;
+    let stretched_tail = time_stretch_interleaved(
+        &input_interleaved[fixed_samples..],
+        channels,
+        sample_rate,
+        tail_target_frames,
+        algorithm,
+    );
+    let mut out = Vec::with_capacity(target_frames * channels);
+    out.extend_from_slice(&input_interleaved[..fixed_samples]);
+    out.extend_from_slice(&stretched_tail);
+    out.resize(target_frames * channels, 0.0);
+    out.truncate(target_frames * channels);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         current_runtime_stretch_settings, resolved_external_stretch_algorithm,
-        should_use_hifigan_mel_stretch, time_stretch_interleaved, update_runtime_stretch_settings,
-        StretchAlgorithm, UserStretchAlgorithm,
+        should_use_hifigan_mel_stretch, time_stretch_interleaved,
+        time_stretch_with_fixed_prefix, update_runtime_stretch_settings, StretchAlgorithm,
+        UserStretchAlgorithm,
     };
 
     #[test]
     fn soundtouch_fallback_keeps_requested_length() {
         let input = vec![0.0f32, 0.5, 0.25, -0.25];
-        let out = time_stretch_interleaved(
-            &input,
-            1,
-            44_100,
-            8,
-            StretchAlgorithm::SoundTouchDll,
-        );
+        let out = time_stretch_interleaved(&input, 1, 44_100, 8, StretchAlgorithm::SoundTouchDll);
         assert_eq!(out.len(), 8);
+    }
+
+    #[test]
+    fn fixed_prefix_is_bit_exact_and_only_tail_stretches() {
+        let input: Vec<f32> = (0..20).map(|value| value as f32).collect();
+        let out =
+            time_stretch_with_fixed_prefix(
+                &input,
+                1,
+                44_100,
+                30,
+                8,
+                StretchAlgorithm::LinearResample,
+            );
+        assert_eq!(out.len(), 30);
+        assert_eq!(&out[..8], &input[..8]);
     }
 
     #[test]
@@ -395,7 +452,10 @@ mod tests {
     fn project_override_inherits_and_resolves_from_global_defaults() {
         update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, true, None, None);
         let settings = current_runtime_stretch_settings();
-        assert_eq!(settings.effective_algorithm(), UserStretchAlgorithm::Signalsmith);
+        assert_eq!(
+            settings.effective_algorithm(),
+            UserStretchAlgorithm::Signalsmith
+        );
         assert!(settings.effective_hifigan_mel_stretch());
         assert!(matches!(
             resolved_external_stretch_algorithm(),

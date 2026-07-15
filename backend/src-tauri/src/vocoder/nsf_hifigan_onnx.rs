@@ -2467,4 +2467,3 @@ pub fn run_benchmark() -> Result<BenchmarkResults, String> {
         gpu_devices,
     })
 }
-

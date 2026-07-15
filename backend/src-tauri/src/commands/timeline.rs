@@ -164,6 +164,10 @@ pub(super) fn import_audio_bytes(
 
     let _ = fs::write(&path, &bytes);
 
+    // Generate the per-sample timing sidecar on first import. Import itself stays
+    // usable if the source directory is read-only or analysis fails.
+    let _ = crate::sample_annotations::ensure_sidecar(&path);
+
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);
     let resolved_track_id: Option<String> = match track_id {
@@ -195,6 +199,10 @@ pub(super) fn import_audio_item(
         let mut rt = state.runtime.lock().unwrap_or_else(|e| e.into_inner());
         rt.audio_loaded = true;
     }
+
+    // UTAU-converted sidecars are loaded as-is; otherwise create a rough
+    // annotation and detected note regions beside the imported sample.
+    let _ = crate::sample_annotations::ensure_sidecar(Path::new(&audio_path));
 
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     state.checkpoint_timeline(&tl);

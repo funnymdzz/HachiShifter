@@ -45,6 +45,8 @@ import { getWaveformColors } from "../../theme/waveformColors";
 import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import { coreApi } from "../../services/api/core";
+import { webApi } from "../../services/webviewApi";
+import type { ClipSampleAnnotationsResult } from "../../services/api/timeline";
 import type { ParamFramesPayload } from "../../types/api";
 import {
     degreeInputToScaleSteps,
@@ -74,7 +76,12 @@ import {
 
 import { AXIS_W, PITCH_MAX_MIDI, PITCH_MIN_MIDI } from "./pianoRoll/constants";
 import { drawPianoRoll } from "./pianoRoll/render";
-import type { DetectedPitchCurve, ReferencePitchOverlay } from "./pianoRoll/render";
+import type {
+    DetectedPitchCurve,
+    DetectedPitchNote,
+    ReferencePitchOverlay,
+    SampleTimingOverlay,
+} from "./pianoRoll/render";
 import {
     buildReferencePitchStrokeColor,
     cleanupVisibleReferenceRootTrackIds,
@@ -427,6 +434,46 @@ export const PianoRollPanel: React.FC = () => {
         if (!effectiveSelectedTrackId) return null;
         return s.tracks.find((track) => track.id === effectiveSelectedTrackId) ?? null;
     }, [effectiveSelectedTrackId, s.tracks]);
+
+    const selectedAudioClip = useMemo(() => {
+        if (!s.selectedClipId) return null;
+        const clip = s.clips.find((candidate) => candidate.id === s.selectedClipId) ?? null;
+        return clip && clip.sourcePath && clip.midiNoteCount == null ? clip : null;
+    }, [s.clips, s.selectedClipId]);
+    const [sampleAnalysis, setSampleAnalysis] = useState<
+        Extract<ClipSampleAnnotationsResult, { ok: true }> | null
+    >(null);
+    const [noteDragPreview, setNoteDragPreview] = useState<{
+        noteIndex: number;
+        midiNote: number;
+    } | null>(null);
+
+    useEffect(() => {
+        let canceled = false;
+        const clipId = selectedAudioClip?.id;
+        setSampleAnalysis(null);
+        setNoteDragPreview(null);
+        if (!clipId) return;
+
+        const load = async () => {
+            try {
+                const payload = await webApi.getClipSampleAnnotations(clipId);
+                if (!canceled && payload.ok) setSampleAnalysis(payload);
+            } catch {
+                // A read-only/missing source should not disable the piano roll.
+            }
+        };
+        const onAnnotationsChanged = (event: Event) => {
+            const changedClipId = (event as CustomEvent<{ clipId?: string }>).detail?.clipId;
+            if (!changedClipId || changedClipId === clipId) void load();
+        };
+        void load();
+        window.addEventListener("hachi-sample-annotations-changed", onAnnotationsChanged);
+        return () => {
+            canceled = true;
+            window.removeEventListener("hachi-sample-annotations-changed", onAnnotationsChanged);
+        };
+    }, [selectedAudioClip?.id]);
 
     const selectedIsChildTrack = Boolean(selectedTrack?.parentId);
 
@@ -1635,6 +1682,114 @@ export const PianoRollPanel: React.FC = () => {
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
 
+    const sampleNoteDisplay = useMemo((): {
+        notes: Array<DetectedPitchNote & { noteIndex: number }>;
+        timing: SampleTimingOverlay | null;
+    } => {
+        const clip = selectedAudioClip;
+        const analysis = sampleAnalysis;
+        if (!clip || !analysis || clip.reversed || editParam !== "pitch") {
+            return { notes: [], timing: null };
+        }
+        const sourceStart = Math.max(0, clip.sourceStartSec);
+        const sourceEnd = Math.max(sourceStart + 1e-6, clip.sourceEndSec);
+        const sourceSpan = sourceEnd - sourceStart;
+        const targetSpan = Math.max(1e-6, clip.lengthSec);
+        const active =
+            analysis.annotations[
+                Math.min(analysis.active_annotation_index, analysis.annotations.length - 1)
+            ] ?? null;
+        const requestedFixed = active
+            ? Math.max(
+                  0,
+                  Math.min(
+                      sourceSpan,
+                      active.region_start_sec + active.fixed_duration_sec - sourceStart,
+                  ),
+              )
+            : 0;
+        const fixed = Math.min(
+            requestedFixed,
+            Math.max(0, sourceSpan - 1e-6),
+            Math.max(0, targetSpan - 1e-6),
+        );
+        const mapSourceToTimeline = (sourceSec: number) => {
+            const local = Math.max(0, Math.min(sourceSpan, sourceSec - sourceStart));
+            let timelineLocal: number;
+            if (fixed > 1e-6 && fixed < sourceSpan - 1e-6) {
+                timelineLocal =
+                    local <= fixed
+                        ? local
+                        : fixed +
+                          ((local - fixed) * (targetSpan - fixed)) / (sourceSpan - fixed);
+            } else {
+                timelineLocal = (local * targetSpan) / sourceSpan;
+            }
+            return clip.startSec + timelineLocal;
+        };
+
+        const curveMidiForRange = (startSec: number, endSec: number): number | null => {
+            if (!paramView || paramView.edit.length === 0) return null;
+            const fp = Math.max(1e-6, paramView.framePeriodMs);
+            const stride = Math.max(1, paramView.stride);
+            const startFrame = Math.floor((startSec * 1000) / fp);
+            const endFrame = Math.ceil((endSec * 1000) / fp);
+            const firstIndex = Math.max(
+                0,
+                Math.ceil((startFrame - paramView.startFrame) / stride),
+            );
+            const lastIndex = Math.min(
+                paramView.edit.length - 1,
+                Math.floor((endFrame - paramView.startFrame) / stride),
+            );
+            let sum = 0;
+            let count = 0;
+            for (let index = firstIndex; index <= lastIndex; index += 1) {
+                const value = Number(paramView.edit[index] ?? 0);
+                if (value > 0 && Number.isFinite(value)) {
+                    sum += value;
+                    count += 1;
+                }
+            }
+            return count > 0 ? sum / count : null;
+        };
+
+        const notes = analysis.pitch_notes
+            .map((note, noteIndex) => {
+                const clippedStart = Math.max(sourceStart, note.start_sec);
+                const clippedEnd = Math.min(sourceEnd, note.end_sec);
+                if (clippedEnd - clippedStart <= 0.005) return null;
+                const startSec = mapSourceToTimeline(clippedStart);
+                const endSec = mapSourceToTimeline(clippedEnd);
+                const curveMidi = curveMidiForRange(startSec, endSec);
+                const preview =
+                    noteDragPreview?.noteIndex === noteIndex
+                        ? noteDragPreview.midiNote
+                        : null;
+                return {
+                    noteIndex,
+                    startSec,
+                    endSec,
+                    midiNote: preview ?? curveMidi ?? Math.round(note.midi_note),
+                    confidence: note.confidence,
+                };
+            })
+            .filter(
+                (note): note is DetectedPitchNote & { noteIndex: number } => note !== null,
+            );
+        const timing = active
+            ? {
+                  regionStartSec: mapSourceToTimeline(active.region_start_sec),
+                  fixedEndSec: mapSourceToTimeline(
+                      active.region_start_sec + active.fixed_duration_sec,
+                  ),
+                  alignmentSec: mapSourceToTimeline(active.note_alignment_sec),
+                  regionEndSec: mapSourceToTimeline(active.region_end_sec),
+              }
+            : null;
+        return { notes, timing };
+    }, [editParam, noteDragPreview, paramView, sampleAnalysis, selectedAudioClip]);
+
     const referencePitchOverlays = useMemo((): ReferencePitchOverlay[] => {
         if (editParam !== "pitch") return [];
         return visibleReferenceRootTrackIds
@@ -1669,7 +1824,7 @@ export const PianoRollPanel: React.FC = () => {
     // 检测音高曲线更新时触发重绘
     useEffect(() => {
         invalidate();
-    }, [detectedPitchCurves, invalidate]);
+    }, [detectedPitchCurves, invalidate, sampleNoteDisplay]);
 
     useEffect(() => {
         invalidate();
@@ -1721,6 +1876,8 @@ export const PianoRollPanel: React.FC = () => {
             waveformColors,
             referencePitchOverlays,
             detectedPitchCurves,
+            detectedPitchNotes: sampleNoteDisplay.notes,
+            sampleTimingOverlay: sampleNoteDisplay.timing,
             isDark: themeMode === "dark",
             fontFamily,
             clipboardPreview: s.showClipboardPreview ? clipboardRef.current : null,
@@ -3187,6 +3344,94 @@ export const PianoRollPanel: React.FC = () => {
         return result;
     }, [s.beats, s.projectSec, secPerBeat]);
 
+    const onPianoCanvasPointerDown = useCallback(
+        (event: React.PointerEvent<HTMLCanvasElement>) => {
+            if (event.button === 0 && editParam === "pitch" && s.toolMode === "select") {
+                const canvas = event.currentTarget;
+                const rect = canvas.getBoundingClientRect();
+                const localX = event.clientX - rect.left;
+                const localY = event.clientY - rect.top;
+                const pointerSec =
+                    (scrollLeftRef.current + localX) / Math.max(1e-9, pxPerSecRef.current);
+                const hit = [...sampleNoteDisplay.notes].reverse().find((note) => {
+                    if (pointerSec < note.startSec || pointerSec > note.endSec) return false;
+                    const y0 = valueToY("pitch", note.midiNote, rect.height);
+                    const y1 = valueToY("pitch", note.midiNote + 1, rect.height);
+                    const top = Math.min(y0, y1);
+                    const rowHeight = Math.max(5, Math.abs(y1 - y0));
+                    const noteHeight = Math.max(4, rowHeight * 0.72);
+                    const noteTop = top + (rowHeight - noteHeight) / 2;
+                    return localY >= noteTop - 3 && localY <= noteTop + noteHeight + 3;
+                });
+                if (hit) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+                    const selection = {
+                        aBeat: hit.startSec / secPerBeat,
+                        bBeat: hit.endSec / secPerBeat,
+                    };
+                    selectionRef.current = selection;
+                    setSelectionUi(selection);
+                    invalidate();
+
+                    const pointerId = event.pointerId;
+                    canvas.setPointerCapture(pointerId);
+                    let targetMidi = hit.midiNote;
+                    let moved = false;
+                    const onMove = (moveEvent: globalThis.PointerEvent) => {
+                        if ((moveEvent.buttons & 1) !== 1) {
+                            void onUp();
+                            return;
+                        }
+                        const currentRect = canvas.getBoundingClientRect();
+                        const currentY = moveEvent.clientY - currentRect.top;
+                        const rawMidi = yToValue("pitch", currentY, currentRect.height) - 0.5;
+                        targetMidi = s.pitchSnapEnabled
+                            ? Math.round(rawMidi)
+                            : Math.round(rawMidi * 100) / 100;
+                        moved = moved || Math.abs(moveEvent.clientY - event.clientY) >= 2;
+                        setNoteDragPreview({
+                            noteIndex: hit.noteIndex,
+                            midiNote: targetMidi,
+                        });
+                    };
+                    const onUp = async () => {
+                        window.removeEventListener("pointermove", onMove);
+                        window.removeEventListener("pointerup", onUp);
+                        window.removeEventListener("pointercancel", onUp);
+                        if (moved) {
+                            await handleEditOp("setPitch", {
+                                value: targetMidi,
+                                edgeSmoothnessPercent: s.edgeSmoothnessPercent,
+                            });
+                        }
+                        setNoteDragPreview(null);
+                        invalidate();
+                    };
+                    window.addEventListener("pointermove", onMove);
+                    window.addEventListener("pointerup", onUp);
+                    window.addEventListener("pointercancel", onUp);
+                    return;
+                }
+            }
+            interactions.onCanvasPointerDown(event);
+        },
+        [
+            editParam,
+            handleEditOp,
+            interactions,
+            invalidate,
+            s.edgeSmoothnessPercent,
+            s.pitchSnapEnabled,
+            s.toolMode,
+            sampleNoteDisplay.notes,
+            secPerBeat,
+            valueToY,
+            yToValue,
+        ],
+    );
+
     return (
         <Flex direction="column" className="h-full w-full bg-qt-graph-bg border-t border-qt-border">
             {/* Header / Parameter Switch */}
@@ -4112,7 +4357,7 @@ export const PianoRollPanel: React.FC = () => {
                                     style={{ cursor: canvasCursor }}
                                     onPointerMove={interactions.onCanvasPointerMove}
                                     onPointerLeave={interactions.onCanvasPointerLeave}
-                                    onPointerDown={interactions.onCanvasPointerDown}
+                                    onPointerDown={onPianoCanvasPointerDown}
                                 />
                                 {s.showParamValuePopup &&
                                     paramValuePreview &&

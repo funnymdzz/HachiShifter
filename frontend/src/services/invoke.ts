@@ -139,6 +139,26 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 ...(args[3] !== undefined ? { startSec: args[3] } : {}),
             };
 
+        case "get_clip_sample_annotations":
+        case "redetect_clip_sample_annotations":
+            return { clipId: args[0] };
+
+        case "save_clip_sample_annotations":
+            return {
+                clipId: args[0],
+                annotations: args[1],
+                activeAnnotationIndex: args[2],
+            };
+
+        case "open_oto_dialog":
+            return {};
+
+        case "convert_oto_to_annotations":
+            return { otoPath: args[0] };
+
+        case "convert_oto_and_refresh_clip":
+            return { clipId: args[0], otoPath: args[1] };
+
         case "add_track":
             return {
                 name: args[0],

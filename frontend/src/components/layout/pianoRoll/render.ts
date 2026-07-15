@@ -278,6 +278,21 @@ export interface DetectedPitchCurve {
     framePeriodMs: number;
 }
 
+/** Automatically detected note object in absolute timeline seconds. */
+export interface DetectedPitchNote {
+    startSec: number;
+    endSec: number;
+    midiNote: number;
+    confidence: number;
+}
+
+export interface SampleTimingOverlay {
+    regionStartSec: number;
+    fixedEndSec: number;
+    alignmentSec: number;
+    regionEndSec: number;
+}
+
 export interface ReferencePitchOverlay {
     rootTrackId: string;
     strokeColor: string;
@@ -311,6 +326,9 @@ export function drawPianoRoll(args: {
     referencePitchOverlays?: ReferencePitchOverlay[];
     /** 检测音高曲线列表，在 pitch 模式下渲染为参考线 */
     detectedPitchCurves?: DetectedPitchCurve[];
+    /** Melodyne-style note blocks generated from the selected audio sample. */
+    detectedPitchNotes?: DetectedPitchNote[];
+    sampleTimingOverlay?: SampleTimingOverlay | null;
     /** 是否为深色主题（默认 true） */
     isDark?: boolean;
     /** 剪贴板预览数据（选区内渲染半透明预览曲线） */
@@ -356,6 +374,8 @@ export function drawPianoRoll(args: {
         },
         referencePitchOverlays,
         detectedPitchCurves,
+        detectedPitchNotes,
+        sampleTimingOverlay,
         isDark = true,
         clipboardPreview,
         paramMorphOverlay,
@@ -834,6 +854,66 @@ export function drawPianoRoll(args: {
             releaseGainBuffer(withGains);
         }
         waveformMipmapStore.releaseInterleaved(result.interleaved);
+    }
+
+    // Sample timing strip: fixed consonant (amber), stretchable tail (cyan),
+    // and the oto-style preutter/alignment point (pink).
+    if (editParam === "pitch" && sampleTimingOverlay) {
+        const xStart = sampleTimingOverlay.regionStartSec * pxPerSec - scrollLeft;
+        const xFixed = sampleTimingOverlay.fixedEndSec * pxPerSec - scrollLeft;
+        const xAlign = sampleTimingOverlay.alignmentSec * pxPerSec - scrollLeft;
+        const xEnd = sampleTimingOverlay.regionEndSec * pxPerSec - scrollLeft;
+        ctx.save();
+        ctx.fillStyle = "rgba(251, 191, 36, 0.30)";
+        ctx.fillRect(xStart, 0, Math.max(0, xFixed - xStart), 6);
+        ctx.fillStyle = "rgba(34, 211, 238, 0.28)";
+        ctx.fillRect(xFixed, 0, Math.max(0, xEnd - xFixed), 6);
+        ctx.strokeStyle = "rgba(244, 114, 182, 0.90)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(xAlign + 0.5, 0);
+        ctx.lineTo(xAlign + 0.5, h);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // Melodyne-style note objects.  They remain behind the editable pitch
+    // curve so the curve is still the authoritative fine-pitch representation.
+    if (editParam === "pitch" && detectedPitchNotes && detectedPitchNotes.length > 0) {
+        const selectionStartSec = selection
+            ? Math.min(selection.aBeat, selection.bBeat) * secPerBeat
+            : Number.NaN;
+        const selectionEndSec = selection
+            ? Math.max(selection.aBeat, selection.bBeat) * secPerBeat
+            : Number.NaN;
+        for (const note of detectedPitchNotes) {
+            const x0 = note.startSec * pxPerSec - scrollLeft;
+            const x1 = note.endSec * pxPerSec - scrollLeft;
+            if (x1 < 0 || x0 > w) continue;
+            const y0 = valueToY("pitch", note.midiNote, h);
+            const y1 = valueToY("pitch", note.midiNote + 1, h);
+            const rowTop = Math.min(y0, y1);
+            const rowHeight = Math.max(5, Math.abs(y1 - y0));
+            const noteHeight = Math.max(4, rowHeight * 0.72);
+            const top = rowTop + (rowHeight - noteHeight) / 2;
+            const selectedNote =
+                selection &&
+                Math.abs(selectionStartSec - note.startSec) < 0.002 &&
+                Math.abs(selectionEndSec - note.endSec) < 0.002;
+            ctx.save();
+            ctx.fillStyle = selectedNote
+                ? "rgba(56, 189, 248, 0.58)"
+                : "rgba(45, 212, 191, 0.28)";
+            ctx.strokeStyle = selectedNote
+                ? "rgba(186, 230, 253, 0.95)"
+                : "rgba(94, 234, 212, 0.62)";
+            ctx.lineWidth = selectedNote ? 1.6 : 1;
+            ctx.beginPath();
+            ctx.roundRect(x0 + 0.5, top, Math.max(2, x1 - x0 - 1), noteHeight, 3);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
     }
 
     // Selection (time band)

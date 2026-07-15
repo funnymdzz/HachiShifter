@@ -530,21 +530,43 @@ pub fn render_mixdown_interleaved(
         // 外部 SoundTouch 拉伸的执行条件：
         //   !processor_handles_stretch → 处理器不内部拉伸（World/HiFiGAN chain 内有 TimeStretchStage，vslib 原生拉伸）
         //   !opts.apply_pitch_edit    → pitch edit 链不会运行，内部拉伸无法触发，需回退到外部拉伸
+        let annotation_timing = crate::sample_annotations::timing_for_clip(clip);
+        let mut annotation_stretch_applied = false;
         if (playback_rate - 1.0).abs() > 1e-6
-            && (!processor_handles_stretch || !opts.apply_pitch_edit)
+            && (annotation_timing.is_some() || !processor_handles_stretch || !opts.apply_pitch_edit)
         {
             let seg_frames_in = segment.len() / 2;
             let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
-            segment = time_stretch_interleaved(&segment, 2, out_rate, target_frames, opts.stretch);
+            segment = if let Some(timing) = annotation_timing {
+                annotation_stretch_applied = true;
+                let fixed_frames =
+                    (timing.fixed_prefix_sec * out_rate as f64).round().max(0.0) as usize;
+                crate::time_stretch::time_stretch_with_fixed_prefix(
+                    &segment,
+                    2,
+                    out_rate,
+                    target_frames,
+                    fixed_frames,
+                    opts.stretch,
+                )
+            } else {
+                time_stretch_interleaved(&segment, 2, out_rate, target_frames, opts.stretch)
+            };
         }
 
         // Apply pitch edit per-clip (v2) if enabled.
         if opts.apply_pitch_edit {
             let seg_start_sec = clip_start_sec + pre_silence_sec;
             let mut seg = segment;
+            let mut processor_clip = clip.clone();
+            if annotation_stretch_applied {
+                // The UTAU-style piecewise mapping has already produced the
+                // requested timeline length; an internal stretcher must not run again.
+                processor_clip.playback_rate = 1.0;
+            }
             let applied = crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
                 timeline,
-                clip,
+                &processor_clip,
                 clip_start_sec,
                 seg_start_sec,
                 out_rate,

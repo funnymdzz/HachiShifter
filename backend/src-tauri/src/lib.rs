@@ -83,6 +83,7 @@ mod reaper_parser;
 mod sstretch;
 #[path = "audio/soundtouch.rs"]
 mod soundtouch;
+mod sample_annotations;
 mod state;
 #[path = "vocoder/streaming_world.rs"]
 mod streaming_world;
@@ -297,6 +298,12 @@ pub fn run() {
             commands::set_project_timeline_settings,
             commands::open_audio_dialog,
             commands::open_audio_dialog_multi,
+            commands::open_oto_dialog,
+            commands::get_clip_sample_annotations,
+            commands::save_clip_sample_annotations,
+            commands::redetect_clip_sample_annotations,
+            commands::convert_oto_to_annotations,
+            commands::convert_oto_and_refresh_clip,
             commands::pick_output_path,
             commands::pick_directory,
             commands::open_midi_dialog,

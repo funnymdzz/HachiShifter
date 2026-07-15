@@ -52,6 +52,7 @@ import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { SCALE_NOTES } from "../../utils/musicalScales";
 import { QuickClipExportDialog } from "./QuickClipExportDialog";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
+import { SampleAnnotationDialog } from "./SampleAnnotationDialog";
 
 import {
     BackgroundGrid,
@@ -235,6 +236,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
         clipId: string | null;
         midiPath: string | null;
     }>({ open: false, clipId: null, midiPath: null });
+    const [sampleAnnotationDialog, setSampleAnnotationDialog] = React.useState<{
+        open: boolean;
+        clipId: string | null;
+    }>({ open: false, clipId: null });
 
     // ── 1. State / refs / viewport / scroll / 坐标转换 ──────
     const state = useTimelineState();
@@ -1748,6 +1753,10 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                                       setContextMenu(null);
                                       clipActions.setRenamingClipId(clipId);
                                   }}
+                                  onEditSampleTiming={(clipId) => {
+                                      setContextMenu(null);
+                                      setSampleAnnotationDialog({ open: true, clipId });
+                                  }}
                                   onCopy={(ids) => {
                                       void (async () => {
                                           const s = sessionRef.current;
@@ -1927,6 +1936,16 @@ export const TimelinePanel: React.FC<TimelinePanelProps> = ({
                     clipIds={quickExportDialog.clipIds}
                     onOpenChange={(open) =>
                         setQuickExportDialog((prev) => (open ? prev : { open: false, clipIds: [] }))
+                    }
+                />
+
+                <SampleAnnotationDialog
+                    open={sampleAnnotationDialog.open}
+                    clipId={sampleAnnotationDialog.clipId}
+                    onOpenChange={(open) =>
+                        setSampleAnnotationDialog((current) =>
+                            open ? current : { open: false, clipId: null },
+                        )
                     }
                 />
 

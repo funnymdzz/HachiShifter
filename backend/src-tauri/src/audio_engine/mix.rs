@@ -95,12 +95,23 @@ fn sample_clip_pcm(clip: &EngineClip, local: u64, local_adj: f64) -> Option<(f32
     }
 
     // 无需合成：直接回退到源 PCM（支持 playback_rate 采样）
-    let src_frame_f = local_adj * clip.playback_rate;
-    let src_frame = src_frame_f.round() as u64;
     let range = clip.src_end_frame.saturating_sub(clip.src_start_frame);
     if range == 0 {
         return None;
     }
+    let src_frame_f = if let Some(fixed_prefix) = clip.fixed_prefix_frames {
+        let fixed = fixed_prefix.min(range.saturating_sub(1)) as f64;
+        if local_adj <= fixed {
+            local_adj
+        } else {
+            let timeline_tail = (clip.length_frames as f64 - fixed).max(1.0);
+            let source_tail = (range as f64 - fixed).max(1.0);
+            fixed + (local_adj - fixed) * (source_tail / timeline_tail)
+        }
+    } else {
+        local_adj * clip.playback_rate
+    };
+    let src_frame = src_frame_f.round() as u64;
     let src_abs = if clip.reversed {
         if src_frame >= range {
             clip.src_end_frame

@@ -4,6 +4,53 @@ import type { LinkedParamCurves } from "../../features/session/sessionTypes";
 import { invoke } from "../invoke";
 import type { ClipTemplate } from "../../features/session/sessionTypes";
 
+export interface SampleRegionAnnotation {
+    name: string;
+    region_start_sec: number;
+    region_end_sec: number;
+    note_alignment_sec: number;
+    fixed_duration_sec: number;
+}
+
+export interface SamplePitchNote {
+    start_sec: number;
+    end_sec: number;
+    midi_note: number;
+    confidence: number;
+}
+
+export type ClipSampleAnnotationsResult =
+    | {
+          ok: true;
+          clip_id: string;
+          audio_path: string;
+          sidecar_path: string;
+          annotations: SampleRegionAnnotation[];
+          pitch_notes: SamplePitchNote[];
+          active_annotation_index: number;
+      }
+    | { ok: false; error: string };
+
+export type SaveClipSampleAnnotationsResult =
+    | {
+          ok: true;
+          clip_id: string;
+          sidecar_path: string;
+          annotations: SampleRegionAnnotation[];
+          active_annotation_index: number;
+      }
+    | { ok: false; error: string };
+
+export interface OtoConversionResult {
+    oto_files: number;
+    converted_samples: Array<{
+        audio_path: string;
+        sidecar_path: string;
+        annotation_count: number;
+    }>;
+    warnings: string[];
+}
+
 export const timelineApi = {
     // Undo/Redo (backend-authoritative)
     undoTimeline: () => invoke<TimelineResult>("undo_timeline"),
@@ -36,6 +83,43 @@ export const timelineApi = {
         trackId?: string | null,
         startSec?: number,
     ) => invoke<TimelineResult>("import_audio_bytes", fileName, base64Data, trackId, startSec),
+
+    getClipSampleAnnotations: (clipId: string) =>
+        invoke<ClipSampleAnnotationsResult>("get_clip_sample_annotations", clipId),
+
+    saveClipSampleAnnotations: (
+        clipId: string,
+        annotations: SampleRegionAnnotation[],
+        activeAnnotationIndex: number,
+    ) =>
+        invoke<SaveClipSampleAnnotationsResult>(
+            "save_clip_sample_annotations",
+            clipId,
+            annotations,
+            activeAnnotationIndex,
+        ),
+
+    redetectClipSampleAnnotations: (clipId: string) =>
+        invoke<ClipSampleAnnotationsResult>("redetect_clip_sample_annotations", clipId),
+
+    openOtoDialog: () =>
+        invoke<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>(
+            "open_oto_dialog",
+        ),
+
+    convertOtoToAnnotations: (otoPath: string) =>
+        invoke<{ ok: boolean; result?: OtoConversionResult; error?: string }>(
+            "convert_oto_to_annotations",
+            otoPath,
+        ),
+
+    convertOtoAndRefreshClip: (clipId: string, otoPath: string) =>
+        invoke<{
+            ok: boolean;
+            conversion?: OtoConversionResult;
+            clip?: ClipSampleAnnotationsResult;
+            error?: string;
+        }>("convert_oto_and_refresh_clip", clipId, otoPath),
 
     // Tracks
     addTrack: (name?: string) => invoke<TimelineResult>("add_track", name),

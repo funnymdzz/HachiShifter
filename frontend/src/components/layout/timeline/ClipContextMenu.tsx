@@ -93,6 +93,7 @@ export const ClipContextMenu: React.FC<{
     onDelete: (ids: string[]) => void;
     onMute: (ids: string[], muted: boolean) => void;
     onRename: (clipId: string) => void;
+    onEditSampleTiming?: (clipId: string) => void;
     onCopy: (ids: string[]) => void;
     onCut: (ids: string[]) => void;
     onReplace: (ids: string[]) => void;
@@ -120,6 +121,7 @@ export const ClipContextMenu: React.FC<{
     onDelete,
     onMute,
     onRename,
+    onEditSampleTiming,
     onCopy,
     onCut,
     onReplace,
@@ -240,13 +242,24 @@ export const ClipContextMenu: React.FC<{
                 }}
             />
             {isSingle && (
-                <MenuItem
-                    label={t("ctx_rename")}
-                    onClick={() => {
-                        onRename(clip.id);
-                        close();
-                    }}
-                />
+                <>
+                    <MenuItem
+                        label={t("ctx_rename")}
+                        onClick={() => {
+                            onRename(clip.id);
+                            close();
+                        }}
+                    />
+                    {!isPitch(clip) && clip.sourcePath && onEditSampleTiming && (
+                        <MenuItem
+                            label={t("ctx_edit_sample_timing")}
+                            onClick={() => {
+                                onEditSampleTiming(clip.id);
+                                close();
+                            }}
+                        />
+                    )}
+                </>
             )}
             <MenuItem
                 label={isMulti ? t("ctx_copy_all") : t("ctx_copy")}

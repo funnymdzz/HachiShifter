@@ -957,35 +957,53 @@ fn render_single_clip(
     // 5. 时间拉伸（playback_rate != 1）
     // 若合成处理器声明自己处理时间拉伸（handles_time_stretch = true），
     // 则跳过此处的时间拉伸，由处理器在 pitch edit 阶段通过 ClipProcessContext.playback_rate 内部完成。
-        let processor_handles_stretch = {
-            let clip_root = timeline.resolve_root_track_id(&clip.track_id);
-            clip_root
-                .and_then(|root| {
-                    let t = timeline.tracks.iter().find(|t| t.id == root)?;
-                    let kind =
-                        crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
-                    let has_adjustment = timeline
-                        .params_by_root_track
-                        .get(&root)
-                        .map(|e| e.has_pitch_adjustment_active)
-                        .unwrap_or(false);
-                    Some(crate::renderer::processor_handles_time_stretch(
-                        kind,
-                        t.compose_enabled || has_adjustment,
-                    ))
-                })
-                .unwrap_or(false)
-        };
-    if (playback_rate - 1.0).abs() > 1e-6 && !processor_handles_stretch {
+    let processor_handles_stretch = {
+        let clip_root = timeline.resolve_root_track_id(&clip.track_id);
+        clip_root
+            .and_then(|root| {
+                let t = timeline.tracks.iter().find(|t| t.id == root)?;
+                let kind = crate::state::SynthPipelineKind::from_track_algo(&t.pitch_analysis_algo);
+                let has_adjustment = timeline
+                    .params_by_root_track
+                    .get(&root)
+                    .map(|e| e.has_pitch_adjustment_active)
+                    .unwrap_or(false);
+                Some(crate::renderer::processor_handles_time_stretch(
+                    kind,
+                    t.compose_enabled || has_adjustment,
+                ))
+            })
+            .unwrap_or(false)
+    };
+    let annotation_timing = crate::sample_annotations::timing_for_clip(clip);
+    let mut annotation_stretch_applied = false;
+    if (playback_rate - 1.0).abs() > 1e-6
+        && (annotation_timing.is_some() || !processor_handles_stretch)
+    {
         let seg_frames_in = segment.len() / 2;
         let target_frames = ((seg_frames_in as f64) / playback_rate).round().max(2.0) as usize;
-        segment = crate::time_stretch::time_stretch_interleaved(
-            &segment,
-            2,
-            out_rate,
-            target_frames,
-            crate::time_stretch::resolved_external_stretch_algorithm(),
-        );
+        let algorithm = crate::time_stretch::resolved_external_stretch_algorithm();
+        segment = if let Some(timing) = annotation_timing {
+            annotation_stretch_applied = true;
+            let fixed_frames =
+                (timing.fixed_prefix_sec * out_rate as f64).round().max(0.0) as usize;
+            crate::time_stretch::time_stretch_with_fixed_prefix(
+                &segment,
+                2,
+                out_rate,
+                target_frames,
+                fixed_frames,
+                algorithm,
+            )
+        } else {
+            crate::time_stretch::time_stretch_interleaved(
+                &segment,
+                2,
+                out_rate,
+                target_frames,
+                algorithm,
+            )
+        };
     }
 
     let clip_start_sec = clip.start_sec.max(0.0);
@@ -1015,9 +1033,13 @@ fn render_single_clip(
 
     let render_variant = |clip_variant: &crate::state::Clip| {
         let mut rendered = segment.clone();
+        let mut processor_clip = clip_variant.clone();
+        if annotation_stretch_applied {
+            processor_clip.playback_rate = 1.0;
+        }
         match crate::pitch_editing::maybe_apply_pitch_edit_to_clip_segment(
             timeline,
-            clip_variant,
+            &processor_clip,
             clip_start_sec,
             seg_start_sec,
             out_rate,

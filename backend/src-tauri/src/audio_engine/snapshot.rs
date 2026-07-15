@@ -157,6 +157,11 @@ pub(crate) fn schedule_stretch_jobs(
         } else {
             1.0
         };
+        if crate::sample_annotations::timing_for_clip(clip).is_some() {
+            // Annotated clips use piecewise source mapping in the realtime
+            // mixer and must not enter the uniform-stretch cache.
+            continue;
+        }
         if processor_handles_stretch || (playback_rate - 1.0).abs() <= 1e-6 {
             continue;
         }
@@ -338,6 +343,9 @@ pub(crate) fn build_snapshot(
         let formant_params = clip.formant_morph.as_ref().filter(|params| params.enabled);
         let mut src_render = src;
         let mut playback_rate_render = playback_rate;
+        let annotation_timing = crate::sample_annotations::timing_for_clip(clip);
+        let mut fixed_prefix_frames_render = annotation_timing
+            .map(|timing| (timing.fixed_prefix_sec * out_rate as f64).round().max(0.0) as u64);
         if let Some(params) = formant_params {
             let slice_start = (src_start as usize).saturating_mul(2);
             let slice_end = (src_end as usize).saturating_mul(2).min(src_render.pcm.len());
@@ -379,15 +387,27 @@ pub(crate) fn build_snapshot(
                     src_end = src_render.frames as u64;
                     repeat = false;
                     if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
-                        let target_frames =
-                            ((src_render.frames as f64) / playback_rate).round().max(2.0) as usize;
-                        let stretched = crate::time_stretch::time_stretch_interleaved(
-                            src_render.pcm.as_slice(),
-                            2,
-                            out_rate,
-                            target_frames,
-                            stretch_algorithm.to_runtime(),
-                        );
+                        let target_frames = ((src_render.frames as f64) / playback_rate)
+                            .round()
+                            .max(2.0) as usize;
+                        let stretched = if let Some(fixed_frames) = fixed_prefix_frames_render {
+                            crate::time_stretch::time_stretch_with_fixed_prefix(
+                                src_render.pcm.as_slice(),
+                                2,
+                                out_rate,
+                                target_frames,
+                                fixed_frames as usize,
+                                stretch_algorithm.to_runtime(),
+                            )
+                        } else {
+                            crate::time_stretch::time_stretch_interleaved(
+                                src_render.pcm.as_slice(),
+                                2,
+                                out_rate,
+                                target_frames,
+                                stretch_algorithm.to_runtime(),
+                            )
+                        };
                         src_render = ResampledStereo {
                             sample_rate: out_rate,
                             frames: target_frames,
@@ -395,6 +415,7 @@ pub(crate) fn build_snapshot(
                         };
                         src_end = src_render.frames as u64;
                         playback_rate_render = 1.0;
+                        fixed_prefix_frames_render = None;
                     }
                 }
                 Err(error) => {
@@ -404,7 +425,10 @@ pub(crate) fn build_snapshot(
                     ));
                 }
             }
-        } else if !processor_handles_stretch && (playback_rate - 1.0).abs() > 1e-6 {
+        } else if annotation_timing.is_none()
+            && !processor_handles_stretch
+            && (playback_rate - 1.0).abs() > 1e-6
+        {
             let key = make_stretch_key(
                 path,
                 out_rate,
@@ -419,6 +443,7 @@ pub(crate) fn build_snapshot(
                     src_start = 0;
                     src_end = src_render.frames as u64;
                     playback_rate_render = 1.0;
+                    fixed_prefix_frames_render = None;
                     repeat = false;
                 }
             }
@@ -719,6 +744,7 @@ pub(crate) fn build_snapshot(
             src_end_frame: src_end,
             reversed: formant_params.is_some().then_some(false).unwrap_or(clip.reversed),
             playback_rate: playback_rate_render,
+            fixed_prefix_frames: fixed_prefix_frames_render,
             local_src_offset_frames,
             repeat,
             fade_in_frames,
@@ -834,6 +860,7 @@ pub(crate) fn build_snapshot_for_file(
             src_end_frame,
             reversed: false,
             playback_rate: 1.0,
+            fixed_prefix_frames: None,
             local_src_offset_frames: 0,
             repeat: false,
             fade_in_frames: 0,

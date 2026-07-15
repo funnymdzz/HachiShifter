@@ -24,6 +24,7 @@ pub(crate) struct StretchJob {
     pub(crate) source_start_sec: f64,
     pub(crate) source_end_sec: f64,
     pub(crate) playback_rate: f64,
+
     /// clip 名称，用于向前端推送拉伸进度信息
     pub(crate) clip_name: String,
     /// Tauri app handle，用于 emit 事件
@@ -76,6 +77,10 @@ pub(crate) struct EngineClip {
     pub(crate) src_end_frame: u64,
     pub(crate) reversed: bool,
     pub(crate) playback_rate: f64,
+
+    /// Source prefix (relative to `src_start_frame`) that must be sampled at
+    /// 1:1 speed. The remaining source range absorbs the clip time stretch.
+    pub(crate) fixed_prefix_frames: Option<u64>,
 
     // Local (timeline) frame offset applied before sampling the source.
     // Negative values mean leading silence (i.e. slip-edit past the source start).

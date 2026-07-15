@@ -39,6 +39,8 @@ mod project;
 mod reaper;
 #[path = "commands/reaper_clipboard.rs"]
 mod reaper_clipboard;
+#[path = "commands/sample_annotations.rs"]
+mod sample_annotations;
 #[path = "commands/synth.rs"]
 mod synth;
 #[path = "commands/timeline.rs"]
@@ -238,6 +240,56 @@ pub fn open_audio_dialog() -> serde_json::Value {
 #[tauri::command(rename_all = "camelCase")]
 pub fn open_audio_dialog_multi() -> serde_json::Value {
     dialogs::open_audio_dialog_multi()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_oto_dialog() -> serde_json::Value {
+    sample_annotations::open_oto_dialog()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_clip_sample_annotations(
+    state: State<'_, AppState>,
+    clip_id: String,
+) -> serde_json::Value {
+    sample_annotations::get_clip_sample_annotations(state, clip_id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn save_clip_sample_annotations(
+    state: State<'_, AppState>,
+    clip_id: String,
+    annotations: Vec<crate::sample_annotations::SampleRegionAnnotation>,
+    active_annotation_index: Option<usize>,
+) -> serde_json::Value {
+    sample_annotations::save_clip_sample_annotations(
+        state,
+        clip_id,
+        annotations,
+        active_annotation_index,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn redetect_clip_sample_annotations(
+    state: State<'_, AppState>,
+    clip_id: String,
+) -> serde_json::Value {
+    sample_annotations::redetect_clip_sample_annotations(state, clip_id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn convert_oto_to_annotations(oto_path: String) -> serde_json::Value {
+    sample_annotations::convert_oto_to_annotations(oto_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn convert_oto_and_refresh_clip(
+    state: State<'_, AppState>,
+    clip_id: String,
+    oto_path: String,
+) -> serde_json::Value {
+    sample_annotations::convert_oto_and_refresh_clip(state, clip_id, oto_path)
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -1113,4 +1165,3 @@ pub fn save_ui_settings(
 ) -> serde_json::Value {
     ui_settings::save_ui_settings(state, settings)
 }
-
