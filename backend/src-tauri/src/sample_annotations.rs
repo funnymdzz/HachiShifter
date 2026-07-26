@@ -232,7 +232,21 @@ pub fn write_sidecar(
 }
 
 pub fn load_or_detect(audio_path: &Path) -> Result<SampleAnalysis, String> {
-    let detected = analyze_audio(audio_path)?;
+    load_or_detect_with_game_mode(audio_path, false)
+}
+
+/// Analyze a sample with GAME large by default, or GAME small when the editor
+/// explicitly enables performance mode. Performance-mode results are kept out
+/// of the default cache so switching modes never reuses the wrong model.
+pub fn load_or_detect_with_game_mode(
+    audio_path: &Path,
+    performance_mode: bool,
+) -> Result<SampleAnalysis, String> {
+    let detected = if performance_mode {
+        analyze_audio_uncached(audio_path, true)?
+    } else {
+        analyze_audio(audio_path)?
+    };
     let annotations = if sidecar_path(audio_path).is_file() {
         match read_sidecar(audio_path) {
             Ok(rows) if !rows.is_empty() => rows,
@@ -360,7 +374,10 @@ fn detect_regions_and_annotations(
     (regions, annotations)
 }
 
-fn analyze_audio_uncached(audio_path: &Path) -> Result<SampleAnalysis, String> {
+fn analyze_audio_uncached(
+    audio_path: &Path,
+    game_performance_mode: bool,
+) -> Result<SampleAnalysis, String> {
     let (sample_rate, channels, interleaved) =
         crate::audio_utils::decode_audio_f32_interleaved(audio_path)?;
     if sample_rate == 0 || channels == 0 || interleaved.is_empty() {
@@ -379,7 +396,10 @@ fn analyze_audio_uncached(audio_path: &Path) -> Result<SampleAnalysis, String> {
         match crate::game_detector::detect_notes(
             &mono,
             sample_rate,
-            crate::game_detector::GameOptions::default(),
+            crate::game_detector::GameOptions {
+                performance_mode: game_performance_mode,
+                ..crate::game_detector::GameOptions::default()
+            },
         ) {
             Ok(notes) => {
                 let notes: Vec<SamplePitchNote> = notes
@@ -427,13 +447,13 @@ pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
     if let Some(analysis) = cached_analysis(audio_path) {
         return Ok(analysis);
     }
-    let analysis = analyze_audio_uncached(audio_path)?;
+    let analysis = analyze_audio_uncached(audio_path, false)?;
     cache_analysis(audio_path, &analysis);
     Ok(analysis)
 }
 
 pub fn reanalyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
-    let analysis = analyze_audio_uncached(audio_path)?;
+    let analysis = analyze_audio_uncached(audio_path, false)?;
     cache_analysis(audio_path, &analysis);
     Ok(analysis)
 }

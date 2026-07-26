@@ -190,6 +190,6 @@ backend/src-tauri/third_party/ort-bundle/
 # that only exist after a GPU dependency download.
 backend/src-tauri/tauri.windows.conf.json
 
-# GAME compact ONNX pack is fetched by GitHub Actions and bundled from the
+# GAME large/default and small/performance ONNX packs are fetched in Actions
 # runner workspace. Keeping it out of Git avoids another large model checkout.
 backend/src-tauri/resources/models/game/

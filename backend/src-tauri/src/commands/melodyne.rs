@@ -28,7 +28,10 @@ pub(super) fn apply_melodyne_correction(
     let Some(source) = clip.source_path.as_deref() else {
         return serde_json::json!({"ok": false, "error": "selected clip has no audio source"});
     };
-    let analysis = match crate::sample_annotations::load_or_detect(Path::new(source)) {
+    let analysis = match crate::sample_annotations::load_or_detect_with_game_mode(
+        Path::new(source),
+        settings.performance_mode,
+    ) {
         Ok(analysis) => analysis,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };

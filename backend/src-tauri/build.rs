@@ -5,7 +5,8 @@ fn main() {
     clean_stale_ort_dlls();
 
     // GAME stays out of Git to keep the checkout small. CI/release builds
-    // materialize the compact ONNX pack directly in the runner workspace.
+    // materialize the large (default) and small (performance) ONNX packs in
+    // the runner workspace. Neither model pack is stored in Git.
     prepare_game_models();
 
     build_frontend();
@@ -57,11 +58,31 @@ fn prepare_game_models() {
         "dur2bd.onnx",
         "config.json",
     ];
-    const URL: &str =
-        "https://github.com/openvpi/GAME/releases/download/v1.0.2/GAME-1.0-small-onnx.zip";
+    const PACKS: &[(&str, &str, &str)] = &[
+        (
+            "large",
+            "GAME-1.0.3-large-onnx.zip",
+            "https://github.com/openvpi/GAME/releases/download/v1.0.3/GAME-1.0.3-large-onnx.zip",
+        ),
+        (
+            "small",
+            "GAME-1.0.3-small-onnx.zip",
+            "https://github.com/openvpi/GAME/releases/download/v1.0.3/GAME-1.0.3-small-onnx.zip",
+        ),
+    ];
 
-    let destination = PathBuf::from("resources").join("models").join("game");
-    if REQUIRED.iter().all(|name| destination.join(name).is_file()) {
+    let model_root = PathBuf::from("resources").join("models").join("game");
+    let destination_for = |variant: &str| {
+        if variant == "large" {
+            model_root.clone()
+        } else {
+            model_root.join(variant)
+        }
+    };
+    if PACKS.iter().all(|(variant, _, _)| {
+        let destination = destination_for(variant);
+        REQUIRED.iter().all(|name| destination.join(name).is_file())
+    }) {
         return;
     }
     if std::env::var("HACHISHIFTER_SKIP_GAME_MODEL_DOWNLOAD")
@@ -74,44 +95,15 @@ fn prepare_game_models() {
         );
     }
 
-    println!("cargo:warning=[GAME] downloading compact ONNX model pack");
-    let scratch = std::env::var_os("OUT_DIR")
+    let scratch_root = std::env::var_os("OUT_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join("hachishifter-game-models");
-    let archive = scratch.join("GAME-1.0-small-onnx.zip");
-    let extracted = scratch.join("extract");
-    let _ = std::fs::remove_dir_all(&scratch);
-    std::fs::create_dir_all(&extracted)
-        .unwrap_or_else(|error| panic!("create GAME extraction directory failed: {error}"));
-    std::fs::create_dir_all(&destination)
-        .unwrap_or_else(|error| panic!("create GAME model directory failed: {error}"));
-
     let curl = if cfg!(target_os = "windows") {
         "curl.exe"
     } else {
         "curl"
     };
-    let download = Command::new(curl)
-        .args(["--fail", "--location", "--retry", "5", "--output"])
-        .arg(&archive)
-        .arg(URL)
-        .status()
-        .unwrap_or_else(|error| panic!("start GAME model download failed: {error}"));
-    if !download.success() {
-        panic!("GAME model download failed with status {download}");
-    }
-
-    let extract = Command::new("tar")
-        .arg("-xf")
-        .arg(&archive)
-        .arg("-C")
-        .arg(&extracted)
-        .status()
-        .unwrap_or_else(|error| panic!("start GAME model extraction failed: {error}"));
-    if !extract.success() {
-        panic!("GAME model extraction failed with status {extract}");
-    }
 
     fn locate(root: &Path, file_name: &str) -> Option<PathBuf> {
         for entry in std::fs::read_dir(root).ok()? {
@@ -128,17 +120,55 @@ fn prepare_game_models() {
         None
     }
 
-    for name in REQUIRED {
-        let source = locate(&extracted, name)
-            .unwrap_or_else(|| panic!("GAME archive is missing required model {name}"));
-        std::fs::copy(&source, destination.join(name))
-            .unwrap_or_else(|error| panic!("copy GAME model {name} failed: {error}"));
+    for &(variant, archive_name, url) in PACKS {
+        let destination = destination_for(variant);
+        if REQUIRED.iter().all(|name| destination.join(name).is_file()) {
+            continue;
+        }
+        println!("cargo:warning=[GAME] downloading {variant} ONNX model pack");
+        let scratch = scratch_root.join(variant);
+        let archive = scratch.join(archive_name);
+        let extracted = scratch.join("extract");
+        let _ = std::fs::remove_dir_all(&scratch);
+        std::fs::create_dir_all(&extracted)
+            .unwrap_or_else(|error| panic!("create GAME extraction directory failed: {error}"));
+        std::fs::create_dir_all(&destination)
+            .unwrap_or_else(|error| panic!("create GAME model directory failed: {error}"));
+
+        let download = Command::new(curl)
+            .args(["--fail", "--location", "--retry", "5", "--output"])
+            .arg(&archive)
+            .arg(url)
+            .status()
+            .unwrap_or_else(|error| panic!("start GAME {variant} download failed: {error}"));
+        if !download.success() {
+            panic!("GAME {variant} model download failed with status {download}");
+        }
+
+        let extract = Command::new("tar")
+            .arg("-xf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(&extracted)
+            .status()
+            .unwrap_or_else(|error| panic!("start GAME {variant} extraction failed: {error}"));
+        if !extract.success() {
+            panic!("GAME {variant} model extraction failed with status {extract}");
+        }
+
+        for name in REQUIRED {
+            let source = locate(&extracted, name)
+                .unwrap_or_else(|| panic!("GAME {variant} archive is missing {name}"));
+            std::fs::copy(&source, destination.join(name))
+                .unwrap_or_else(|error| panic!("copy GAME {variant} model {name} failed: {error}"));
+        }
+        let _ = std::fs::remove_dir_all(&scratch);
+        println!(
+            "cargo:warning=[GAME] {variant} ONNX models ready at {}",
+            destination.display()
+        );
     }
-    let _ = std::fs::remove_dir_all(&scratch);
-    println!(
-        "cargo:warning=[GAME] compact ONNX models ready at {}",
-        destination.display()
-    );
+    let _ = std::fs::remove_dir_all(&scratch_root);
 }
 
 /// 在编译时自动构建前端静态资源。

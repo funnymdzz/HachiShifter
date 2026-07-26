@@ -18,6 +18,8 @@ pub struct MelodyneCorrectionSettings {
     pub modulation_strength: f32,
     pub transition_ms: f32,
     #[serde(default)]
+    pub performance_mode: bool,
+    #[serde(default)]
     pub reset: bool,
     pub selection_start_sec: Option<f64>,
     pub selection_end_sec: Option<f64>,

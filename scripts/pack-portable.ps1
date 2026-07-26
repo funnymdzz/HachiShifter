@@ -166,6 +166,12 @@ $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\game\bd2dur.onnx";                Dst = "models\game\bd2dur.onnx" }
     @{ Src = Join-Path $TauriDir "resources\models\game\dur2bd.onnx";                Dst = "models\game\dur2bd.onnx" }
     @{ Src = Join-Path $TauriDir "resources\models\game\config.json";                Dst = "models\game\config.json" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\encoder.onnx";         Dst = "models\game\small\encoder.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\segmenter.onnx";       Dst = "models\game\small\segmenter.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\estimator.onnx";       Dst = "models\game\small\estimator.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\bd2dur.onnx";          Dst = "models\game\small\bd2dur.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\dur2bd.onnx";          Dst = "models\game\small\dur2bd.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\small\config.json";          Dst = "models\game\small\config.json" }
 )
 
 if ($ArchShort -eq "x64") {

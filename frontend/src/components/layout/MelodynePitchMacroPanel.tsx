@@ -8,6 +8,7 @@ export interface MelodyneMacroValues {
     driftStrength: number;
     modulationStrength: number;
     transitionMs: number;
+    performanceMode: boolean;
 }
 
 const initialValues: MelodyneMacroValues = {
@@ -15,6 +16,7 @@ const initialValues: MelodyneMacroValues = {
     driftStrength: 0.5,
     modulationStrength: 0.2,
     transitionMs: 80,
+    performanceMode: false,
 };
 
 const MacroSlider: React.FC<{
@@ -57,7 +59,10 @@ export const MelodynePitchMacroPanel: React.FC<{
     const [busy, setBusy] = React.useState(false);
     const [status, setStatus] = React.useState("");
 
-    const update = (key: keyof MelodyneMacroValues, value: number) => {
+    const update = <K extends keyof MelodyneMacroValues,>(
+        key: K,
+        value: MelodyneMacroValues[K],
+    ) => {
         setValues((current) => ({ ...current, [key]: value }));
     };
 
@@ -132,6 +137,39 @@ export const MelodynePitchMacroPanel: React.FC<{
                     onChange={(value) => update("transitionMs", value)}
                 />
             </div>
+
+            <Flex align="center" justify="between" gap="3" mt="3" className="melodyne-model-mode">
+                <div>
+                    <Text as="div" size="1" weight="bold">
+                        {t("melodyne_game_model")}
+                    </Text>
+                    <Text as="div" size="1" color="gray">
+                        {values.performanceMode
+                            ? t("melodyne_game_small_hint")
+                            : t("melodyne_game_large_hint")}
+                    </Text>
+                </div>
+                <Flex gap="1" className="shrink-0">
+                    <Button
+                        size="1"
+                        variant={!values.performanceMode ? "solid" : "soft"}
+                        color="orange"
+                        disabled={disabled || busy}
+                        onClick={() => update("performanceMode", false)}
+                    >
+                        {t("melodyne_game_large")}
+                    </Button>
+                    <Button
+                        size="1"
+                        variant={values.performanceMode ? "solid" : "soft"}
+                        color="gray"
+                        disabled={disabled || busy}
+                        onClick={() => update("performanceMode", true)}
+                    >
+                        {t("melodyne_game_small")}
+                    </Button>
+                </Flex>
+            </Flex>
 
             <Flex align="center" justify="between" gap="3" mt="3">
                 <Text size="1" color={detectorMessage ? "amber" : "gray"} className="min-w-0">

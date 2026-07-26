@@ -1,7 +1,7 @@
 //! GAME (Generative Adaptive MIDI Extractor) ONNX note segmentation.
 //!
-//! The desktop application uses the compact ONNX export instead of embedding
-//! Python/PyTorch.  The four-stage inference graph is:
+//! The desktop application uses the large ONNX export by default and switches
+//! to the small export in performance mode. The four-stage inference graph is:
 //! encoder -> iterative segmenter -> boundary-to-duration -> estimator.
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +13,8 @@ pub struct GameOptions {
     pub segmentation_radius: i64,
     pub estimation_threshold: f32,
     pub language: i64,
+    #[serde(default)]
+    pub performance_mode: bool,
 }
 
 impl Default for GameOptions {
@@ -23,6 +25,7 @@ impl Default for GameOptions {
             segmentation_radius: 2,
             estimation_threshold: 0.20,
             language: 0,
+            performance_mode: false,
         }
     }
 }
@@ -40,6 +43,8 @@ pub struct GameNote {
 pub struct GameStatus {
     pub available: bool,
     pub model_dir: Option<String>,
+    pub performance_available: bool,
+    pub performance_model_dir: Option<String>,
     pub message: String,
 }
 
@@ -69,6 +74,7 @@ mod implementation {
     }
 
     struct GameSessions {
+        performance_mode: bool,
         config: GameConfig,
         encoder: Session,
         segmenter: Session,
@@ -99,8 +105,13 @@ mod implementation {
         .all(|name| path.join(name).is_file())
     }
 
-    fn resolve_model_dir() -> Result<PathBuf, String> {
-        if let Some(path) = env_path("HACHISHIFTER_GAME_MODEL_DIR") {
+    fn resolve_model_dir(performance_mode: bool) -> Result<PathBuf, String> {
+        let override_name = if performance_mode {
+            "HACHISHIFTER_GAME_SMALL_MODEL_DIR"
+        } else {
+            "HACHISHIFTER_GAME_MODEL_DIR"
+        };
+        if let Some(path) = env_path(override_name) {
             if is_model_dir(&path) {
                 return Ok(path);
             }
@@ -110,9 +121,14 @@ mod implementation {
             ));
         }
 
-        if let Some(path) = crate::game_model_dir() {
-            if is_model_dir(path) {
-                return Ok(path.to_path_buf());
+        if let Some(root) = crate::game_model_dir() {
+            let path = if performance_mode {
+                root.join("small")
+            } else {
+                root.to_path_buf()
+            };
+            if is_model_dir(&path) {
+                return Ok(path);
             }
         }
 
@@ -120,28 +136,41 @@ mod implementation {
             .join("resources")
             .join("models")
             .join("game");
+        let development = if performance_mode {
+            development.join("small")
+        } else {
+            development
+        };
         if is_model_dir(&development) {
             return Ok(development);
         }
 
         if let Ok(executable) = std::env::current_exe() {
             if let Some(parent) = executable.parent() {
-                let portable = parent.join("models").join("game");
+                let portable_root = parent.join("models").join("game");
+                let portable = if performance_mode {
+                    portable_root.join("small")
+                } else {
+                    portable_root
+                };
                 if is_model_dir(&portable) {
                     return Ok(portable);
                 }
             }
         }
 
-        Err("GAME compact ONNX model pack was not found".to_string())
+        Err(format!(
+            "GAME {} ONNX model pack was not found",
+            if performance_mode { "small" } else { "large" }
+        ))
     }
 
-    fn load_sessions() -> Result<GameSessions, String> {
+    fn load_sessions(performance_mode: bool) -> Result<GameSessions, String> {
         ORT_INIT.get_or_init(|| {
             ort::init().with_name("hachishifter-game").commit();
         });
 
-        let dir = resolve_model_dir()?;
+        let dir = resolve_model_dir(performance_mode)?;
         let config_text = std::fs::read_to_string(dir.join("config.json"))
             .map_err(|error| format!("read GAME config failed: {error}"))?;
         let config: GameConfig = serde_json::from_str(&config_text)
@@ -160,6 +189,7 @@ mod implementation {
         };
 
         Ok(GameSessions {
+            performance_mode,
             config,
             encoder: build("encoder.onnx")?,
             segmenter: build("segmenter.onnx")?,
@@ -168,13 +198,20 @@ mod implementation {
         })
     }
 
-    fn with_sessions<T>(callback: impl FnOnce(&mut GameSessions) -> Result<T, String>) -> Result<T, String> {
+    fn with_sessions<T>(
+        performance_mode: bool,
+        callback: impl FnOnce(&mut GameSessions) -> Result<T, String>,
+    ) -> Result<T, String> {
         let sessions = SESSIONS.get_or_init(|| Mutex::new(None));
         let mut guard = sessions
             .lock()
             .map_err(|error| format!("GAME session lock poisoned: {error}"))?;
-        if guard.is_none() {
-            *guard = Some(load_sessions()?);
+        if guard
+            .as_ref()
+            .map(|sessions| sessions.performance_mode != performance_mode)
+            .unwrap_or(true)
+        {
+            *guard = Some(load_sessions(performance_mode)?);
         }
         callback(guard.as_mut().expect("GAME sessions initialized"))
     }
@@ -410,7 +447,7 @@ mod implementation {
         if sample_rate == 0 || mono.is_empty() {
             return Ok(Vec::new());
         }
-        with_sessions(|sessions| {
+        with_sessions(options.performance_mode, |sessions| {
             let waveform = linear_resample(mono, sample_rate, sessions.config.samplerate);
             let samples_per_frame =
                 (sessions.config.samplerate as f32 * sessions.config.timestep)
@@ -436,17 +473,21 @@ mod implementation {
     }
 
     pub fn status() -> GameStatus {
-        match resolve_model_dir() {
-            Ok(path) => GameStatus {
-                available: true,
-                model_dir: Some(path.display().to_string()),
-                message: "GAME compact ONNX models are ready".to_string(),
-            },
-            Err(error) => GameStatus {
-                available: false,
-                model_dir: None,
-                message: error,
-            },
+        let large = resolve_model_dir(false);
+        let small = resolve_model_dir(true);
+        let available = large.is_ok();
+        let performance_available = small.is_ok();
+        let message = match (&large, &small) {
+            (Ok(_), Ok(_)) => "GAME large is the default; small performance mode is ready".to_string(),
+            (Err(error), _) => error.clone(),
+            (_, Err(error)) => error.clone(),
+        };
+        GameStatus {
+            available,
+            model_dir: large.ok().map(|path| path.display().to_string()),
+            performance_available,
+            performance_model_dir: small.ok().map(|path| path.display().to_string()),
+            message,
         }
     }
 }
@@ -468,6 +509,8 @@ pub fn status() -> GameStatus {
     GameStatus {
         available: false,
         model_dir: None,
+        performance_available: false,
+        performance_model_dir: None,
         message: "GAME inference is disabled in this build".to_string(),
     }
 }

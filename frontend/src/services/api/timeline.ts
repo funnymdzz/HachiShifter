@@ -110,6 +110,8 @@ export const timelineApi = {
         invoke<{
             available: boolean;
             model_dir?: string | null;
+            performance_available: boolean;
+            performance_model_dir?: string | null;
             message: string;
         }>("get_game_status"),
 
@@ -120,6 +122,7 @@ export const timelineApi = {
             driftStrength: number;
             modulationStrength: number;
             transitionMs: number;
+            performanceMode?: boolean;
             reset?: boolean;
             selectionStartSec?: number | null;
             selectionEndSec?: number | null;
