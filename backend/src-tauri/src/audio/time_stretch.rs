@@ -373,6 +373,63 @@ pub(crate) fn anchor_transients(
     }
 }
 
+/// Keep the broad spectral tilt of a stretched/synthesized vocal close to its
+/// source. This is deliberately gentle: it does not move formant peaks, but it
+/// prevents accumulated stretch + pitch processing from turning the voice
+/// unnaturally dark ("older") or bright ("younger").
+pub(crate) fn stabilize_vocal_timbre(
+    input: &[f32],
+    output: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+) {
+    let channels = channels.max(1);
+    if input.len() < channels * 32 || output.len() < channels * 32 {
+        return;
+    }
+    let alpha = (-2.0f32 * std::f32::consts::PI * 1_400.0 / sample_rate.max(1) as f32).exp();
+    for channel in 0..channels {
+        let measure = |samples: &[f32]| {
+            let mut signal = 0.0f64;
+            let mut difference = 0.0f64;
+            let mut previous = samples[channel];
+            let mut count = 0usize;
+            for frame in (channel..samples.len()).step_by(channels) {
+                let value = samples[frame];
+                signal += (value as f64) * (value as f64);
+                let delta = value - previous;
+                difference += (delta as f64) * (delta as f64);
+                previous = value;
+                count += 1;
+            }
+            let count = count.max(1) as f64;
+            ((signal / count).sqrt(), (difference / count).sqrt())
+        };
+        let (source_rms, source_diff) = measure(input);
+        let (before_rms, output_diff) = measure(output);
+        if source_rms < 1e-7 || before_rms < 1e-7 {
+            continue;
+        }
+        let source_brightness = source_diff / source_rms;
+        let output_brightness = output_diff / before_rms;
+        let high_gain = (source_brightness / output_brightness.max(1e-7)).clamp(0.78, 1.28) as f32;
+        if (high_gain - 1.0).abs() < 0.015 {
+            continue;
+        }
+        let mut low = output[channel];
+        for frame in (channel..output.len()).step_by(channels) {
+            let value = output[frame];
+            low = (1.0 - alpha) * value + alpha * low;
+            output[frame] = low + (value - low) * high_gain;
+        }
+        let (after_rms, _) = measure(output);
+        let level = (before_rms / after_rms.max(1e-7)).clamp(0.85, 1.18) as f32;
+        for frame in (channel..output.len()).step_by(channels) {
+            output[frame] *= level;
+        }
+    }
+}
+
 fn loop_stretch_interleaved(
     input: &[f32],
     channels: usize,
@@ -417,11 +474,14 @@ pub fn time_stretch_interleaved(
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
         StretchAlgorithm::SignalsmithStretch => {
-            signalsmith_stretch(input, channels, sample_rate, out_frames)
+            let mut out = signalsmith_stretch(input, channels, sample_rate, out_frames);
+            stabilize_vocal_timbre(input, &mut out, channels, sample_rate.max(1));
+            out
         }
         StretchAlgorithm::MelodyneHybrid => {
             let mut out = signalsmith_stretch(input, channels, sample_rate, out_frames);
             anchor_transients(input, &mut out, channels, sample_rate.max(1));
+            stabilize_vocal_timbre(input, &mut out, channels, sample_rate.max(1));
             out
         }
         StretchAlgorithm::LoopVowel => loop_stretch_interleaved(input, channels, out_frames),
@@ -461,6 +521,7 @@ pub fn time_stretch_interleaved(
                         sample_rate.max(1),
                     );
                     out.resize(out_frames * channels, 0.0);
+                    stabilize_vocal_timbre(input, &mut out, channels, sample_rate.max(1));
                     out
                 }
                 Err(e) => {

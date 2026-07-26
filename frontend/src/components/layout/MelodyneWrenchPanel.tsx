@@ -160,6 +160,9 @@ export const MelodyneWrenchPanel: React.FC<{
                     <Text size="1" color="gray" className="shrink-0">
                         {tAny("melodyne_edge_drag_hint")}
                     </Text>
+                    <Text size="1" color="gray" className="shrink-0">
+                        {tAny("melodyne_game_alignment_hint")}
+                    </Text>
                 </Flex>
             ) : lane === "events" ? (
                 <Flex gap="1" mt="2" align="center" className="overflow-x-auto pb-1">

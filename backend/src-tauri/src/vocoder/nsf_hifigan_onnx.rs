@@ -1747,13 +1747,21 @@ impl NsfHifiganOnnx {
     ) -> Result<Vec<f32>, String> {
         let model_sr = self.cfg.sampling_rate;
 
-        // 1. Variable-hop mel extraction.  The earlier implementation always
-        // extracted at the model hop and then linearly resized the mel time
-        // axis.  Here the analysis hop itself follows playback_rate, retaining
-        // attack frames and formant envelopes more faithfully.
-        let variable_hop = ((self.cfg.hop_size as f64) * playback_rate.max(1e-6))
+        // 1. Variable-hop mel extraction. Large deviations from the hop used
+        // during model training make the decoder unstable and can bend the F0
+        // trajectory. Keep the actual analysis hop in a vocal-safe range and
+        // use a small residual time interpolation only for the remainder.
+        let safe_hop_ratio = playback_rate.max(1e-6).clamp(0.72, 1.40);
+        let variable_hop = ((self.cfg.hop_size as f64) * safe_hop_ratio)
             .round()
-            .clamp(1.0, (self.cfg.hop_size * 10).max(1) as f64) as usize;
+            .clamp(1.0, (self.cfg.hop_size * 2).max(1) as f64) as usize;
+        let model_input_len = if sample_rate == model_sr {
+            audio_mono.len()
+        } else {
+            ((audio_mono.len() as f64) * model_sr as f64 / sample_rate.max(1) as f64)
+                .round()
+                .max(1.0) as usize
+        };
         let mel_orig = if sample_rate == model_sr {
             self.mel_from_audio_fast_with_hop(audio_mono, variable_hop)?
         } else {
@@ -1770,10 +1778,19 @@ impl NsfHifiganOnnx {
             return Ok(vec![0.0; target_len]);
         }
 
-        // 2. Each extracted frame is emitted at the fixed synthesis hop.  The
-        // frame count therefore already is the stretched duration.
-        let t_new = t_orig;
-        let mut mel_stretched = mel_orig;
+        // 2. Synthesize an exact frame count. This avoids zero-padded tails and
+        // pitch-line drift caused by rounding the variable analysis hop.
+        let target_model_samples = ((model_input_len as f64) / playback_rate.max(1e-6))
+            .round()
+            .max(1.0) as usize;
+        let t_new = target_model_samples
+            .div_ceil(self.cfg.hop_size.max(1))
+            .max(1);
+        let mut mel_stretched = if t_new == t_orig {
+            mel_orig
+        } else {
+            interpolate_mel_time(&mel_orig, self.cfg.num_mels, t_orig, t_new)
+        };
 
         // 4. 应用共振峰偏移（在 mel 域沿频率轴做线性插值）
         let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);

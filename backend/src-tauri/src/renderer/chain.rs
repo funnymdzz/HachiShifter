@@ -177,7 +177,14 @@ impl ProcessingStage for WorldVocoderStage {
             clip_midi: cc.clip_midi,
             clip_id: cc.clip_id,
         };
-        crate::renderer::world::WorldRenderer.render(&render_ctx)
+        let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
+        crate::time_stretch::stabilize_vocal_timbre(
+            &input_pcm,
+            &mut output,
+            1,
+            cc.sample_rate,
+        );
+        Ok(output)
     }
 }
 
@@ -213,6 +220,12 @@ impl ProcessingStage for Mld5VocoderStage {
         };
         let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
         crate::time_stretch::anchor_transients(&input_pcm, &mut output, 1, cc.sample_rate);
+        crate::time_stretch::stabilize_vocal_timbre(
+            &input_pcm,
+            &mut output,
+            1,
+            cc.sample_rate,
+        );
         Ok(output)
     }
 }
@@ -297,9 +310,26 @@ impl ProcessingStage for HiFiGanStage {
                     1,
                     cc.sample_rate,
                 );
+                if formant_curve.map_or(true, |curve| curve.iter().all(|value| value.abs() < 0.5)) {
+                    crate::time_stretch::stabilize_vocal_timbre(
+                        &input_pcm,
+                        &mut output,
+                        1,
+                        cc.sample_rate,
+                    );
+                }
                 Ok(output)
             } else {
-                renderer.render_with_formant(&render_ctx, formant_curve)
+                let mut output = renderer.render_with_formant(&render_ctx, formant_curve)?;
+                if formant_curve.map_or(true, |curve| curve.iter().all(|value| value.abs() < 0.5)) {
+                    crate::time_stretch::stabilize_vocal_timbre(
+                        &input_pcm,
+                        &mut output,
+                        1,
+                        cc.sample_rate,
+                    );
+                }
+                Ok(output)
             };
         }
 
@@ -339,9 +369,26 @@ impl ProcessingStage for HiFiGanStage {
                     1,
                     cc.sample_rate,
                 );
+                if formant_curve.map_or(true, |curve| curve.iter().all(|value| value.abs() < 0.5)) {
+                    crate::time_stretch::stabilize_vocal_timbre(
+                        &harmonic,
+                        &mut output,
+                        1,
+                        cc.sample_rate,
+                    );
+                }
                 output
             } else {
-                renderer.render_with_formant(&render_ctx, formant_curve)?
+                let mut output = renderer.render_with_formant(&render_ctx, formant_curve)?;
+                if formant_curve.map_or(true, |curve| curve.iter().all(|value| value.abs() < 0.5)) {
+                    crate::time_stretch::stabilize_vocal_timbre(
+                        &harmonic,
+                        &mut output,
+                        1,
+                        cc.sample_rate,
+                    );
+                }
+                output
             }
         };
 

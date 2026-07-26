@@ -402,7 +402,7 @@ fn analyze_audio_uncached(
     }
     let mono = interleaved_to_mono(&interleaved, channels as usize);
     let duration_sec = mono.len() as f64 / sample_rate as f64;
-    let (regions, annotations) =
+    let (regions, mut annotations) =
         detect_regions_and_annotations(audio_path, &mono, sample_rate, duration_sec);
     let mut fallback_pitch_notes = Vec::new();
     for &(start, end) in &regions {
@@ -456,6 +456,25 @@ fn analyze_audio_uncached(
                 Some(error),
             ),
         };
+
+    // GAME note boundaries are the most useful musical anchors: the start of
+    // each detected note normally carries the beat, while the preceding
+    // unvoiced material is the fixed consonant. Use the first GAME note in
+    // each pronunciation region as the default alignment/fixed boundary.
+    if note_detector == NoteDetectorKind::Game {
+        for annotation in &mut annotations {
+            if let Some(note) = pitch_notes.iter().find(|note| {
+                note.start_sec >= annotation.region_start_sec - 0.005
+                    && note.start_sec < annotation.region_end_sec
+            }) {
+                let alignment = note
+                    .start_sec
+                    .clamp(annotation.region_start_sec, annotation.region_end_sec);
+                annotation.note_alignment_sec = alignment;
+                annotation.fixed_duration_sec = (alignment - annotation.region_start_sec).max(0.0);
+            }
+        }
+    }
 
     Ok(SampleAnalysis {
         annotations,
