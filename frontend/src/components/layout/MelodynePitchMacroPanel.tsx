@@ -95,7 +95,7 @@ export const MelodynePitchMacroPanel: React.FC<{
                     </div>
                 </Flex>
                 <Badge color={detector === "game" ? "blue" : "gray"} variant="soft">
-                    {detector === "game" ? "GAME" : "YIN"}
+                    GAME
                 </Badge>
             </Flex>
 

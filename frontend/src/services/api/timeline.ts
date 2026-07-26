@@ -26,7 +26,7 @@ export interface SampleAudioEvent {
     confidence: number;
 }
 
-export type NoteDetectorKind = "game" | "yin_fallback";
+export type NoteDetectorKind = "game";
 
 export type ClipSampleAnnotationsResult =
     | {

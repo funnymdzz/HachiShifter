@@ -1,4 +1,4 @@
-//! Per-sample timing annotations and lightweight note detection.
+//! Per-sample timing annotations backed by authoritative GAME syllable notes.
 //!
 //! The sidecar format intentionally stays small and human-editable:
 //! `name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec`.
@@ -63,7 +63,6 @@ pub struct SampleAnalysis {
 #[serde(rename_all = "snake_case")]
 pub enum NoteDetectorKind {
     Game,
-    YinFallback,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -286,9 +285,9 @@ pub fn load_or_detect_with_game_mode(
     })
 }
 
-/// Ensure that an imported sample has a sidecar without re-running pitch
-/// analysis when a valid sidecar already exists.  Full note extraction is
-/// intentionally deferred until the piano-roll/editor requests it.
+/// Return the sidecar location while deferring creation until GAME has run.
+/// Import must stay lightweight, but writing an acoustic placeholder here
+/// would incorrectly turn non-GAME regions into syllables.
 pub fn ensure_sidecar(audio_path: &Path) -> Result<PathBuf, String> {
     let path = sidecar_path(audio_path);
     if path.is_file() {
@@ -298,20 +297,7 @@ pub fn ensure_sidecar(audio_path: &Path) -> Result<PathBuf, String> {
             }
         }
     }
-    let (sample_rate, channels, interleaved) =
-        crate::audio_utils::decode_audio_f32_interleaved(audio_path)?;
-    if sample_rate == 0 || channels == 0 || interleaved.is_empty() {
-        return Err("audio has no decodable samples".to_string());
-    }
-    let mono = interleaved_to_mono(&interleaved, channels as usize);
-    let duration_sec = mono.len() as f64 / sample_rate as f64;
-    let (_, annotations) = detect_regions_and_annotations(
-        audio_path,
-        &mono,
-        sample_rate,
-        duration_sec,
-    );
-    write_sidecar(audio_path, &annotations)
+    Ok(path)
 }
 
 pub fn timing_for_clip(clip: &crate::state::Clip) -> Option<ClipAnnotationTiming> {
@@ -346,51 +332,6 @@ pub fn timing_for_clip(clip: &crate::state::Clip) -> Option<ClipAnnotationTiming
     })
 }
 
-fn detect_regions_and_annotations(
-    audio_path: &Path,
-    mono: &[f32],
-    sample_rate: u32,
-    duration_sec: f64,
-) -> (Vec<(f64, f64)>, Vec<SampleRegionAnnotation>) {
-    let regions = detect_active_regions(&mono, sample_rate);
-    let mut annotations = Vec::new();
-    for (index, (start, end)) in regions.iter().copied().enumerate() {
-        let voiced_start = detect_voiced_start(&mono, sample_rate, start, end).unwrap_or(start);
-        let fixed_end = voiced_start.clamp(start, end);
-        annotations.push(SampleRegionAnnotation {
-            name: if regions.len() == 1 {
-                audio_path
-                    .file_stem()
-                    .and_then(|value| value.to_str())
-                    .unwrap_or("pronunciation")
-                    .to_string()
-            } else {
-                format!("pronunciation {}", index + 1)
-            },
-            region_start_sec: start,
-            region_end_sec: end,
-            note_alignment_sec: fixed_end,
-            fixed_duration_sec: (fixed_end - start).max(0.0),
-        });
-    }
-
-    if annotations.is_empty() {
-        annotations.push(SampleRegionAnnotation {
-            name: audio_path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("sample")
-                .to_string(),
-            region_start_sec: 0.0,
-            region_end_sec: duration_sec.max(0.001),
-            note_alignment_sec: 0.0,
-            fixed_duration_sec: 0.0,
-        });
-    }
-
-    (regions, annotations)
-}
-
 fn analyze_audio_uncached(
     audio_path: &Path,
     game_performance_mode: bool,
@@ -402,12 +343,6 @@ fn analyze_audio_uncached(
     }
     let mono = interleaved_to_mono(&interleaved, channels as usize);
     let duration_sec = mono.len() as f64 / sample_rate as f64;
-    let (regions, mut annotations) =
-        detect_regions_and_annotations(audio_path, &mono, sample_rate, duration_sec);
-    let mut fallback_pitch_notes = Vec::new();
-    for &(start, end) in &regions {
-        fallback_pitch_notes.extend(detect_pitch_notes(&mono, sample_rate, start, end));
-    }
     let audio_events = detect_silence_and_breath_events(&mono, sample_rate);
 
     let (pitch_notes, note_detector, detector_message) =
@@ -427,10 +362,6 @@ fn analyze_audio_uncached(
                             && note.midi_note.is_finite()
                             && (0.0..=127.0).contains(&note.midi_note)
                             && note.end_sec - note.start_sec >= 0.01
-                            && regions.iter().any(|(start, end)| {
-                                let center = (note.start_sec + note.end_sec) * 0.5;
-                                center >= *start && center <= *end
-                            })
                     })
                     .map(|note| SamplePitchNote {
                         start_sec: note.start_sec,
@@ -442,39 +373,35 @@ fn analyze_audio_uncached(
                     .collect();
                 if notes.is_empty() {
                     (
-                        fallback_pitch_notes,
-                        NoteDetectorKind::YinFallback,
-                        Some("GAME returned no voiced notes; used the lightweight detector".to_string()),
+                        Vec::new(),
+                        NoteDetectorKind::Game,
+                        Some("GAME returned no syllable notes".to_string()),
                     )
                 } else {
                     (notes, NoteDetectorKind::Game, None)
                 }
             }
             Err(error) => (
-                fallback_pitch_notes,
-                NoteDetectorKind::YinFallback,
+                Vec::new(),
+                NoteDetectorKind::Game,
                 Some(error),
             ),
         };
 
-    // GAME note boundaries are the most useful musical anchors: the start of
-    // each detected note normally carries the beat, while the preceding
-    // unvoiced material is the fixed consonant. Use the first GAME note in
-    // each pronunciation region as the default alignment/fixed boundary.
-    if note_detector == NoteDetectorKind::Game {
-        for annotation in &mut annotations {
-            if let Some(note) = pitch_notes.iter().find(|note| {
-                note.start_sec >= annotation.region_start_sec - 0.005
-                    && note.start_sec < annotation.region_end_sec
-            }) {
-                let alignment = note
-                    .start_sec
-                    .clamp(annotation.region_start_sec, annotation.region_end_sec);
-                annotation.note_alignment_sec = alignment;
-                annotation.fixed_duration_sec = (alignment - annotation.region_start_sec).max(0.0);
-            }
-        }
-    }
+    // GAME segmentation is authoritative: one GAME note is one syllable.
+    // No acoustic helper is allowed to split, merge, discard or redefine
+    // these syllable objects.
+    let annotations: Vec<SampleRegionAnnotation> = pitch_notes
+        .iter()
+        .enumerate()
+        .map(|(index, note)| SampleRegionAnnotation {
+            name: format!("GAME {}", index + 1),
+            region_start_sec: note.start_sec,
+            region_end_sec: note.end_sec,
+            note_alignment_sec: note.start_sec,
+            fixed_duration_sec: 0.0,
+        })
+        .collect();
 
     Ok(SampleAnalysis {
         annotations,
@@ -876,184 +803,6 @@ fn interleaved_to_mono(input: &[f32], channels: usize) -> Vec<f32> {
         .collect()
 }
 
-fn detect_active_regions(samples: &[f32], sample_rate: u32) -> Vec<(f64, f64)> {
-    let window = ((sample_rate as f64 * 0.02).round() as usize).max(32);
-    let hop = ((sample_rate as f64 * 0.01).round() as usize).max(16);
-    if samples.len() < window {
-        return if samples.iter().any(|value| value.abs() > 1e-5) {
-            vec![(0.0, samples.len() as f64 / sample_rate as f64)]
-        } else {
-            Vec::new()
-        };
-    }
-    let mut rms = Vec::new();
-    let mut pos = 0usize;
-    while pos + window <= samples.len() {
-        let energy = samples[pos..pos + window]
-            .iter()
-            .map(|value| value * value)
-            .sum::<f32>()
-            / window as f32;
-        rms.push(energy.sqrt());
-        pos += hop;
-    }
-    let peak = rms.iter().copied().fold(0.0f32, f32::max);
-    if peak < 1e-5 {
-        return Vec::new();
-    }
-    let mut sorted = rms.clone();
-    sorted.sort_by(f32::total_cmp);
-    let noise = sorted[sorted.len() / 5];
-    let threshold = (noise * 3.0).max(peak * 0.025).max(0.0015);
-    let mut active: Vec<bool> = rms.iter().map(|value| *value >= threshold).collect();
-
-    // Bridge short internal gaps (up to 80 ms), but keep leading/trailing silence.
-    let max_gap = 8usize;
-    let mut index = 0usize;
-    while index < active.len() {
-        if active[index] {
-            index += 1;
-            continue;
-        }
-        let gap_start = index;
-        while index < active.len() && !active[index] {
-            index += 1;
-        }
-        if gap_start > 0 && index < active.len() && index - gap_start <= max_gap {
-            active[gap_start..index].fill(true);
-        }
-    }
-
-    let mut regions = Vec::new();
-    let min_frames = 4usize;
-    let mut index = 0usize;
-    while index < active.len() {
-        if !active[index] {
-            index += 1;
-            continue;
-        }
-        let start_frame = index;
-        while index < active.len() && active[index] {
-            index += 1;
-        }
-        if index - start_frame >= min_frames {
-            let start_sample = start_frame.saturating_sub(1) * hop;
-            let end_sample = (index * hop + window).min(samples.len());
-            regions.push((
-                start_sample as f64 / sample_rate as f64,
-                end_sample as f64 / sample_rate as f64,
-            ));
-        }
-    }
-    regions
-}
-
-fn detect_voiced_start(
-    samples: &[f32],
-    sample_rate: u32,
-    region_start: f64,
-    region_end: f64,
-) -> Option<f64> {
-    let step_sec = 0.01;
-    let search_end = region_end.min(region_start + 0.35);
-    let mut time = region_start;
-    let mut consecutive = 0usize;
-    while time < search_end {
-        let (_, confidence) = estimate_pitch(samples, sample_rate, time, 0.04);
-        if confidence >= 0.48 {
-            consecutive += 1;
-            if consecutive >= 3 {
-                return Some((time - step_sec * 2.0).max(region_start));
-            }
-        } else {
-            consecutive = 0;
-        }
-        time += step_sec;
-    }
-    None
-}
-
-fn detect_pitch_notes(
-    samples: &[f32],
-    sample_rate: u32,
-    region_start: f64,
-    region_end: f64,
-) -> Vec<SamplePitchNote> {
-    let hop_sec = 0.02;
-    let mut frames = Vec::<(f64, f32, f32)>::new();
-    let mut time = region_start;
-    while time + 0.02 <= region_end {
-        let (frequency, confidence) = estimate_pitch(samples, sample_rate, time, 0.04);
-        if frequency > 0.0 && confidence >= 0.42 {
-            let midi = 69.0 + 12.0 * (frequency / 440.0).log2();
-            if (24.0..=108.0).contains(&midi) {
-                frames.push((time, midi, confidence));
-            }
-        }
-        time += hop_sec;
-    }
-    if frames.is_empty() {
-        return Vec::new();
-    }
-
-    let mut notes = Vec::<SamplePitchNote>::new();
-    let mut group = vec![frames[0]];
-    for frame in frames.into_iter().skip(1) {
-        let median = median_midi(&group);
-        let prev_time = group.last().map(|value| value.0).unwrap_or(frame.0);
-        if frame.0 - prev_time > hop_sec * 1.75 || (frame.1 - median).abs() >= 1.25 {
-            push_pitch_group(&mut notes, &group, hop_sec);
-            group.clear();
-        }
-        group.push(frame);
-    }
-    push_pitch_group(&mut notes, &group, hop_sec);
-
-    // Suppress tiny detector flickers; merge adjacent notes with the same pitch class.
-    notes.retain(|note| note.end_sec - note.start_sec >= 0.04);
-    let mut merged = Vec::<SamplePitchNote>::new();
-    for note in notes {
-        if let Some(last) = merged.last_mut() {
-            if note.start_sec - last.end_sec <= 0.04
-                && (note.midi_note.round() - last.midi_note.round()).abs() < 0.5
-            {
-                let left_duration = (last.end_sec - last.start_sec) as f32;
-                let right_duration = (note.end_sec - note.start_sec) as f32;
-                last.midi_note = (last.midi_note * left_duration + note.midi_note * right_duration)
-                    / (left_duration + right_duration).max(1e-6);
-                last.confidence = last.confidence.max(note.confidence);
-                last.end_sec = note.end_sec;
-                continue;
-            }
-        }
-        merged.push(note);
-    }
-    merged
-}
-
-fn push_pitch_group(out: &mut Vec<SamplePitchNote>, group: &[(f64, f32, f32)], hop_sec: f64) {
-    if group.is_empty() {
-        return;
-    }
-    let midi = median_midi(group);
-    let confidence = group.iter().map(|value| value.2).sum::<f32>() / group.len() as f32;
-    out.push(SamplePitchNote {
-        start_sec: group[0].0,
-        end_sec: group
-            .last()
-            .map(|value| value.0 + hop_sec)
-            .unwrap_or(group[0].0 + hop_sec),
-        midi_note: midi,
-        confidence,
-    });
-}
-
-fn median_midi(group: &[(f64, f32, f32)]) -> f32 {
-    let mut values: Vec<f32> = group.iter().map(|value| value.1).collect();
-    values.sort_by(f32::total_cmp);
-    values[values.len() / 2]
-}
-
 fn estimate_pitch(
     samples: &[f32],
     sample_rate: u32,
@@ -1136,20 +885,6 @@ mod tests {
         .unwrap();
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].name, "a");
-    }
-
-    #[test]
-    fn detects_two_regions_separated_by_silence() {
-        let sample_rate = 8_000u32;
-        let mut samples = vec![0.0f32; sample_rate as usize];
-        for index in 800..2400 {
-            samples[index] = ((index as f32) * 0.1).sin() * 0.5;
-        }
-        for index in 4800..6800 {
-            samples[index] = ((index as f32) * 0.08).sin() * 0.5;
-        }
-        let regions = detect_active_regions(&samples, sample_rate);
-        assert_eq!(regions.len(), 2);
     }
 
     #[test]

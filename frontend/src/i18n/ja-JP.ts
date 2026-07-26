@@ -930,6 +930,6 @@ export const jaJP = {
     melodyne_connect_pitch: "ピッチ線を接続",
     melodyne_disconnect_pitch: "ピッチ線を切断",
     melodyne_edge_drag_hint: "ノート端をドラッグして伸縮し、整列線をダブルクリックしてグリッドへスナップ",
-    melodyne_game_alignment_hint: "各 GAME ノートの先頭を既定のリズム整列点として使用します。",
+    melodyne_game_alignment_hint: "各 GAME note を1音節として扱い、その先頭をリズム整列点にします。",
     sample_timing_save: "保存",
 } as const;

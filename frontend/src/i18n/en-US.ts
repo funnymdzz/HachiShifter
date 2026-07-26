@@ -922,6 +922,6 @@ export const enUS = {
     melodyne_connect_pitch: "Connect pitch line",
     melodyne_disconnect_pitch: "Disconnect pitch line",
     melodyne_edge_drag_hint: "Drag note edges to stretch; double-click alignment line to snap to grid",
-    melodyne_game_alignment_hint: "GAME note starts are used as the default beat-alignment points.",
+    melodyne_game_alignment_hint: "Each GAME note is one syllable; its start is the beat-alignment point.",
     sample_timing_save: "Save",
 } as const;

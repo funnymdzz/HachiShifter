@@ -909,6 +909,6 @@ export const zhCN = {
     melodyne_connect_pitch: "连接音高线",
     melodyne_disconnect_pitch: "断开音高线",
     melodyne_edge_drag_hint: "拖动音符块边缘拉伸；双击对齐线吸附网格",
-    melodyne_game_alignment_hint: "默认使用每个 GAME 音符的开头作为节奏对齐点。",
+    melodyne_game_alignment_hint: "每个 GAME note 直接作为一个音节，其开头就是节奏对齐点。",
     sample_timing_save: "保存",
 } as const;

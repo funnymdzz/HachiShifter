@@ -909,6 +909,6 @@ export const zhTW = {
     melodyne_connect_pitch: "連接音高線",
     melodyne_disconnect_pitch: "中斷音高線",
     melodyne_edge_drag_hint: "拖曳音符塊邊緣可拉伸；雙擊對齊線可吸附網格",
-    melodyne_game_alignment_hint: "預設使用每個 GAME 音符的開頭作為節奏對齊點。",
+    melodyne_game_alignment_hint: "每個 GAME note 直接作為一個音節，其開頭就是節奏對齊點。",
     sample_timing_save: "儲存",
 } as const;

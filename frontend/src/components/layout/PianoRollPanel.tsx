@@ -1840,7 +1840,7 @@ export const PianoRollPanel: React.FC = () => {
             invalidate();
             return t("melodyne_result")
                 .replace("{n}", String(result.summary.affectedNotes))
-                .replace("{detector}", result.summary.detector === "game" ? "GAME" : "YIN");
+                .replace("{detector}", "GAME");
         },
         [bumpRefreshToken, invalidate, secPerBeat, selectedAudioClip, t],
     );
