@@ -94,7 +94,7 @@ export const MelodynePitchMacroPanel: React.FC<{
                         </Text>
                     </div>
                 </Flex>
-                <Badge color={detector === "game" ? "green" : "amber"} variant="soft">
+                <Badge color={detector === "game" ? "blue" : "gray"} variant="soft">
                     {detector === "game" ? "GAME" : "YIN"}
                 </Badge>
             </Flex>
@@ -153,7 +153,7 @@ export const MelodynePitchMacroPanel: React.FC<{
                     <Button
                         size="1"
                         variant={!values.performanceMode ? "solid" : "soft"}
-                        color="orange"
+                        color="blue"
                         disabled={disabled || busy}
                         onClick={() => update("performanceMode", false)}
                     >
@@ -187,7 +187,7 @@ export const MelodynePitchMacroPanel: React.FC<{
                     </Button>
                     <Button
                         size="1"
-                        color="orange"
+                        color="blue"
                         disabled={disabled || busy}
                         onClick={() => void run(false)}
                     >

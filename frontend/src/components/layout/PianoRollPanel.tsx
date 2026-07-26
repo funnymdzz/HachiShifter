@@ -4254,7 +4254,7 @@ export const PianoRollPanel: React.FC = () => {
                                 <Button
                                     size="1"
                                     variant={showPitchMacro ? "solid" : "soft"}
-                                    color="orange"
+                                    color="blue"
                                     onClick={() => setShowPitchMacro((current) => !current)}
                                     style={{ cursor: "pointer" }}
                                 >

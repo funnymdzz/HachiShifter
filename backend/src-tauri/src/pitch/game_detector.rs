@@ -352,8 +352,7 @@ mod implementation {
             .bd2dur
             .run(ort::inputs![
                 "boundaries" => Tensor::from_array(([1usize, time_frames], previous_boundaries.clone())).map_err(|error| format!("build GAME boundary tensor failed: {error}"))?,
-                "maskT" => Tensor::from_array(([1usize, time_frames], mask_t.clone())).map_err(|error| format!("build GAME duration mask failed: {error}"))?,
-                "duration" => Tensor::from_array(([1usize], vec![duration])).map_err(|error| format!("build GAME duration scalar failed: {error}"))?
+                "maskT" => Tensor::from_array(([1usize, time_frames], mask_t.clone())).map_err(|error| format!("build GAME duration mask failed: {error}"))?
             ])
             .map_err(|error| format!("GAME boundary-to-duration inference failed: {error}"))?;
         let duration_value = duration_outputs
@@ -385,7 +384,7 @@ mod implementation {
                 "maskT" => Tensor::from_array(([1usize, time_frames], mask_t)).map_err(|error| format!("build GAME estimator time mask failed: {error}"))?,
                 "boundaries" => Tensor::from_array(([1usize, time_frames], previous_boundaries)).map_err(|error| format!("build GAME estimator boundaries failed: {error}"))?,
                 "maskN" => Tensor::from_array(([1usize, note_count], mask_n[..note_count].to_vec())).map_err(|error| format!("build GAME estimator note mask failed: {error}"))?,
-                "threshold" => Tensor::from_array(((), vec![options.estimation_threshold])).map_err(|error| format!("build GAME estimator threshold failed: {error}"))?
+                "threshold" => Tensor::from_array(([1usize], vec![options.estimation_threshold])).map_err(|error| format!("build GAME estimator threshold failed: {error}"))?
             ])
             .map_err(|error| format!("GAME estimator inference failed: {error}"))?;
         let (_, score_data) = estimator_outputs

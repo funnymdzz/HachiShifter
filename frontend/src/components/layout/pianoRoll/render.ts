@@ -904,16 +904,16 @@ export function drawPianoRoll(args: {
             const confidence = clamp(note.confidence || 0.7, 0.25, 1);
             const gradient = ctx.createLinearGradient(0, top, 0, top + noteHeight);
             if (selectedNote) {
-                gradient.addColorStop(0, "rgba(255, 226, 139, 0.96)");
-                gradient.addColorStop(1, "rgba(234, 128, 30, 0.92)");
+                gradient.addColorStop(0, isDark ? "rgba(147, 197, 253, 0.96)" : "rgba(96, 165, 250, 0.92)");
+                gradient.addColorStop(1, isDark ? "rgba(37, 99, 235, 0.92)" : "rgba(59, 130, 246, 0.88)");
             } else {
-                gradient.addColorStop(0, `rgba(251, 191, 36, ${0.42 + confidence * 0.28})`);
-                gradient.addColorStop(1, `rgba(194, 85, 20, ${0.34 + confidence * 0.24})`);
+                gradient.addColorStop(0, `rgba(96, 165, 250, ${0.38 + confidence * 0.26})`);
+                gradient.addColorStop(1, `rgba(37, 99, 235, ${0.30 + confidence * 0.22})`);
             }
             ctx.fillStyle = gradient;
             ctx.strokeStyle = selectedNote
-                ? "rgba(255, 244, 203, 0.98)"
-                : "rgba(251, 146, 60, 0.82)";
+                ? (isDark ? "rgba(219, 234, 254, 0.98)" : "rgba(30, 64, 175, 0.96)")
+                : (isDark ? "rgba(96, 165, 250, 0.82)" : "rgba(37, 99, 235, 0.78)");
             ctx.lineWidth = selectedNote ? 1.6 : 1;
             ctx.beginPath();
             ctx.roundRect(x0 + 0.5, top, Math.max(2, x1 - x0 - 1), noteHeight, 3);
@@ -923,8 +923,8 @@ export function drawPianoRoll(args: {
             // Melodyne-style pitch-center guide and edge separators.
             const centerY = top + noteHeight * 0.5;
             ctx.strokeStyle = selectedNote
-                ? "rgba(94, 44, 8, 0.82)"
-                : "rgba(83, 42, 14, 0.58)";
+                ? "rgba(15, 23, 42, 0.82)"
+                : "rgba(15, 49, 105, 0.58)";
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x0 + 4, centerY + 0.5);
@@ -932,8 +932,8 @@ export function drawPianoRoll(args: {
             ctx.stroke();
             if (x1 - x0 >= 10) {
                 ctx.fillStyle = selectedNote
-                    ? "rgba(255, 248, 220, 0.92)"
-                    : "rgba(255, 218, 145, 0.66)";
+                    ? "rgba(239, 246, 255, 0.92)"
+                    : "rgba(191, 219, 254, 0.66)";
                 ctx.fillRect(x0 + 1, top + 2, 1.5, Math.max(1, noteHeight - 4));
                 ctx.fillRect(x1 - 2.5, top + 2, 1.5, Math.max(1, noteHeight - 4));
             }

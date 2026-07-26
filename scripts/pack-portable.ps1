@@ -93,6 +93,8 @@ else {
 
 $ZipName = "$ProductName-v$Version-portable-win-$ArchShort.zip"
 $ZipPath = Join-Path $OutputDir $ZipName
+$NoModelZipName = "$ProductName-v$Version-no-model-portable-win-$ArchShort.zip"
+$NoModelZipPath = Join-Path $OutputDir $NoModelZipName
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  HachiShifter 便携版打包工具" -ForegroundColor Cyan
@@ -203,6 +205,9 @@ if (Test-Path $TempDir) {
 if (Test-Path $ZipPath) {
     Remove-Item $ZipPath -Force
 }
+if (Test-Path $NoModelZipPath) {
+    Remove-Item $NoModelZipPath -Force
+}
 
 # 创建输出目录
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
@@ -254,11 +259,22 @@ Write-Host "[4/5] 正在压缩为 ZIP..." -ForegroundColor Yellow
 
 Compress-Archive -Path $TempDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
+# Produce a lightweight overwrite/update archive. It intentionally omits the
+# models directory so extracting it over an existing installation keeps the
+# user's already-installed models in place.
+$BundledModels = Join-Path $TempDir "models"
+if (Test-Path $BundledModels) {
+    Remove-Item $BundledModels -Recurse -Force
+}
+Compress-Archive -Path $TempDir -DestinationPath $NoModelZipPath -CompressionLevel Optimal
+
 # 清理临时目录
 Remove-Item $TempDir -Recurse -Force
 
 $ZipSize = (Get-Item $ZipPath).Length
 $ZipSizeMB = [math]::Round($ZipSize / 1MB, 2)
+$NoModelZipSize = (Get-Item $NoModelZipPath).Length
+$NoModelZipSizeMB = [math]::Round($NoModelZipSize / 1MB, 2)
 
 Write-Host "[4/5] 压缩完成 ✓" -ForegroundColor Green
 
@@ -290,6 +306,8 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  打包成功！" -ForegroundColor Green
 Write-Host "  便携版: $ZipPath" -ForegroundColor Green
 Write-Host "  大小:   $ZipSizeMB MB" -ForegroundColor Green
+Write-Host "  覆盖更新包（不带模型）: $NoModelZipPath" -ForegroundColor Green
+Write-Host "  大小:   $NoModelZipSizeMB MB" -ForegroundColor Green
 if (Test-Path (Join-Path $OutputDir $NsisPattern)) {
     Write-Host "  安装包: $(Join-Path $OutputDir $NsisPattern)" -ForegroundColor Green
     Write-Host "  大小:   $NsisSizeMB MB" -ForegroundColor Green
