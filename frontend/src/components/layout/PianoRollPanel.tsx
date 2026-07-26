@@ -3770,6 +3770,10 @@ export const PianoRollPanel: React.FC = () => {
                                         playbackRate: sourceSpan / nextLength,
                                     }),
                                 );
+                                // The backend remaps the edited pitch contour
+                                // to the new clip geometry. Reload it so the
+                                // visible line stretches with the audio.
+                                bumpRefreshToken();
                             } else {
                                 // Shift the complete note contour (center,
                                 // drift and modulation) instead of replacing
@@ -3793,6 +3797,7 @@ export const PianoRollPanel: React.FC = () => {
         },
         [
             editParam,
+            bumpRefreshToken,
             handleEditOp,
             interactions,
             invalidate,

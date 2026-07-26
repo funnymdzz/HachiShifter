@@ -565,8 +565,72 @@ pub(super) fn apply_clip_linked_params(
     payload
 }
 
-#[allow(clippy::too_many_arguments)]
+fn remap_edited_pitch_for_clip_geometry(
+    timeline: &mut crate::state::TimelineState,
+    root_track_id: &str,
+    before: &crate::state::Clip,
+    after: &crate::state::Clip,
+) {
+    if (before.start_sec - after.start_sec).abs() <= 1e-7
+        && (before.length_sec - after.length_sec).abs() <= 1e-7
+    {
+        return;
+    }
+    let Some(entry) = timeline.params_by_root_track.get_mut(root_track_id) else {
+        return;
+    };
+    if !entry.pitch_edit_user_modified || entry.pitch_edit.is_empty() {
+        return;
+    }
 
+    let frame_sec = entry.frame_period_ms.max(0.1) / 1000.0;
+    let old_start = before.start_sec.max(0.0);
+    let old_end = (before.start_sec + before.length_sec.max(frame_sec)).max(old_start + frame_sec);
+    let new_start = after.start_sec.max(0.0);
+    let new_end = (after.start_sec + after.length_sec.max(frame_sec)).max(new_start + frame_sec);
+    let old_curve = entry.pitch_edit.clone();
+    let frame_at = |time: f64| (time.max(0.0) / frame_sec).round().max(0.0) as usize;
+    let old_first = frame_at(old_start);
+    let old_last = frame_at(old_end).saturating_add(1);
+    let new_first = frame_at(new_start);
+    let new_last = frame_at(new_end).saturating_add(1);
+    let required = old_last.max(new_last).max(entry.pitch_orig.len());
+    if entry.pitch_edit.len() < required {
+        let existing = entry.pitch_edit.len();
+        entry.pitch_edit.resize(required, 0.0);
+        for index in existing..required {
+            entry.pitch_edit[index] = entry.pitch_orig.get(index).copied().unwrap_or(0.0);
+        }
+    }
+
+    for index in old_first..old_last.min(entry.pitch_edit.len()) {
+        if index < new_first || index >= new_last {
+            entry.pitch_edit[index] = entry.pitch_orig.get(index).copied().unwrap_or(0.0);
+        }
+    }
+
+    let old_span = (old_end - old_start).max(frame_sec);
+    let new_span = (new_end - new_start).max(frame_sec);
+    for index in new_first..new_last.min(entry.pitch_edit.len()) {
+        let destination_time = index as f64 * frame_sec;
+        let unit = ((destination_time - new_start) / new_span).clamp(0.0, 1.0);
+        let source_frame = (old_start + unit * old_span) / frame_sec;
+        let left = source_frame.floor().max(0.0) as usize;
+        let right = left.saturating_add(1).min(old_curve.len().saturating_sub(1));
+        let fraction = (source_frame - left as f64).clamp(0.0, 1.0) as f32;
+        let a = old_curve.get(left).copied().unwrap_or(0.0);
+        let b = old_curve.get(right).copied().unwrap_or(a);
+        entry.pitch_edit[index] = if a > 0.0 && b > 0.0 {
+            a + (b - a) * fraction
+        } else if fraction < 0.5 {
+            a
+        } else {
+            b
+        };
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) fn set_clip_state(
     state: State<'_, AppState>,
     clip_id: String,
@@ -589,6 +653,9 @@ pub(super) fn set_clip_state(
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
     let previous_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
+    let previous_root_track_id = previous_clip
+        .as_ref()
+        .and_then(|clip| tl.resolve_root_track_id(&clip.track_id));
     // checkpoint 默认为 true，但可以通过传递 false 来抑制 undo checkpoint
     // 这在 undo group 内进行多次操作时很有用
     let do_checkpoint = checkpoint.unwrap_or(true);
@@ -616,6 +683,13 @@ pub(super) fn set_clip_state(
         },
     );
     let next_clip = tl.clips.iter().find(|clip| clip.id == clip_id).cloned();
+    if let (Some(root_track_id), Some(before), Some(after)) = (
+        previous_root_track_id.as_deref(),
+        previous_clip.as_ref(),
+        next_clip.as_ref(),
+    ) {
+        remap_edited_pitch_for_clip_geometry(&mut tl, root_track_id, before, after);
+    }
     let root_track_id = tl
         .clips
         .iter()
