@@ -6,6 +6,13 @@ pub enum UserStretchAlgorithm {
     Linear,
     Signalsmith,
     Soundtouch,
+    /// Transient-aware note-object workflow reconstructed from the Melodyne
+    /// analysis.  Signalsmith supplies the phase-coherent periodic path while
+    /// short attacks are re-anchored from the source below.
+    MelodyneHybrid,
+    /// Preserve the fixed consonant and extend the remaining vowel/tail by
+    /// looping it with short equal-power crossfades.
+    Loop,
 }
 
 impl Default for UserStretchAlgorithm {
@@ -20,6 +27,8 @@ impl UserStretchAlgorithm {
             Self::Linear => StretchAlgorithm::LinearResample,
             Self::Signalsmith => StretchAlgorithm::SignalsmithStretch,
             Self::Soundtouch => StretchAlgorithm::SoundTouchDll,
+            Self::MelodyneHybrid => StretchAlgorithm::MelodyneHybrid,
+            Self::Loop => StretchAlgorithm::LoopVowel,
         }
     }
 }
@@ -38,6 +47,14 @@ pub enum StretchAlgorithm {
 
     /// Default time-stretch implementation via SoundTouch Windows DLL.
     SoundTouchDll,
+
+    /// Phase-coherent stretch plus source-aligned transient anchoring.
+    MelodyneHybrid,
+
+    /// Crossfaded looping, intended for sustained vowels or user-selected
+    /// cyclic material.  Fixed consonants are handled by
+    /// `time_stretch_with_fixed_prefix` before this stage.
+    LoopVowel,
 
     /// Desired: zplane Elastique (Soloist) time-stretch preserving pitch + formants.
     /// This requires integrating the Elastique SDK (commercial).
@@ -248,6 +265,138 @@ fn preserve_hard_silence_after_stretch(
     }
 }
 
+fn signalsmith_stretch(
+    input: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    out_frames: usize,
+) -> Vec<f32> {
+    let in_frames = if channels == 0 { 0 } else { input.len() / channels };
+    if in_frames < 2 || out_frames < 2 {
+        return linear_time_stretch_interleaved(input, channels, out_frames);
+    }
+    let ratio = (out_frames as f64) / (in_frames as f64);
+    let result = crate::sstretch::try_time_stretch_interleaved_realtime(
+        input,
+        channels,
+        sample_rate.max(1),
+        ratio,
+        out_frames,
+    )
+    .or_else(|_| {
+        crate::sstretch::try_time_stretch_interleaved_offline(
+            input,
+            channels,
+            sample_rate.max(1),
+            ratio,
+            out_frames,
+        )
+    });
+    match result {
+        Ok(mut out) => {
+            preserve_hard_silence_after_stretch(input, &mut out, channels, sample_rate.max(1));
+            out.resize(out_frames * channels, 0.0);
+            out
+        }
+        Err(e) => {
+            if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+                eprintln!("time_stretch: SignalsmithStretch failed, falling back: {e}");
+            }
+            linear_time_stretch_interleaved(input, channels, out_frames)
+        }
+    }
+}
+
+/// Re-anchor short high-flux attacks after the periodic/phase-coherent path.
+/// This follows the analysed Melodyne split between stable periodic material
+/// and attack/noise material without depending on proprietary constants.
+fn anchor_transients(
+    input: &[f32],
+    output: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+) {
+    if channels == 0 || input.len() < channels * 8 || output.len() < channels * 8 {
+        return;
+    }
+    let in_frames = input.len() / channels;
+    let out_frames = output.len() / channels;
+    let block = ((sample_rate as usize) / 200).max(8); // about 5 ms
+    let mut flux = Vec::new();
+    let mut previous = 0.0f32;
+    for start in (0..in_frames).step_by(block) {
+        let end = (start + block).min(in_frames);
+        let mut energy = 0.0f32;
+        for frame in start..end {
+            for channel in 0..channels {
+                energy += input[frame * channels + channel].abs();
+            }
+        }
+        energy /= ((end - start).max(1) * channels) as f32;
+        flux.push((start, (energy - previous).max(0.0)));
+        previous = energy;
+    }
+    if flux.is_empty() {
+        return;
+    }
+    let mean = flux.iter().map(|(_, value)| *value).sum::<f32>() / flux.len() as f32;
+    let threshold = (mean * 3.0).max(0.004);
+    let attack_frames = ((sample_rate as usize) * 8 / 1000).max(8);
+    for (source_center, value) in flux {
+        if value < threshold {
+            continue;
+        }
+        let target_center = ((source_center as f64) * out_frames as f64 / in_frames as f64)
+            .round() as usize;
+        for offset in 0..attack_frames {
+            let source_frame = source_center.saturating_add(offset);
+            let target_frame = target_center.saturating_add(offset);
+            if source_frame >= in_frames || target_frame >= out_frames {
+                break;
+            }
+            let phase = offset as f32 / attack_frames as f32;
+            let weight = (1.0 - phase).powi(2).clamp(0.0, 1.0);
+            for channel in 0..channels {
+                let src = input[source_frame * channels + channel];
+                let dst = &mut output[target_frame * channels + channel];
+                *dst = *dst * (1.0 - weight) + src * weight;
+            }
+        }
+    }
+}
+
+fn loop_stretch_interleaved(
+    input: &[f32],
+    channels: usize,
+    out_frames: usize,
+) -> Vec<f32> {
+    if input.is_empty() || channels == 0 || out_frames == 0 {
+        return Vec::new();
+    }
+    let in_frames = input.len() / channels;
+    if out_frames <= in_frames {
+        return linear_time_stretch_interleaved(input, channels, out_frames);
+    }
+    let mut out = vec![0.0f32; out_frames * channels];
+    let crossfade = (in_frames / 8).clamp(8, 2048).min(in_frames / 2);
+    for frame in 0..out_frames {
+        let source_frame = frame % in_frames;
+        for channel in 0..channels {
+            let mut value = input[source_frame * channels + channel];
+            if frame >= in_frames && source_frame < crossfade {
+                let previous_frame = in_frames - crossfade + source_frame;
+                let phase = source_frame as f32 / crossfade.max(1) as f32;
+                let fade_in = (phase * std::f32::consts::FRAC_PI_2).sin();
+                let fade_out = (phase * std::f32::consts::FRAC_PI_2).cos();
+                value = input[previous_frame * channels + channel] * fade_out
+                    + value * fade_in;
+            }
+            out[frame * channels + channel] = value;
+        }
+    }
+    out
+}
+
 pub fn time_stretch_interleaved(
     input: &[f32],
     channels: usize,
@@ -260,56 +409,14 @@ pub fn time_stretch_interleaved(
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
         StretchAlgorithm::SignalsmithStretch => {
-            // Signalsmith Stretch: time ratio = out / in.
-            let in_frames = if channels == 0 {
-                0
-            } else {
-                input.len() / channels
-            };
-            if in_frames < 2 || out_frames < 2 {
-                return linear_time_stretch_interleaved(input, channels, out_frames);
-            }
-            let ratio = (out_frames as f64) / (in_frames as f64);
-
-            // 优先使用实时模式，与 stretch_stream 路径统一。
-            // 若实时模式失败，回退到离线模式。
-            let result = crate::sstretch::try_time_stretch_interleaved_realtime(
-                input,
-                channels,
-                sample_rate.max(1),
-                ratio,
-                out_frames,
-            )
-            .or_else(|_| {
-                crate::sstretch::try_time_stretch_interleaved_offline(
-                    input,
-                    channels,
-                    sample_rate.max(1),
-                    ratio,
-                    out_frames,
-                )
-            });
-
-            match result {
-                Ok(mut out) => {
-                    // 确保输出长度精确匹配请求
-                    preserve_hard_silence_after_stretch(
-                        input,
-                        &mut out,
-                        channels,
-                        sample_rate.max(1),
-                    );
-                    out.resize(out_frames * channels, 0.0);
-                    out
-                }
-                Err(e) => {
-                    if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
-                        eprintln!("time_stretch: SignalsmithStretch failed, falling back: {e}");
-                    }
-                    linear_time_stretch_interleaved(input, channels, out_frames)
-                }
-            }
+            signalsmith_stretch(input, channels, sample_rate, out_frames)
         }
+        StretchAlgorithm::MelodyneHybrid => {
+            let mut out = signalsmith_stretch(input, channels, sample_rate, out_frames);
+            anchor_transients(input, &mut out, channels, sample_rate.max(1));
+            out
+        }
+        StretchAlgorithm::LoopVowel => loop_stretch_interleaved(input, channels, out_frames),
         StretchAlgorithm::SoundTouchDll => {
             let in_frames = if channels == 0 {
                 0

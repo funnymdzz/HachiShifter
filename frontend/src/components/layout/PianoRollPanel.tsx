@@ -38,6 +38,8 @@ import {
     createClipsRemote,
     addTrackRemote,
     importMidiAsClip,
+    setClipStateRemote,
+    setProjectStretchSettingsRemote,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
 import { useAppTheme } from "../../theme/AppThemeProvider";
@@ -46,7 +48,10 @@ import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import { coreApi } from "../../services/api/core";
 import { webApi } from "../../services/webviewApi";
-import type { ClipSampleAnnotationsResult } from "../../services/api/timeline";
+import type {
+    ClipSampleAnnotationsResult,
+    SampleRegionAnnotation,
+} from "../../services/api/timeline";
 import type { ParamFramesPayload } from "../../types/api";
 import {
     degreeInputToScaleSteps,
@@ -137,6 +142,7 @@ import {
     MelodynePitchMacroPanel,
     type MelodyneMacroValues,
 } from "./MelodynePitchMacroPanel";
+import { MelodyneWrenchPanel } from "./MelodyneWrenchPanel";
 import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
@@ -451,12 +457,16 @@ export const PianoRollPanel: React.FC = () => {
         noteIndex: number;
         midiNote: number;
     } | null>(null);
+    const [showMelodyneWrench, setShowMelodyneWrench] = useState(false);
+    const [activeSampleNoteIndex, setActiveSampleNoteIndex] = useState<number | null>(null);
+    const [sampleToolBusy, setSampleToolBusy] = useState(false);
 
     useEffect(() => {
         let canceled = false;
         const clipId = selectedAudioClip?.id;
         setSampleAnalysis(null);
         setNoteDragPreview(null);
+        setActiveSampleNoteIndex(null);
         if (!clipId) return;
 
         const load = async () => {
@@ -1825,6 +1835,72 @@ export const PianoRollPanel: React.FC = () => {
         [bumpRefreshToken, invalidate, secPerBeat, selectedAudioClip, t],
     );
 
+    const selectSampleNote = useCallback(
+        (noteIndex: number) => {
+            const note = sampleNoteDisplay.notes.find((item) => item.noteIndex === noteIndex);
+            if (!note) return;
+            const selection = {
+                aBeat: note.startSec / secPerBeat,
+                bBeat: note.endSec / secPerBeat,
+            };
+            setActiveSampleNoteIndex(noteIndex);
+            selectionRef.current = selection;
+            setSelectionUi(selection);
+            invalidate();
+        },
+        [invalidate, sampleNoteDisplay.notes, secPerBeat],
+    );
+
+    const changeSampleRegions = useCallback((annotations: SampleRegionAnnotation[]) => {
+        setSampleAnalysis((current) => (current ? { ...current, annotations } : current));
+    }, []);
+
+    const selectSampleRegion = useCallback((active_annotation_index: number) => {
+        setSampleAnalysis((current) =>
+            current ? { ...current, active_annotation_index } : current,
+        );
+    }, []);
+
+    const saveInlineSampleAnnotations = useCallback(async () => {
+        if (!selectedAudioClip || !sampleAnalysis) return;
+        setSampleToolBusy(true);
+        try {
+            const result = await webApi.saveClipSampleAnnotations(
+                selectedAudioClip.id,
+                sampleAnalysis.annotations,
+                sampleAnalysis.active_annotation_index,
+            );
+            if (!result.ok) throw new Error(result.error);
+            setSampleAnalysis((current) =>
+                current
+                    ? {
+                          ...current,
+                          annotations: result.annotations,
+                          active_annotation_index: result.active_annotation_index,
+                      }
+                    : current,
+            );
+            window.dispatchEvent(
+                new CustomEvent("hachi-sample-annotations-changed", {
+                    detail: { clipId: selectedAudioClip.id },
+                }),
+            );
+        } finally {
+            setSampleToolBusy(false);
+        }
+    }, [sampleAnalysis, selectedAudioClip]);
+
+    const redetectInlineSampleAnnotations = useCallback(async () => {
+        if (!selectedAudioClip) return;
+        setSampleToolBusy(true);
+        try {
+            const result = await webApi.redetectClipSampleAnnotations(selectedAudioClip.id);
+            if (result.ok) setSampleAnalysis(result);
+        } finally {
+            setSampleToolBusy(false);
+        }
+    }, [selectedAudioClip]);
+
     const referencePitchOverlays = useMemo((): ReferencePitchOverlay[] => {
         if (editParam !== "pitch") return [];
         return visibleReferenceRootTrackIds
@@ -3118,6 +3194,36 @@ export const PianoRollPanel: React.FC = () => {
     // Keep the ref in sync so usePianoRollInteractions can dispatch edit ops
     handleEditActionRef.current = (op: string) => void handleEditOp(op);
 
+    const editSelectedNoteConnection = useCallback(
+        async (connect: boolean) => {
+            if (activeSampleNoteIndex == null) return;
+            const notes = sampleNoteDisplay.notes;
+            const index = notes.findIndex((note) => note.noteIndex === activeSampleNoteIndex);
+            if (index < 0) return;
+            const current = notes[index];
+            const next = notes[index + 1];
+            const boundary = next
+                ? (current.endSec + next.startSec) / 2
+                : current.endSec;
+            const radius = connect ? 0.09 : 0.025;
+            const selection = {
+                aBeat: Math.max(0, boundary - radius) / secPerBeat,
+                bBeat: (boundary + radius) / secPerBeat,
+            };
+            selectionRef.current = selection;
+            setSelectionUi(selection);
+            if (connect) {
+                await handleEditOp("smooth", { strength: 88 });
+            } else {
+                // Restoring the narrow transition removes the generated
+                // smoothing bridge while leaving both note contours intact.
+                await handleEditOp("initialize");
+            }
+            invalidate();
+        },
+        [activeSampleNoteIndex, handleEditOp, invalidate, sampleNoteDisplay.notes, secPerBeat],
+    );
+
     // Listen for edit operations dispatched from MenuBar
     useEffect(() => {
         const handler = (e: Event) => {
@@ -3386,6 +3492,164 @@ export const PianoRollPanel: React.FC = () => {
                 const rect = canvas.getBoundingClientRect();
                 const localX = event.clientX - rect.left;
                 const localY = event.clientY - rect.top;
+                if (
+                    showMelodyneWrench &&
+                    selectedAudioClip &&
+                    sampleAnalysis &&
+                    sampleNoteDisplay.timing
+                ) {
+                    const timing = sampleNoteDisplay.timing;
+                    const markers = [
+                        ["start", timing.regionStartSec],
+                        ["fixed", timing.fixedEndSec],
+                        ["alignment", timing.alignmentSec],
+                        ["end", timing.regionEndSec],
+                    ] as const;
+                    const marker = markers.find(
+                        ([, time]) =>
+                            Math.abs(
+                                localX -
+                                    (time * pxPerSecRef.current - scrollLeftRef.current),
+                            ) <= 7,
+                    );
+                    if (marker) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const activeIndex = Math.min(
+                            sampleAnalysis.active_annotation_index,
+                            sampleAnalysis.annotations.length - 1,
+                        );
+                        const original = sampleAnalysis.annotations[activeIndex];
+                        if (!original) return;
+                        const sourceStart = Math.max(0, selectedAudioClip.sourceStartSec);
+                        const sourceEnd = Math.max(
+                            sourceStart + 1e-6,
+                            selectedAudioClip.sourceEndSec,
+                        );
+                        const sourceSpan = sourceEnd - sourceStart;
+                        const targetSpan = Math.max(1e-6, selectedAudioClip.lengthSec);
+                        const fixedLocal = Math.min(
+                            Math.max(
+                                0,
+                                original.region_start_sec +
+                                    original.fixed_duration_sec -
+                                    sourceStart,
+                            ),
+                            sourceSpan - 1e-6,
+                            targetSpan - 1e-6,
+                        );
+                        const timelineToSource = (timelineSec: number) => {
+                            const local = Math.max(
+                                0,
+                                Math.min(targetSpan, timelineSec - selectedAudioClip.startSec),
+                            );
+                            const sourceLocal =
+                                fixedLocal > 1e-6 && local > fixedLocal
+                                    ? fixedLocal +
+                                      ((local - fixedLocal) * (sourceSpan - fixedLocal)) /
+                                          Math.max(1e-6, targetSpan - fixedLocal)
+                                    : local;
+                            return sourceStart + sourceLocal;
+                        };
+                        let latestAnnotations = sampleAnalysis.annotations;
+                        const pointerId = event.pointerId;
+                        canvas.setPointerCapture(pointerId);
+                        const onMove = (moveEvent: globalThis.PointerEvent) => {
+                            const currentRect = canvas.getBoundingClientRect();
+                            const x = moveEvent.clientX - currentRect.left;
+                            const timelineSec =
+                                (scrollLeftRef.current + x) /
+                                Math.max(1e-9, pxPerSecRef.current);
+                            const sourceSec = timelineToSource(timelineSec);
+                            const fixedEnd =
+                                original.region_start_sec + original.fixed_duration_sec;
+                            let next = original;
+                            if (marker[0] === "start") {
+                                const start = Math.min(
+                                    original.region_end_sec - 0.001,
+                                    Math.max(0, sourceSec),
+                                );
+                                next = {
+                                    ...original,
+                                    region_start_sec: start,
+                                    fixed_duration_sec: Math.max(0, fixedEnd - start),
+                                    note_alignment_sec: Math.max(
+                                        start,
+                                        original.note_alignment_sec,
+                                    ),
+                                };
+                            } else if (marker[0] === "fixed") {
+                                next = {
+                                    ...original,
+                                    fixed_duration_sec:
+                                        Math.min(
+                                            original.region_end_sec,
+                                            Math.max(original.region_start_sec, sourceSec),
+                                        ) - original.region_start_sec,
+                                };
+                            } else if (marker[0] === "alignment") {
+                                next = {
+                                    ...original,
+                                    note_alignment_sec: Math.min(
+                                        original.region_end_sec,
+                                        Math.max(original.region_start_sec, sourceSec),
+                                    ),
+                                };
+                            } else {
+                                const end = Math.max(
+                                    original.region_start_sec + 0.001,
+                                    sourceSec,
+                                );
+                                next = {
+                                    ...original,
+                                    region_end_sec: end,
+                                    fixed_duration_sec: Math.min(
+                                        original.fixed_duration_sec,
+                                        end - original.region_start_sec,
+                                    ),
+                                    note_alignment_sec: Math.min(
+                                        end,
+                                        original.note_alignment_sec,
+                                    ),
+                                };
+                            }
+                            latestAnnotations = sampleAnalysis.annotations.map((row, index) =>
+                                index === activeIndex ? next : row,
+                            );
+                            setSampleAnalysis({
+                                ...sampleAnalysis,
+                                annotations: latestAnnotations,
+                            });
+                            invalidate();
+                        };
+                        const onUp = async () => {
+                            window.removeEventListener("pointermove", onMove);
+                            window.removeEventListener("pointerup", onUp);
+                            window.removeEventListener("pointercancel", onUp);
+                            const result = await webApi.saveClipSampleAnnotations(
+                                selectedAudioClip.id,
+                                latestAnnotations,
+                                activeIndex,
+                            );
+                            if (result.ok) {
+                                setSampleAnalysis((current) =>
+                                    current
+                                        ? {
+                                              ...current,
+                                              annotations: result.annotations,
+                                              active_annotation_index:
+                                                  result.active_annotation_index,
+                                          }
+                                        : current,
+                                );
+                            }
+                        };
+                        window.addEventListener("pointermove", onMove);
+                        window.addEventListener("pointerup", onUp);
+                        window.addEventListener("pointercancel", onUp);
+                        return;
+                    }
+                }
                 const pointerSec =
                     (scrollLeftRef.current + localX) / Math.max(1e-9, pxPerSecRef.current);
                 const hit = [...sampleNoteDisplay.notes].reverse().find((note) => {
@@ -3408,11 +3672,22 @@ export const PianoRollPanel: React.FC = () => {
                     };
                     selectionRef.current = selection;
                     setSelectionUi(selection);
+                    setActiveSampleNoteIndex(hit.noteIndex);
                     invalidate();
 
                     const pointerId = event.pointerId;
                     canvas.setPointerCapture(pointerId);
+                    const hitStartX = hit.startSec * pxPerSecRef.current - scrollLeftRef.current;
+                    const hitEndX = hit.endSec * pxPerSecRef.current - scrollLeftRef.current;
+                    const edgeMode = showMelodyneWrench
+                        ? Math.abs(localX - hitStartX) <= 7
+                            ? "start"
+                            : Math.abs(localX - hitEndX) <= 7
+                              ? "end"
+                              : null
+                        : null;
                     let targetMidi = hit.midiNote;
+                    let targetEdgeSec = edgeMode === "start" ? hit.startSec : hit.endSec;
                     let moved = false;
                     const onMove = (moveEvent: globalThis.PointerEvent) => {
                         if ((moveEvent.buttons & 1) !== 1) {
@@ -3420,6 +3695,33 @@ export const PianoRollPanel: React.FC = () => {
                             return;
                         }
                         const currentRect = canvas.getBoundingClientRect();
+                        if (edgeMode) {
+                            const currentX = moveEvent.clientX - currentRect.left;
+                            const rawSec =
+                                (scrollLeftRef.current + currentX) /
+                                Math.max(1e-9, pxPerSecRef.current);
+                            const gridSec = gridStepBeats(s.grid) * secPerBeat;
+                            const snappedSec = s.gridSnap
+                                ? Math.round(rawSec / gridSec) * gridSec
+                                : rawSec;
+                            targetEdgeSec =
+                                edgeMode === "start"
+                                    ? Math.min(hit.endSec - 0.02, snappedSec)
+                                    : Math.max(hit.startSec + 0.02, snappedSec);
+                            moved = moved || Math.abs(moveEvent.clientX - event.clientX) >= 2;
+                            const previewSelection = {
+                                aBeat:
+                                    (edgeMode === "start" ? targetEdgeSec : hit.startSec) /
+                                    secPerBeat,
+                                bBeat:
+                                    (edgeMode === "end" ? targetEdgeSec : hit.endSec) /
+                                    secPerBeat,
+                            };
+                            selectionRef.current = previewSelection;
+                            setSelectionUi(previewSelection);
+                            invalidate();
+                            return;
+                        }
                         const currentY = moveEvent.clientY - currentRect.top;
                         const rawMidi = yToValue("pitch", currentY, currentRect.height) - 0.5;
                         targetMidi = s.pitchSnapEnabled
@@ -3436,10 +3738,37 @@ export const PianoRollPanel: React.FC = () => {
                         window.removeEventListener("pointerup", onUp);
                         window.removeEventListener("pointercancel", onUp);
                         if (moved) {
-                            await handleEditOp("setPitch", {
-                                value: targetMidi,
-                                edgeSmoothnessPercent: s.edgeSmoothnessPercent,
-                            });
+                            if (edgeMode && selectedAudioClip) {
+                                const delta =
+                                    edgeMode === "end"
+                                        ? targetEdgeSec - hit.endSec
+                                        : hit.startSec - targetEdgeSec;
+                                const nextLength = Math.max(0.05, selectedAudioClip.lengthSec + delta);
+                                const sourceSpan = Math.max(
+                                    0.001,
+                                    selectedAudioClip.sourceEndSec -
+                                        selectedAudioClip.sourceStartSec,
+                                );
+                                await dispatch(
+                                    setClipStateRemote({
+                                        clipId: selectedAudioClip.id,
+                                        startSec:
+                                            edgeMode === "start"
+                                                ? selectedAudioClip.startSec - delta
+                                                : undefined,
+                                        lengthSec: nextLength,
+                                        playbackRate: sourceSpan / nextLength,
+                                    }),
+                                );
+                            } else {
+                                // Shift the complete note contour (center,
+                                // drift and modulation) instead of replacing
+                                // every frame with a flat MIDI value.
+                                await handleEditOp("transposeCents", {
+                                    cents: (targetMidi - hit.midiNote) * 100,
+                                    edgeSmoothnessPercent: s.edgeSmoothnessPercent,
+                                });
+                            }
                         }
                         setNoteDragPreview(null);
                         invalidate();
@@ -3458,12 +3787,98 @@ export const PianoRollPanel: React.FC = () => {
             interactions,
             invalidate,
             s.edgeSmoothnessPercent,
+            s.grid,
+            s.gridSnap,
             s.pitchSnapEnabled,
             s.toolMode,
             sampleNoteDisplay.notes,
+            sampleNoteDisplay.timing,
+            sampleAnalysis,
             secPerBeat,
+            selectedAudioClip,
+            showMelodyneWrench,
+            dispatch,
             valueToY,
             yToValue,
+        ],
+    );
+
+    const onPianoCanvasDoubleClick = useCallback(
+        async (event: React.MouseEvent<HTMLCanvasElement>) => {
+            if (!showMelodyneWrench || !selectedAudioClip || !sampleAnalysis) return;
+            const timing = sampleNoteDisplay.timing;
+            if (!timing) return;
+            const rect = event.currentTarget.getBoundingClientRect();
+            const localX = event.clientX - rect.left;
+            const alignmentX =
+                timing.alignmentSec * pxPerSecRef.current - scrollLeftRef.current;
+            if (Math.abs(localX - alignmentX) > 10) return;
+            event.preventDefault();
+            event.stopPropagation();
+
+            const rawTimelineSec =
+                (scrollLeftRef.current + localX) / Math.max(1e-9, pxPerSecRef.current);
+            const gridSec = Math.max(1e-6, gridStepBeats(s.grid) * secPerBeat);
+            const snappedTimelineSec = Math.round(rawTimelineSec / gridSec) * gridSec;
+            const sourceStart = Math.max(0, selectedAudioClip.sourceStartSec);
+            const sourceEnd = Math.max(sourceStart + 1e-6, selectedAudioClip.sourceEndSec);
+            const sourceSpan = sourceEnd - sourceStart;
+            const targetSpan = Math.max(1e-6, selectedAudioClip.lengthSec);
+            const activeIndex = Math.min(
+                sampleAnalysis.active_annotation_index,
+                sampleAnalysis.annotations.length - 1,
+            );
+            const active = sampleAnalysis.annotations[activeIndex];
+            if (!active) return;
+            const fixed = Math.min(
+                Math.max(0, active.region_start_sec + active.fixed_duration_sec - sourceStart),
+                sourceSpan - 1e-6,
+                targetSpan - 1e-6,
+            );
+            const timelineLocal = Math.max(
+                0,
+                Math.min(targetSpan, snappedTimelineSec - selectedAudioClip.startSec),
+            );
+            const sourceLocal =
+                fixed > 1e-6 && timelineLocal > fixed
+                    ? fixed +
+                      ((timelineLocal - fixed) * (sourceSpan - fixed)) /
+                          Math.max(1e-6, targetSpan - fixed)
+                    : timelineLocal;
+            const note_alignment_sec = Math.min(
+                active.region_end_sec,
+                Math.max(active.region_start_sec, sourceStart + sourceLocal),
+            );
+            const annotations = sampleAnalysis.annotations.map((row, index) =>
+                index === activeIndex ? { ...row, note_alignment_sec } : row,
+            );
+            setSampleAnalysis({ ...sampleAnalysis, annotations });
+            const result = await webApi.saveClipSampleAnnotations(
+                selectedAudioClip.id,
+                annotations,
+                activeIndex,
+            );
+            if (result.ok) {
+                setSampleAnalysis((current) =>
+                    current
+                        ? {
+                              ...current,
+                              annotations: result.annotations,
+                              active_annotation_index: result.active_annotation_index,
+                          }
+                        : current,
+                );
+            }
+            invalidate();
+        },
+        [
+            invalidate,
+            s.grid,
+            sampleAnalysis,
+            sampleNoteDisplay.timing,
+            secPerBeat,
+            selectedAudioClip,
+            showMelodyneWrench,
         ],
     );
 
@@ -4251,6 +4666,28 @@ export const PianoRollPanel: React.FC = () => {
                                 </DropdownMenu.Root>
                             ) : null}
                             {editParam === "pitch" && selectedAudioClip ? (
+                                <IconButton
+                                    size="1"
+                                    variant={showMelodyneWrench ? "solid" : "soft"}
+                                    color={showMelodyneWrench ? "blue" : "gray"}
+                                    onClick={() =>
+                                        setShowMelodyneWrench((current) => !current)
+                                    }
+                                    title={tAny("melodyne_wrench_title")}
+                                    style={{ cursor: "pointer" }}
+                                >
+                                    <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                                        <path
+                                            d="M9.1 2.1a3.1 3.1 0 0 0-3.8 3.8L2.1 9.1a1.55 1.55 0 1 0 2.2 2.2l3.2-3.2a3.1 3.1 0 0 0 3.8-3.8L9.5 6.1 7.9 4.5 9.1 2.1Z"
+                                            stroke="currentColor"
+                                            strokeWidth="1.15"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        />
+                                    </svg>
+                                </IconButton>
+                            ) : null}
+                            {editParam === "pitch" && selectedAudioClip ? (
                                 <Button
                                     size="1"
                                     variant={showPitchMacro ? "solid" : "soft"}
@@ -4278,6 +4715,45 @@ export const PianoRollPanel: React.FC = () => {
                     ) : null}
                 </Flex>
             </Flex>
+
+            {editParam === "pitch" && selectedAudioClip && showMelodyneWrench ? (
+                <MelodyneWrenchPanel
+                    analysis={sampleAnalysis}
+                    activeNoteIndex={activeSampleNoteIndex}
+                    stretchAlgorithm={
+                        s.project.stretchAlgorithmOverride ?? s.defaultStretchAlgorithm
+                    }
+                    variableHopEnabled={
+                        s.project.hifiganMelStretchOverride ?? s.defaultHifiganMelStretch
+                    }
+                    busy={sampleToolBusy}
+                    onSelectNote={selectSampleNote}
+                    onSelectRegion={selectSampleRegion}
+                    onChangeRegions={changeSampleRegions}
+                    onSave={() => void saveInlineSampleAnnotations()}
+                    onRedetect={() => void redetectInlineSampleAnnotations()}
+                    onConnect={() => void editSelectedNoteConnection(true)}
+                    onDisconnect={() => void editSelectedNoteConnection(false)}
+                    onStretchAlgorithmChange={(stretchAlgorithmOverride) =>
+                        void dispatch(
+                            setProjectStretchSettingsRemote({
+                                stretchAlgorithmOverride,
+                                hifiganMelStretchOverride:
+                                    s.project.hifiganMelStretchOverride,
+                            }),
+                        )
+                    }
+                    onVariableHopChange={(hifiganMelStretchOverride) =>
+                        void dispatch(
+                            setProjectStretchSettingsRemote({
+                                stretchAlgorithmOverride:
+                                    s.project.stretchAlgorithmOverride,
+                                hifiganMelStretchOverride,
+                            }),
+                        )
+                    }
+                />
+            ) : null}
 
             {editParam === "pitch" && selectedAudioClip && showPitchMacro ? (
                 <MelodynePitchMacroPanel
@@ -4414,6 +4890,7 @@ export const PianoRollPanel: React.FC = () => {
                                     onPointerMove={interactions.onCanvasPointerMove}
                                     onPointerLeave={interactions.onCanvasPointerLeave}
                                     onPointerDown={onPianoCanvasPointerDown}
+                                    onDoubleClick={onPianoCanvasDoubleClick}
                                 />
                                 {s.showParamValuePopup &&
                                     paramValuePreview &&

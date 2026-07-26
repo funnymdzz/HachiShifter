@@ -259,6 +259,8 @@ impl AudioEngine {
                                 crate::soundtouch::is_available()
                             }
                             crate::time_stretch::StretchAlgorithm::SignalsmithStretch
+                            | crate::time_stretch::StretchAlgorithm::MelodyneHybrid
+                            | crate::time_stretch::StretchAlgorithm::LoopVowel
                             | crate::time_stretch::StretchAlgorithm::LinearResample => true,
                             crate::time_stretch::StretchAlgorithm::ElastiqueSoloist => false,
                         };

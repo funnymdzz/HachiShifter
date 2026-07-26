@@ -91,7 +91,13 @@ export interface ProjectMeta {
     } | null;
     beats_per_bar?: number;
     grid_size?: string;
-    stretch_algorithm_override?: "linear" | "signalsmith" | "soundtouch" | null;
+    stretch_algorithm_override?:
+        | "linear"
+        | "signalsmith"
+        | "soundtouch"
+        | "melodyne_hybrid"
+        | "loop"
+        | null;
     hifigan_mel_stretch_override?: boolean | null;
 }
 

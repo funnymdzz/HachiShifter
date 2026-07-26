@@ -1,6 +1,11 @@
 import { invoke } from "../invoke";
 
-export type StretchAlgorithmOption = "linear" | "signalsmith" | "soundtouch";
+export type StretchAlgorithmOption =
+    | "linear"
+    | "signalsmith"
+    | "soundtouch"
+    | "melodyne_hybrid"
+    | "loop";
 
 export interface UiSettings {
     autoCrossfade: boolean;

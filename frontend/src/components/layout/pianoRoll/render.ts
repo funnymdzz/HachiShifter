@@ -868,12 +868,33 @@ export function drawPianoRoll(args: {
         ctx.fillRect(xStart, 0, Math.max(0, xFixed - xStart), 6);
         ctx.fillStyle = "rgba(34, 211, 238, 0.28)";
         ctx.fillRect(xFixed, 0, Math.max(0, xEnd - xFixed), 6);
+        for (const [x, color] of [
+            [xStart, "rgba(148, 163, 184, 0.85)"],
+            [xFixed, "rgba(34, 211, 238, 0.88)"],
+            [xEnd, "rgba(148, 163, 184, 0.85)"],
+        ] as const) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x + 0.5, 0);
+            ctx.lineTo(x + 0.5, h);
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.fillRect(x - 3, 0, 7, 7);
+        }
         ctx.strokeStyle = "rgba(244, 114, 182, 0.90)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(xAlign + 0.5, 0);
         ctx.lineTo(xAlign + 0.5, h);
         ctx.stroke();
+        ctx.fillStyle = "rgba(244, 114, 182, 0.95)";
+        ctx.beginPath();
+        ctx.moveTo(xAlign - 4, 0);
+        ctx.lineTo(xAlign + 4, 0);
+        ctx.lineTo(xAlign, 7);
+        ctx.closePath();
+        ctx.fill();
         ctx.restore();
     }
 

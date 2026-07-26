@@ -171,12 +171,18 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const effectiveProjectHifiganMelStretch =
         s.project.hifiganMelStretchOverride ?? s.defaultHifiganMelStretch;
 
-    const stretchAlgorithmLabel = (value: "linear" | "signalsmith" | "soundtouch") => {
+    const stretchAlgorithmLabel = (
+        value: "linear" | "signalsmith" | "soundtouch" | "melodyne_hybrid" | "loop",
+    ) => {
         switch (value) {
             case "linear":
                 return tAny("stretch_option_linear");
             case "signalsmith":
                 return tAny("stretch_option_signalsmith");
+            case "melodyne_hybrid":
+                return tAny("stretch_option_melodyne_hybrid");
+            case "loop":
+                return tAny("stretch_option_loop");
             case "soundtouch":
             default:
                 return tAny("stretch_option_soundtouch");
@@ -591,7 +597,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                             `${tAny("stretch_inherit_global")} (${stretchAlgorithmLabel(s.defaultStretchAlgorithm)})`,
                                         )}
                                     </DropdownMenu.Item>
-                                    {(["linear", "signalsmith", "soundtouch"] as const).map(
+                                    {([
+                                        "linear",
+                                        "signalsmith",
+                                        "soundtouch",
+                                        "melodyne_hybrid",
+                                        "loop",
+                                    ] as const).map(
                                         (algorithm) => (
                                             <DropdownMenu.Item
                                                 key={algorithm}
@@ -685,7 +697,13 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                     {`${tAny("stretch_algorithm")}: ${stretchAlgorithmLabel(s.defaultStretchAlgorithm)}`}
                                 </DropdownMenu.SubTrigger>
                                 <DropdownMenu.SubContent>
-                                    {(["linear", "signalsmith", "soundtouch"] as const).map(
+                                    {([
+                                        "linear",
+                                        "signalsmith",
+                                        "soundtouch",
+                                        "melodyne_hybrid",
+                                        "loop",
+                                    ] as const).map(
                                         (algorithm) => (
                                             <DropdownMenu.Item
                                                 key={algorithm}

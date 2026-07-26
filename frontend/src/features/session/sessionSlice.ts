@@ -150,7 +150,12 @@ export type {
 
 type ClipColor = ClipInfo["color"];
 type WaveformPreview = number[] | { l: number[]; r: number[] };
-type StretchAlgorithmOption = "linear" | "signalsmith" | "soundtouch";
+type StretchAlgorithmOption =
+    | "linear"
+    | "signalsmith"
+    | "soundtouch"
+    | "melodyne_hybrid"
+    | "loop";
 type ClipFormantToolWindowState = {
     open: boolean;
     clipId: string | null;
@@ -1868,7 +1873,9 @@ const sessionSlice = createSlice({
                 const defaultStretchAlgorithm = (s as any).defaultStretchAlgorithm;
                 if (
                     defaultStretchAlgorithm != null &&
-                    ["linear", "signalsmith", "soundtouch"].includes(defaultStretchAlgorithm)
+                    ["linear", "signalsmith", "soundtouch", "melodyne_hybrid", "loop"].includes(
+                        defaultStretchAlgorithm,
+                    )
                 ) {
                     state.defaultStretchAlgorithm =
                         defaultStretchAlgorithm as StretchAlgorithmOption;

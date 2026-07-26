@@ -91,8 +91,6 @@ else {
     $ArchShort = "x64"
 }
 
-$ZipName = "$ProductName-v$Version-portable-win-$ArchShort.zip"
-$ZipPath = Join-Path $OutputDir $ZipName
 $NoModelZipName = "$ProductName-v$Version-no-model-portable-win-$ArchShort.zip"
 $NoModelZipPath = Join-Path $OutputDir $NoModelZipName
 
@@ -102,7 +100,7 @@ Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  产品名称: $ProductName"
 Write-Host "  版本:     $Version"
-Write-Host "  输出路径: $ZipPath"
+Write-Host "  输出路径: $NoModelZipPath"
 Write-Host ""
 
 # ===== 交互式选择（未指定 -SkipBuild 时） =====
@@ -202,9 +200,6 @@ Write-Host "[3/5] 组装便携包目录..." -ForegroundColor Yellow
 if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force
 }
-if (Test-Path $ZipPath) {
-    Remove-Item $ZipPath -Force
-}
 if (Test-Path $NoModelZipPath) {
     Remove-Item $NoModelZipPath -Force
 }
@@ -218,6 +213,12 @@ Write-Host "  ✓ $ProductName.exe" -ForegroundColor DarkGreen
 
 # 复制资源文件
 foreach ($res in $Resources) {
+    # Cloud builds validate/download model resources, but overwrite/update
+    # packages intentionally contain runtime files only. Existing installed
+    # models remain untouched when the ZIP is extracted over the app.
+    if ($res.Dst -like "models\*") {
+        continue
+    }
     $DstFull = Join-Path $TempDir $res.Dst
     $DstDir = Split-Path $DstFull -Parent
     if (-not (Test-Path $DstDir)) {
@@ -257,59 +258,21 @@ Write-Host "[3/5] 目录组装完成 ✓" -ForegroundColor Green
 # ===== 步骤 4: 压缩 =====
 Write-Host "[4/5] 正在压缩为 ZIP..." -ForegroundColor Yellow
 
-Compress-Archive -Path $TempDir -DestinationPath $ZipPath -CompressionLevel Optimal
-
-# Produce a lightweight overwrite/update archive. It intentionally omits the
-# models directory so extracting it over an existing installation keeps the
-# user's already-installed models in place.
-$BundledModels = Join-Path $TempDir "models"
-if (Test-Path $BundledModels) {
-    Remove-Item $BundledModels -Recurse -Force
-}
 Compress-Archive -Path $TempDir -DestinationPath $NoModelZipPath -CompressionLevel Optimal
 
 # 清理临时目录
 Remove-Item $TempDir -Recurse -Force
 
-$ZipSize = (Get-Item $ZipPath).Length
-$ZipSizeMB = [math]::Round($ZipSize / 1MB, 2)
 $NoModelZipSize = (Get-Item $NoModelZipPath).Length
 $NoModelZipSizeMB = [math]::Round($NoModelZipSize / 1MB, 2)
 
 Write-Host "[4/5] 压缩完成 ✓" -ForegroundColor Green
 
-# ===== 步骤 5: 复制 NSIS 安装包 =====
-Write-Host "[5/5] 复制 NSIS 安装包到 dist..." -ForegroundColor Yellow
-
-# NSIS installer path: look under the detected triple's bundle dir
-$NsisDir = Join-Path $ProjectRoot (Join-Path "backend\src-tauri\target" (Join-Path $DetectedTriple "release\bundle\nsis"))
-if ($ArchShort -eq "x64") {
-    $NsisPattern = "${ProductName}_${Version}_x64-setup.exe"
-}
-else {
-    $NsisPattern = "${ProductName}_${Version}_arm64-setup.exe"
-}
-$NsisExePath = Join-Path $NsisDir $NsisPattern
-
-if (Test-Path $NsisExePath) {
-    Copy-Item $NsisExePath -Destination $OutputDir
-    $NsisSize = (Get-Item (Join-Path $OutputDir $NsisPattern)).Length
-    $NsisSizeMB = [math]::Round($NsisSize / 1MB, 2)
-    Write-Host "[5/5] NSIS 安装包已复制 ✓ ($NsisSizeMB MB)" -ForegroundColor Green
-}
-else {
-    Write-Host "[5/5] 未找到 NSIS 安装包，跳过（路径: $NsisExePath）" -ForegroundColor DarkGray
-}
+Write-Host "[5/5] 仅保留不带模型的覆盖更新包 ✓" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  打包成功！" -ForegroundColor Green
-Write-Host "  便携版: $ZipPath" -ForegroundColor Green
-Write-Host "  大小:   $ZipSizeMB MB" -ForegroundColor Green
 Write-Host "  覆盖更新包（不带模型）: $NoModelZipPath" -ForegroundColor Green
 Write-Host "  大小:   $NoModelZipSizeMB MB" -ForegroundColor Green
-if (Test-Path (Join-Path $OutputDir $NsisPattern)) {
-    Write-Host "  安装包: $(Join-Path $OutputDir $NsisPattern)" -ForegroundColor Green
-    Write-Host "  大小:   $NsisSizeMB MB" -ForegroundColor Green
-}
 Write-Host "============================================" -ForegroundColor Cyan

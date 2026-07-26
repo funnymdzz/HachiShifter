@@ -580,7 +580,19 @@ impl NsfHifiganOnnx {
     }
 
     fn mel_from_audio_fast(&mut self, audio: &[f32]) -> Result<Vec<f32>, String> {
-        let hop = self.cfg.hop_size;
+        self.mel_from_audio_fast_with_hop(audio, self.cfg.hop_size)
+    }
+
+    /// Extract mel frames with a caller-selected analysis hop.  HiFiGAN still
+    /// synthesizes every frame at the model hop, so choosing
+    /// `analysis_hop = model_hop * playback_rate` performs time stretching
+    /// without flattening/interpolating spectral events along the mel axis.
+    fn mel_from_audio_fast_with_hop(
+        &mut self,
+        audio: &[f32],
+        analysis_hop: usize,
+    ) -> Result<Vec<f32>, String> {
+        let hop = analysis_hop.max(1);
         let win_size = self.cfg.win_size;
         let n_fft = self.cfg.n_fft;
 
@@ -1735,13 +1747,19 @@ impl NsfHifiganOnnx {
     ) -> Result<Vec<f32>, String> {
         let model_sr = self.cfg.sampling_rate;
 
-        // 1. 重采样到模型采样率、从原始 PCM 提取 mel [n_mels, T_orig]
+        // 1. Variable-hop mel extraction.  The earlier implementation always
+        // extracted at the model hop and then linearly resized the mel time
+        // axis.  Here the analysis hop itself follows playback_rate, retaining
+        // attack frames and formant envelopes more faithfully.
+        let variable_hop = ((self.cfg.hop_size as f64) * playback_rate.max(1e-6))
+            .round()
+            .clamp(1.0, (self.cfg.hop_size * 10).max(1) as f64) as usize;
         let mel_orig = if sample_rate == model_sr {
-            self.mel_from_audio_fast(audio_mono)?
+            self.mel_from_audio_fast_with_hop(audio_mono, variable_hop)?
         } else {
             let mut resample_buf = std::mem::take(&mut self.audio_resample_buf);
             linear_resample_mono_into(audio_mono, sample_rate, model_sr, &mut resample_buf);
-            let mel_result = self.mel_from_audio_fast(&resample_buf);
+            let mel_result = self.mel_from_audio_fast_with_hop(&resample_buf, variable_hop);
             self.audio_resample_buf = resample_buf;
             mel_result?
         };
@@ -1752,15 +1770,10 @@ impl NsfHifiganOnnx {
             return Ok(vec![0.0; target_len]);
         }
 
-        // 2. 计算拉伸后的目标帧数 T_new = T_orig / playback_rate
-        let t_new = ((t_orig as f64) / playback_rate).round().max(1.0) as usize;
-
-        // 3. mel 时间轴线性插值 [n_mels, T_orig] → [n_mels, T_new]
-        let mut mel_stretched = if (playback_rate - 1.0).abs() <= 1e-6 {
-            mel_orig
-        } else {
-            interpolate_mel_time(&mel_orig, self.cfg.num_mels, t_orig, t_new)
-        };
+        // 2. Each extracted frame is emitted at the fixed synthesis hop.  The
+        // frame count therefore already is the stretched duration.
+        let t_new = t_orig;
+        let mut mel_stretched = mel_orig;
 
         // 4. 应用共振峰偏移（在 mel 域沿频率轴做线性插值）
         let hop_sec = (self.cfg.hop_size as f64) / (model_sr.max(1) as f64);

@@ -138,7 +138,13 @@ export const setProjectStretchSettingsRemote = createAsyncThunk(
     "session/setProjectStretchSettingsRemote",
     async (
         payload: {
-            stretchAlgorithmOverride?: "linear" | "signalsmith" | "soundtouch" | null;
+            stretchAlgorithmOverride?:
+                | "linear"
+                | "signalsmith"
+                | "soundtouch"
+                | "melodyne_hybrid"
+                | "loop"
+                | null;
             hifiganMelStretchOverride?: boolean | null;
         },
         { rejectWithValue },
