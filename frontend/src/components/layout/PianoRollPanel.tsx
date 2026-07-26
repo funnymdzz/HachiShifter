@@ -3701,7 +3701,7 @@ export const PianoRollPanel: React.FC = () => {
                                 (scrollLeftRef.current + currentX) /
                                 Math.max(1e-9, pxPerSecRef.current);
                             const gridSec = gridStepBeats(s.grid) * secPerBeat;
-                            const snappedSec = s.gridSnap
+                            const snappedSec = s.gridSnapEnabled
                                 ? Math.round(rawSec / gridSec) * gridSec
                                 : rawSec;
                             targetEdgeSec =
@@ -3788,7 +3788,7 @@ export const PianoRollPanel: React.FC = () => {
             invalidate,
             s.edgeSmoothnessPercent,
             s.grid,
-            s.gridSnap,
+            s.gridSnapEnabled,
             s.pitchSnapEnabled,
             s.toolMode,
             sampleNoteDisplay.notes,
