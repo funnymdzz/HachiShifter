@@ -35,10 +35,26 @@ pub struct SamplePitchNote {
     pub confidence: f32,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SampleAudioEventKind {
+    Silence,
+    Breath,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SampleAudioEvent {
+    pub start_sec: f64,
+    pub end_sec: f64,
+    pub kind: SampleAudioEventKind,
+    pub confidence: f32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SampleAnalysis {
     pub annotations: Vec<SampleRegionAnnotation>,
     pub pitch_notes: Vec<SamplePitchNote>,
+    pub audio_events: Vec<SampleAudioEvent>,
     pub note_detector: NoteDetectorKind,
     pub detector_message: Option<String>,
 }
@@ -264,6 +280,7 @@ pub fn load_or_detect_with_game_mode(
     Ok(SampleAnalysis {
         annotations,
         pitch_notes: detected.pitch_notes,
+        audio_events: detected.audio_events,
         note_detector: detected.note_detector,
         detector_message: detected.detector_message,
     })
@@ -388,9 +405,10 @@ fn analyze_audio_uncached(
     let (regions, annotations) =
         detect_regions_and_annotations(audio_path, &mono, sample_rate, duration_sec);
     let mut fallback_pitch_notes = Vec::new();
-    for (start, end) in regions {
+    for &(start, end) in &regions {
         fallback_pitch_notes.extend(detect_pitch_notes(&mono, sample_rate, start, end));
     }
+    let audio_events = detect_silence_and_breath_events(&mono, sample_rate);
 
     let (pitch_notes, note_detector, detector_message) =
         match crate::game_detector::detect_notes(
@@ -409,6 +427,10 @@ fn analyze_audio_uncached(
                             && note.midi_note.is_finite()
                             && (0.0..=127.0).contains(&note.midi_note)
                             && note.end_sec - note.start_sec >= 0.01
+                            && regions.iter().any(|(start, end)| {
+                                let center = (note.start_sec + note.end_sec) * 0.5;
+                                center >= *start && center <= *end
+                            })
                     })
                     .map(|note| SamplePitchNote {
                         start_sec: note.start_sec,
@@ -438,9 +460,98 @@ fn analyze_audio_uncached(
     Ok(SampleAnalysis {
         annotations,
         pitch_notes,
+        audio_events,
         note_detector,
         detector_message,
     })
+}
+
+/// Add explicit silence and breath/noise events around GAME's note output.
+/// GAME is a note segmenter, so its rest probability alone is not a reliable
+/// silence detector. This lightweight acoustic post-pass combines adaptive RMS,
+/// periodicity and zero-crossing density and is deterministic on every target.
+fn detect_silence_and_breath_events(samples: &[f32], sample_rate: u32) -> Vec<SampleAudioEvent> {
+    if samples.is_empty() || sample_rate == 0 {
+        return Vec::new();
+    }
+    let window = ((sample_rate as f64 * 0.02).round() as usize).max(32);
+    let hop = ((sample_rate as f64 * 0.01).round() as usize).max(16);
+    if samples.len() < window {
+        let rms = (samples.iter().map(|value| value * value).sum::<f32>()
+            / samples.len().max(1) as f32)
+            .sqrt();
+        return (rms < 0.001).then(|| SampleAudioEvent {
+            start_sec: 0.0,
+            end_sec: samples.len() as f64 / sample_rate as f64,
+            kind: SampleAudioEventKind::Silence,
+            confidence: 1.0,
+        }).into_iter().collect();
+    }
+    let mut rms_values = Vec::new();
+    let mut starts = Vec::new();
+    for start in (0..samples.len().saturating_sub(window).saturating_add(1)).step_by(hop) {
+        let slice = &samples[start..start + window];
+        let rms = (slice.iter().map(|value| value * value).sum::<f32>() / window as f32).sqrt();
+        starts.push(start);
+        rms_values.push(rms);
+    }
+    if rms_values.is_empty() {
+        return Vec::new();
+    }
+    let peak = rms_values.iter().copied().fold(0.0f32, f32::max);
+    let mut sorted = rms_values.clone();
+    sorted.sort_by(f32::total_cmp);
+    let floor = sorted[sorted.len() / 5];
+    let silence_threshold = (floor * 2.5).max(peak * 0.012).max(0.0008);
+
+    let labels: Vec<Option<SampleAudioEventKind>> = starts
+        .iter()
+        .zip(rms_values.iter())
+        .map(|(&start, &rms)| {
+            if rms < silence_threshold {
+                return Some(SampleAudioEventKind::Silence);
+            }
+            let slice = &samples[start..start + window];
+            let crossings = slice
+                .windows(2)
+                .filter(|pair| (pair[0] >= 0.0) != (pair[1] >= 0.0))
+                .count() as f32
+                / (window - 1).max(1) as f32;
+            let time = start as f64 / sample_rate as f64;
+            let (_, periodicity) = estimate_pitch(samples, sample_rate, time, 0.04);
+            (periodicity < 0.35 && crossings > 0.055 && rms < (peak * 0.7).max(0.01))
+                .then_some(SampleAudioEventKind::Breath)
+        })
+        .collect();
+
+    let mut events = Vec::new();
+    let mut index = 0usize;
+    while index < labels.len() {
+        let Some(kind) = labels[index] else {
+            index += 1;
+            continue;
+        };
+        let begin = index;
+        while index < labels.len() && labels[index] == Some(kind) {
+            index += 1;
+        }
+        let min_frames = match kind {
+            SampleAudioEventKind::Silence => 4,
+            SampleAudioEventKind::Breath => 5,
+        };
+        if index - begin < min_frames {
+            continue;
+        }
+        let start_sec = starts[begin] as f64 / sample_rate as f64;
+        let end_sample = (starts[index - 1] + window).min(samples.len());
+        let end_sec = end_sample as f64 / sample_rate as f64;
+        let confidence = match kind {
+            SampleAudioEventKind::Silence => 1.0 - (rms_values[begin] / silence_threshold).min(1.0),
+            SampleAudioEventKind::Breath => 0.75,
+        };
+        events.push(SampleAudioEvent { start_sec, end_sec, kind, confidence });
+    }
+    events
 }
 
 pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {

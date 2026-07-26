@@ -43,6 +43,7 @@ static VSLIB_RENDERER: vslib_processor::VslibRenderer = vslib_processor::VslibRe
 pub fn get_renderer(kind: SynthPipelineKind) -> &'static dyn Renderer {
     match kind {
         SynthPipelineKind::WorldVocoder => &WORLD_RENDERER,
+        SynthPipelineKind::Mld5 => &WORLD_RENDERER,
         SynthPipelineKind::NsfHifiganOnnx => &HIFIGAN_RENDERER,
         #[cfg(feature = "vslib")]
         SynthPipelineKind::VocalShifterVslib => &VSLIB_RENDERER,
@@ -64,6 +65,7 @@ pub fn all_renderers() -> Vec<&'static dyn Renderer> {
 pub fn get_processor(kind: SynthPipelineKind) -> Box<dyn ClipProcessor> {
     match kind {
         SynthPipelineKind::WorldVocoder => Box::new(chain::world_chain()),
+        SynthPipelineKind::Mld5 => Box::new(chain::mld5_chain()),
         SynthPipelineKind::NsfHifiganOnnx => Box::new(chain::hifigan_chain()),
         #[cfg(feature = "vslib")]
         SynthPipelineKind::VocalShifterVslib => Box::new(vslib_processor::VslibProcessor),
@@ -109,7 +111,7 @@ mod tests {
 
     #[test]
     fn hifigan_mel_stretch_requires_compose_enabled() {
-        update_runtime_stretch_settings(UserStretchAlgorithm::Signalsmith, true, None, None);
+        update_runtime_stretch_settings(UserStretchAlgorithm::HifiganMelHop, true, None, None);
         assert!(!processor_handles_time_stretch(
             SynthPipelineKind::NsfHifiganOnnx,
             false,

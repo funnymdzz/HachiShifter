@@ -225,6 +225,9 @@ pub(super) fn get_param_frames(
             crate::pitch_editing::PitchEditAlgorithm::WorldVocoder => {
                 crate::world_vocoder::is_available()
             }
+            crate::pitch_editing::PitchEditAlgorithm::Mld5 => {
+                crate::world_vocoder::is_available()
+            }
             crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
                 crate::nsf_hifigan_onnx::is_available()
             }

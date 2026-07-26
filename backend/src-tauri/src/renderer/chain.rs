@@ -181,6 +181,42 @@ impl ProcessingStage for WorldVocoderStage {
     }
 }
 
+/// mld5 keeps WORLD's stable periodic synthesis and restores short attacks
+/// from the source, matching the periodic/transient split used by the editor's
+/// Melodyne-style note-object controls without shipping another model.
+pub struct Mld5VocoderStage;
+
+impl ProcessingStage for Mld5VocoderStage {
+    fn id(&self) -> &str {
+        "mld5"
+    }
+
+    fn display_name(&self) -> &str {
+        "mld5"
+    }
+
+    fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
+        if !crate::world_vocoder::is_available() {
+            return Ok(input_pcm);
+        }
+        let cc = ctx.clip_ctx;
+        let render_ctx = RenderContext {
+            mono_pcm: &input_pcm,
+            sample_rate: cc.sample_rate,
+            seg_start_sec: cc.seg_start_sec,
+            seg_end_sec: cc.seg_end_sec,
+            clip_start_sec: cc.clip_start_sec,
+            frame_period_ms: cc.frame_period_ms,
+            pitch_edit: cc.pitch_edit,
+            clip_midi: cc.clip_midi,
+            clip_id: cc.clip_id,
+        };
+        let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
+        crate::time_stretch::anchor_transients(&input_pcm, &mut output, 1, cc.sample_rate);
+        Ok(output)
+    }
+}
+
 /// Stage 1b：NSF-HiFiGAN ONNX 合成。
 pub struct HiFiGanStage;
 
@@ -247,11 +283,21 @@ impl ProcessingStage for HiFiGanStage {
             };
             let renderer = crate::renderer::hifigan::HiFiGanRenderer;
             return if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
-                renderer.render_mel_stretch_with_formant(
+                let mut output = renderer.render_mel_stretch_with_formant(
                     &render_ctx,
                     cc.playback_rate,
                     formant_curve,
-                )
+                )?;
+                // Variable Mel-hop synthesis can restart phase at the
+                // consonant/vowel boundary. Re-anchor short source attacks
+                // with smooth windows so the boundary remains click-free.
+                crate::time_stretch::anchor_transients(
+                    &input_pcm,
+                    &mut output,
+                    1,
+                    cc.sample_rate,
+                );
+                Ok(output)
             } else {
                 renderer.render_with_formant(&render_ctx, formant_curve)
             };
@@ -282,11 +328,18 @@ impl ProcessingStage for HiFiGanStage {
             };
             let renderer = crate::renderer::hifigan::HiFiGanRenderer;
             if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
-                renderer.render_mel_stretch_with_formant(
+                let mut output = renderer.render_mel_stretch_with_formant(
                     &render_ctx,
                     cc.playback_rate,
                     formant_curve,
-                )?
+                )?;
+                crate::time_stretch::anchor_transients(
+                    &harmonic,
+                    &mut output,
+                    1,
+                    cc.sample_rate,
+                );
+                output
             } else {
                 renderer.render_with_formant(&render_ctx, formant_curve)?
             }
@@ -340,6 +393,16 @@ pub fn world_chain() -> ProcessorChain {
         id: "world".into(),
         display_name: "WORLD Vocoder".into(),
         stages: vec![Box::new(WorldVocoderStage)],
+        handles_time_stretch: false,
+    }
+}
+
+/// Melodyne-inspired pitch path exposed in the UI as `mld5`.
+pub fn mld5_chain() -> ProcessorChain {
+    ProcessorChain {
+        id: "mld5".into(),
+        display_name: "mld5".into(),
+        stages: vec![Box::new(Mld5VocoderStage)],
         handles_time_stretch: false,
     }
 }

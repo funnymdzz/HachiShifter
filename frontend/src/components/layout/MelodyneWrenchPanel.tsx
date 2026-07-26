@@ -14,7 +14,7 @@ export const MelodyneWrenchPanel: React.FC<{
     analysis: Analysis | null;
     activeNoteIndex: number | null;
     stretchAlgorithm: StretchAlgorithmOption;
-    variableHopEnabled: boolean;
+    showHifiganMelHop?: boolean;
     busy?: boolean;
     onSelectNote: (index: number) => void;
     onSelectRegion: (index: number) => void;
@@ -24,12 +24,11 @@ export const MelodyneWrenchPanel: React.FC<{
     onConnect: () => void;
     onDisconnect: () => void;
     onStretchAlgorithmChange: (value: StretchAlgorithmOption) => void;
-    onVariableHopChange: (enabled: boolean) => void;
 }> = ({
     analysis,
     activeNoteIndex,
     stretchAlgorithm,
-    variableHopEnabled,
+    showHifiganMelHop = false,
     busy = false,
     onSelectNote,
     onSelectRegion,
@@ -39,11 +38,10 @@ export const MelodyneWrenchPanel: React.FC<{
     onConnect,
     onDisconnect,
     onStretchAlgorithmChange,
-    onVariableHopChange,
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [lane, setLane] = React.useState<"notes" | "segments">("notes");
+    const [lane, setLane] = React.useState<"notes" | "segments" | "events">("notes");
 
     const updateRegion = (
         index: number,
@@ -82,12 +80,24 @@ export const MelodyneWrenchPanel: React.FC<{
                 >
                     {tAny("melodyne_segment_lane")}
                 </Button>
+                <Button
+                    size="1"
+                    variant={lane === "events" ? "solid" : "soft"}
+                    color={lane === "events" ? "blue" : "gray"}
+                    onClick={() => setLane("events")}
+                >
+                    {tAny("melodyne_event_lane")}
+                </Button>
                 <div className="h-5 w-px bg-qt-border" />
                 <Text size="1" color="gray">
                     {tAny("stretch_algorithm")}
                 </Text>
                 <Select.Root
-                    value={stretchAlgorithm}
+                    value={
+                        stretchAlgorithm === "hifigan_mel_hop" && !showHifiganMelHop
+                            ? "signalsmith"
+                            : stretchAlgorithm
+                    }
                     onValueChange={(value) =>
                         onStretchAlgorithmChange(value as StretchAlgorithmOption)
                     }
@@ -98,6 +108,11 @@ export const MelodyneWrenchPanel: React.FC<{
                             {tAny("stretch_option_melodyne_hybrid")}
                         </Select.Item>
                         <Select.Item value="loop">{tAny("stretch_option_loop")}</Select.Item>
+                        {showHifiganMelHop ? (
+                            <Select.Item value="hifigan_mel_hop">
+                                {tAny("stretch_option_hifigan_mel_hop")}
+                            </Select.Item>
+                        ) : null}
                         <Select.Item value="signalsmith">
                             {tAny("stretch_option_signalsmith")}
                         </Select.Item>
@@ -109,14 +124,6 @@ export const MelodyneWrenchPanel: React.FC<{
                         </Select.Item>
                     </Select.Content>
                 </Select.Root>
-                <Button
-                    size="1"
-                    variant={variableHopEnabled ? "solid" : "soft"}
-                    color={variableHopEnabled ? "blue" : "gray"}
-                    onClick={() => onVariableHopChange(!variableHopEnabled)}
-                >
-                    {tAny("melodyne_variable_hop")}
-                </Button>
                 <Button size="1" variant="soft" disabled={busy} onClick={onRedetect}>
                     {tAny("sample_timing_redetect")}
                 </Button>
@@ -153,6 +160,28 @@ export const MelodyneWrenchPanel: React.FC<{
                     <Text size="1" color="gray" className="shrink-0">
                         {tAny("melodyne_edge_drag_hint")}
                     </Text>
+                </Flex>
+            ) : lane === "events" ? (
+                <Flex gap="1" mt="2" align="center" className="overflow-x-auto pb-1">
+                    {(analysis.audio_events ?? []).map((event, index) => (
+                        <Button
+                            key={`${event.kind}-${event.start_sec}-${index}`}
+                            size="1"
+                            variant="soft"
+                            color={event.kind === "breath" ? "amber" : "gray"}
+                            title={`${event.start_sec.toFixed(3)}–${event.end_sec.toFixed(3)} s · ${(event.confidence * 100).toFixed(0)}%`}
+                        >
+                            {event.kind === "breath"
+                                ? tAny("audio_event_breath")
+                                : tAny("audio_event_silence")}
+                            {` ${event.start_sec.toFixed(2)}–${event.end_sec.toFixed(2)}s`}
+                        </Button>
+                    ))}
+                    {(analysis.audio_events ?? []).length === 0 ? (
+                        <Text size="1" color="gray">
+                            {tAny("audio_event_none")}
+                        </Text>
+                    ) : null}
                 </Flex>
             ) : (
                 <div className="mt-2 max-h-28 overflow-auto">

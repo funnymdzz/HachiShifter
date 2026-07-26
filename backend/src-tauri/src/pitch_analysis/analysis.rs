@@ -82,6 +82,7 @@ fn build_timeline_snapshot(
                 file_mtime,
                 algo: match algo {
                     PitchAnalysisAlgo::WorldDll => "world_dll",
+                    PitchAnalysisAlgo::Mld5 => "mld5",
                     PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
                     PitchAnalysisAlgo::VocalShifterVslib => "vslib",
                     PitchAnalysisAlgo::None => "none",
@@ -324,6 +325,7 @@ fn analyze_clip_with_cache(
 
     let algo_str = match algo {
         PitchAnalysisAlgo::WorldDll => "world_dll",
+        PitchAnalysisAlgo::Mld5 => "mld5",
         PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
         PitchAnalysisAlgo::VocalShifterVslib => "vslib",
         PitchAnalysisAlgo::None => "none",
@@ -515,6 +517,7 @@ fn process_single_clip(
             file_mtime,
             algo: match algo {
                 PitchAnalysisAlgo::WorldDll => "world_dll",
+                PitchAnalysisAlgo::Mld5 => "mld5",
                 PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx",
                 PitchAnalysisAlgo::VocalShifterVslib => "vslib",
                 PitchAnalysisAlgo::None => "none",
@@ -1246,6 +1249,7 @@ pub(crate) fn compute_pitch_curve(job: &PitchJob, mut on_progress: impl FnMut(f3
     if matches!(
         job.algo,
         PitchAnalysisAlgo::WorldDll
+            | PitchAnalysisAlgo::Mld5
             | PitchAnalysisAlgo::NsfHifiganOnnx
             | PitchAnalysisAlgo::Unknown
     ) && !crate::fcpe_onnx::is_available()

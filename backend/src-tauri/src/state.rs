@@ -38,6 +38,8 @@ fn default_formant_strength() -> f64 {
 #[serde(rename_all = "snake_case")]
 pub enum PitchAnalysisAlgo {
     WorldDll,
+    /// Melodyne-inspired, model-free periodic/transient synthesis path.
+    Mld5,
     #[default]
     NsfHifiganOnnx,
     #[serde(rename = "vslib")]
@@ -52,6 +54,7 @@ pub enum PitchAnalysisAlgo {
 #[serde(rename_all = "snake_case")]
 pub enum SynthPipelineKind {
     WorldVocoder,
+    Mld5,
     NsfHifiganOnnx,
     /// VocalShifter vslib 原生声码器（仅限 Windows，需 vslib feature）。
     #[cfg(feature = "vslib")]
@@ -62,6 +65,7 @@ impl SynthPipelineKind {
     /// 从 Track 的分析算法推断合成链路类型。
     pub fn from_track_algo(algo: &PitchAnalysisAlgo) -> Self {
         match algo {
+            PitchAnalysisAlgo::Mld5 => Self::Mld5,
             PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
             #[cfg(feature = "vslib")]
             PitchAnalysisAlgo::VocalShifterVslib => Self::VocalShifterVslib,
@@ -3939,6 +3943,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
         fn algo_name(a: &PitchAnalysisAlgo) -> String {
             match a {
                 PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
+                PitchAnalysisAlgo::Mld5 => "mld5".to_string(),
                 PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
                 PitchAnalysisAlgo::VocalShifterVslib => "vslib".to_string(),
                 PitchAnalysisAlgo::None => "none".to_string(),
@@ -3995,6 +4000,7 @@ fn build_track_payload(tracks: &[Track]) -> Vec<TimelineTrack> {
                     compose_enabled: t.compose_enabled,
                     pitch_analysis_algo: match t.pitch_analysis_algo {
                         PitchAnalysisAlgo::WorldDll => "world_dll".to_string(),
+                        PitchAnalysisAlgo::Mld5 => "mld5".to_string(),
                         PitchAnalysisAlgo::NsfHifiganOnnx => "nsf_hifigan_onnx".to_string(),
                         PitchAnalysisAlgo::VocalShifterVslib => "vslib".to_string(),
                         PitchAnalysisAlgo::None => "none".to_string(),

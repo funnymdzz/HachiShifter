@@ -4518,7 +4518,7 @@ export const PianoRollPanel: React.FC = () => {
                             </Text>
                             <Select.Root
                                 value={
-                                    ["world_dll", "nsf_hifigan_onnx", "vslib", "none"].includes(
+                                    ["world_dll", "mld5", "nsf_hifigan_onnx", "vslib", "none"].includes(
                                         rootTrack.pitchAnalysisAlgo,
                                     )
                                         ? rootTrack.pitchAnalysisAlgo
@@ -4539,6 +4539,7 @@ export const PianoRollPanel: React.FC = () => {
                                     onWheel={(event) => {
                                         const currentValue = [
                                             "world_dll",
+                                            "mld5",
                                             "nsf_hifigan_onnx",
                                             "vslib",
                                             "none",
@@ -4550,6 +4551,7 @@ export const PianoRollPanel: React.FC = () => {
                                             currentValue,
                                             options: [
                                                 "world_dll",
+                                                "mld5",
                                                 "nsf_hifigan_onnx",
                                                 "vslib",
                                                 "none",
@@ -4568,6 +4570,7 @@ export const PianoRollPanel: React.FC = () => {
                                 />
                                 <Select.Content>
                                     <Select.Item value="world_dll">world</Select.Item>
+                                    <Select.Item value="mld5">mld5</Select.Item>
                                     <Select.Item value="nsf_hifigan_onnx">nsf-hifigan</Select.Item>
                                     <Select.Item value="vslib">vslib</Select.Item>
                                     <Select.Item value="none">{t("none")}</Select.Item>
@@ -4733,9 +4736,7 @@ export const PianoRollPanel: React.FC = () => {
                     stretchAlgorithm={
                         s.project.stretchAlgorithmOverride ?? s.defaultStretchAlgorithm
                     }
-                    variableHopEnabled={
-                        s.project.hifiganMelStretchOverride ?? s.defaultHifiganMelStretch
-                    }
+                    showHifiganMelHop={rootTrack?.pitchAnalysisAlgo === "nsf_hifigan_onnx"}
                     busy={sampleToolBusy}
                     onSelectNote={selectSampleNote}
                     onSelectRegion={selectSampleRegion}
@@ -4750,15 +4751,6 @@ export const PianoRollPanel: React.FC = () => {
                                 stretchAlgorithmOverride,
                                 hifiganMelStretchOverride:
                                     s.project.hifiganMelStretchOverride,
-                            }),
-                        )
-                    }
-                    onVariableHopChange={(hifiganMelStretchOverride) =>
-                        void dispatch(
-                            setProjectStretchSettingsRemote({
-                                stretchAlgorithmOverride:
-                                    s.project.stretchAlgorithmOverride,
-                                hifiganMelStretchOverride,
                             }),
                         )
                     }

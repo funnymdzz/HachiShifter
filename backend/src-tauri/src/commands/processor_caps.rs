@@ -82,6 +82,7 @@ pub(super) fn get_processor_params(algo: String) -> Vec<ParamDescriptorDto> {
 fn algo_to_kind(algo: &str) -> crate::state::SynthPipelineKind {
     use crate::state::SynthPipelineKind;
     match algo {
+        "mld5" => SynthPipelineKind::Mld5,
         "nsf_hifigan_onnx" => SynthPipelineKind::NsfHifiganOnnx,
         #[cfg(feature = "vslib")]
         "vslib" | "vocalshifter_vslib" => SynthPipelineKind::VocalShifterVslib,

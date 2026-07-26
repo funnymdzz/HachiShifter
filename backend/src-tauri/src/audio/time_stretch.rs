@@ -13,6 +13,9 @@ pub enum UserStretchAlgorithm {
     /// Preserve the fixed consonant and extend the remaining vowel/tail by
     /// looping it with short equal-power crossfades.
     Loop,
+    /// NSF-HiFiGAN-only stretch which changes the analysis Mel hop size and
+    /// lets the vocoder synthesize the requested duration directly.
+    HifiganMelHop,
 }
 
 impl Default for UserStretchAlgorithm {
@@ -29,6 +32,10 @@ impl UserStretchAlgorithm {
             Self::Soundtouch => StretchAlgorithm::SoundTouchDll,
             Self::MelodyneHybrid => StretchAlgorithm::MelodyneHybrid,
             Self::Loop => StretchAlgorithm::LoopVowel,
+            // External callers can still reach this branch for fixed-prefix
+            // material. Use the transient-aware path there; the HiFiGAN
+            // processor handles the regular variable-hop path internally.
+            Self::HifiganMelHop => StretchAlgorithm::MelodyneHybrid,
         }
     }
 }
@@ -151,7 +158,8 @@ pub fn resolved_user_external_stretch_algorithm() -> UserStretchAlgorithm {
 }
 
 pub fn should_use_hifigan_mel_stretch() -> bool {
-    current_runtime_stretch_settings().effective_hifigan_mel_stretch()
+    current_runtime_stretch_settings().effective_algorithm()
+        == UserStretchAlgorithm::HifiganMelHop
 }
 
 const STRETCH_SILENCE_WINDOW_MS: f64 = 10.0;
@@ -310,7 +318,7 @@ fn signalsmith_stretch(
 /// Re-anchor short high-flux attacks after the periodic/phase-coherent path.
 /// This follows the analysed Melodyne split between stable periodic material
 /// and attack/noise material without depending on proprietary constants.
-fn anchor_transients(
+pub(crate) fn anchor_transients(
     input: &[f32],
     output: &mut [f32],
     channels: usize,
@@ -514,6 +522,35 @@ pub fn time_stretch_with_fixed_prefix(
     out.extend_from_slice(&stretched_tail);
     out.resize(target_frames * channels, 0.0);
     out.truncate(target_frames * channels);
+
+    // A variable-hop/vocoder tail can have a different phase and DC level at
+    // the consonant-vowel boundary. Smooth the splice in-place without moving
+    // the annotated boundary or changing the exact output length. The source
+    // continuation supplies a stable left candidate while the stretched tail
+    // supplies the right candidate; a raised-cosine ramp removes both the
+    // waveform jump and the derivative click.
+    let fade_frames = ((sample_rate.max(1) as usize * 12) / 1000)
+        .max(8)
+        .min(fixed_frames)
+        .min(tail_target_frames);
+    if fade_frames > 1 && stretched_tail.len() >= fade_frames * channels {
+        for i in 0..fade_frames {
+            let out_frame = fixed_frames + i;
+            if out_frame >= target_frames {
+                break;
+            }
+            let x = i as f32 / (fade_frames - 1) as f32;
+            let right_gain = 0.5 - 0.5 * (std::f32::consts::PI * x).cos();
+            let left_gain = 1.0 - right_gain;
+            let source_frame = out_frame.min(input_frames - 1);
+            let tail_frame = i.min(tail_target_frames - 1);
+            for channel in 0..channels {
+                let left = input_interleaved[source_frame * channels + channel];
+                let right = stretched_tail[tail_frame * channels + channel];
+                out[out_frame * channels + channel] = left * left_gain + right * right_gain;
+            }
+        }
+    }
     out
 }
 
@@ -568,7 +605,7 @@ mod tests {
             resolved_external_stretch_algorithm(),
             StretchAlgorithm::SignalsmithStretch
         ));
-        assert!(should_use_hifigan_mel_stretch());
+        assert!(!should_use_hifigan_mel_stretch());
 
         update_runtime_stretch_settings(
             UserStretchAlgorithm::Signalsmith,

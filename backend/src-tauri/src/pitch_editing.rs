@@ -16,6 +16,7 @@ fn pitch_edit_algo_from_env() -> Option<String> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PitchEditAlgorithm {
     WorldVocoder,
+    Mld5,
     NsfHifiganOnnx,
     #[cfg(feature = "vslib")]
     VocalShifterVslib,
@@ -122,6 +123,7 @@ fn pitch_edit_backend_available_for_track(track: &crate::state::Track) -> bool {
     let algo = PitchEditAlgorithm::from_track_algo(&track.pitch_analysis_algo);
     match algo {
         PitchEditAlgorithm::WorldVocoder => crate::world_vocoder::is_available(),
+        PitchEditAlgorithm::Mld5 => crate::world_vocoder::is_available(),
         PitchEditAlgorithm::NsfHifiganOnnx => crate::nsf_hifigan_onnx::is_available(),
         #[cfg(feature = "vslib")]
         PitchEditAlgorithm::VocalShifterVslib => true,
@@ -249,6 +251,7 @@ impl PitchEditAlgorithm {
             }
         }
         match algo {
+            PitchAnalysisAlgo::Mld5 => Self::Mld5,
             PitchAnalysisAlgo::WorldDll | PitchAnalysisAlgo::Unknown => Self::WorldVocoder,
             PitchAnalysisAlgo::NsfHifiganOnnx => Self::NsfHifiganOnnx,
             #[cfg(feature = "vslib")]

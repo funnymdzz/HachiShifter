@@ -87,6 +87,7 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
     hasher.update(&[if compose { 1 } else { 0 }]);
     hasher.update(match algo {
         PitchAnalysisAlgo::WorldDll => b"world_dll",
+        PitchAnalysisAlgo::Mld5 => b"mld5",
         PitchAnalysisAlgo::NsfHifiganOnnx => b"nsf_hifigan_onnx",
         PitchAnalysisAlgo::VocalShifterVslib => b"vslib",
         PitchAnalysisAlgo::None => b"none",
@@ -98,6 +99,7 @@ pub(crate) fn build_root_pitch_key(tl: &TimelineState, root_track_id: &str) -> S
     if matches!(
         algo,
         PitchAnalysisAlgo::WorldDll
+            | PitchAnalysisAlgo::Mld5
             | PitchAnalysisAlgo::NsfHifiganOnnx
             | PitchAnalysisAlgo::Unknown
     ) {

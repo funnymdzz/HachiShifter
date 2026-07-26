@@ -97,6 +97,7 @@ export interface ProjectMeta {
         | "soundtouch"
         | "melodyne_hybrid"
         | "loop"
+        | "hifigan_mel_hop"
         | null;
     hifigan_mel_stretch_override?: boolean | null;
 }

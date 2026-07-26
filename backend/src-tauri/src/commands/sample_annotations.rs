@@ -1,5 +1,5 @@
 use crate::sample_annotations::{
-    self, NoteDetectorKind, SamplePitchNote, SampleRegionAnnotation,
+    self, NoteDetectorKind, SampleAudioEvent, SamplePitchNote, SampleRegionAnnotation,
 };
 use crate::state::AppState;
 use serde::Serialize;
@@ -17,6 +17,7 @@ struct ClipAnnotationPayload {
     sidecar_path: String,
     annotations: Vec<SampleRegionAnnotation>,
     pitch_notes: Vec<SamplePitchNote>,
+    audio_events: Vec<SampleAudioEvent>,
     note_detector: NoteDetectorKind,
     detector_message: Option<String>,
     active_annotation_index: usize,
@@ -74,6 +75,7 @@ pub(super) fn get_clip_sample_annotations(
             active_annotation_index: active_annotation_index(&clip, analysis.annotations.len()),
             annotations: analysis.annotations,
             pitch_notes: analysis.pitch_notes,
+            audio_events: analysis.audio_events,
             note_detector: analysis.note_detector,
             detector_message: analysis.detector_message,
         })
@@ -170,6 +172,7 @@ pub(super) fn redetect_clip_sample_annotations(
                 "sidecar_path": sample_annotations::sidecar_path(Path::new(&source)).display().to_string(),
                 "annotations": annotations,
                 "pitch_notes": analysis.pitch_notes,
+                "audio_events": analysis.audio_events,
                 "note_detector": analysis.note_detector,
                 "detector_message": analysis.detector_message,
                 "active_annotation_index": 0,

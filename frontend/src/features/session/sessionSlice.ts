@@ -155,7 +155,8 @@ type StretchAlgorithmOption =
     | "signalsmith"
     | "soundtouch"
     | "melodyne_hybrid"
-    | "loop";
+    | "loop"
+    | "hifigan_mel_hop";
 type ClipFormantToolWindowState = {
     open: boolean;
     clipId: string | null;
@@ -1873,7 +1874,7 @@ const sessionSlice = createSlice({
                 const defaultStretchAlgorithm = (s as any).defaultStretchAlgorithm;
                 if (
                     defaultStretchAlgorithm != null &&
-                    ["linear", "signalsmith", "soundtouch", "melodyne_hybrid", "loop"].includes(
+                    ["linear", "signalsmith", "soundtouch", "melodyne_hybrid", "loop", "hifigan_mel_hop"].includes(
                         defaultStretchAlgorithm,
                     )
                 ) {

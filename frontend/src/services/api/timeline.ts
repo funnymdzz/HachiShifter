@@ -19,6 +19,13 @@ export interface SamplePitchNote {
     confidence: number;
 }
 
+export interface SampleAudioEvent {
+    start_sec: number;
+    end_sec: number;
+    kind: "silence" | "breath";
+    confidence: number;
+}
+
 export type NoteDetectorKind = "game" | "yin_fallback";
 
 export type ClipSampleAnnotationsResult =
@@ -29,6 +36,7 @@ export type ClipSampleAnnotationsResult =
           sidecar_path: string;
           annotations: SampleRegionAnnotation[];
           pitch_notes: SamplePitchNote[];
+          audio_events?: SampleAudioEvent[];
           note_detector: NoteDetectorKind;
           detector_message?: string | null;
           active_annotation_index: number;

@@ -349,6 +349,7 @@ pub(super) fn set_track_state(
     state.checkpoint_timeline(&tl);
     let algo = pitch_analysis_algo.as_deref().map(|s| match s {
         "world_dll" | "world" => crate::state::PitchAnalysisAlgo::WorldDll,
+        "mld5" => crate::state::PitchAnalysisAlgo::Mld5,
         "nsf_hifigan_onnx" | "nsf_hifigan" | "onnx" => {
             crate::state::PitchAnalysisAlgo::NsfHifiganOnnx
         }

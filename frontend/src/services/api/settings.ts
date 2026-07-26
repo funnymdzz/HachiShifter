@@ -5,7 +5,8 @@ export type StretchAlgorithmOption =
     | "signalsmith"
     | "soundtouch"
     | "melodyne_hybrid"
-    | "loop";
+    | "loop"
+    | "hifigan_mel_hop";
 
 export interface UiSettings {
     autoCrossfade: boolean;

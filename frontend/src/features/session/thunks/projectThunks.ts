@@ -144,6 +144,7 @@ export const setProjectStretchSettingsRemote = createAsyncThunk(
                 | "soundtouch"
                 | "melodyne_hybrid"
                 | "loop"
+                | "hifigan_mel_hop"
                 | null;
             hifiganMelStretchOverride?: boolean | null;
         },

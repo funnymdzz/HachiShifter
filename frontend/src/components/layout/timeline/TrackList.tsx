@@ -19,7 +19,7 @@ const TRACK_COLOR_PALETTE_KEYS: { value: string; key: MessageKey }[] = [
     { value: "#a39061", key: "color_yellow" },
     { value: "#996d68", key: "color_red" },
 ];
-const PITCH_ANALYSIS_ALGO_OPTIONS = ["world_dll", "nsf_hifigan_onnx", "vslib", "none"] as const;
+const PITCH_ANALYSIS_ALGO_OPTIONS = ["world_dll", "mld5", "nsf_hifigan_onnx", "vslib", "none"] as const;
 
 const TRACK_METER_MIN_DB = -48;
 const TRACK_METER_MAX_DB = 3;
@@ -1270,6 +1270,7 @@ const TrackListInner: React.FC<TrackListProps> = ({
                                                                     PITCH_ANALYSIS_ALGO_OPTIONS.includes(
                                                                         track.pitchAnalysisAlgo as
                                                                             | "world_dll"
+                                                                            | "mld5"
                                                                             | "nsf_hifigan_onnx"
                                                                             | "vslib"
                                                                             | "none",
@@ -1289,6 +1290,9 @@ const TrackListInner: React.FC<TrackListProps> = ({
                                                                 <Select.Content>
                                                                     <Select.Item value="world_dll">
                                                                         world
+                                                                    </Select.Item>
+                                                                    <Select.Item value="mld5">
+                                                                        mld5
                                                                     </Select.Item>
                                                                     <Select.Item value="nsf_hifigan_onnx">
                                                                         nsf-hifigan
