@@ -145,11 +145,18 @@ fn prepare_game_models() {
             panic!("GAME {variant} model download failed with status {download}");
         }
 
-        let extract = Command::new("tar")
-            .arg("-xf")
-            .arg(&archive)
-            .arg("-C")
-            .arg(&extracted)
+        // GNU tar on Linux does not read ZIP files; Windows' bsdtar does.
+        // Use unzip where available and retain tar.exe for the Windows runner.
+        let mut extract_command = if cfg!(target_os = "windows") {
+            let mut command = Command::new("tar");
+            command.arg("-xf").arg(&archive).arg("-C").arg(&extracted);
+            command
+        } else {
+            let mut command = Command::new("unzip");
+            command.arg("-q").arg(&archive).arg("-d").arg(&extracted);
+            command
+        };
+        let extract = extract_command
             .status()
             .unwrap_or_else(|error| panic!("start GAME {variant} extraction failed: {error}"));
         if !extract.success() {
