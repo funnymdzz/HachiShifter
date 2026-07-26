@@ -21,6 +21,8 @@ mod file_browser;
 mod midi;
 #[path = "commands/midi_export.rs"]
 mod midi_export;
+#[path = "commands/melodyne.rs"]
+mod melodyne;
 #[path = "commands/onnx_status.rs"]
 mod onnx_status;
 #[path = "commands/params.rs"]
@@ -290,6 +292,20 @@ pub fn convert_oto_and_refresh_clip(
     oto_path: String,
 ) -> serde_json::Value {
     sample_annotations::convert_oto_and_refresh_clip(state, clip_id, oto_path)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_game_status() -> serde_json::Value {
+    melodyne::get_game_status()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn apply_melodyne_correction(
+    state: State<'_, AppState>,
+    clip_id: String,
+    settings: crate::melodyne_correction::MelodyneCorrectionSettings,
+) -> serde_json::Value {
+    melodyne::apply_melodyne_correction(state, clip_id, settings)
 }
 
 #[tauri::command(rename_all = "camelCase")]

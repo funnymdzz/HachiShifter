@@ -4,6 +4,10 @@ fn main() {
     // Fresh DLLs are only staged when the `cuda` feature is active.
     clean_stale_ort_dlls();
 
+    // GAME stays out of Git to keep the checkout small. CI/release builds
+    // materialize the compact ONNX pack directly in the runner workspace.
+    prepare_game_models();
+
     build_frontend();
 
     // Allow skipping expensive native builds in CI checks via env var
@@ -39,6 +43,102 @@ fn main() {
     // tauri_build validates resources, so soundtouch must run first to populate
     // the shared library at the resource path.
     tauri_build::build();
+}
+
+fn prepare_game_models() {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+
+    const REQUIRED: &[&str] = &[
+        "encoder.onnx",
+        "segmenter.onnx",
+        "estimator.onnx",
+        "bd2dur.onnx",
+        "dur2bd.onnx",
+        "config.json",
+    ];
+    const URL: &str =
+        "https://github.com/openvpi/GAME/releases/download/v1.0.2/GAME-1.0-small-onnx.zip";
+
+    let destination = PathBuf::from("resources").join("models").join("game");
+    if REQUIRED.iter().all(|name| destination.join(name).is_file()) {
+        return;
+    }
+    if std::env::var("HACHISHIFTER_SKIP_GAME_MODEL_DOWNLOAD")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        panic!(
+            "GAME models are missing and HACHISHIFTER_SKIP_GAME_MODEL_DOWNLOAD=1 was requested"
+        );
+    }
+
+    println!("cargo:warning=[GAME] downloading compact ONNX model pack");
+    let scratch = std::env::var_os("OUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("hachishifter-game-models");
+    let archive = scratch.join("GAME-1.0-small-onnx.zip");
+    let extracted = scratch.join("extract");
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&extracted)
+        .unwrap_or_else(|error| panic!("create GAME extraction directory failed: {error}"));
+    std::fs::create_dir_all(&destination)
+        .unwrap_or_else(|error| panic!("create GAME model directory failed: {error}"));
+
+    let curl = if cfg!(target_os = "windows") {
+        "curl.exe"
+    } else {
+        "curl"
+    };
+    let download = Command::new(curl)
+        .args(["--fail", "--location", "--retry", "5", "--output"])
+        .arg(&archive)
+        .arg(URL)
+        .status()
+        .unwrap_or_else(|error| panic!("start GAME model download failed: {error}"));
+    if !download.success() {
+        panic!("GAME model download failed with status {download}");
+    }
+
+    let extract = Command::new("tar")
+        .arg("-xf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(&extracted)
+        .status()
+        .unwrap_or_else(|error| panic!("start GAME model extraction failed: {error}"));
+    if !extract.success() {
+        panic!("GAME model extraction failed with status {extract}");
+    }
+
+    fn locate(root: &Path, file_name: &str) -> Option<PathBuf> {
+        for entry in std::fs::read_dir(root).ok()? {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(found) = locate(&path, file_name) {
+                    return Some(found);
+                }
+            } else if path.file_name().and_then(|value| value.to_str()) == Some(file_name) {
+                return Some(path);
+            }
+        }
+        None
+    }
+
+    for name in REQUIRED {
+        let source = locate(&extracted, name)
+            .unwrap_or_else(|| panic!("GAME archive is missing required model {name}"));
+        std::fs::copy(&source, destination.join(name))
+            .unwrap_or_else(|error| panic!("copy GAME model {name} failed: {error}"));
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    println!(
+        "cargo:warning=[GAME] compact ONNX models ready at {}",
+        destination.display()
+    );
 }
 
 /// 在编译时自动构建前端静态资源。

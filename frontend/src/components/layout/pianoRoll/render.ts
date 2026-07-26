@@ -901,17 +901,42 @@ export function drawPianoRoll(args: {
                 Math.abs(selectionStartSec - note.startSec) < 0.002 &&
                 Math.abs(selectionEndSec - note.endSec) < 0.002;
             ctx.save();
-            ctx.fillStyle = selectedNote
-                ? "rgba(56, 189, 248, 0.58)"
-                : "rgba(45, 212, 191, 0.28)";
+            const confidence = clamp(note.confidence || 0.7, 0.25, 1);
+            const gradient = ctx.createLinearGradient(0, top, 0, top + noteHeight);
+            if (selectedNote) {
+                gradient.addColorStop(0, "rgba(255, 226, 139, 0.96)");
+                gradient.addColorStop(1, "rgba(234, 128, 30, 0.92)");
+            } else {
+                gradient.addColorStop(0, `rgba(251, 191, 36, ${0.42 + confidence * 0.28})`);
+                gradient.addColorStop(1, `rgba(194, 85, 20, ${0.34 + confidence * 0.24})`);
+            }
+            ctx.fillStyle = gradient;
             ctx.strokeStyle = selectedNote
-                ? "rgba(186, 230, 253, 0.95)"
-                : "rgba(94, 234, 212, 0.62)";
+                ? "rgba(255, 244, 203, 0.98)"
+                : "rgba(251, 146, 60, 0.82)";
             ctx.lineWidth = selectedNote ? 1.6 : 1;
             ctx.beginPath();
             ctx.roundRect(x0 + 0.5, top, Math.max(2, x1 - x0 - 1), noteHeight, 3);
             ctx.fill();
             ctx.stroke();
+
+            // Melodyne-style pitch-center guide and edge separators.
+            const centerY = top + noteHeight * 0.5;
+            ctx.strokeStyle = selectedNote
+                ? "rgba(94, 44, 8, 0.82)"
+                : "rgba(83, 42, 14, 0.58)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x0 + 4, centerY + 0.5);
+            ctx.lineTo(Math.max(x0 + 4, x1 - 4), centerY + 0.5);
+            ctx.stroke();
+            if (x1 - x0 >= 10) {
+                ctx.fillStyle = selectedNote
+                    ? "rgba(255, 248, 220, 0.92)"
+                    : "rgba(255, 218, 145, 0.66)";
+                ctx.fillRect(x0 + 1, top + 2, 1.5, Math.max(1, noteHeight - 4));
+                ctx.fillRect(x1 - 2.5, top + 2, 1.5, Math.max(1, noteHeight - 4));
+            }
             ctx.restore();
         }
     }

@@ -19,6 +19,8 @@ export interface SamplePitchNote {
     confidence: number;
 }
 
+export type NoteDetectorKind = "game" | "yin_fallback";
+
 export type ClipSampleAnnotationsResult =
     | {
           ok: true;
@@ -27,6 +29,8 @@ export type ClipSampleAnnotationsResult =
           sidecar_path: string;
           annotations: SampleRegionAnnotation[];
           pitch_notes: SamplePitchNote[];
+          note_detector: NoteDetectorKind;
+          detector_message?: string | null;
           active_annotation_index: number;
       }
     | { ok: false; error: string };
@@ -101,6 +105,37 @@ export const timelineApi = {
 
     redetectClipSampleAnnotations: (clipId: string) =>
         invoke<ClipSampleAnnotationsResult>("redetect_clip_sample_annotations", clipId),
+
+    getGameStatus: () =>
+        invoke<{
+            available: boolean;
+            model_dir?: string | null;
+            message: string;
+        }>("get_game_status"),
+
+    applyMelodyneCorrection: (
+        clipId: string,
+        settings: {
+            centerStrength: number;
+            driftStrength: number;
+            modulationStrength: number;
+            transitionMs: number;
+            reset?: boolean;
+            selectionStartSec?: number | null;
+            selectionEndSec?: number | null;
+        },
+    ) =>
+        invoke<{
+            ok: boolean;
+            summary?: {
+                rootTrackId: string;
+                affectedNotes: number;
+                affectedFrames: number;
+                framePeriodMs: number;
+                detector: NoteDetectorKind;
+            };
+            error?: string;
+        }>("apply_melodyne_correction", clipId, settings),
 
     openOtoDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string; error?: string }>(

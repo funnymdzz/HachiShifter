@@ -16,6 +16,10 @@ mod launch_args;
 mod mixdown;
 mod models;
 mod pitch_analysis;
+#[path = "pitch/game_detector.rs"]
+mod game_detector;
+#[path = "pitch/melodyne_correction.rs"]
+mod melodyne_correction;
 #[path = "pitch/pitch_clip.rs"]
 mod pitch_clip;
 #[path = "pitch/pitch_config.rs"]
@@ -107,6 +111,7 @@ use tauri::Manager;
 static NSF_HIFIGAN_MODEL_DIR: OnceLock<PathBuf> = OnceLock::new();
 static HNSEP_MODEL_DIR: OnceLock<PathBuf> = OnceLock::new();
 static FCPE_ONNX_PATH: OnceLock<PathBuf> = OnceLock::new();
+static GAME_MODEL_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn nsf_hifigan_model_dir() -> Option<&'static Path> {
     NSF_HIFIGAN_MODEL_DIR.get().map(|p| p.as_path())
@@ -118,6 +123,10 @@ pub fn hnsep_model_dir() -> Option<&'static Path> {
 
 pub fn fcpe_onnx_path() -> Option<&'static Path> {
     FCPE_ONNX_PATH.get().map(|p| p.as_path())
+}
+
+pub fn game_model_dir() -> Option<&'static Path> {
+    GAME_MODEL_DIR.get().map(|path| path.as_path())
 }
 
 pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
@@ -157,6 +166,18 @@ pub fn run() {
                 let p = res_dir.join("models").join("fcpe").join("fcpe.onnx");
                 if p.exists() {
                     let _ = FCPE_ONNX_PATH.set(p);
+                }
+            }
+
+            if let Ok(res_dir) = app.path().resource_dir() {
+                let p = res_dir.join("models").join("game");
+                if p.join("encoder.onnx").exists()
+                    && p.join("segmenter.onnx").exists()
+                    && p.join("estimator.onnx").exists()
+                    && p.join("bd2dur.onnx").exists()
+                    && p.join("config.json").exists()
+                {
+                    let _ = GAME_MODEL_DIR.set(p);
                 }
             }
 
@@ -304,6 +325,8 @@ pub fn run() {
             commands::redetect_clip_sample_annotations,
             commands::convert_oto_to_annotations,
             commands::convert_oto_and_refresh_clip,
+            commands::get_game_status,
+            commands::apply_melodyne_correction,
             commands::pick_output_path,
             commands::pick_directory,
             commands::open_midi_dialog,

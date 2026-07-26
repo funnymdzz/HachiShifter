@@ -90,6 +90,8 @@ export const webApi = {
     getClipSampleAnnotations: timelineApi.getClipSampleAnnotations,
     saveClipSampleAnnotations: timelineApi.saveClipSampleAnnotations,
     redetectClipSampleAnnotations: timelineApi.redetectClipSampleAnnotations,
+    getGameStatus: timelineApi.getGameStatus,
+    applyMelodyneCorrection: timelineApi.applyMelodyneCorrection,
     openOtoDialog: timelineApi.openOtoDialog,
     convertOtoToAnnotations: timelineApi.convertOtoToAnnotations,
     convertOtoAndRefreshClip: timelineApi.convertOtoAndRefreshClip,

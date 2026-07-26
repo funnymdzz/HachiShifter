@@ -133,6 +133,10 @@ import { ProgressBar } from "../ProgressBar";
 
 import { usePianoRollStatusUpdate } from "../../contexts/PianoRollStatusContext";
 import { MidiTrackSelectDialog } from "./MidiTrackSelectDialog";
+import {
+    MelodynePitchMacroPanel,
+    type MelodyneMacroValues,
+} from "./MelodynePitchMacroPanel";
 import { settingsApi } from "../../services/api/settings";
 import { EditContextMenu } from "../editDialogs/EditContextMenu";
 import { getDynamicProjectSec } from "../../features/session/projectBoundary";
@@ -1789,6 +1793,37 @@ export const PianoRollPanel: React.FC = () => {
             : null;
         return { notes, timing };
     }, [editParam, noteDragPreview, paramView, sampleAnalysis, selectedAudioClip]);
+
+    const [showPitchMacro, setShowPitchMacro] = useState(true);
+    const applyMelodyneMacro = useCallback(
+        async (values: MelodyneMacroValues, reset: boolean): Promise<string> => {
+            if (!selectedAudioClip) {
+                throw new Error("Select an audio clip first");
+            }
+            const currentSelection = selectionRef.current;
+            const selectionStartSec = currentSelection
+                ? Math.min(currentSelection.aBeat, currentSelection.bBeat) * secPerBeat
+                : null;
+            const selectionEndSec = currentSelection
+                ? Math.max(currentSelection.aBeat, currentSelection.bBeat) * secPerBeat
+                : null;
+            const result = await webApi.applyMelodyneCorrection(selectedAudioClip.id, {
+                ...values,
+                reset,
+                selectionStartSec,
+                selectionEndSec,
+            });
+            if (!result.ok || !result.summary) {
+                throw new Error(result.error || "Pitch correction failed");
+            }
+            bumpRefreshToken();
+            invalidate();
+            return t("melodyne_result")
+                .replace("{n}", String(result.summary.affectedNotes))
+                .replace("{detector}", result.summary.detector === "game" ? "GAME" : "YIN");
+        },
+        [bumpRefreshToken, invalidate, secPerBeat, selectedAudioClip, t],
+    );
 
     const referencePitchOverlays = useMemo((): ReferencePitchOverlay[] => {
         if (editParam !== "pitch") return [];
@@ -4215,6 +4250,17 @@ export const PianoRollPanel: React.FC = () => {
                                     </DropdownMenu.Content>
                                 </DropdownMenu.Root>
                             ) : null}
+                            {editParam === "pitch" && selectedAudioClip ? (
+                                <Button
+                                    size="1"
+                                    variant={showPitchMacro ? "solid" : "soft"}
+                                    color="orange"
+                                    onClick={() => setShowPitchMacro((current) => !current)}
+                                    style={{ cursor: "pointer" }}
+                                >
+                                    {t("melodyne_show_macro")}
+                                </Button>
+                            ) : null}
                             {editParam === "pitch" ? (
                                 <Button
                                     size="1"
@@ -4232,6 +4278,16 @@ export const PianoRollPanel: React.FC = () => {
                     ) : null}
                 </Flex>
             </Flex>
+
+            {editParam === "pitch" && selectedAudioClip && showPitchMacro ? (
+                <MelodynePitchMacroPanel
+                    detector={sampleAnalysis?.note_detector ?? null}
+                    detectorMessage={sampleAnalysis?.detector_message}
+                    hasSelection={selectionUi != null}
+                    disabled={!pitchEnabled || !sampleAnalysis}
+                    onApply={applyMelodyneMacro}
+                />
+            ) : null}
 
             {/* Task 6.5: 参数面板顶部添加进度条区 ?*/}
             {asyncRefresh.isLoading && (

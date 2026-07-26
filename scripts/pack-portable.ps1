@@ -160,6 +160,12 @@ $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\hnsep.onnx";                 Dst = "models\hnsep\hnsep.onnx" },
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" },
     @{ Src = Join-Path $TauriDir "resources\models\fcpe\fcpe.onnx";                   Dst = "models\fcpe\fcpe.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\encoder.onnx";               Dst = "models\game\encoder.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\segmenter.onnx";             Dst = "models\game\segmenter.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\estimator.onnx";             Dst = "models\game\estimator.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\bd2dur.onnx";                Dst = "models\game\bd2dur.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\dur2bd.onnx";                Dst = "models\game\dur2bd.onnx" }
+    @{ Src = Join-Path $TauriDir "resources\models\game\config.json";                Dst = "models\game\config.json" }
 )
 
 if ($ArchShort -eq "x64") {

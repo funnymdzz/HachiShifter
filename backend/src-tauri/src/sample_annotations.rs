@@ -8,9 +8,10 @@
 
 use encoding_rs::SHIFT_JIS;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 const SIDECAR_SUFFIX: &str = ".hachi.csv";
 const CSV_HEADER: &str =
@@ -38,6 +39,15 @@ pub struct SamplePitchNote {
 pub struct SampleAnalysis {
     pub annotations: Vec<SampleRegionAnnotation>,
     pub pitch_notes: Vec<SamplePitchNote>,
+    pub note_detector: NoteDetectorKind,
+    pub detector_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteDetectorKind {
+    Game,
+    YinFallback,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,6 +81,61 @@ struct OtoEntry {
     consonant_ms: f64,
     cutoff_ms: f64,
     preutter_ms: f64,
+}
+
+#[derive(Clone)]
+struct CachedSampleAnalysis {
+    file_len: u64,
+    modified_ns: u128,
+    analysis: SampleAnalysis,
+}
+
+static ANALYSIS_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSampleAnalysis>>> = OnceLock::new();
+
+fn analysis_fingerprint(path: &Path) -> Option<(u64, u128)> {
+    let metadata = fs::metadata(path).ok()?;
+    let modified_ns = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    Some((metadata.len(), modified_ns))
+}
+
+fn cache_analysis(path: &Path, analysis: &SampleAnalysis) {
+    let Some((file_len, modified_ns)) = analysis_fingerprint(path) else {
+        return;
+    };
+    if let Ok(mut cache) = ANALYSIS_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        if cache.len() >= 32 && !cache.contains_key(path) {
+            if let Some(oldest) = cache.keys().next().cloned() {
+                cache.remove(&oldest);
+            }
+        }
+        cache.insert(
+            path.to_path_buf(),
+            CachedSampleAnalysis {
+                file_len,
+                modified_ns,
+                analysis: analysis.clone(),
+            },
+        );
+    }
+}
+
+fn cached_analysis(path: &Path) -> Option<SampleAnalysis> {
+    let (file_len, modified_ns) = analysis_fingerprint(path)?;
+    let cache = ANALYSIS_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()?;
+    let cached = cache.get(path)?;
+    (cached.file_len == file_len && cached.modified_ns == modified_ns)
+        .then(|| cached.analysis.clone())
 }
 
 pub fn sidecar_path(audio_path: &Path) -> PathBuf {
@@ -185,6 +250,8 @@ pub fn load_or_detect(audio_path: &Path) -> Result<SampleAnalysis, String> {
     Ok(SampleAnalysis {
         annotations,
         pitch_notes: detected.pitch_notes,
+        note_detector: detected.note_detector,
+        detector_message: detected.detector_message,
     })
 }
 
@@ -200,8 +267,20 @@ pub fn ensure_sidecar(audio_path: &Path) -> Result<PathBuf, String> {
             }
         }
     }
-    let detected = analyze_audio(audio_path)?;
-    write_sidecar(audio_path, &detected.annotations)
+    let (sample_rate, channels, interleaved) =
+        crate::audio_utils::decode_audio_f32_interleaved(audio_path)?;
+    if sample_rate == 0 || channels == 0 || interleaved.is_empty() {
+        return Err("audio has no decodable samples".to_string());
+    }
+    let mono = interleaved_to_mono(&interleaved, channels as usize);
+    let duration_sec = mono.len() as f64 / sample_rate as f64;
+    let (_, annotations) = detect_regions_and_annotations(
+        audio_path,
+        &mono,
+        sample_rate,
+        duration_sec,
+    );
+    write_sidecar(audio_path, &annotations)
 }
 
 pub fn timing_for_clip(clip: &crate::state::Clip) -> Option<ClipAnnotationTiming> {
@@ -236,18 +315,14 @@ pub fn timing_for_clip(clip: &crate::state::Clip) -> Option<ClipAnnotationTiming
     })
 }
 
-pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
-    let (sample_rate, channels, interleaved) =
-        crate::audio_utils::decode_audio_f32_interleaved(audio_path)?;
-    if sample_rate == 0 || channels == 0 || interleaved.is_empty() {
-        return Err("audio has no decodable samples".to_string());
-    }
-    let mono = interleaved_to_mono(&interleaved, channels as usize);
-    let duration_sec = mono.len() as f64 / sample_rate as f64;
+fn detect_regions_and_annotations(
+    audio_path: &Path,
+    mono: &[f32],
+    sample_rate: u32,
+    duration_sec: f64,
+) -> (Vec<(f64, f64)>, Vec<SampleRegionAnnotation>) {
     let regions = detect_active_regions(&mono, sample_rate);
-
     let mut annotations = Vec::new();
-    let mut pitch_notes = Vec::new();
     for (index, (start, end)) in regions.iter().copied().enumerate() {
         let voiced_start = detect_voiced_start(&mono, sample_rate, start, end).unwrap_or(start);
         let fixed_end = voiced_start.clamp(start, end);
@@ -266,7 +341,6 @@ pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
             note_alignment_sec: fixed_end,
             fixed_duration_sec: (fixed_end - start).max(0.0),
         });
-        pitch_notes.extend(detect_pitch_notes(&mono, sample_rate, start, end));
     }
 
     if annotations.is_empty() {
@@ -283,10 +357,85 @@ pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
         });
     }
 
+    (regions, annotations)
+}
+
+fn analyze_audio_uncached(audio_path: &Path) -> Result<SampleAnalysis, String> {
+    let (sample_rate, channels, interleaved) =
+        crate::audio_utils::decode_audio_f32_interleaved(audio_path)?;
+    if sample_rate == 0 || channels == 0 || interleaved.is_empty() {
+        return Err("audio has no decodable samples".to_string());
+    }
+    let mono = interleaved_to_mono(&interleaved, channels as usize);
+    let duration_sec = mono.len() as f64 / sample_rate as f64;
+    let (regions, annotations) =
+        detect_regions_and_annotations(audio_path, &mono, sample_rate, duration_sec);
+    let mut fallback_pitch_notes = Vec::new();
+    for (start, end) in regions {
+        fallback_pitch_notes.extend(detect_pitch_notes(&mono, sample_rate, start, end));
+    }
+
+    let (pitch_notes, note_detector, detector_message) =
+        match crate::game_detector::detect_notes(
+            &mono,
+            sample_rate,
+            crate::game_detector::GameOptions::default(),
+        ) {
+            Ok(notes) => {
+                let notes: Vec<SamplePitchNote> = notes
+                    .into_iter()
+                    .filter(|note| {
+                        !note.is_rest
+                            && note.midi_note.is_finite()
+                            && (0.0..=127.0).contains(&note.midi_note)
+                            && note.end_sec - note.start_sec >= 0.01
+                    })
+                    .map(|note| SamplePitchNote {
+                        start_sec: note.start_sec,
+                        end_sec: note.end_sec.min(duration_sec),
+                        midi_note: note.midi_note,
+                        confidence: note.confidence,
+                    })
+                    .filter(|note| note.end_sec > note.start_sec)
+                    .collect();
+                if notes.is_empty() {
+                    (
+                        fallback_pitch_notes,
+                        NoteDetectorKind::YinFallback,
+                        Some("GAME returned no voiced notes; used the lightweight detector".to_string()),
+                    )
+                } else {
+                    (notes, NoteDetectorKind::Game, None)
+                }
+            }
+            Err(error) => (
+                fallback_pitch_notes,
+                NoteDetectorKind::YinFallback,
+                Some(error),
+            ),
+        };
+
     Ok(SampleAnalysis {
         annotations,
         pitch_notes,
+        note_detector,
+        detector_message,
     })
+}
+
+pub fn analyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
+    if let Some(analysis) = cached_analysis(audio_path) {
+        return Ok(analysis);
+    }
+    let analysis = analyze_audio_uncached(audio_path)?;
+    cache_analysis(audio_path, &analysis);
+    Ok(analysis)
+}
+
+pub fn reanalyze_audio(audio_path: &Path) -> Result<SampleAnalysis, String> {
+    let analysis = analyze_audio_uncached(audio_path)?;
+    cache_analysis(audio_path, &analysis);
+    Ok(analysis)
 }
 
 pub fn convert_oto_path(path: &Path) -> Result<OtoConversionResult, String> {

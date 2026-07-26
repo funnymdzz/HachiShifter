@@ -1,4 +1,6 @@
-use crate::sample_annotations::{self, SamplePitchNote, SampleRegionAnnotation};
+use crate::sample_annotations::{
+    self, NoteDetectorKind, SamplePitchNote, SampleRegionAnnotation,
+};
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::Path;
@@ -15,6 +17,8 @@ struct ClipAnnotationPayload {
     sidecar_path: String,
     annotations: Vec<SampleRegionAnnotation>,
     pitch_notes: Vec<SamplePitchNote>,
+    note_detector: NoteDetectorKind,
+    detector_message: Option<String>,
     active_annotation_index: usize,
 }
 
@@ -70,6 +74,8 @@ pub(super) fn get_clip_sample_annotations(
             active_annotation_index: active_annotation_index(&clip, analysis.annotations.len()),
             annotations: analysis.annotations,
             pitch_notes: analysis.pitch_notes,
+            note_detector: analysis.note_detector,
+            detector_message: analysis.detector_message,
         })
         .unwrap_or_else(|error| serde_json::json!({"ok": false, "error": error.to_string()})),
         Err(error) => serde_json::json!({"ok": false, "error": error}),
@@ -148,7 +154,7 @@ pub(super) fn redetect_clip_sample_annotations(
         Ok(value) => value,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
-    match sample_annotations::analyze_audio(Path::new(&source)) {
+    match sample_annotations::reanalyze_audio(Path::new(&source)) {
         Ok(analysis) => {
             let annotations = match sample_annotations::validate_annotations(
                 &analysis.annotations,
@@ -164,6 +170,8 @@ pub(super) fn redetect_clip_sample_annotations(
                 "sidecar_path": sample_annotations::sidecar_path(Path::new(&source)).display().to_string(),
                 "annotations": annotations,
                 "pitch_notes": analysis.pitch_notes,
+                "note_detector": analysis.note_detector,
+                "detector_message": analysis.detector_message,
                 "active_annotation_index": 0,
             })
         }
