@@ -489,6 +489,16 @@ export const PianoRollPanel: React.FC = () => {
         };
     }, [selectedAudioClip?.id]);
 
+    useEffect(() => {
+        const openWrench = () => {
+            setShowMelodyneWrench(true);
+            dispatch(setEditParam("pitch"));
+            document.body.setAttribute("data-hs-focus-window", "pianoRoll");
+        };
+        window.addEventListener("hachi:open-melodyne-wrench", openWrench);
+        return () => window.removeEventListener("hachi:open-melodyne-wrench", openWrench);
+    }, [dispatch]);
+
     const selectedIsChildTrack = Boolean(selectedTrack?.parentId);
 
     const childPitchOffsetCentsParam = useMemo(() => {

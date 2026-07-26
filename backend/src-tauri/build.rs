@@ -44,6 +44,19 @@ fn main() {
     // tauri_build validates resources, so soundtouch must run first to populate
     // the shared library at the resource path.
     tauri_build::build();
+
+    // The existing Linux workflow packages `resources/models` directly after
+    // `cargo build`.  Keep cloud artifacts suitable for overwrite updates by
+    // pruning those downloaded build-time resources after Tauri has validated
+    // them. Windows uses pack-portable.ps1, which already filters models.
+    if std::env::var("GITHUB_ACTIONS").ok().as_deref() == Some("true")
+        && std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("linux")
+    {
+        let models = std::path::Path::new("resources/models");
+        let _ = std::fs::remove_dir_all(models);
+        let _ = std::fs::create_dir_all(models);
+        println!("cargo:warning=[Package] pruned models for no-model Linux update artifact");
+    }
 }
 
 fn prepare_game_models() {
