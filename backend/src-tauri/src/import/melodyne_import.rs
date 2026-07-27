@@ -544,8 +544,93 @@ impl Graph {
     }
 
     fn eval_function(&self, function_id: u32, x: f64) -> f64 {
+        if self.class_name(function_id) == Some("MUBezierDataPointFunction") {
+            let Some(points_id) = self.reference(function_id, "points") else {
+                return x;
+            };
+            let points = self.list(points_id);
+            if points.is_empty() {
+                return x;
+            }
+            let first = points[0];
+            let first_x = self.f64(first, "x").unwrap_or(0.0);
+            if x <= first_x || points.len() == 1 {
+                return self.f64(first, "y").unwrap_or(x);
+            }
+            for pair in points.windows(2) {
+                let left = pair[0];
+                let right = pair[1];
+                let x0 = self.f64(left, "x").unwrap_or(0.0);
+                let y0 = self.f64(left, "y").unwrap_or(x0);
+                let x3 = self.f64(right, "x").unwrap_or(x0);
+                let y3 = self.f64(right, "y").unwrap_or(y0);
+                if x > x3 {
+                    continue;
+                }
+                let x1 = x0 + self.f64(left, "rightControlPointXDelta").unwrap_or(0.0);
+                let y1 = y0 + self.f64(left, "rightControlPointYDelta").unwrap_or(0.0);
+                let x2 = x3 + self.f64(right, "leftControlPointXDelta").unwrap_or(0.0);
+                let y2 = y3 + self.f64(right, "leftControlPointYDelta").unwrap_or(0.0);
+                // Solve Bezier X(t)=x. Melodyne marks this function invertible,
+                // therefore a bounded binary search reproduces its mapping
+                // without flattening the stored attack slope.
+                let mut lo = 0.0f64;
+                let mut hi = 1.0f64;
+                for _ in 0..28 {
+                    let t = (lo + hi) * 0.5;
+                    let u = 1.0 - t;
+                    let bx = u * u * u * x0
+                        + 3.0 * u * u * t * x1
+                        + 3.0 * u * t * t * x2
+                        + t * t * t * x3;
+                    if bx < x { lo = t; } else { hi = t; }
+                }
+                let t = (lo + hi) * 0.5;
+                let u = 1.0 - t;
+                return u * u * u * y0
+                    + 3.0 * u * u * t * y1
+                    + 3.0 * u * t * t * y2
+                    + t * t * t * y3;
+            }
+            return points
+                .last()
+                .and_then(|point| self.f64(*point, "y"))
+                .unwrap_or(x);
+        }
         let points = self.function_points(function_id);
         interpolate_function_points(&points, x).unwrap_or(x)
+    }
+
+    fn inverse_eval_function(&self, function_id: u32, y: f64) -> Option<f64> {
+        if !y.is_finite() {
+            return None;
+        }
+        let points = self.function_points(function_id);
+        let (first, last) = (*points.first()?, *points.last()?);
+        let ascending = last.1 >= first.1;
+        let mut lo = first.0;
+        let mut hi = last.0;
+        for _ in 0..32 {
+            let x = (lo + hi) * 0.5;
+            let value = self.eval_function(function_id, x);
+            if (value < y) == ascending { lo = x; } else { hi = x; }
+        }
+        Some(((lo + hi) * 0.5).clamp(first.0.min(last.0), first.0.max(last.0)))
+    }
+
+    fn sampled_function_points(&self, function_id: u32) -> Vec<(f64, f64)> {
+        let anchors = self.function_points(function_id);
+        let (Some(first), Some(last)) = (anchors.first(), anchors.last()) else {
+            return anchors;
+        };
+        let steps = (((last.0 - first.0).abs() / 0.001).ceil() as usize).clamp(2, 4096);
+        (0..=steps)
+            .map(|index| {
+                let fraction = index as f64 / steps as f64;
+                let x = first.0 + (last.0 - first.0) * fraction;
+                (x, self.eval_function(function_id, x))
+            })
+            .collect()
     }
 }
 
@@ -568,34 +653,6 @@ fn interpolate_function_points(points: &[(f64, f64)], x: f64) -> Option<f64> {
             }
         }
         points.last().map(|point| point.1)
-}
-
-/// Invert Melodyne's monotonic source-time mapping.  Fade handles are stored
-/// in source-time coordinates, while the renderer consumes destination-time
-/// durations, so using the raw source delta makes fades wrong whenever a note
-/// has been stretched.
-fn inverse_interpolate_function_points(points: &[(f64, f64)], y: f64) -> Option<f64> {
-    if points.is_empty() || !y.is_finite() {
-        return None;
-    }
-    if points.len() == 1 || y <= points[0].1 {
-        return Some(points[0].0);
-    }
-    for pair in points.windows(2) {
-        let (x0, y0) = pair[0];
-        let (x1, y1) = pair[1];
-        let lo = y0.min(y1);
-        let hi = y0.max(y1);
-        if y >= lo && y <= hi {
-            let span = y1 - y0;
-            if span.abs() <= 1e-9 {
-                return Some(x0);
-            }
-            let fraction = ((y - y0) / span).clamp(0.0, 1.0);
-            return Some(x0 + (x1 - x0) * fraction);
-        }
-    }
-    points.last().map(|point| point.0)
 }
 
 fn has_audio_extension(value: &str) -> bool {
@@ -902,9 +959,6 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 let following_join = graph.reference(element_id, "followingJoin");
                 let source_function_id =
                     graph.reference(element_id, "sourceTimeForElementTimeFunction");
-                let source_time_points = source_function_id
-                    .map(|function| graph.function_points(function))
-                    .unwrap_or_default();
                 // Melodyne 5 keeps fadeInTime/fadeOutTime at zero for most
                 // edited notes and persists the actual fade handles in source
                 // time. A plain Option fallback therefore discarded nearly
@@ -917,9 +971,9 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         graph
                             .f64(element_id, "amplitudeFadeInEndSourceTime")
                             .filter(|value| value.is_finite())
-                            .and_then(|value| {
-                                inverse_interpolate_function_points(&source_time_points, value)
-                            })
+                            .and_then(|value| source_function_id
+                                .and_then(|function| graph.inverse_eval_function(function, value))
+                                .or(Some(value)))
                             .unwrap_or(0.0)
                     })
                     .clamp(0.0, duration);
@@ -930,9 +984,9 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         graph
                             .f64(element_id, "amplitudeFadeOutStartSourceTime")
                             .filter(|value| value.is_finite())
-                            .and_then(|value| {
-                                inverse_interpolate_function_points(&source_time_points, value)
-                            })
+                            .and_then(|value| source_function_id
+                                .and_then(|function| graph.inverse_eval_function(function, value))
+                                .or(Some(value)))
                             .map(|start| duration - start)
                             .unwrap_or(0.0)
                     })
@@ -1010,6 +1064,35 @@ fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64
         .map(|function| graph.eval_function(function, local_time.clamp(0.0, element.duration)))
         .unwrap_or(local_time);
     item_start_samples / sample_rate + mapped.max(0.0)
+}
+
+fn element_time_map_points(
+    graph: &Graph,
+    element: &ImportedElement,
+    shift: f64,
+) -> Vec<crate::state::MelodyneTimeMapPoint> {
+    let mut local_times = element
+        .source_function_id
+        .map(|function| {
+            graph
+                .function_points(function)
+                .into_iter()
+                .map(|point| point.0)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    local_times.push(0.0);
+    local_times.push(element.duration);
+    local_times.sort_by(f64::total_cmp);
+    local_times.dedup_by(|left, right| (*left - *right).abs() <= 1e-7);
+    local_times
+        .into_iter()
+        .filter(|time| time.is_finite() && *time >= 0.0 && *time <= element.duration)
+        .map(|time| crate::state::MelodyneTimeMapPoint {
+            timeline_sec: element.start + shift + time,
+            source_sec: source_time(graph, element, time),
+        })
+        .collect()
 }
 
 fn register_project_note_objects(
@@ -1326,7 +1409,7 @@ fn build_track_params(
             .and_then(Option::as_ref);
         let time_function = element
             .source_function_id
-            .map(|function| graph.function_points(function))
+            .map(|function| graph.sampled_function_points(function))
             .unwrap_or_default();
         let start = element.start + shift;
         let first = (start / frame_period_sec).floor().max(0.0) as usize;
@@ -1588,10 +1671,14 @@ fn import_graph(
                                 .total_cmp(&(right.start + right.duration))
                         })?;
                     let boundary_gap = group.timeline_start - previous.timeline_end;
-                    (previous_element.join_amplitude
-                        && boundary_gap
-                            <= previous_element.amplitude_transition_duration.max(0.015) * 2.0)
-                        .then_some(previous_element.amplitude_transition_duration.max(0.002))
+                    (boundary_gap <= 0.002 && boundary_gap >= -0.5).then_some(
+                        if previous_element.join_amplitude {
+                            previous_element.amplitude_transition_duration.max(0.008)
+                        } else {
+                            (-boundary_gap).max(0.008)
+                        }
+                        .min(0.1),
+                    )
                 });
                 let outgoing_join = clip_groups.get(group_index + 1).and_then(|next| {
                     let last_element = group
@@ -1603,10 +1690,14 @@ fn import_graph(
                                 .total_cmp(&(right.start + right.duration))
                         })?;
                     let boundary_gap = next.timeline_start - group.timeline_end;
-                    (last_element.join_amplitude
-                        && boundary_gap
-                            <= last_element.amplitude_transition_duration.max(0.015) * 2.0)
-                        .then_some(last_element.amplitude_transition_duration.max(0.002))
+                    (boundary_gap <= 0.002 && boundary_gap >= -0.5).then_some(
+                        if last_element.join_amplitude {
+                            last_element.amplitude_transition_duration.max(0.008)
+                        } else {
+                            (-boundary_gap).max(0.008)
+                        }
+                        .min(0.1),
+                    )
                 });
                 // Joins inside a source occurrence are rendered by the
                 // Melodyne segment renderer. Joins crossing two source clips
@@ -1626,6 +1717,7 @@ fn import_graph(
                         source_start_sec: source_time(&graph, element, 0.0).max(0.0),
                         source_end_sec: source_time(&graph, element, element.duration)
                             .max(source_time(&graph, element, 0.0) + 0.001),
+                        time_map_points: element_time_map_points(&graph, element, shift),
                         connected_to_next: element.join_next,
                         amplitude_factor: element.amplitude_factor.max(0.0),
                         fade_in_sec: element.fade_in_sec,

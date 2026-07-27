@@ -86,6 +86,7 @@ export interface ClipInfo {
         timelineEndSec: number;
         sourceStartSec: number;
         sourceEndSec: number;
+        timeMapPoints: Array<{ timelineSec: number; sourceSec: number }>;
         connectedToNext: boolean;
         amplitudeFactor: number;
         fadeInSec: number;

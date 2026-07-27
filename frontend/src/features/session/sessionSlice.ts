@@ -759,6 +759,10 @@ function applyTimelineState(
                 timelineEndSec: Number(segment.timelineEndSec),
                 sourceStartSec: Number(segment.sourceStartSec),
                 sourceEndSec: Number(segment.sourceEndSec),
+                timeMapPoints: (segment.timeMapPoints ?? []).map((point) => ({
+                    timelineSec: Number(point.timelineSec),
+                    sourceSec: Number(point.sourceSec),
+                })),
                 connectedToNext: Boolean(segment.connectedToNext),
                 amplitudeFactor: Number(segment.amplitudeFactor ?? 1),
                 fadeInSec: Number(segment.fadeInSec ?? 0),

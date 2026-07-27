@@ -211,6 +211,8 @@ export const enUS = {
     formant_shift_label: "Formant Shift",
     hifigan_volume_label: "Volume",
     vslib_volume_label: "Volume",
+    mld5_volume_label: "Note Amplitude",
+    mld5_sibilant_label: "Sibilant Balance",
     vslib_synth_mode_label: "Synth Mode",
     vslib_pan_label: "Pan",
     vslib_breathiness_label: "Breathiness",

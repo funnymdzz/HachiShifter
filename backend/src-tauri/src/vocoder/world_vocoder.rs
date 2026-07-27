@@ -477,6 +477,24 @@ fn compute_f0_with_positions_harvest(
     Ok((temporal_positions, f0))
 }
 
+/// Model-free reference F0 extraction used by the MPD regression comparator.
+/// It deliberately uses the same WORLD Harvest implementation linked into the
+/// mld5 renderer, avoiding a detector mismatch in reported pitch error.
+pub fn analyze_f0_harvest(
+    samples: &[f64],
+    sample_rate: u32,
+    frame_period_ms: f64,
+) -> Result<Vec<f64>, String> {
+    compute_f0_with_positions_harvest(
+        samples,
+        sample_rate as i32,
+        frame_period_ms,
+        55.0,
+        1100.0,
+    )
+    .map(|(_, f0)| f0)
+}
+
 #[allow(dead_code)]
 fn vocode_one(
     x_f64: &[f64],

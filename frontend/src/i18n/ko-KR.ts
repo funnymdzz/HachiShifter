@@ -282,6 +282,8 @@ export const koKR = {
     formant_shift_label: "포먼트 시프트",
     hifigan_volume_label: "볼륨",
     vslib_volume_label: "볼륨",
+    mld5_volume_label: "노트 음량",
+    mld5_sibilant_label: "치찰음 밸런스",
     vslib_synth_mode_label: "합성 모드",
     vslib_pan_label: "팬",
     vslib_breathiness_label: "브레스",

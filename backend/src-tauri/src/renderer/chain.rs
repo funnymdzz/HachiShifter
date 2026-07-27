@@ -16,6 +16,42 @@ use super::traits::{
 
 static HIFIGAN_BREATH_OPTIONS: [(&str, i32); 2] = [("Off", 0), ("On", 1)];
 
+static MLD5_PARAM_DESCRIPTORS: [ParamDescriptor; 3] = [
+    ParamDescriptor {
+        id: "volume",
+        display_name: "Note Amplitude",
+        group: "mld5",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "x",
+            default_value: 1.0,
+            min_value: 0.0,
+            max_value: 4.0,
+        },
+    },
+    ParamDescriptor {
+        id: "formant_shift_cents",
+        display_name: "Formant Shift",
+        group: "mld5",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "cents",
+            default_value: 0.0,
+            min_value: -1200.0,
+            max_value: 1200.0,
+        },
+    },
+    ParamDescriptor {
+        id: "mld5_sibilant_balance",
+        display_name: "Sibilant Balance",
+        group: "mld5",
+        kind: super::traits::ParamKind::AutomationCurve {
+            unit: "x",
+            default_value: 0.0,
+            min_value: -1.0,
+            max_value: 1.0,
+        },
+    },
+];
+
 static HIFIGAN_PARAM_DESCRIPTORS: [ParamDescriptor; 5] = [
     ParamDescriptor {
         id: "breath_enabled",
@@ -202,6 +238,10 @@ impl ProcessingStage for Mld5VocoderStage {
 
     fn display_name(&self) -> &str {
         "mld5"
+    }
+
+    fn param_descriptors(&self) -> &'static [ParamDescriptor] {
+        &MLD5_PARAM_DESCRIPTORS
     }
 
     fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {

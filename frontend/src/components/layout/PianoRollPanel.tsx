@@ -934,7 +934,11 @@ export const PianoRollPanel: React.FC = () => {
                 case "hifigan_volume":
                     return t("hifigan_volume_label");
                 case "volume":
-                    return t("vslib_volume_label");
+                    return rootTrack?.pitchAnalysisAlgo === "mld5"
+                        ? t("mld5_volume_label")
+                        : t("vslib_volume_label");
+                case "mld5_sibilant_balance":
+                    return t("mld5_sibilant_label");
                 case "synth_mode":
                     return t("vslib_synth_mode_label");
                 case "pan":
@@ -945,7 +949,7 @@ export const PianoRollPanel: React.FC = () => {
                     return param.display_name;
             }
         },
-        [t],
+        [rootTrack?.pitchAnalysisAlgo, t],
     );
 
     const getStaticOptionLabel = useCallback(
@@ -1730,6 +1734,18 @@ export const PianoRollPanel: React.FC = () => {
         () => s.clips.filter((c) => groupTrackIds.has(c.trackId)),
         [s.clips, groupTrackIds],
     );
+    const melodyneTrackClips = useMemo(
+        () =>
+            trackClips
+                .filter(
+                    (clip) =>
+                        Boolean(clip.sourcePath) &&
+                        (clip.melodyneWarpSegments?.length ?? 0) > 0 &&
+                        !clip.muted,
+                )
+                .sort((left, right) => left.startSec - right.startSec),
+        [trackClips],
+    );
 
     // 可见区域的 sec 范围（统一用 sec 坐标系）
     const visibleStartSec = scrollLeft / Math.max(1e-9, pxPerSec);
@@ -1841,6 +1857,8 @@ export const PianoRollPanel: React.FC = () => {
         notes: Array<
             DetectedPitchNote & {
                 noteIndex: number;
+                annotationIndex: number;
+                clipId: string;
                 sourceStartSec: number;
                 sourceEndSec: number;
                 finalStartSec: number;
@@ -1862,6 +1880,16 @@ export const PianoRollPanel: React.FC = () => {
         const warpSegments = [...(clip.melodyneWarpSegments ?? [])].sort(
             (a, b) => a.timelineStartSec - b.timelineStartSec,
         );
+        const displayedWarpEntries = (showMelodyneWrench ? [clip] : melodyneTrackClips)
+            .flatMap((ownerClip) =>
+                [...(ownerClip.melodyneWarpSegments ?? [])]
+                    .sort((a, b) => a.timelineStartSec - b.timelineStartSec)
+                    .map((segment) => ({ ownerClip, segment })),
+            )
+            .sort(
+                (left, right) =>
+                    left.segment.timelineStartSec - right.segment.timelineStartSec,
+            );
         const active =
             analysis?.annotations[
                 Math.min(analysis.active_annotation_index, analysis.annotations.length - 1)
@@ -1887,6 +1915,26 @@ export const PianoRollPanel: React.FC = () => {
                     sourceSec <= segment.sourceEndSec + 0.005,
             );
             if (warp) {
+                const timeMap = warp.timeMapPoints ?? [];
+                for (let index = 0; index + 1 < timeMap.length; index += 1) {
+                    const left = timeMap[index];
+                    const right = timeMap[index + 1];
+                    const sourceMin = Math.min(left.sourceSec, right.sourceSec) - 1e-7;
+                    const sourceMax = Math.max(left.sourceSec, right.sourceSec) + 1e-7;
+                    if (sourceSec < sourceMin || sourceSec > sourceMax) continue;
+                    const sourceLength = right.sourceSec - left.sourceSec;
+                    const unit =
+                        Math.abs(sourceLength) <= 1e-9
+                            ? 0
+                            : Math.max(
+                                  0,
+                                  Math.min(1, (sourceSec - left.sourceSec) / sourceLength),
+                              );
+                    return (
+                        left.timelineSec +
+                        unit * (right.timelineSec - left.timelineSec)
+                    );
+                }
                 const sourceLength = Math.max(
                     1e-6,
                     warp.sourceEndSec - warp.sourceStartSec,
@@ -1981,6 +2029,8 @@ export const PianoRollPanel: React.FC = () => {
                     analysis?.annotations[noteIndex]?.relative_pitch_cents ?? 0;
                 return {
                     noteIndex,
+                    annotationIndex: noteIndex,
+                    clipId: clip.id,
                     startSec,
                     endSec,
                     sourceStartSec: note.start_sec,
@@ -2001,37 +2051,44 @@ export const PianoRollPanel: React.FC = () => {
         // may still be loading or may omit a quiet element; deriving blobs
         // from the persisted warp map keeps every Melodyne timing handle
         // visible instead of leaving only the pitch line.
-        const notes = warpSegments.length
-            ? warpSegments.map((segment, segmentIndex) => {
+        const notes = displayedWarpEntries.length
+            ? displayedWarpEntries.map(({ ownerClip, segment }, displayIndex) => {
                   let matchedIndex = -1;
                   let matchedOverlap = 0;
-                  detectedNotes.forEach((note, noteIndex) => {
-                      const overlap = Math.max(
-                          0,
-                          Math.min(segment.sourceEndSec, note.end_sec) -
-                              Math.max(segment.sourceStartSec, note.start_sec),
-                      );
-                      if (overlap > matchedOverlap) {
-                          matchedOverlap = overlap;
-                          matchedIndex = noteIndex;
-                      }
-                  });
+                  if (ownerClip.id === clip.id) {
+                      detectedNotes.forEach((note, noteIndex) => {
+                          const overlap = Math.max(
+                              0,
+                              Math.min(segment.sourceEndSec, note.end_sec) -
+                                  Math.max(segment.sourceStartSec, note.start_sec),
+                          );
+                          if (overlap > matchedOverlap) {
+                              matchedOverlap = overlap;
+                              matchedIndex = noteIndex;
+                          }
+                      });
+                  }
                   const matched = matchedIndex >= 0 ? detectedNotes[matchedIndex] : null;
                   const finalStartSec = segment.timelineStartSec;
                   const finalEndSec = segment.timelineEndSec;
                   const curveMidi = curveMidiForRange(finalStartSec, finalEndSec);
                   const originalMidi = matched?.midi_note ?? curveMidi ?? 60;
-                  const noteIndex = matchedIndex >= 0 ? matchedIndex : segmentIndex;
+                  const annotationIndex = matchedIndex >= 0 ? matchedIndex : displayIndex;
+                  const noteIndex = displayIndex;
                   const relativePitchCents =
-                      analysis?.annotations[noteIndex]?.relative_pitch_cents ?? 0;
+                      ownerClip.id === clip.id
+                          ? (analysis?.annotations[annotationIndex]?.relative_pitch_cents ?? 0)
+                          : 0;
                   const preview =
                       noteDragPreview?.noteIndex === noteIndex
                           ? noteDragPreview.midiNote
                           : null;
                   return {
                       noteIndex,
+                      annotationIndex,
+                      clipId: ownerClip.id,
                       startSec: showMelodyneWrench
-                          ? clip.startSec + segment.sourceStartSec
+                          ? ownerClip.startSec + segment.sourceStartSec
                           : finalStartSec,
                       endSec: showMelodyneWrench
                           ? clip.startSec + segment.sourceEndSec
@@ -2061,7 +2118,7 @@ export const PianoRollPanel: React.FC = () => {
               }
             : null;
         return { notes, timing };
-    }, [editParam, noteDragPreview, paramView, rootTrack?.composeEnabled, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
+    }, [editParam, melodyneTrackClips, noteDragPreview, paramView, rootTrack?.composeEnabled, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
 
     const [showPitchMacro, setShowPitchMacro] = useState(true);
     const applyMelodyneMacro = useCallback(
@@ -4017,7 +4074,7 @@ export const PianoRollPanel: React.FC = () => {
                                   active_annotation_index: Math.max(
                                       0,
                                       Math.min(
-                                          hit.noteIndex,
+                                          hit.annotationIndex,
                                           current.annotations.length - 1,
                                       ),
                                   ),
@@ -4089,9 +4146,10 @@ export const PianoRollPanel: React.FC = () => {
                         window.removeEventListener("pointerup", onUp);
                         window.removeEventListener("pointercancel", onUp);
                         if (moved) {
-                            if (edgeMode && selectedAudioClip) {
+                            const hitClip = s.clips.find((candidate) => candidate.id === hit.clipId);
+                            if (edgeMode && hitClip) {
                                 const orderedWarp = [
-                                    ...(selectedAudioClip.melodyneWarpSegments ?? []),
+                                    ...(hitClip.melodyneWarpSegments ?? []),
                                 ].sort((a, b) => a.timelineStartSec - b.timelineStartSec);
                                 const warpIndex = orderedWarp.findIndex((segment) => {
                                     const overlap = Math.max(
@@ -4118,7 +4176,7 @@ export const PianoRollPanel: React.FC = () => {
                                         : warpIndex + 1 < orderedWarp.length);
                                 if (hasSharedWarpBoundary) {
                                     await webApi.setMelodyneNoteBoundary({
-                                        clipId: selectedAudioClip.id,
+                                        clipId: hitClip.id,
                                         sourceStartSec: hit.sourceStartSec,
                                         sourceEndSec: hit.sourceEndSec,
                                         edge: edgeMode,
@@ -4137,18 +4195,17 @@ export const PianoRollPanel: React.FC = () => {
                                     edgeMode === "end"
                                         ? targetEdgeSec - hit.endSec
                                         : hit.startSec - targetEdgeSec;
-                                const nextLength = Math.max(0.05, selectedAudioClip.lengthSec + delta);
+                                const nextLength = Math.max(0.05, hitClip.lengthSec + delta);
                                 const sourceSpan = Math.max(
                                     0.001,
-                                    selectedAudioClip.sourceEndSec -
-                                        selectedAudioClip.sourceStartSec,
+                                    hitClip.sourceEndSec - hitClip.sourceStartSec,
                                 );
                                 await dispatch(
                                     setClipStateRemote({
-                                        clipId: selectedAudioClip.id,
+                                        clipId: hitClip.id,
                                         startSec:
                                             edgeMode === "start"
-                                                ? selectedAudioClip.startSec - delta
+                                                ? hitClip.startSec - delta
                                                 : undefined,
                                         lengthSec: nextLength,
                                         playbackRate: sourceSpan / nextLength,
@@ -4168,14 +4225,14 @@ export const PianoRollPanel: React.FC = () => {
                                     sampleAnalysis &&
                                     selectedAudioClip
                                 ) {
-                                    const row = sampleAnalysis.annotations[hit.noteIndex];
+                                    const row = sampleAnalysis.annotations[hit.annotationIndex];
                                     const oldRelative = row?.relative_pitch_cents ?? 0;
                                     const nextRelative =
                                         (targetMidi - hit.originalMidi) * 100;
                                     const deltaCents = nextRelative - oldRelative;
                                     const annotations = sampleAnalysis.annotations.map(
                                         (annotation, index) =>
-                                            index === hit.noteIndex
+                                            index === hit.annotationIndex
                                                 ? {
                                                       ...annotation,
                                                       relative_pitch_cents: nextRelative,
@@ -4189,7 +4246,7 @@ export const PianoRollPanel: React.FC = () => {
                                         Math.max(
                                             0,
                                             Math.min(
-                                                hit.noteIndex,
+                                                hit.annotationIndex,
                                                 sampleAnalysis.annotations.length - 1,
                                             ),
                                         ),
@@ -5202,7 +5259,11 @@ export const PianoRollPanel: React.FC = () => {
                 <MelodyneWrenchPanel
                     analysis={sampleAnalysis}
                     sourceLabel={sampleAnalysis?.audio_path ?? selectedAudioClip.sourcePath}
-                    activeNoteIndex={activeSampleNoteIndex}
+                    activeNoteIndex={
+                        sampleNoteDisplay.notes.find(
+                            (note) => note.noteIndex === activeSampleNoteIndex,
+                        )?.annotationIndex ?? null
+                    }
                     stretchAlgorithm={
                         s.project.stretchAlgorithmOverride ?? s.defaultStretchAlgorithm
                     }

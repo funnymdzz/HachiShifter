@@ -143,11 +143,23 @@ pub struct ClipFormantMorph {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct MelodyneTimeMapPoint {
+    pub timeline_sec: f64,
+    pub source_sec: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct MelodyneWarpSegment {
     pub timeline_start_sec: f64,
     pub timeline_end_sec: f64,
     pub source_start_sec: f64,
     pub source_end_sec: f64,
+    /// Exact persisted source-time/element-time anchors.  Endpoints alone are
+    /// insufficient: Melodyne commonly gives the attack and sustain different
+    /// stretch ratios inside one note.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_map_points: Vec<MelodyneTimeMapPoint>,
     /// Melodyne's persisted note-connection state. This controls only the
     /// short phase-continuity splice at the boundary; imported pitch curves
     /// are never smoothed implicitly.
@@ -2003,6 +2015,16 @@ impl TimelineState {
     /// projects with many clips.
     pub fn to_payload_lite(&self) -> TimelineStatePayload {
         let tracks_payload = build_track_payload(&self.tracks);
+        let selected_root_id = self
+            .selected_clip_id
+            .as_deref()
+            .and_then(|clip_id| self.clips.iter().find(|clip| clip.id == clip_id))
+            .and_then(|clip| self.resolve_root_track_id(&clip.track_id))
+            .or_else(|| {
+                self.selected_track_id
+                    .as_deref()
+                    .and_then(|track_id| self.resolve_root_track_id(track_id))
+            });
         let clips_payload = self
             .clips
             .iter()
@@ -2042,8 +2064,12 @@ impl TimelineState {
                 } else {
                     None
                 },
-                melodyne_warp_segments: if self.selected_clip_id.as_deref()
-                    == Some(c.id.as_str())
+                // The piano roll represents the complete Compose track, not
+                // just the last selected source clip.  Send every persisted
+                // MPD note object on the selected root so deleting/reordering
+                // another track never collapses the display to one blob.
+                melodyne_warp_segments: if self.resolve_root_track_id(&c.track_id)
+                    == selected_root_id
                 {
                     c.melodyne_warp_segments.clone()
                 } else {
@@ -2768,6 +2794,8 @@ impl TimelineState {
     pub fn patch_clip_state(&mut self, clip_id: &str, patch: ClipStatePatch) {
         let mut end_sec: Option<f64> = None;
         if let Some(c) = self.clips.iter_mut().find(|c| c.id == clip_id) {
+            let old_start_sec = c.start_sec;
+            let old_length_sec = c.length_sec.max(1e-9);
             if let Some(v) = patch.name {
                 c.name = v;
             }
@@ -2818,6 +2846,22 @@ impl TimelineState {
                 c.formant_morph = Some(v);
             }
 
+            if !c.melodyne_warp_segments.is_empty()
+                && ((c.start_sec - old_start_sec).abs() > 1e-9
+                    || (c.length_sec - old_length_sec).abs() > 1e-9)
+            {
+                let scale = c.length_sec / old_length_sec;
+                let new_start_sec = c.start_sec;
+                let remap =
+                    |time: f64| new_start_sec + (time - old_start_sec) * scale;
+                for segment in &mut c.melodyne_warp_segments {
+                    segment.timeline_start_sec = remap(segment.timeline_start_sec);
+                    segment.timeline_end_sec = remap(segment.timeline_end_sec);
+                    for point in &mut segment.time_map_points {
+                        point.timeline_sec = remap(point.timeline_sec);
+                    }
+                }
+            }
             end_sec = Some(c.start_sec + c.length_sec);
         }
 

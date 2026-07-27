@@ -212,6 +212,8 @@ export const jaJP = {
     formant_shift_label: "フォルマントシフト",
     hifigan_volume_label: "ボリューム",
     vslib_volume_label: "ボリューム",
+    mld5_volume_label: "ノート音量",
+    mld5_sibilant_label: "歯擦音バランス",
     vslib_synth_mode_label: "合成モード",
     vslib_pan_label: "パン",
     vslib_breathiness_label: "ブレッシネス",

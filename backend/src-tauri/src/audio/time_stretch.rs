@@ -909,7 +909,10 @@ fn continue_periodic_phase_at_join(
         }
     }
 
-    let requested = if connected { 12 } else { 2 };
+    // Auto crossfade is enabled by default. Disconnected pitch objects keep
+    // independent contours, but their PCM boundary still receives an 8 ms
+    // equal-power-compatible de-click bridge.
+    let requested = if connected { 12 } else { 8 };
     let default_fade = ((sample_rate as usize * requested) / 1000).max(8);
     // `joinsAmplitudes` carries its own transition duration. Honour that
     // persisted boundary ramp while keeping it bounded so it cannot smear a
@@ -975,14 +978,70 @@ pub fn render_melodyne_warp_segments(
         if dst_start >= target_frames { continue; }
         let dst_end = dst_end.clamp(dst_start.saturating_add(1), target_frames);
         if dst_end <= dst_start { continue; }
-        let mut stretched = time_stretch_interleaved(
-            &input[src_start * channels..src_end * channels],
-            channels,
-            sample_rate,
-            dst_end - dst_start,
-            StretchAlgorithm::MelodyneHybrid,
-        );
         let piece_frames = dst_end - dst_start;
+        let mut stretched = vec![0.0f32; piece_frames * channels];
+        let mut mapped_any = false;
+        let mut internal_boundaries = Vec::new();
+        if segment.time_map_points.len() >= 2 {
+            for pair in segment.time_map_points.windows(2) {
+                let map_src_start = ((pair[0].source_sec - clip_source_start_sec).max(0.0)
+                    * sample_rate as f64).round() as usize;
+                let map_src_end = ((pair[1].source_sec - clip_source_start_sec).max(0.0)
+                    * sample_rate as f64).round() as usize;
+                let map_dst_start = ((pair[0].timeline_sec - clip_start_sec).max(0.0)
+                    * sample_rate as f64).round() as usize;
+                let map_dst_end = ((pair[1].timeline_sec - clip_start_sec).max(0.0)
+                    * sample_rate as f64).round() as usize;
+                let map_src_start = map_src_start.clamp(src_start, src_end);
+                let map_dst_start = map_dst_start.clamp(dst_start, dst_end);
+                if map_src_start >= src_end || map_dst_start >= dst_end {
+                    continue;
+                }
+                let map_src_end = map_src_end.clamp(map_src_start + 1, src_end);
+                let map_dst_end = map_dst_end.clamp(map_dst_start + 1, dst_end);
+                if map_src_end <= map_src_start || map_dst_end <= map_dst_start {
+                    continue;
+                }
+                let rendered = time_stretch_interleaved(
+                    &input[map_src_start * channels..map_src_end * channels],
+                    channels,
+                    sample_rate,
+                    map_dst_end - map_dst_start,
+                    StretchAlgorithm::MelodyneHybrid,
+                );
+                let local_start = map_dst_start.saturating_sub(dst_start);
+                let frames = (rendered.len() / channels).min(piece_frames.saturating_sub(local_start));
+                stretched[local_start * channels..(local_start + frames) * channels]
+                    .copy_from_slice(&rendered[..frames * channels]);
+                mapped_any = true;
+                if map_dst_end < dst_end {
+                    internal_boundaries.push(map_dst_end - dst_start);
+                }
+            }
+        }
+        if !mapped_any {
+            stretched = time_stretch_interleaved(
+                &input[src_start * channels..src_end * channels],
+                channels,
+                sample_rate,
+                piece_frames,
+                StretchAlgorithm::MelodyneHybrid,
+            );
+        } else {
+            // Preserve phase through Melodyne's internal attack/sustain warp
+            // anchors.  These anchors change time ratio, not pitch or phase.
+            for boundary in internal_boundaries {
+                continue_periodic_phase_at_join(
+                    &mut stretched,
+                    channels,
+                    sample_rate,
+                    boundary,
+                    piece_frames.saturating_sub(boundary),
+                    true,
+                    (sample_rate as usize * 4) / 1000,
+                );
+            }
+        }
         let fade_in = (segment.fade_in_sec.max(0.0) * sample_rate as f64).round() as usize;
         let fade_out = (segment.fade_out_sec.max(0.0) * sample_rate as f64).round() as usize;
         for local in 0..piece_frames {

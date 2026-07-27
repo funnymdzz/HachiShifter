@@ -153,6 +153,15 @@ pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(result) = try_compare_vocal_f0_from_args() {
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("vocal F0 comparison failed: {error}");
+                std::process::exit(2);
+            }
+        }
+    }
     if let Some(result) = try_render_mpd_vocal_from_args() {
         match result {
             Ok(()) => std::process::exit(0),
@@ -459,6 +468,113 @@ pub fn run() {
                 crate::hnsep_onnx::drop_shared_session();
             }
         });
+}
+
+fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let flag_index = args
+        .iter()
+        .position(|arg| arg.as_os_str() == std::ffi::OsStr::new("--compare-vocal-f0"))?;
+    let reference = args.get(flag_index + 1).map(std::path::PathBuf::from);
+    let rendered = args.get(flag_index + 2).map(std::path::PathBuf::from);
+    Some((|| {
+        let reference = reference.ok_or_else(|| "missing reference vocal WAV".to_string())?;
+        let rendered = rendered.ok_or_else(|| "missing rendered vocal WAV".to_string())?;
+        fn read_mono(path: &std::path::Path) -> Result<(u32, Vec<f64>), String> {
+            let (rate, channels, pcm) = crate::audio_utils::decode_audio_f32_interleaved(path)?;
+            let channels = channels.max(1) as usize;
+            let mono = pcm
+                .chunks_exact(channels)
+                .map(|frame| frame.iter().map(|value| *value as f64).sum::<f64>() / channels as f64)
+                .collect();
+            Ok((rate, mono))
+        }
+        fn resample(input: &[f64], in_rate: u32, out_rate: u32) -> Vec<f64> {
+            if in_rate == out_rate || input.len() < 2 { return input.to_vec(); }
+            let frames = ((input.len() as f64 * out_rate as f64 / in_rate as f64).round())
+                .max(1.0) as usize;
+            (0..frames)
+                .map(|index| {
+                    let position = index as f64 * in_rate as f64 / out_rate as f64;
+                    let left = (position.floor() as usize).min(input.len() - 1);
+                    let right = (left + 1).min(input.len() - 1);
+                    input[left] + (input[right] - input[left]) * (position - left as f64)
+                })
+                .collect()
+        }
+        fn envelope(input: &[f64], hop: usize) -> Vec<f64> {
+            input
+                .chunks(hop.max(1))
+                .map(|chunk| (chunk.iter().map(|value| value * value).sum::<f64>()
+                    / chunk.len().max(1) as f64).sqrt())
+                .collect()
+        }
+        let target_rate = 48_000;
+        let (reference_rate, reference_pcm) = read_mono(&reference)?;
+        let (rendered_rate, rendered_pcm) = read_mono(&rendered)?;
+        let reference_pcm = resample(&reference_pcm, reference_rate, target_rate);
+        let rendered_pcm = resample(&rendered_pcm, rendered_rate, target_rate);
+        if rendered_pcm.len() < reference_pcm.len() {
+            return Err("rendered vocal is shorter than reference".to_string());
+        }
+        let ref_env = envelope(&reference_pcm, 480);
+        let rendered_env = envelope(&rendered_pcm, 480);
+        let mut best = (f64::NEG_INFINITY, 0usize);
+        for offset in 0..=rendered_env.len().saturating_sub(ref_env.len()) {
+            let candidate = &rendered_env[offset..offset + ref_env.len()];
+            let ref_mean = ref_env.iter().sum::<f64>() / ref_env.len().max(1) as f64;
+            let candidate_mean = candidate.iter().sum::<f64>() / candidate.len().max(1) as f64;
+            let mut dot = 0.0;
+            let mut aa = 0.0;
+            let mut bb = 0.0;
+            for (left, right) in ref_env.iter().zip(candidate) {
+                let a = left - ref_mean;
+                let b = right - candidate_mean;
+                dot += a * b;
+                aa += a * a;
+                bb += b * b;
+            }
+            let correlation = dot / (aa * bb).sqrt().max(1e-12);
+            if correlation > best.0 { best = (correlation, offset); }
+        }
+        let offset_samples = best.1 * 480;
+        let aligned = &rendered_pcm[offset_samples..(offset_samples + reference_pcm.len())
+            .min(rendered_pcm.len())];
+        let length = aligned.len().min(reference_pcm.len());
+        let reference_f0 = crate::world_vocoder::analyze_f0_harvest(
+            &reference_pcm[..length], target_rate, 5.0,
+        )?;
+        let rendered_f0 = crate::world_vocoder::analyze_f0_harvest(
+            &aligned[..length], target_rate, 5.0,
+        )?;
+        let frame_count = reference_f0.len().min(rendered_f0.len());
+        let mut errors = Vec::new();
+        let mut signed = Vec::new();
+        let mut reference_voiced = 0usize;
+        let mut rendered_voiced = 0usize;
+        for index in 0..frame_count {
+            let left = reference_f0[index];
+            let right = rendered_f0[index];
+            reference_voiced += usize::from(left > 0.0);
+            rendered_voiced += usize::from(right > 0.0);
+            if left > 0.0 && right > 0.0 {
+                let cents = 1200.0 * (right / left).log2();
+                signed.push(cents);
+                errors.push(cents.abs());
+            }
+        }
+        errors.sort_by(f64::total_cmp);
+        signed.sort_by(f64::total_cmp);
+        let percentile = |values: &[f64], fraction: f64| -> f64 {
+            if values.is_empty() { return 0.0; }
+            values[((values.len() - 1) as f64 * fraction).round() as usize]
+        };
+        println!("{{\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3}}}",
+            reference.display(), rendered.display(), offset_samples as f64 / target_rate as f64,
+            best.0, frame_count, reference_voiced, rendered_voiced, errors.len(),
+            percentile(&errors, 0.5), percentile(&errors, 0.9), percentile(&signed, 0.5));
+        Ok(())
+    })())
 }
 
 /// Small headless reference path used to compare the imported `vocal` track

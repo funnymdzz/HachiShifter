@@ -734,6 +734,12 @@ pub(super) fn set_melodyne_note_boundary(
     state.checkpoint_timeline(&tl);
     segments[left_index].timeline_end_sec = new_boundary;
     segments[right_index].timeline_start_sec = new_boundary;
+    if let Some(point) = segments[left_index].time_map_points.last_mut() {
+        point.timeline_sec = new_boundary;
+    }
+    if let Some(point) = segments[right_index].time_map_points.first_mut() {
+        point.timeline_sec = new_boundary;
+    }
     tl.clips[clip_index].melodyne_warp_segments = segments;
 
     if let Some(root_track_id) = root_track_id {
