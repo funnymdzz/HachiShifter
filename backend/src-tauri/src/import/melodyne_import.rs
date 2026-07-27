@@ -1467,6 +1467,50 @@ fn build_track_params(
     }
 }
 
+fn build_group_source_pitch_curve(
+    graph: &Graph,
+    track: &ImportedTrack,
+    group: &ClipGroup,
+    shift: f64,
+    frame_period_ms: f64,
+) -> Vec<f32> {
+    let frame_sec = frame_period_ms.max(0.1) / 1000.0;
+    let clip_start = group.timeline_start + shift;
+    let clip_length = (group.timeline_end - group.timeline_start).max(0.001);
+    let mut curve = vec![0.0f32; (clip_length / frame_sec).ceil() as usize + 2];
+    let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
+    for element_index in &group.element_indices {
+        let Some(element) = track.elements.get(*element_index) else {
+            continue;
+        };
+        pitch_cache_by_item
+            .entry(element.source_item_id)
+            .or_insert_with(|| build_source_pitch_cache(graph, element));
+        let pitch_cache = pitch_cache_by_item
+            .get(&element.source_item_id)
+            .and_then(Option::as_ref);
+        let time_function = element
+            .source_function_id
+            .map(|function| graph.sampled_function_points(function))
+            .unwrap_or_default();
+        let destination_start = element.start + shift;
+        let first = ((destination_start - clip_start) / frame_sec).floor().max(0.0) as usize;
+        let last = ((destination_start + element.duration - clip_start) / frame_sec)
+            .ceil()
+            .max(0.0) as usize;
+        for local_frame in first..last.min(curve.len()) {
+            let destination_time = clip_start + local_frame as f64 * frame_sec;
+            let element_time = destination_time - destination_start;
+            if let Some((raw, _)) =
+                pitch_cache.and_then(|cache| source_pitch_at(cache, &time_function, element_time))
+            {
+                curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
+            }
+        }
+    }
+    curve
+}
+
 fn parse_project_graph(data: &[u8]) -> Result<Graph, String> {
     let mut last_error = "Melodyne project contains no object graph".to_string();
     for entry in decode_graph_entries(data)? {
@@ -1637,6 +1681,7 @@ fn import_graph(
             state_track.compose_enabled = compose;
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
+        let mut clip_source_pitch_curves = Vec::<(String, Vec<f32>)>::new();
         for (group_index, group) in clip_groups.iter().enumerate() {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
@@ -1728,12 +1773,22 @@ fn import_graph(
                         connected_amplitude_to_next: element.join_amplitude,
                     })
                 }).collect();
+                if compose {
+                    clip_source_pitch_curves.push((
+                        clip.id.clone(),
+                        build_group_source_pitch_curve(
+                            &graph,
+                            track,
+                            group,
+                            shift,
+                            frame_period_ms,
+                        ),
+                    ));
+                }
             }
         }
         if compose {
-            timeline.params_by_root_track.insert(
-                track_id.clone(),
-                build_track_params(
+            let mut params = build_track_params(
                     &graph,
                     track,
                     shift,
@@ -1742,8 +1797,13 @@ fn import_graph(
                     track_index,
                     tracks.len(),
                     progress,
-                ),
-            );
+                );
+            for (clip_id, curve) in clip_source_pitch_curves {
+                params
+                    .extra_curves
+                    .insert(format!("mld5_source_pitch::{clip_id}"), curve);
+            }
+            timeline.params_by_root_track.insert(track_id.clone(), params);
         }
         if track_index == 0 {
             timeline.selected_track_id = Some(track_id);

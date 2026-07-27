@@ -638,15 +638,22 @@ pub(crate) fn build_clip_input_pitch_curve(
         // sustain warp, causing the pitch shifter to apply the wrong interval.
         let clip_root = clip_root_track_id(timeline, clip)?;
         let params = timeline.params_by_root_track.get(&clip_root)?;
-        let fp_sec = frame_period_ms.max(0.1) / 1000.0;
-        let frame_count = (clip.length_sec.max(0.0) / fp_sec).ceil().max(1.0) as usize + 1;
-        (0..frame_count)
-            .map(|local_index| {
-                let abs_time = clip_start_sec + local_index as f64 * fp_sec;
-                let global_index = (abs_time / fp_sec).round().max(0.0) as usize;
-                params.pitch_orig.get(global_index).copied().unwrap_or(0.0)
+        params
+            .extra_curves
+            .get(&format!("mld5_source_pitch::{}", clip.id))
+            .cloned()
+            .unwrap_or_else(|| {
+                let fp_sec = frame_period_ms.max(0.1) / 1000.0;
+                let frame_count =
+                    (clip.length_sec.max(0.0) / fp_sec).ceil().max(1.0) as usize + 1;
+                (0..frame_count)
+                    .map(|local_index| {
+                        let abs_time = clip_start_sec + local_index as f64 * fp_sec;
+                        let global_index = (abs_time / fp_sec).round().max(0.0) as usize;
+                        params.pitch_orig.get(global_index).copied().unwrap_or(0.0)
+                    })
+                    .collect()
             })
-            .collect()
     } else {
         let clip_root = clip_root_track_id(timeline, clip)?;
         let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
