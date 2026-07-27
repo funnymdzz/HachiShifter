@@ -165,9 +165,11 @@ export const MelodyneWrenchPanel: React.FC<{
                         </Select.Item>
                     </Select.Content>
                 </Select.Root>
-                <Button size="1" variant="soft" disabled={busy} onClick={onRedetect}>
-                    {tAny("sample_timing_redetect")}
-                </Button>
+                {analysis?.note_detector !== "melodyne" ? (
+                    <Button size="1" variant="soft" disabled={busy} onClick={onRedetect}>
+                        {tAny("sample_timing_redetect")}
+                    </Button>
+                ) : null}
                 <Button size="1" variant="soft" disabled={busy} onClick={onSave}>
                     {tAny("sample_timing_save")}
                 </Button>

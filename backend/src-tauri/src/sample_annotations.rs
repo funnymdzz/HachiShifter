@@ -201,7 +201,7 @@ pub fn register_melodyne_project_analysis(path: &Path, analysis: SampleAnalysis)
     }
 }
 
-fn melodyne_project_analysis(path: &Path) -> Option<SampleAnalysis> {
+pub fn melodyne_project_analysis(path: &Path) -> Option<SampleAnalysis> {
     let (file_len, modified_ns) = analysis_fingerprint(path)?;
     let cache = MELODYNE_PROJECT_CACHE
         .get_or_init(|| Mutex::new(HashMap::new())).lock().ok()?;

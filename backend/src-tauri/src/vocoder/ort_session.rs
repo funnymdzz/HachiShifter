@@ -248,8 +248,14 @@ pub fn build_ort_session(onnx_path: &Path, role: OrtSessionRole) -> Result<(Sess
     // detector on CPU; DirectML remains active for the much heavier HiFiGAN
     // vocoder where it provides the useful acceleration.
     #[cfg(target_os = "windows")]
-    if matches!(role, OrtSessionRole::PitchDetector) && choice == "directml" {
-        return build_cpu_session(onnx_path, role, "directml_pitch_cpu_guard");
+    if matches!(role, OrtSessionRole::PitchDetector) && choice != "cpu" {
+        // `auto` also resolves to DirectML on Windows. Guarding only the
+        // literal `directml` choice still let audio import create dynamic
+        // FCPE/GAME graphs on DML and several drivers terminated the process
+        // during graph compilation. Pitch detection remains on CPU for every
+        // GPU-capable choice; the heavy HiFiGAN vocoder continues to use the
+        // selected DirectML adapter.
+        return build_cpu_session(onnx_path, role, "windows_dynamic_pitch_cpu_guard");
     }
 
     // ── GPU path: try DirectML first (Windows) ──────────────────────────

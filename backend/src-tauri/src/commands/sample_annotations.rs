@@ -130,7 +130,16 @@ pub(super) fn get_clip_sample_annotations(
         Ok(value) => value,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
-    match sample_annotations::load_or_detect(Path::new(&source)) {
+    // MPD clips must remain entirely graph-driven. Their note identity,
+    // boundaries, timing handles and controls were already restored during
+    // import; running GAME here would silently replace that information.
+    let loaded = if clip.melodyne_warp_segments.is_empty() {
+        sample_annotations::load_or_detect(Path::new(&source))
+    } else {
+        sample_annotations::melodyne_project_analysis(Path::new(&source))
+            .ok_or_else(|| "Melodyne project note data is unavailable".to_string())
+    };
+    match loaded {
         Ok(analysis) => {
             let detected_end = analysis
                 .annotations
@@ -247,7 +256,15 @@ pub(super) fn redetect_clip_sample_annotations(
         Ok(value) => value,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
-    match sample_annotations::reanalyze_audio(Path::new(&source)) {
+    let analysis_result = if clip.melodyne_warp_segments.is_empty() {
+        sample_annotations::reanalyze_audio(Path::new(&source))
+    } else {
+        // "Redetect" on an MPD clip means reload its persisted Melodyne
+        // objects. Acoustic GAME analysis is intentionally excluded.
+        sample_annotations::melodyne_project_analysis(Path::new(&source))
+            .ok_or_else(|| "Melodyne project note data is unavailable".to_string())
+    };
+    match analysis_result {
         Ok(analysis) => {
             let annotations = match sample_annotations::validate_annotations(
                 &analysis.annotations,

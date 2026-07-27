@@ -731,7 +731,6 @@ struct ImportedElement {
     pitch_modulation: f32,
     formant_offset: f32,
     amplitude_factor: f32,
-    amplitude_envelope_function_id: Option<u32>,
     sibilant_balance: f32,
     attack_duration: f64,
     decay_elongation: f32,
@@ -779,6 +778,18 @@ fn is_melodic_description(graph: &Graph, description_id: u32) -> bool {
         .unwrap_or_default()
         .to_ascii_lowercase();
     identifier.contains(".melodic") || graph.bool(parameter_set, "isTonalicOnly")
+}
+
+fn track_volume(graph: &Graph, track_id: u32) -> f32 {
+    let direct = graph.f32(track_id, "volume");
+    let effect_fader = graph
+        .reference(track_id, "effectChain")
+        .and_then(|chain| graph.reference(chain, "effects"))
+        .into_iter()
+        .flat_map(|effects| graph.list(effects))
+        .find(|effect| graph.class_name(*effect) == Some("MUFader"))
+        .and_then(|fader| graph.f32(fader, "volume"));
+    direct.or(effect_fader).unwrap_or(1.0).clamp(0.0, 4.0)
 }
 
 fn collect_track_ids(graph: &Graph, track_id: u32, output: &mut Vec<u32>, seen: &mut HashSet<u32>) {
@@ -861,23 +872,56 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     continue;
                 }
                 let following_join = graph.reference(element_id, "followingJoin");
-                let source_start = source_time_for_ids(graph, source_item_id, source_description_id, 0.0);
-                let source_end = source_time_for_ids(graph, source_item_id, source_description_id, duration);
-                let fade_in_sec = graph.f64(element_id, "fadeInTime").unwrap_or_else(|| {
-                    graph.f64(element_id, "amplitudeFadeInEndSourceTime")
-                        .map(|value| value - source_start).unwrap_or(0.0)
-                }).clamp(0.0, duration);
-                let fade_out_sec = graph.f64(element_id, "fadeOutTime").unwrap_or_else(|| {
-                    graph.f64(element_id, "amplitudeFadeOutStartSourceTime")
-                        .map(|value| source_end - value).unwrap_or(0.0)
-                }).clamp(0.0, duration);
+                let source_function_id =
+                    graph.reference(element_id, "sourceTimeForElementTimeFunction");
+                let source_start = source_time_for_ids(
+                    graph,
+                    source_item_id,
+                    source_description_id,
+                    source_function_id,
+                    0.0,
+                    duration,
+                );
+                let source_end = source_time_for_ids(
+                    graph,
+                    source_item_id,
+                    source_description_id,
+                    source_function_id,
+                    duration,
+                    duration,
+                );
+                // Melodyne 5 keeps fadeInTime/fadeOutTime at zero for most
+                // edited notes and persists the actual fade handles in source
+                // time. A plain Option fallback therefore discarded nearly
+                // every crossfade. Prefer a positive explicit duration, then
+                // derive it from the warped source-time endpoints.
+                let fade_in_sec = graph
+                    .f64(element_id, "fadeInTime")
+                    .filter(|value| *value > 1e-9)
+                    .unwrap_or_else(|| {
+                        graph
+                            .f64(element_id, "amplitudeFadeInEndSourceTime")
+                            .map(|value| value - source_start)
+                            .unwrap_or(0.0)
+                    })
+                    .clamp(0.0, duration);
+                let fade_out_sec = graph
+                    .f64(element_id, "fadeOutTime")
+                    .filter(|value| *value > 1e-9)
+                    .unwrap_or_else(|| {
+                        graph
+                            .f64(element_id, "amplitudeFadeOutStartSourceTime")
+                            .map(|value| source_end - value)
+                            .unwrap_or(0.0)
+                    })
+                    .clamp(0.0, duration);
                 elements.push(ImportedElement {
                     start,
                     duration,
                     source_id,
                     source_item_id,
                     source_description_id,
-                    source_function_id: graph.reference(element_id, "sourceTimeForElementTimeFunction"),
+                    source_function_id,
                     pitch_center: graph.f32(element_id, "pitchCenter").unwrap_or(0.0),
                     pitch_drift: graph.f32(element_id, "pitchDriftFactor").unwrap_or(1.0),
                     pitch_modulation: graph
@@ -885,9 +929,6 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         .unwrap_or(1.0),
                     formant_offset: graph.f32(element_id, "formantOffset").unwrap_or(0.0),
                     amplitude_factor: graph.f32(element_id, "amplitudeFactor").unwrap_or(1.0),
-                    amplitude_envelope_function_id: graph
-                        .reference(element_id, "amplitudeEnvelope")
-                        .or_else(|| graph.reference(source_item_id, "amplitudeEnvelope")),
                     sibilant_balance: graph.f32(element_id, "sibilantBalance").unwrap_or(0.0),
                     attack_duration: graph.f64(element_id, "attackDuration").unwrap_or(0.0),
                     decay_elongation: graph.f32(element_id, "decayElongation").unwrap_or(0.0),
@@ -901,8 +942,14 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         .unwrap_or(0.0),
                     fade_in_sec,
                     fade_out_sec,
-                    fade_in_shape_pow: graph.f32(element_id, "amplitudeFadeInShapePow").unwrap_or(1.0).clamp(0.1, 8.0),
-                    fade_out_shape_pow: graph.f32(element_id, "amplitudeFadeOutShapePow").unwrap_or(1.0).clamp(0.1, 8.0),
+                    fade_in_shape_pow: graph
+                        .f64(element_id, "amplitudeFadeInShapePow")
+                        .unwrap_or(1.0)
+                        .clamp(0.1, 8.0) as f32,
+                    fade_out_shape_pow: graph
+                        .f64(element_id, "amplitudeFadeOutShapePow")
+                        .unwrap_or(1.0)
+                        .clamp(0.1, 8.0) as f32,
                     join_amplitude: following_join.map(|join| graph.bool(join, "joinsAmplitudes")).unwrap_or(false),
                     amplitude_transition_duration: following_join.and_then(|join| graph.f64(join, "amplitudeTransitionDuration")).unwrap_or(0.0).max(0.0),
                 });
@@ -915,11 +962,7 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 muted: graph.bool(track_id, "isMuted"),
                 solo: graph.bool(track_id, "isSolo"),
                 melodic,
-                volume: graph.f32(track_id, "volume").or_else(|| {
-                    graph.reference(track_id, "volumeFader").and_then(|fader| {
-                        graph.f32(fader, "allGain").or_else(|| graph.f32(fader, "volume"))
-                    })
-                }).unwrap_or(1.0).clamp(0.0, 4.0),
+                volume: track_volume(graph, track_id),
                 elements,
             });
         }
@@ -930,11 +973,21 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
     Ok((tracks, sources))
 }
 
-fn source_time_for_ids(graph: &Graph, source_item_id: u32, source_description_id: u32, local: f64) -> f64 {
+fn source_time_for_ids(
+    graph: &Graph,
+    source_item_id: u32,
+    source_description_id: u32,
+    source_function_id: Option<u32>,
+    local: f64,
+    duration: f64,
+) -> f64 {
     let start = graph.i64(source_item_id, "startSampleIndex").unwrap_or(0).max(0) as f64;
     let rate = graph.reference(source_description_id, "audioSource")
         .and_then(|source| graph.f64(source, "sampleRate")).unwrap_or(44_100.0).max(1.0);
-    start / rate + local.max(0.0)
+    let mapped = source_function_id
+        .map(|function| graph.eval_function(function, local.clamp(0.0, duration)))
+        .unwrap_or(local);
+    start / rate + mapped.max(0.0)
 }
 
 fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64 {
@@ -1238,10 +1291,7 @@ fn build_track_params(
     let has_volume = track
         .elements
         .iter()
-        .any(|element| {
-            (element.amplitude_factor - 1.0).abs() > 1e-6
-                || element.amplitude_envelope_function_id.is_some()
-        });
+        .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
     let has_sibilant = track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6);
     let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
     let mut volume = has_volume.then(|| vec![1.0f32; frame_count]);
@@ -1273,10 +1323,6 @@ fn build_track_params(
             .source_function_id
             .map(|function| graph.function_points(function))
             .unwrap_or_default();
-        let amplitude_envelope = element
-            .amplitude_envelope_function_id
-            .map(|function| graph.function_points(function))
-            .unwrap_or_default();
         let start = element.start + shift;
         let first = (start / frame_period_sec).floor().max(0.0) as usize;
         let last = ((start + element.duration) / frame_period_sec)
@@ -1300,14 +1346,7 @@ fn build_track_params(
                 curve[frame] = element.formant_offset;
             }
             if let Some(curve) = volume.as_mut() {
-                let envelope = element
-                    .amplitude_envelope_function_id
-                    .and_then(|_| interpolate_function_points(&amplitude_envelope, local_time))
-                    .map(|value| value as f32)
-                    .filter(|value| value.is_finite())
-                    .unwrap_or(1.0)
-                    .clamp(0.0, 4.0);
-                curve[frame] = element.amplitude_factor.max(0.0) * envelope;
+                curve[frame] = element.amplitude_factor.max(0.0);
             }
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
@@ -1510,7 +1549,7 @@ fn import_graph(
             state_track.compose_enabled = compose;
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
-        for group in clip_groups {
+        for (group_index, group) in clip_groups.iter().enumerate() {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
             };
@@ -1533,8 +1572,47 @@ fn import_graph(
                 clip.source_start_sec = group.source_start.max(0.0);
                 clip.source_end_sec = group.source_end.max(clip.source_start_sec + 0.001);
                 clip.playback_rate = (source_length / timeline_length).clamp(0.05, 20.0) as f32;
-                clip.fade_in_sec = 0.0;
-                clip.fade_out_sec = 0.0;
+                let incoming_join = group_index.checked_sub(1).and_then(|previous_index| {
+                    let previous = clip_groups.get(previous_index)?;
+                    let previous_element = previous
+                        .element_indices
+                        .iter()
+                        .filter_map(|index| track.elements.get(*index))
+                        .max_by(|left, right| {
+                            (left.start + left.duration)
+                                .total_cmp(&(right.start + right.duration))
+                        })?;
+                    let boundary_gap = group.timeline_start - previous.timeline_end;
+                    (previous_element.join_amplitude
+                        && boundary_gap
+                            <= previous_element.amplitude_transition_duration.max(0.015) * 2.0)
+                        .then_some(previous_element.amplitude_transition_duration.max(0.002))
+                });
+                let outgoing_join = clip_groups.get(group_index + 1).and_then(|next| {
+                    let last_element = group
+                        .element_indices
+                        .iter()
+                        .filter_map(|index| track.elements.get(*index))
+                        .max_by(|left, right| {
+                            (left.start + left.duration)
+                                .total_cmp(&(right.start + right.duration))
+                        })?;
+                    let boundary_gap = next.timeline_start - group.timeline_end;
+                    (last_element.join_amplitude
+                        && boundary_gap
+                            <= last_element.amplitude_transition_duration.max(0.015) * 2.0)
+                        .then_some(last_element.amplitude_transition_duration.max(0.002))
+                });
+                // Joins inside a source occurrence are rendered by the
+                // Melodyne segment renderer. Joins crossing two source clips
+                // need clip-edge ramps as well, otherwise the mixer sees two
+                // unrelated waveforms and produces a click at the splice.
+                clip.fade_in_sec = incoming_join
+                    .unwrap_or(0.0)
+                    .min(timeline_length * 0.5);
+                clip.fade_out_sec = outgoing_join
+                    .unwrap_or(0.0)
+                    .min(timeline_length * 0.5);
                 clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
                     let element = track.elements.get(*index)?;
                     Some(crate::state::MelodyneWarpSegment {

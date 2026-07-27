@@ -2299,13 +2299,45 @@ impl TimelineState {
             .retain(|c| !remove_set.contains(c.track_id.as_str()));
 
         self.tracks.retain(|t| !remove_set.contains(t.id.as_str()));
+        self.params_by_root_track
+            .retain(|root_id, _| !remove_set.contains(root_id.as_str()));
 
-        if self.selected_track_id.as_deref() == Some(track_id) {
-            self.selected_track_id = self.tracks.first().map(|t| t.id.clone());
+        if self
+            .selected_track_id
+            .as_deref()
+            .is_some_and(|selected| !self.tracks.iter().any(|track| track.id == selected))
+        {
+            self.selected_track_id = self
+                .tracks
+                .iter()
+                .filter(|track| track.parent_id.is_none())
+                .min_by_key(|track| track.order)
+                .or_else(|| self.tracks.first())
+                .map(|track| track.id.clone());
         }
-        if let Some(cid) = self.selected_clip_id.clone() {
-            if !self.clips.iter().any(|c| c.id == cid) {
-                self.selected_clip_id = None;
+        let selected_clip_survived = self
+            .selected_clip_id
+            .as_deref()
+            .is_some_and(|clip_id| self.clips.iter().any(|clip| clip.id == clip_id));
+        if !selected_clip_survived {
+            // Keep the piano-roll context valid after deleting the selected
+            // MPD track. Previously selected_clip_id became None, so the
+            // surviving Compose track still had its pitch data but no note
+            // object was selected to expose its sliders.
+            let selected_track = self.selected_track_id.as_deref();
+            let replacement = self
+                .clips
+                .iter()
+                .filter(|clip| Some(clip.track_id.as_str()) == selected_track)
+                .min_by(|left, right| left.start_sec.total_cmp(&right.start_sec))
+                .or_else(|| {
+                    self.clips
+                        .iter()
+                        .min_by(|left, right| left.start_sec.total_cmp(&right.start_sec))
+                });
+            self.selected_clip_id = replacement.map(|clip| clip.id.clone());
+            if let Some(track_id) = replacement.map(|clip| clip.track_id.clone()) {
+                self.selected_track_id = Some(track_id);
             }
         }
     }

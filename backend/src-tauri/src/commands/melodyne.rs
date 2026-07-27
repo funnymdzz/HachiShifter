@@ -28,10 +28,16 @@ pub(super) fn apply_melodyne_correction(
     let Some(source) = clip.source_path.as_deref() else {
         return serde_json::json!({"ok": false, "error": "selected clip has no audio source"});
     };
-    let analysis = match crate::sample_annotations::load_or_detect_with_game_mode(
-        Path::new(source),
-        settings.performance_mode,
-    ) {
+    let analysis_result = if clip.melodyne_warp_segments.is_empty() {
+        crate::sample_annotations::load_or_detect_with_game_mode(
+            Path::new(source),
+            settings.performance_mode,
+        )
+    } else {
+        crate::sample_annotations::melodyne_project_analysis(Path::new(source))
+            .ok_or_else(|| "Melodyne project note data is unavailable".to_string())
+    };
+    let analysis = match analysis_result {
         Ok(analysis) => analysis,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };

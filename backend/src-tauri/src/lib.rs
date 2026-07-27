@@ -153,6 +153,15 @@ pub fn nsf_hifigan_onnx_probe() -> Result<String, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(result) = try_render_mpd_vocal_from_args() {
+        match result {
+            Ok(()) => std::process::exit(0),
+            Err(error) => {
+                eprintln!("headless MPD vocal render failed: {error}");
+                std::process::exit(2);
+            }
+        }
+    }
     tauri::Builder::default()
         .manage(state::AppState::default())
         .plugin(tauri_plugin_opener::init())
@@ -450,4 +459,58 @@ pub fn run() {
                 crate::hnsep_onnx::drop_shared_session();
             }
         });
+}
+
+/// Small headless reference path used to compare the imported `vocal` track
+/// with Melodyne's own export without starting GTK/WebView or downloading any
+/// model. MLD5 is model-free, so the normal no-model CI artifact is enough.
+fn try_render_mpd_vocal_from_args() -> Option<Result<(), String>> {
+    let args = std::env::args_os().collect::<Vec<_>>();
+    let flag_index = args
+        .iter()
+        .position(|arg| arg.as_os_str() == std::ffi::OsStr::new("--render-mpd-vocal"))?;
+    let input = args.get(flag_index + 1).map(std::path::PathBuf::from);
+    let output = args.get(flag_index + 2).map(std::path::PathBuf::from);
+    Some((|| {
+        let input = input.ok_or_else(|| "missing MPD input path".to_string())?;
+        let output = output.ok_or_else(|| "missing WAV output path".to_string())?;
+        let mut imported = crate::melodyne_import::import_mpd_file(
+            &input,
+            &|progress, stage, current, total| {
+                eprintln!(
+                    "[headless-mpd] {stage} {:.0}% ({current}/{total})",
+                    progress * 100.0
+                );
+            },
+            Some(&[0]),
+        )?;
+        let vocal_track_id = imported
+            .timeline
+            .tracks
+            .iter()
+            .find(|track| track.name.eq_ignore_ascii_case("vocal"))
+            .or_else(|| imported.timeline.tracks.first())
+            .map(|track| track.id.clone())
+            .ok_or_else(|| "MPD contains no vocal track".to_string())?;
+        for track in &mut imported.timeline.tracks {
+            track.muted = track.id != vocal_track_id;
+            track.solo = false;
+        }
+        crate::mixdown::render_mixdown_wav(
+            &imported.timeline,
+            &output,
+            crate::mixdown::MixdownOptions {
+                sample_rate: 48_000,
+                start_sec: 0.0,
+                end_sec: None,
+                stretch: crate::time_stretch::StretchAlgorithm::MelodyneHybrid,
+                apply_pitch_edit: true,
+                export_format: crate::mixdown::ExportFormat::Wav16,
+                quality_preset: crate::mixdown::QualityPreset::Export,
+                cancel_flag: None,
+            },
+        )?;
+        eprintln!("[headless-mpd] wrote {}", output.display());
+        Ok(())
+    })())
 }
