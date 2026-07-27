@@ -1308,7 +1308,6 @@ fn build_source_pitch_cache(
     let point_ids = graph.list(property_points);
     let source_id = graph.reference(element.source_description_id, "audioSource")?;
     let sample_rate = graph.f64(source_id, "sampleRate")?.max(1.0);
-    let sample_count = graph.i64(source_id, "sampleCount")?.max(1) as f64;
     let mut points = Vec::with_capacity(point_ids.len());
     for (index, point_id) in point_ids.into_iter().enumerate() {
         let Some(pitch) = graph.f32(point_id, "pitchCent") else {
@@ -1326,21 +1325,19 @@ fn build_source_pitch_cache(
         });
     }
     points.sort_by(|left, right| left.slice.total_cmp(&right.slice));
-    let source_duration = sample_count / sample_rate;
     // `timeSliceIndex` addresses the source description's analysis frames.
     // `parameterValuesPerSecond` is the density of values stored inside a
     // slice (441 in this MPD5 fixture), not the slice clock.  Treating it as
     // Hz advances the source F0 by about 10.24x and selects unrelated notes.
-    // Derive the clock from the descriptor itself; for a 44.1-kHz Melodyne 5
-    // analysis this evaluates to 43.06640625 Hz (the persisted 1024-sample
-    // analysis hop) without hard-coding a sample rate or hop size.
+    // Melodyne 5 advances this analysis on an exact 1024-sample hop. Deriving
+    // `(count - 1) / duration` looks close for a long file, but is biased by
+    // the final partial slice on short vocal samples (often by 3-8%). Item
+    // start indices in the MPD independently confirm floor(sample / 1024).
     let time_slice_count = graph
         .i32(element.source_description_id, "timeSliceCount")
         .unwrap_or(points.len() as i32)
         .max(1) as f64;
-    let slices_per_second = ((time_slice_count - 1.0).max(1.0)
-        / source_duration.max(1e-9))
-        .max(1e-9);
+    let slices_per_second = sample_rate / 1024.0;
     Some(SourcePitchCache {
         item_start: graph
             .i64(element.source_item_id, "startSampleIndex")
