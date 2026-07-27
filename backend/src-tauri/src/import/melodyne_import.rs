@@ -623,7 +623,10 @@ impl Graph {
         let (Some(first), Some(last)) = (anchors.first(), anchors.last()) else {
             return anchors;
         };
-        let steps = (((last.0 - first.0).abs() / 0.001).ceil() as usize).clamp(2, 4096);
+        // Five-millisecond subdivisions retain MPD's Bezier attack slope while
+        // keeping large projects bounded. The renderer consumes these points
+        // through one persistent state, so subdivisions do not create joins.
+        let steps = (((last.0 - first.0).abs() / 0.005).ceil() as usize).clamp(2, 512);
         (0..=steps)
             .map(|index| {
                 let fraction = index as f64 / steps as f64;
@@ -1079,26 +1082,58 @@ fn element_time_map_points(
     element: &ImportedElement,
     shift: f64,
 ) -> Vec<crate::state::MelodyneTimeMapPoint> {
-    let mut local_times = element
+    let mut points = element
         .source_function_id
-        .map(|function| {
-            graph
-                .function_points(function)
-                .into_iter()
-                .map(|point| point.0)
-                .collect::<Vec<_>>()
-        })
+        .map(|function| graph.sampled_function_points(function))
         .unwrap_or_default();
-    local_times.push(0.0);
-    local_times.push(element.duration);
-    local_times.sort_by(f64::total_cmp);
-    local_times.dedup_by(|left, right| (*left - *right).abs() <= 1e-7);
-    local_times
+    points.push((
+        0.0,
+        element
+            .source_function_id
+            .map(|function| graph.eval_function(function, 0.0))
+            .unwrap_or(0.0),
+    ));
+    points.push((
+        element.duration,
+        element
+            .source_function_id
+            .map(|function| graph.eval_function(function, element.duration))
+            .unwrap_or(element.duration),
+    ));
+    // `attackDuration` is the destination consonant/vowel handle; preserving
+    // it exactly avoids moving the boundary to the nearest sampled point.
+    if element.attack_duration > 0.0 && element.attack_duration < element.duration {
+        points.push((
+            element.attack_duration,
+            element
+                .source_function_id
+                .map(|function| graph.eval_function(function, element.attack_duration))
+                .unwrap_or(element.attack_duration),
+        ));
+    }
+    points.sort_by(|left, right| left.0.total_cmp(&right.0));
+    points.dedup_by(|left, right| (left.0 - right.0).abs() <= 1e-7);
+    points
         .into_iter()
-        .filter(|time| time.is_finite() && *time >= 0.0 && *time <= element.duration)
-        .map(|time| crate::state::MelodyneTimeMapPoint {
+        .filter(|(time, source)| {
+            time.is_finite()
+                && source.is_finite()
+                && *time >= 0.0
+                && *time <= element.duration
+        })
+        .map(|(time, source)| crate::state::MelodyneTimeMapPoint {
             timeline_sec: element.start + shift + time,
-            source_sec: source_time(graph, element, time),
+            // sampled_function_points returns function-local source time;
+            // source_time additionally applies the audio-item origin.
+            source_sec: {
+                let function_origin = element
+                    .source_function_id
+                    .map(|function| graph.eval_function(function, 0.0))
+                    .unwrap_or(0.0)
+                    .max(0.0);
+                let item_origin = source_time(graph, element, 0.0) - function_origin;
+                item_origin + source.max(0.0)
+            },
         })
         .collect()
 }
@@ -1292,39 +1327,27 @@ fn build_source_pitch_cache(
     }
     points.sort_by(|left, right| left.slice.total_cmp(&right.slice));
     let source_duration = sample_count / sample_rate;
-    // Melodyne stores property-point positions in analysis-slice units.  In
-    // MPD5 `parameterValuesPerSecond` is the authoritative conversion (441
-    // for the common 100-sample hop at 44.1 kHz), not an arbitrary metadata
-    // value.  Normalising by the complete file length accumulates drift and
-    // can select the neighbouring phoneme near the end of a long source.
-    let explicit_distance = graph
-        .f64(element.source_description_id, "explicitTimeSliceTimeDistance")
-        .filter(|value| *value > 1e-9);
-    let slices_per_second = explicit_distance
-        .map(|distance| 1.0 / distance)
-        .or_else(|| {
-            graph
-                .f64(element.source_description_id, "parameterValuesPerSecond")
-                .filter(|value| *value > 1.0)
-        })
-        .unwrap_or_else(|| {
-            graph
-                .i32(element.source_description_id, "timeSliceCount")
-                .unwrap_or(points.len() as i32)
-                .saturating_sub(1)
-                .max(1) as f64
-                / source_duration.max(1e-9)
-        });
+    // `timeSliceIndex` addresses the source description's analysis frames.
+    // `parameterValuesPerSecond` is the density of values stored inside a
+    // slice (441 in this MPD5 fixture), not the slice clock.  Treating it as
+    // Hz advances the source F0 by about 10.24x and selects unrelated notes.
+    // Derive the clock from the descriptor itself; for a 44.1-kHz Melodyne 5
+    // analysis this evaluates to 43.06640625 Hz (the persisted 1024-sample
+    // analysis hop) without hard-coding a sample rate or hop size.
+    let time_slice_count = graph
+        .i32(element.source_description_id, "timeSliceCount")
+        .unwrap_or(points.len() as i32)
+        .max(1) as f64;
+    let slices_per_second = ((time_slice_count - 1.0).max(1.0)
+        / source_duration.max(1e-9))
+        .max(1e-9);
     Some(SourcePitchCache {
         item_start: graph
             .i64(element.source_item_id, "startSampleIndex")
             .unwrap_or(0)
             .max(0) as f64
             / sample_rate,
-        time_slice_count: graph
-            .i32(element.source_description_id, "timeSliceCount")
-            .unwrap_or(points.len() as i32)
-            .max(1) as f64,
+        time_slice_count,
         slices_per_second,
         points,
     })
@@ -1678,7 +1701,7 @@ fn import_graph(
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
         let mut clip_source_pitch_curves = Vec::<(String, Vec<f32>)>::new();
-        for (group_index, group) in clip_groups.iter().enumerate() {
+        for group in clip_groups {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
             };
@@ -1701,59 +1724,12 @@ fn import_graph(
                 clip.source_start_sec = group.source_start.max(0.0);
                 clip.source_end_sec = group.source_end.max(clip.source_start_sec + 0.001);
                 clip.playback_rate = (source_length / timeline_length).clamp(0.05, 20.0) as f32;
-                let incoming_join = group_index.checked_sub(1).and_then(|previous_index| {
-                    let previous = clip_groups.get(previous_index)?;
-                    let previous_element = previous
-                        .element_indices
-                        .iter()
-                        .filter_map(|index| track.elements.get(*index))
-                        .max_by(|left, right| {
-                            (left.start + left.duration)
-                                .total_cmp(&(right.start + right.duration))
-                        })?;
-                    let boundary_gap = group.timeline_start - previous.timeline_end;
-                    (boundary_gap < -0.001 && boundary_gap >= -0.5).then_some(
-                        if previous_element.join_amplitude {
-                            previous_element.amplitude_transition_duration
-                                .max(0.001)
-                                .min(-boundary_gap)
-                        } else {
-                            -boundary_gap
-                        }
-                        .min(0.1),
-                    )
-                });
-                let outgoing_join = clip_groups.get(group_index + 1).and_then(|next| {
-                    let last_element = group
-                        .element_indices
-                        .iter()
-                        .filter_map(|index| track.elements.get(*index))
-                        .max_by(|left, right| {
-                            (left.start + left.duration)
-                                .total_cmp(&(right.start + right.duration))
-                        })?;
-                    let boundary_gap = next.timeline_start - group.timeline_end;
-                    (boundary_gap < -0.001 && boundary_gap >= -0.5).then_some(
-                        if last_element.join_amplitude {
-                            last_element.amplitude_transition_duration
-                                .max(0.001)
-                                .min(-boundary_gap)
-                        } else {
-                            -boundary_gap
-                        }
-                        .min(0.1),
-                    )
-                });
-                // Joins inside a source occurrence are rendered by the
-                // Melodyne segment renderer. Joins crossing two source clips
-                // need clip-edge ramps as well, otherwise the mixer sees two
-                // unrelated waveforms and produces a click at the splice.
-                clip.fade_in_sec = incoming_join
-                    .unwrap_or(0.0)
-                    .min(timeline_length * 0.5);
-                clip.fade_out_sec = outgoing_join
-                    .unwrap_or(0.0)
-                    .min(timeline_length * 0.5);
+                // MPD joins and source-time fade handles are rendered below
+                // per element.  Do not manufacture clip-edge crossfades:
+                // they double-apply level ramps, alter Melodyne's overlap
+                // balance, and hide the persisted joinsPhases decision.
+                clip.fade_in_sec = 0.0;
+                clip.fade_out_sec = 0.0;
                 clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
                     let element = track.elements.get(*index)?;
                     Some(crate::state::MelodyneWarpSegment {

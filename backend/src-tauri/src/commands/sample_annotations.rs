@@ -248,10 +248,32 @@ pub(super) fn save_clip_sample_annotations(
                 let maximum = (segment.timeline_end_sec - segment.timeline_start_sec)
                     .max(0.0);
                 let attack = row.melodyne_attack_duration_sec.clamp(0.0, maximum);
+                let previous_attack = segment.attack_duration_sec.clamp(0.0, maximum);
                 segment.attack_duration_sec = attack;
                 let attack_timeline = segment.timeline_start_sec + attack;
                 let attack_source_sec = segment.attack_source_sec;
                 if attack_source_sec.is_finite() && attack_source_sec > 0.0 {
+                    // Move the complete sampled Bezier map around the attack
+                    // handle. Keeping only the nearest point moved while its
+                    // neighbours stayed behind could make the time function
+                    // non-monotonic and create a click. Source coordinates are
+                    // invariant; only destination time is re-parameterised.
+                    for point in &mut segment.time_map_points {
+                        let local = (point.timeline_sec - segment.timeline_start_sec)
+                            .clamp(0.0, maximum);
+                        let warped = if local <= previous_attack && previous_attack > 1e-9 {
+                            local * attack / previous_attack
+                        } else if local > previous_attack
+                            && maximum - previous_attack > 1e-9
+                        {
+                            attack
+                                + (local - previous_attack) * (maximum - attack)
+                                    / (maximum - previous_attack)
+                        } else {
+                            local
+                        };
+                        point.timeline_sec = segment.timeline_start_sec + warped;
+                    }
                     if let Some(point) = segment.time_map_points.iter_mut().min_by(|left, right| {
                         (left.source_sec - attack_source_sec)
                             .abs()

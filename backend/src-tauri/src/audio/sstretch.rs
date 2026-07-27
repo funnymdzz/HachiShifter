@@ -297,6 +297,114 @@ pub fn try_time_stretch_interleaved_offline(
     }
 }
 
+/// Render a piecewise time map through one Signalsmith state.
+///
+/// Each tuple is `(source_start_frame, source_end_frame, destination_frames)`.
+/// Unlike calling the ordinary offline helper for every tuple, this resets and
+/// compensates latency only once.  The spectral/phase history consequently
+/// survives a ratio change at Melodyne's consonant/attack handle.
+pub fn try_time_stretch_interleaved_variable_offline(
+    input_interleaved: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    chunks: &[(usize, usize, usize)],
+    out_frames_hint: usize,
+) -> Result<Vec<f32>, String> {
+    if input_interleaved.is_empty() || channels == 0 || out_frames_hint == 0 {
+        return Ok(Vec::new());
+    }
+    if channels > 2 {
+        return Err("signalsmith stretch: channels > 2 not supported yet".to_string());
+    }
+    let input_frames = input_interleaved.len() / channels;
+    if input_frames < 2 || chunks.is_empty() {
+        return Ok(input_interleaved.to_vec());
+    }
+
+    unsafe {
+        let state = sstretch_new(sample_rate.max(1), channels as u32);
+        if state.is_null() {
+            return Err("sstretch_new returned null".to_string());
+        }
+        sstretch_set_transpose_semitones(state, 0.0);
+
+        let output_latency = sstretch_output_latency(state).max(0) as usize;
+        let input_latency = sstretch_input_latency(state).max(0) as usize;
+        let mut produced = Vec::<f32>::with_capacity(
+            out_frames_hint.saturating_add(output_latency.saturating_mul(2)) * channels,
+        );
+        let mut failed = false;
+        let mut block = Vec::<f32>::new();
+
+        for &(source_start, source_end, destination_frames) in chunks {
+            let source_start = source_start.min(input_frames);
+            let source_end = source_end.clamp(source_start, input_frames);
+            if source_end <= source_start || destination_frames == 0 {
+                continue;
+            }
+            block.resize(destination_frames * channels, 0.0);
+            block.fill(0.0);
+            let ret = sstretch_process_interleaved(
+                state,
+                input_interleaved[source_start * channels..source_end * channels].as_ptr(),
+                (source_end - source_start) as u32,
+                block.as_mut_ptr(),
+                destination_frames as u32,
+            );
+            if ret < 0 {
+                failed = true;
+                break;
+            }
+            produced.extend_from_slice(&block);
+        }
+
+        if !failed {
+            // Feed the algorithmic input tail once, while requesting enough
+            // output to move the delayed real signal beyond its pre-roll.
+            // This is deliberately outside the mapped chunks so it cannot
+            // introduce another ratio/state reset at the attack boundary.
+            if input_latency > 0 || output_latency > 0 {
+                let tail_in_frames = input_latency.max(1);
+                let tail_out_frames = output_latency.max(1);
+                let tail_in = vec![0.0f32; tail_in_frames * channels];
+                let mut tail_out = vec![0.0f32; tail_out_frames * channels];
+                let ret = sstretch_process_interleaved(
+                    state,
+                    tail_in.as_ptr(),
+                    tail_in_frames as u32,
+                    tail_out.as_mut_ptr(),
+                    tail_out_frames as u32,
+                );
+                if ret < 0 {
+                    failed = true;
+                } else {
+                    produced.extend_from_slice(&tail_out);
+                }
+            }
+            if !failed && output_latency > 0 {
+                let mut flushed = vec![0.0f32; output_latency * channels];
+                let ret = sstretch_flush(state, flushed.as_mut_ptr(), output_latency as u32);
+                if ret < 0 {
+                    failed = true;
+                } else {
+                    produced.extend_from_slice(&flushed);
+                }
+            }
+        }
+        sstretch_delete(state);
+
+        if failed {
+            return Err("sstretch variable offline processing failed".to_string());
+        }
+        let available_frames = produced.len() / channels;
+        let skip = output_latency.min(available_frames);
+        let take = out_frames_hint.min(available_frames.saturating_sub(skip));
+        let mut output = produced[skip * channels..(skip + take) * channels].to_vec();
+        output.resize(out_frames_hint * channels, 0.0);
+        Ok(output)
+    }
+}
+
 /// 使用 Signalsmith Stretch 实时模式完成批量时间拉伸。
 ///
 /// 与 `try_time_stretch_interleaved_offline` 功能相同，

@@ -909,19 +909,20 @@ fn continue_periodic_phase_at_join(
         }
     }
 
-    // This is a phase-continuity/de-click splice, not an automatic crossfade:
-    // automatic crossfades are created only where two source regions overlap.
-    // A touching discontinuity still needs a compact bridge to avoid a click.
-    let requested = if connected { 12 } else { 8 };
-    let default_fade = ((sample_rate as usize * requested) / 1000).max(8);
+    // This is the persisted joinsPhases/joinsAmplitudes operation, not a
+    // generic clip-edge crossfade. Callers leave unrelated boundaries alone.
+    let phase_fade = if connected {
+        ((sample_rate as usize * 12) / 1000).max(8)
+    } else {
+        0
+    };
     // `joinsAmplitudes` carries its own transition duration. Honour that
     // persisted boundary ramp while keeping it bounded so it cannot smear a
     // whole note when an old project contains a stale duration.
     let stored_fade = amplitude_transition_frames
         .min((sample_rate as usize / 10).max(8));
-    let fade = default_fade
+    let fade = phase_fade
         .max(stored_fade)
-        .max(8)
         .min(available_right)
         .min(total_frames - boundary);
     if fade < 2 {
@@ -958,9 +959,7 @@ pub fn render_melodyne_warp_segments(
     let input_frames = input.len() / channels;
     if input_frames == 0 || target_frames == 0 || segments.is_empty() { return input.to_vec(); }
     let mut out = vec![0.0f32; target_frames * channels];
-    let mut weights = vec![0.0f32; target_frames];
     let mut rendered_ranges = Vec::<(usize, usize, bool, bool, bool, usize)>::new();
-    let edge = ((sample_rate as usize * 5) / 1000).max(4);
     for segment in segments {
         let src_start = ((segment.source_start_sec - clip_source_start_sec).max(0.0)
             * sample_rate as f64).round() as usize;
@@ -981,9 +980,41 @@ pub fn render_melodyne_warp_segments(
         let piece_frames = dst_end - dst_start;
         let mut stretched = vec![0.0f32; piece_frames * channels];
         let mut mapped_any = false;
-        let mut internal_boundaries = Vec::new();
-        if segment.time_map_points.len() >= 2 {
-            for pair in segment.time_map_points.windows(2) {
+        let mut time_map_points = segment.time_map_points.clone();
+        if segment.attack_duration_sec > 0.0
+            && segment.attack_duration_sec
+                < segment.timeline_end_sec - segment.timeline_start_sec
+        {
+            let attack_timeline = segment.timeline_start_sec + segment.attack_duration_sec;
+            let attack_source = if segment.attack_source_sec.is_finite()
+                && segment.attack_source_sec > segment.source_start_sec
+            {
+                segment.attack_source_sec
+            } else {
+                // Older HachiShifter project snapshots did not persist the
+                // source-side attack handle. Reconstruct it from Melodyne's
+                // stored sourceTimeForElementTimeFunctionAttackSlope.
+                segment.source_start_sec
+                    + segment.attack_duration_sec * segment.attack_time_slope.max(1e-6)
+            }
+            .clamp(segment.source_start_sec, segment.source_end_sec);
+            if !time_map_points.iter().any(|point| {
+                (point.timeline_sec - attack_timeline).abs() <= 1e-7
+            }) {
+                time_map_points.push(crate::state::MelodyneTimeMapPoint {
+                    timeline_sec: attack_timeline,
+                    source_sec: attack_source,
+                });
+                time_map_points.sort_by(|left, right| {
+                    left.timeline_sec.total_cmp(&right.timeline_sec)
+                });
+            }
+        }
+        if time_map_points.len() >= 2 {
+            let mut variable_chunks = Vec::<(usize, usize, usize)>::new();
+            let mut mapped_dst_start = None::<usize>;
+            let mut mapped_dst_end = dst_start;
+            for pair in time_map_points.windows(2) {
                 let map_src_start = ((pair[0].source_sec - clip_source_start_sec).max(0.0)
                     * sample_rate as f64).round() as usize;
                 let map_src_end = ((pair[1].source_sec - clip_source_start_sec).max(0.0)
@@ -1002,20 +1033,40 @@ pub fn render_melodyne_warp_segments(
                 if map_src_end <= map_src_start || map_dst_end <= map_dst_start {
                     continue;
                 }
-                let rendered = time_stretch_interleaved(
-                    &input[map_src_start * channels..map_src_end * channels],
-                    channels,
-                    sample_rate,
-                    map_dst_end - map_dst_start,
-                    StretchAlgorithm::MelodyneHybrid,
-                );
-                let local_start = map_dst_start.saturating_sub(dst_start);
-                let frames = (rendered.len() / channels).min(piece_frames.saturating_sub(local_start));
-                stretched[local_start * channels..(local_start + frames) * channels]
-                    .copy_from_slice(&rendered[..frames * channels]);
-                mapped_any = true;
-                if map_dst_end < dst_end {
-                    internal_boundaries.push(map_dst_end - dst_start);
+                // A Melodyne time function is continuous even where its
+                // attack and sustain ratios differ. Keep all pairs in one
+                // stretcher state; resetting WORLD/Signalsmith here was the
+                // direct source of the large consonant/vowel click.
+                if mapped_dst_start.is_none() {
+                    mapped_dst_start = Some(map_dst_start);
+                }
+                if map_dst_start > mapped_dst_end {
+                    // Retain rounding-size holes in the destination map.
+                    variable_chunks.push((map_src_start, map_src_start + 1, map_dst_start - mapped_dst_end));
+                }
+                variable_chunks.push((map_src_start, map_src_end, map_dst_end - map_dst_start));
+                mapped_dst_end = map_dst_end;
+            }
+            if let Some(first_dst) = mapped_dst_start {
+                let mapped_frames = variable_chunks
+                    .iter()
+                    .map(|chunk| chunk.2)
+                    .sum::<usize>();
+                if mapped_frames > 0 {
+                    if let Ok(rendered) = crate::sstretch::try_time_stretch_interleaved_variable_offline(
+                        input,
+                        channels,
+                        sample_rate,
+                        &variable_chunks,
+                        mapped_frames,
+                    ) {
+                        let local_start = first_dst.saturating_sub(dst_start);
+                        let frames = (rendered.len() / channels)
+                            .min(piece_frames.saturating_sub(local_start));
+                        stretched[local_start * channels..(local_start + frames) * channels]
+                            .copy_from_slice(&rendered[..frames * channels]);
+                        mapped_any = frames > 0;
+                    }
                 }
             }
         }
@@ -1027,20 +1078,6 @@ pub fn render_melodyne_warp_segments(
                 piece_frames,
                 StretchAlgorithm::MelodyneHybrid,
             );
-        } else {
-            // Preserve phase through Melodyne's internal attack/sustain warp
-            // anchors.  These anchors change time ratio, not pitch or phase.
-            for boundary in internal_boundaries {
-                continue_periodic_phase_at_join(
-                    &mut stretched,
-                    channels,
-                    sample_rate,
-                    boundary,
-                    piece_frames.saturating_sub(boundary),
-                    true,
-                    (sample_rate as usize * 4) / 1000,
-                );
-            }
         }
         let fade_in = (segment.fade_in_sec.max(0.0) * sample_rate as f64).round() as usize;
         let fade_out = (segment.fade_out_sec.max(0.0) * sample_rate as f64).round() as usize;
@@ -1074,24 +1111,18 @@ pub fn render_melodyne_warp_segments(
         ));
         for local in 0..(dst_end - dst_start) {
             let frame = dst_start + local;
-            let left = (local as f32 / edge as f32).clamp(0.0, 1.0);
-            let right = ((dst_end - dst_start - 1 - local) as f32 / edge as f32).clamp(0.0, 1.0);
-            let weight = (left.min(right) * std::f32::consts::FRAC_PI_2).sin().max(0.001);
-            weights[frame] += weight;
             for channel in 0..channels {
-                out[frame * channels + channel] += stretched[local * channels + channel] * weight;
+                // Melodyne's element fade handles and amplitudeFactor already
+                // describe overlap gain. Normalising by an invented 5-ms
+                // weight changes both loudness and transition shape.
+                out[frame * channels + channel] += stretched[local * channels + channel];
             }
-        }
-    }
-    for frame in 0..target_frames {
-        if weights[frame] > 1e-6 {
-            for channel in 0..channels { out[frame * channels + channel] /= weights[frame]; }
         }
     }
     rendered_ranges.sort_by_key(|range| range.0);
     let join_tolerance = ((sample_rate as usize * 2) / 1000).max(2);
     for pair in rendered_ranges.windows(2) {
-        let (left_start, left_end, connected, joins_phase, joins_amplitude, amplitude_transition_frames) = pair[0];
+        let (left_start, left_end, _joins_pitch, joins_phase, joins_amplitude, amplitude_transition_frames) = pair[0];
         let (right_start, right_end, _, _, _, _) = pair[1];
         if left_end <= left_start || right_end <= right_start {
             continue;
@@ -1101,10 +1132,9 @@ pub fn render_melodyne_warp_segments(
         if right_start > left_end.saturating_add(join_tolerance) {
             continue;
         }
-        // Actual overlaps have already been gain-balanced by the weighted
-        // source composition above. Do not add a synthetic bridge unless the
-        // MPD explicitly requests phase/pitch continuity.
-        if right_start < left_end && !(connected || joins_phase) {
+        // Do not add a bridge unless the MPD explicitly persists a phase or
+        // amplitude join. Pitch continuity alone only affects the F0 curve.
+        if !(joins_phase || joins_amplitude) {
             continue;
         }
         continue_periodic_phase_at_join(
@@ -1113,7 +1143,7 @@ pub fn render_melodyne_warp_segments(
             sample_rate,
             right_start,
             right_end.saturating_sub(right_start),
-            connected || joins_phase,
+            joins_phase,
             if joins_amplitude { amplitude_transition_frames } else { 0 },
         );
     }
