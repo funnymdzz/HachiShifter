@@ -13,17 +13,39 @@ This document records the clean-room observations used by HachiShifter's
 - The decoded graph is a `GNBinaryKeyValueArchive`. Audio media is referenced
   by `GNFilePath`, normally stored as UTF-16LE.
 - HachiShifter bounds-checks the container, caps an inflated entry at 256 MiB,
-  extracts supported audio references, resolves exact/relative/basename and
-  one-level `Audio Files`-style locations, and hands missing paths to its
-  existing relink dialog.
+  and reads the key/class/object tables of the graph. Object, class, field and
+  allocation counts are capped before any graph data is used.
+- `MUPerformance.rootTrack`, `MUTrack.subtracks` and `MUTrack.elements` restore
+  Melodyne's track assignment instead of creating one track for every file.
+  Track titles, mute/solo state and the original order are retained.
+- `MUAudioComponent` references are followed through the source element and
+  source description to `MUAudioFileSource`. Exact, relative, basename and
+  one-level `Audio Files`-style locations are resolved; missing paths are sent
+  to the existing relink dialog.
 - Imported MPD sessions are deliberately unsaved HachiShifter projects. Save
   opens Save As, so the source `.mpd` is never overwritten. Referenced audio is
   present on the timeline immediately and the transport can play it before
   pitch analysis or model download.
 
-The current importer reconstructs playable media tracks. A future graph reader
-can add Melodyne part placements and note functions on top of the same bounded
-container parser.
+Multiple source files on a Melodyne track remain clips on one HachiShifter
+track. Repeated use of a file is separated by its inferred source-to-project
+placement. Source/element time functions restore trim and overall stretch;
+negative Melodyne preroll is shifted as a whole so all tracks keep their exact
+relative timing while HachiShifter's transport begins at zero.
+
+Tracks whose analyzer parameter set is `melodic` automatically select `mld5`
+and enable Compose. The imported editable curves retain:
+
+- note pitch center;
+- pitch drift and modulation factors, reconstructed from source property
+  points and the stored pitch-without-vibrato curve;
+- formant offset, amplitude factor and muted notes;
+- explicit successive-note pitch joins and their transition duration.
+
+Touching source clips on one track receive a short smooth contour bridge. This
+matches Melodyne's connected-note transport and avoids a discontinuity at a
+multi-sample edit. Raw media remains available immediately, while Compose uses
+the reconstructed curve without requiring a GAME model download.
 
 ## Observed note/audio model
 
@@ -60,4 +82,3 @@ and its start is exactly the beat-alignment point. A separate backward pass from
 that point uses adaptive energy, positive flux, high-frequency ratio and
 zero-crossing density to find a preceding consonant/plosive/sibilant onset. The
 prefix becomes the fixed non-stretched region; it never creates or merges notes.
-
