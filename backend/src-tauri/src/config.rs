@@ -82,15 +82,17 @@ pub struct UiSettings {
     pub midi_close_leading_gap: bool,
     #[serde(default = "default_midi_import_target")]
     pub midi_import_target: String,
-    /// ONNX Runtime execution provider preference ("Auto", "CUDA", "CPU").
+    /// ONNX Runtime execution provider preference ("auto", "cpu", "gpu").
     /// Persisted so the user's GPU/CPU choice survives restarts.
     #[serde(default = "default_ort_ep")]
     pub ort_ep: String,
-    /// Selected CUDA device ID for GPU inference.
-    /// Persisted so the user's GPU selection survives restarts.
-    /// Set to 0 by default; users with multiple GPUs can change it.
-    #[serde(default = "default_cuda_device_id")]
-    pub cuda_device_id: i32,
+    /// DirectML device ID override (Windows only).
+    /// When set, DirectML will use the specified GPU adapter index.
+    /// When `None`, DirectML auto-selects the best GPU using
+    /// PerformancePreference::HighPerformance + DeviceFilter::Gpu.
+    /// GPU adapter indices are 0-based and match DXGI adapter enumeration order.
+    #[serde(default)]
+    pub ort_device_id: Option<i32>,
     /// 后台预渲染：启用后，当编辑操作使渲染缓存失效时，
     /// 立即在后台启动预渲染，而不是等到用户按下播放时才渲染。
     /// 用户可在渲染进行中随时开始播放已渲染完成的部分。
@@ -103,11 +105,7 @@ pub struct UiSettings {
 }
 
 fn default_ort_ep() -> String {
-    "Auto".to_string()
-}
-
-fn default_cuda_device_id() -> i32 {
-    0
+    "auto".to_string()
 }
 
 /// 导出音频设置（持久化到 app_config.json）
@@ -282,7 +280,7 @@ impl Default for UiSettings {
             midi_close_leading_gap: true,
             midi_import_target: default_midi_import_target(),
             ort_ep: default_ort_ep(),
-            cuda_device_id: default_cuda_device_id(),
+            ort_device_id: None,
             auto_background_render: true,
         }
     }

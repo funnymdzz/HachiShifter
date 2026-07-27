@@ -9,8 +9,8 @@
 use crate::state::{PitchAnalysisAlgo, TimelineState, TrackParamsState};
 use flate2::read::ZlibDecoder;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fs;
-use std::io::Read;
+use std::fs::{self, File};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 
@@ -21,6 +21,12 @@ const MAX_KEYS: usize = 16_384;
 const MAX_CLASSES: usize = 2_048;
 const MAX_OBJECTS: usize = 2_000_000;
 const IMPORT_FRAME_PERIOD_MS: f64 = 5.0;
+// Dense edit curves are the largest persistent allocation after an import.
+// Keep their aggregate payload small enough that the state and audio-engine
+// snapshots can briefly coexist without exhausting typical 8 GB machines.
+const MAX_IMPORT_PARAM_BYTES: f64 = 64.0 * 1024.0 * 1024.0;
+
+pub type ImportProgress<'a> = dyn Fn(f64, &str, usize, usize) + 'a;
 
 #[derive(Debug)]
 pub struct MelodyneImportResult {
@@ -105,6 +111,120 @@ fn decode_graph_entries(data: &[u8]) -> Result<Vec<Vec<u8>>, String> {
         }
     }
     Ok(entries)
+}
+
+/// Locate and inflate only the object-graph entry.  Unlike `fs::read` plus
+/// `decode_graph_entries`, this keeps the compressed MPD container out of
+/// memory and never copies unrelated archive entries.
+fn decode_graph_file(path: &Path, progress: &ImportProgress<'_>) -> Result<Vec<u8>, String> {
+    let file = File::open(path).map_err(|error| format!("failed to open MPD: {error}"))?;
+    let file_len = file
+        .metadata()
+        .map_err(|error| format!("failed to inspect MPD: {error}"))?
+        .len()
+        .max(1);
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut header = [0u8; 8];
+    reader
+        .read_exact(&mut header)
+        .map_err(|error| format!("failed to read MPD header: {error}"))?;
+    if header.get(..6) != Some(ARCHIVE_MAGIC.as_slice()) {
+        return Err("not a Melodyne GNBCFA project".to_string());
+    }
+
+    loop {
+        let position = reader
+            .stream_position()
+            .map_err(|error| format!("failed to scan MPD: {error}"))?;
+        if position >= file_len {
+            break;
+        }
+        progress(
+            0.03 + 0.09 * position as f64 / file_len as f64,
+            "scan_container",
+            position.min(usize::MAX as u64) as usize,
+            file_len.min(usize::MAX as u64) as usize,
+        );
+        let mut entry_header = [0u8; 8];
+        reader
+            .read_exact(&mut entry_header)
+            .map_err(|error| format!("truncated MPD entry header: {error}"))?;
+        let name_length = u32::from_le_bytes(entry_header[..4].try_into().unwrap()) as usize;
+        if name_length > 1024 * 1024 {
+            return Err("invalid MPD entry name length".to_string());
+        }
+        let mut name = vec![0u8; name_length];
+        reader
+            .read_exact(&mut name)
+            .map_err(|error| format!("truncated MPD entry name: {error}"))?;
+        let after_name = reader
+            .stream_position()
+            .map_err(|error| format!("failed to scan MPD: {error}"))? as usize;
+        let aligned = align_8(after_name)? as u64;
+        reader
+            .seek(SeekFrom::Start(aligned))
+            .map_err(|error| format!("failed to seek MPD entry: {error}"))?;
+        let mut length_bytes = [0u8; 8];
+        reader
+            .read_exact(&mut length_bytes)
+            .map_err(|error| format!("truncated MPD entry length: {error}"))?;
+        let stored_length = u64::from_le_bytes(length_bytes);
+        let payload_start = reader
+            .stream_position()
+            .map_err(|error| format!("failed to scan MPD: {error}"))?;
+        let payload_end = payload_start
+            .checked_add(stored_length)
+            .ok_or_else(|| "MPD payload length overflow".to_string())?;
+        if payload_end > file_len {
+            return Err("truncated MPD entry payload".to_string());
+        }
+        let entry_name = String::from_utf8_lossy(&name).to_ascii_lowercase();
+        if entry_name.contains("melodyne.graph") {
+            if stored_length > MAX_DECODED_ENTRY_BYTES.saturating_add(20) {
+                return Err("compressed MPD graph exceeds the input limit".to_string());
+            }
+            let mut compression_header = [0u8; 20];
+            reader
+                .read_exact(&mut compression_header)
+                .map_err(|error| format!("truncated MPD graph header: {error}"))?;
+            if compression_header.get(..8) == Some(COMPRESSED_MAGIC.as_slice()) {
+                let compressed_length = u32::from_le_bytes(
+                    compression_header[16..20].try_into().unwrap(),
+                ) as u64;
+                if compressed_length != stored_length.saturating_sub(20) {
+                    return Err("invalid compressed MPD graph length".to_string());
+                }
+                progress(0.13, "decompress_graph", 0, 1);
+                let mut decoder = ZlibDecoder::new(reader.take(compressed_length));
+                let mut decoded = Vec::new();
+                decoder
+                    .by_ref()
+                    .take(MAX_DECODED_ENTRY_BYTES + 1)
+                    .read_to_end(&mut decoded)
+                    .map_err(|error| format!("failed to decompress MPD graph: {error}"))?;
+                if decoded.len() as u64 > MAX_DECODED_ENTRY_BYTES {
+                    return Err("MPD graph entry exceeds the decode limit".to_string());
+                }
+                progress(0.22, "parse_graph", 1, 1);
+                return Ok(decoded);
+            }
+
+            reader
+                .seek(SeekFrom::Start(payload_start))
+                .map_err(|error| format!("failed to seek MPD graph: {error}"))?;
+            let mut decoded = Vec::with_capacity(stored_length as usize);
+            reader
+                .take(stored_length)
+                .read_to_end(&mut decoded)
+                .map_err(|error| format!("failed to read MPD graph: {error}"))?;
+            progress(0.22, "parse_graph", 1, 1);
+            return Ok(decoded);
+        }
+        reader
+            .seek(SeekFrom::Start(payload_end))
+            .map_err(|error| format!("failed to seek next MPD entry: {error}"))?;
+    }
+    Err("Melodyne project contains no object graph".to_string())
 }
 
 #[derive(Clone, Debug)]
@@ -537,7 +657,42 @@ fn file_name_from_foreign_path(value: &str) -> Option<&str> {
         .find(|part| !part.trim().is_empty())
 }
 
-fn resolve_media_path(stored: &str, project_dir: &Path) -> Option<PathBuf> {
+fn build_media_index(project_dir: &Path) -> HashMap<String, PathBuf> {
+    let mut index = HashMap::new();
+    let Ok(entries) = fs::read_dir(project_dir) else {
+        return index;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                index
+                    .entry(name.to_lowercase())
+                    .or_insert_with(|| fs::canonicalize(&path).unwrap_or(path));
+            }
+        } else if path.is_dir() {
+            if let Ok(children) = fs::read_dir(&path) {
+                for child in children.flatten() {
+                    let child_path = child.path();
+                    if child_path.is_file() {
+                        if let Some(name) = child_path.file_name().and_then(|name| name.to_str()) {
+                            index.entry(name.to_lowercase()).or_insert_with(|| {
+                                fs::canonicalize(&child_path).unwrap_or(child_path)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    index
+}
+
+fn resolve_media_path(
+    stored: &str,
+    project_dir: &Path,
+    media_index: &HashMap<String, PathBuf>,
+) -> Option<PathBuf> {
     let stored_path = PathBuf::from(stored);
     if stored_path.is_file() {
         return fs::canonicalize(&stored_path).ok().or(Some(stored_path));
@@ -553,47 +708,16 @@ fn resolve_media_path(stored: &str, project_dir: &Path) -> Option<PathBuf> {
         return fs::canonicalize(&beside).ok().or(Some(beside));
     }
 
-    let wanted = file_name.to_lowercase();
-    let entries = fs::read_dir(project_dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_file()
-            && path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| name.to_lowercase() == wanted)
-                .unwrap_or(false)
-        {
-            return fs::canonicalize(&path).ok().or(Some(path));
-        }
-        if !path.is_dir() {
-            continue;
-        }
-        for child in fs::read_dir(&path).ok()?.flatten() {
-            let child_path = child.path();
-            if child_path.is_file()
-                && child_path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .map(|name| name.to_lowercase() == wanted)
-                    .unwrap_or(false)
-            {
-                return fs::canonicalize(&child_path).ok().or(Some(child_path));
-            }
-        }
-    }
-    None
+    media_index.get(&file_name.to_lowercase()).cloned()
 }
 
 #[derive(Clone, Debug)]
 struct SourceInfo {
     stored_path: String,
-    sample_rate: f64,
 }
 
 #[derive(Clone, Debug)]
 struct ImportedElement {
-    object_id: u32,
     start: f64,
     duration: f64,
     source_id: u32,
@@ -685,7 +809,6 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 source_id,
                 SourceInfo {
                     stored_path,
-                    sample_rate: graph.f64(source_id, "sampleRate").unwrap_or(44_100.0).max(1.0),
                 },
             );
         }
@@ -725,7 +848,6 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 }
                 let following_join = graph.reference(element_id, "followingJoin");
                 elements.push(ImportedElement {
-                    object_id: element_id,
                     start,
                     duration,
                     source_id,
@@ -787,7 +909,7 @@ fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64
 struct ClipGroup {
     source_id: u32,
     placement: f64,
-    element_indices: Vec<usize>,
+    element_count: usize,
     timeline_start: f64,
     timeline_end: f64,
     source_start: f64,
@@ -796,105 +918,167 @@ struct ClipGroup {
 
 fn group_clips(graph: &Graph, track: &ImportedTrack) -> Vec<ClipGroup> {
     let mut groups: Vec<ClipGroup> = Vec::new();
-    for (index, element) in track.elements.iter().enumerate() {
+    let mut placement_bins: HashMap<(u32, i64), Vec<usize>> = HashMap::new();
+    for element in &track.elements {
         let source_start = source_time(graph, element, 0.0);
         let source_end = source_time(graph, element, element.duration).max(source_start + 1e-6);
         let placement = element.start - source_start;
         // Elements from one source occurrence share a placement.  A 50 ms
         // tolerance retains manually warped notes while keeping a later reuse
         // of the same sample as a distinct clip.
-        if let Some(group) = groups.iter_mut().find(|group| {
-            group.source_id == element.source_id && (group.placement - placement).abs() <= 0.05
-        }) {
-            group.element_indices.push(index);
+        let bin = (placement / 0.05).round() as i64;
+        let matching_index = (-1i64..=1).find_map(|delta| {
+            placement_bins
+                .get(&(element.source_id, bin + delta))
+                .and_then(|indices| {
+                    indices.iter().copied().find(|group_index| {
+                        (groups[*group_index].placement - placement).abs() <= 0.05
+                    })
+                })
+        });
+        if let Some(group_index) = matching_index {
+            let group = &mut groups[group_index];
+            group.element_count += 1;
             group.timeline_start = group.timeline_start.min(element.start);
             group.timeline_end = group.timeline_end.max(element.start + element.duration);
             group.source_start = group.source_start.min(source_start);
             group.source_end = group.source_end.max(source_end);
-            let count = group.element_indices.len() as f64;
+            let count = group.element_count as f64;
             group.placement += (placement - group.placement) / count;
         } else {
+            let group_index = groups.len();
             groups.push(ClipGroup {
                 source_id: element.source_id,
                 placement,
-                element_indices: vec![index],
+                element_count: 1,
                 timeline_start: element.start,
                 timeline_end: element.start + element.duration,
                 source_start,
                 source_end,
             });
+            placement_bins
+                .entry((element.source_id, bin))
+                .or_default()
+                .push(group_index);
         }
     }
     groups.sort_by(|left, right| left.timeline_start.total_cmp(&right.timeline_start));
     groups
 }
 
-fn source_pitch_at(graph: &Graph, element: &ImportedElement, local_time: f64) -> Option<(f32, f32)> {
-    let property_points = graph.reference(element.source_item_id, "propertyPoints")?;
-    let points = graph.list(property_points);
+#[derive(Clone, Copy)]
+struct CachedPitchPoint {
+    slice: f64,
+    pitch: f32,
+    without_vibrato: f32,
+    silent: bool,
+}
+
+struct SourcePitchCache {
+    source_duration: f64,
+    item_start: f64,
+    time_slice_count: f64,
+    points: Vec<CachedPitchPoint>,
+}
+
+fn eval_cached_function(points: &[(f64, f64)], x: f64) -> f64 {
     if points.is_empty() {
-        return None;
+        return x;
     }
+    if points.len() == 1 || x <= points[0].0 {
+        return points[0].1;
+    }
+    for pair in points.windows(2) {
+        if x <= pair[1].0 {
+            let span = (pair[1].0 - pair[0].0).max(1e-9);
+            let fraction = ((x - pair[0].0) / span).clamp(0.0, 1.0);
+            return pair[0].1 + (pair[1].1 - pair[0].1) * fraction;
+        }
+    }
+    points.last().map(|point| point.1).unwrap_or(x)
+}
+
+fn build_source_pitch_cache(
+    graph: &Graph,
+    element: &ImportedElement,
+) -> Option<SourcePitchCache> {
+    let property_points = graph.reference(element.source_item_id, "propertyPoints")?;
+    let point_ids = graph.list(property_points);
     let source_id = graph.reference(element.source_description_id, "audioSource")?;
     let sample_rate = graph.f64(source_id, "sampleRate")?.max(1.0);
     let sample_count = graph.i64(source_id, "sampleCount")?.max(1) as f64;
-    let source_duration = sample_count / sample_rate;
-    let item_start = graph
-        .i64(element.source_item_id, "startSampleIndex")
-        .unwrap_or(0)
-        .max(0) as f64
-        / sample_rate;
-    let mapped_time = element
-        .source_function_id
-        .map(|function| graph.eval_function(function, local_time))
-        .unwrap_or(local_time)
-        .max(0.0);
+    let mut points = Vec::with_capacity(point_ids.len());
+    for (index, point_id) in point_ids.into_iter().enumerate() {
+        let Some(pitch) = graph.f32(point_id, "pitchCent") else {
+            continue;
+        };
+        points.push(CachedPitchPoint {
+            slice: graph
+                .i32(point_id, "timeSliceIndex")
+                .unwrap_or(index as i32) as f64,
+            pitch,
+            without_vibrato: graph
+                .f32(point_id, "pitchWithoutVibrato")
+                .unwrap_or(pitch),
+            silent: graph.bool(point_id, "isConsideredSilent"),
+        });
+    }
+    points.sort_by(|left, right| left.slice.total_cmp(&right.slice));
+    Some(SourcePitchCache {
+        source_duration: sample_count / sample_rate,
+        item_start: graph
+            .i64(element.source_item_id, "startSampleIndex")
+            .unwrap_or(0)
+            .max(0) as f64
+            / sample_rate,
+        time_slice_count: graph
+            .i32(element.source_description_id, "timeSliceCount")
+            .unwrap_or(points.len() as i32)
+            .max(1) as f64,
+        points,
+    })
+}
+
+fn source_pitch_at(
+    cache: &SourcePitchCache,
+    time_function: &[(f64, f64)],
+    local_time: f64,
+) -> Option<(f32, f32)> {
+    if cache.points.is_empty() {
+        return None;
+    }
+    let mapped_time = eval_cached_function(time_function, local_time).max(0.0);
     // `timeSliceIndex` is global to the audio-source description, not local to
     // an item's property-point list.  Derive its position from the full source
     // duration; `parameterValuesPerSecond` is not a reliable hop-rate field in
     // Melodyne 5 archives (the observed value is commonly 441).
-    let time_slice_count = graph
-        .i32(element.source_description_id, "timeSliceCount")
-        .unwrap_or(points.len() as i32)
-        .max(1) as f64;
-    let slice_position = ((item_start + mapped_time) / source_duration)
+    let slice_position = ((cache.item_start + mapped_time) / cache.source_duration)
         .clamp(0.0, 1.0)
-        * (time_slice_count - 1.0).max(0.0);
-    let mut left_index = 0usize;
-    let mut right_index = points.len() - 1;
-    for (index, point_id) in points.iter().enumerate() {
-        let point_slice = graph.i32(*point_id, "timeSliceIndex").unwrap_or(index as i32) as f64;
-        if point_slice <= slice_position {
-            left_index = index;
-        }
-        if point_slice >= slice_position {
-            right_index = index;
-            break;
-        }
-    }
-    let left_slice = graph
-        .i32(points[left_index], "timeSliceIndex")
-        .unwrap_or(left_index as i32) as f64;
-    let right_slice = graph
-        .i32(points[right_index], "timeSliceIndex")
-        .unwrap_or(right_index as i32) as f64;
-    let fraction = if right_slice > left_slice {
-        ((slice_position - left_slice) / (right_slice - left_slice)).clamp(0.0, 1.0) as f32
+        * (cache.time_slice_count - 1.0).max(0.0);
+    // The former linear scan made long, densely analysed sources quadratic:
+    // every 5 ms output frame walked the complete source point list.  Melodyne
+    // stores points sorted by time slice, so a binary partition is sufficient.
+    let right_index = cache
+        .points
+        .partition_point(|point| point.slice < slice_position)
+        .min(cache.points.len() - 1);
+    let left_index = right_index
+        .saturating_sub(usize::from(cache.points[right_index].slice > slice_position));
+    let left = cache.points[left_index];
+    let right = cache.points[right_index];
+    let fraction = if right.slice > left.slice {
+        ((slice_position - left.slice) / (right.slice - left.slice)).clamp(0.0, 1.0) as f32
     } else {
         0.0
     };
-    let read = |point_id: u32, name: &str| graph.f32(point_id, name);
-    let left = points[left_index];
-    let right = points[right_index];
-    if graph.bool(left, "isConsideredSilent") && graph.bool(right, "isConsideredSilent") {
+    if left.silent && right.silent {
         return None;
     }
-    let interpolate = |name: &str| {
-        let a = read(left, name)?;
-        let b = read(right, name).unwrap_or(a);
-        Some(a + (b - a) * fraction)
-    };
-    Some((interpolate("pitchCent")?, interpolate("pitchWithoutVibrato")?))
+    Some((
+        left.pitch + (right.pitch - left.pitch) * fraction,
+        left.without_vibrato
+            + (right.without_vibrato - left.without_vibrato) * fraction,
+    ))
 }
 
 fn smooth_curve(curve: &mut [f32], center: usize, radius: usize) {
@@ -915,18 +1099,57 @@ fn smooth_curve(curve: &mut [f32], center: usize, radius: usize) {
     }
 }
 
-fn build_track_params(graph: &Graph, track: &ImportedTrack, shift: f64, project_sec: f64) -> TrackParamsState {
-    let frame_period_sec = IMPORT_FRAME_PERIOD_MS / 1000.0;
+fn build_track_params(
+    graph: &Graph,
+    track: &ImportedTrack,
+    shift: f64,
+    project_sec: f64,
+    frame_period_ms: f64,
+    track_index: usize,
+    track_count: usize,
+    progress: &ImportProgress<'_>,
+) -> TrackParamsState {
+    let frame_period_sec = frame_period_ms / 1000.0;
     let frame_count = (project_sec / frame_period_sec).ceil().max(1.0) as usize + 1;
     let mut pitch_orig = vec![0.0f32; frame_count];
     let mut pitch_edit = vec![0.0f32; frame_count];
-    let mut formant = vec![0.0f32; frame_count];
-    let mut volume = vec![1.0f32; frame_count];
+    let has_formant = track
+        .elements
+        .iter()
+        .any(|element| element.formant_offset.abs() > 1e-6);
+    let has_volume = track
+        .elements
+        .iter()
+        .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
+    let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
+    let mut volume = has_volume.then(|| vec![1.0f32; frame_count]);
+    // A source item is commonly referenced by hundreds of Melodyne elements.
+    // Decode its property-point list once instead of cloning it per note.
+    let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
 
-    for element in &track.elements {
+    for (element_index, element) in track.elements.iter().enumerate() {
+        if element_index % 64 == 0 {
+            let within = element_index as f64 / track.elements.len().max(1) as f64;
+            progress(
+                0.65 + 0.28 * (track_index as f64 + within) / track_count.max(1) as f64,
+                "restore_edits",
+                element_index,
+                track.elements.len(),
+            );
+        }
         if element.muted {
             continue;
         }
+        pitch_cache_by_item
+            .entry(element.source_item_id)
+            .or_insert_with(|| build_source_pitch_cache(graph, element));
+        let pitch_cache = pitch_cache_by_item
+            .get(&element.source_item_id)
+            .and_then(Option::as_ref);
+        let time_function = element
+            .source_function_id
+            .map(|function| graph.function_points(function))
+            .unwrap_or_default();
         let start = element.start + shift;
         let first = (start / frame_period_sec).floor().max(0.0) as usize;
         let last = ((start + element.duration) / frame_period_sec)
@@ -937,15 +1160,20 @@ fn build_track_params(graph: &Graph, track: &ImportedTrack, shift: f64, project_
             .unwrap_or(element.pitch_center);
         for frame in first..last.min(frame_count) {
             let local_time = frame as f64 * frame_period_sec - start;
-            let (raw, without_vibrato) = source_pitch_at(graph, element, local_time)
+            let (raw, without_vibrato) = pitch_cache
+                .and_then(|cache| source_pitch_at(cache, &time_function, local_time))
                 .unwrap_or((source_center, source_center));
             let edited = element.pitch_center
                 + element.pitch_drift * (without_vibrato - source_center)
                 + element.pitch_modulation * (raw - without_vibrato);
             pitch_orig[frame] = (raw / 100.0).clamp(0.0, 127.0);
             pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
-            formant[frame] = element.formant_offset;
-            volume[frame] = element.amplitude_factor.max(0.0);
+            if let Some(curve) = formant.as_mut() {
+                curve[frame] = element.formant_offset;
+            }
+            if let Some(curve) = volume.as_mut() {
+                curve[frame] = element.amplitude_factor.max(0.0);
+            }
         }
     }
 
@@ -966,10 +1194,14 @@ fn build_track_params(graph: &Graph, track: &ImportedTrack, shift: f64, project_
     }
 
     let mut extra_curves = HashMap::new();
-    extra_curves.insert("formant_shift_cents".to_string(), formant);
-    extra_curves.insert("volume".to_string(), volume);
+    if let Some(curve) = formant {
+        extra_curves.insert("formant_shift_cents".to_string(), curve);
+    }
+    if let Some(curve) = volume {
+        extra_curves.insert("volume".to_string(), curve);
+    }
     TrackParamsState {
-        frame_period_ms: IMPORT_FRAME_PERIOD_MS,
+        frame_period_ms,
         pitch_orig,
         pitch_edit,
         pitch_edit_user_modified: true,
@@ -990,14 +1222,48 @@ fn parse_project_graph(data: &[u8]) -> Result<Graph, String> {
     Err(last_error)
 }
 
+fn choose_frame_period_ms(tracks: &[ImportedTrack], project_sec: f64) -> f64 {
+    let bytes_per_project_frame: usize = tracks
+        .iter()
+        .filter(|track| track.melodic)
+        .map(|track| {
+            let has_formant = track
+                .elements
+                .iter()
+                .any(|element| element.formant_offset.abs() > 1e-6);
+            let has_volume = track
+                .elements
+                .iter()
+                .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
+            8 + usize::from(has_formant) * 4 + usize::from(has_volume) * 4
+        })
+        .sum();
+    if bytes_per_project_frame == 0 || project_sec <= 0.0 {
+        return IMPORT_FRAME_PERIOD_MS;
+    }
+    let estimated = project_sec * 1000.0 / IMPORT_FRAME_PERIOD_MS
+        * bytes_per_project_frame as f64;
+    if estimated <= MAX_IMPORT_PARAM_BYTES {
+        IMPORT_FRAME_PERIOD_MS
+    } else {
+        // Round upward to a whole millisecond.  This places a hard aggregate
+        // budget on dense HachiShifter curves while retaining Melodyne's
+        // original property points in the graph during reconstruction.
+        (IMPORT_FRAME_PERIOD_MS * estimated / MAX_IMPORT_PARAM_BYTES)
+            .ceil()
+            .max(IMPORT_FRAME_PERIOD_MS)
+    }
+}
+
 fn import_flat_paths(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, String> {
     let referenced_files = referenced_audio_paths(data)?;
     let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let media_index = build_media_index(project_dir);
     let mut timeline = TimelineState::default();
     timeline.clips.clear();
     let mut missing_files = Vec::new();
     for (index, stored) in referenced_files.iter().enumerate() {
-        let resolved = resolve_media_path(stored, project_dir);
+        let resolved = resolve_media_path(stored, project_dir, &media_index);
         let import_path = resolved
             .as_ref()
             .map(|value| value.to_string_lossy().to_string())
@@ -1029,23 +1295,30 @@ fn import_flat_paths(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, S
     })
 }
 
-pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, String> {
-    let graph = match parse_project_graph(data) {
-        Ok(graph) => graph,
-        Err(_) => return import_flat_paths(path, data),
-    };
+fn import_graph(
+    path: &Path,
+    graph: Graph,
+    progress: &ImportProgress<'_>,
+) -> Result<MelodyneImportResult, String> {
+    progress(0.25, "read_tracks", 0, 1);
     let (tracks, sources) = collect_project(&graph)?;
+    progress(0.34, "resolve_media", 0, sources.len());
     let referenced_files: Vec<String> = sources
         .values()
         .map(|source| source.stored_path.clone())
         .collect();
     let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let media_index = build_media_index(project_dir);
     let resolved_sources: BTreeMap<u32, Option<PathBuf>> = sources
         .iter()
-        .map(|(source_id, source)| {
+        .enumerate()
+        .map(|(index, (source_id, source))| {
+            if index % 32 == 0 {
+                progress(0.34 + 0.08 * index as f64 / sources.len().max(1) as f64, "resolve_media", index, sources.len());
+            }
             (
                 *source_id,
-                resolve_media_path(&source.stored_path, project_dir),
+                resolve_media_path(&source.stored_path, project_dir, &media_index),
             )
         })
         .collect();
@@ -1062,7 +1335,11 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
 
     let grouped: Vec<Vec<ClipGroup>> = tracks
         .iter()
-        .map(|track| group_clips(&graph, track))
+        .enumerate()
+        .map(|(index, track)| {
+            progress(0.42 + 0.08 * index as f64 / tracks.len().max(1) as f64, "group_samples", index, tracks.len());
+            group_clips(&graph, track)
+        })
         .collect();
     let earliest = grouped
         .iter()
@@ -1076,6 +1353,7 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
         .map(|group| group.timeline_end + shift)
         .fold(4.0f64, f64::max);
     let project_sec = latest.ceil().max(4.0);
+    let frame_period_ms = choose_frame_period_ms(&tracks, project_sec);
 
     let mut timeline = TimelineState::default();
     timeline.clips.clear();
@@ -1084,6 +1362,12 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
     timeline.next_track_order = 0;
 
     for (track_index, (track, clip_groups)) in tracks.iter().zip(grouped.iter()).enumerate() {
+        progress(
+            0.50 + 0.15 * track_index as f64 / tracks.len().max(1) as f64,
+            "create_clips",
+            track_index,
+            tracks.len(),
+        );
         let track_id = timeline.add_track(Some(track.name.clone()), None, None);
         if let Some(state_track) = timeline.tracks.iter_mut().find(|item| item.id == track_id) {
             state_track.muted = track.muted;
@@ -1121,7 +1405,16 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
         if track.melodic {
             timeline.params_by_root_track.insert(
                 track_id.clone(),
-                build_track_params(&graph, track, shift, project_sec),
+                build_track_params(
+                    &graph,
+                    track,
+                    shift,
+                    project_sec,
+                    frame_period_ms,
+                    track_index,
+                    tracks.len(),
+                    progress,
+                ),
             );
         }
         if track_index == 0 {
@@ -1135,12 +1428,56 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
     if let Some(first_clip_track) = timeline.clips.first().map(|clip| clip.track_id.clone()) {
         timeline.selected_track_id = Some(first_clip_track);
     }
+    progress(0.96, "finalize", tracks.len(), tracks.len());
 
     Ok(MelodyneImportResult {
         timeline,
         missing_files,
         referenced_files,
     })
+}
+
+pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, String> {
+    let graph = match parse_project_graph(data) {
+        Ok(graph) => graph,
+        Err(_) => return import_flat_paths(path, data),
+    };
+    import_graph(path, graph, &|_, _, _, _| {})
+}
+
+pub fn import_mpd_file(
+    path: &Path,
+    progress: &ImportProgress<'_>,
+) -> Result<MelodyneImportResult, String> {
+    progress(0.0, "open", 0, 1);
+    match decode_graph_file(path, progress).and_then(Graph::parse) {
+        Ok(graph) if graph.find_first_class("MUPerformance").is_some() => {
+            import_graph(path, graph, progress)
+        }
+        Ok(_) => {
+            // Compatibility path for older MPD variants.  It is reached only
+            // when the bounded streaming graph reader cannot identify a
+            // performance graph.
+            progress(0.20, "legacy_scan", 0, 1);
+            let data = fs::read(path).map_err(|error| format!("failed to read MPD: {error}"))?;
+            let result = import_mpd(path, &data);
+            progress(0.96, "finalize", 1, 1);
+            result
+        }
+        Err(error) => {
+            let file_len = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+            if file_len > 64 * 1024 * 1024 {
+                Err(format!("large MPD graph parsing failed: {error}"))
+            } else {
+                progress(0.20, "legacy_scan", 0, 1);
+                let data = fs::read(path)
+                    .map_err(|read_error| format!("failed to read MPD: {read_error}"))?;
+                let result = import_mpd(path, &data);
+                progress(0.96, "finalize", 1, 1);
+                result
+            }
+        }
+    }
 }
 
 #[cfg(test)]

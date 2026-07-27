@@ -223,7 +223,8 @@ export interface SessionState {
     /** 全局默认 HiFiGAN mel stretch 开关 */
     defaultHifiganMelStretch: boolean;
     ortEp: string;
-    cudaDeviceId: number;
+    gpuDeviceId: number;
+    ortDeviceId: number | null;
     /** 后台预渲染：编辑后立即在后台渲染，无需等待播放触发 */
     autoBackgroundRender: boolean;
 
@@ -279,6 +280,7 @@ export interface SessionState {
         playbackTarget: string | null;
         playbackPositionSec: number;
         playbackDurationSec: number;
+        gpuBackend: string;
     };
 
     selectedTrackSummary: {
@@ -990,7 +992,8 @@ const initialState: SessionState = {
     defaultStretchAlgorithm: "signalsmith",
     defaultHifiganMelStretch: true,
     ortEp: "auto",
-    cudaDeviceId: 0,
+    gpuDeviceId: 0,
+    ortDeviceId: null,
     autoBackgroundRender: true,
 
     paramsEpoch: 0,
@@ -1044,6 +1047,7 @@ const initialState: SessionState = {
         playbackTarget: null,
         playbackPositionSec: 0,
         playbackDurationSec: 0,
+        gpuBackend: "",
     },
 
     selectedTrackSummary: {
@@ -1281,8 +1285,11 @@ const sessionSlice = createSlice({
         setOrtEp(state, action: PayloadAction<string>) {
             state.ortEp = action.payload;
         },
-        setCudaDeviceId(state, action: PayloadAction<number>) {
-            state.cudaDeviceId = action.payload;
+        setGpuDeviceId(state, action: PayloadAction<number>) {
+            state.gpuDeviceId = action.payload;
+        },
+        setOrtDeviceId(state, action: PayloadAction<number | null>) {
+            state.ortDeviceId = action.payload;
         },
         toggleAutoBackgroundRender(state) {
             state.autoBackgroundRender = !state.autoBackgroundRender;
@@ -1779,6 +1786,7 @@ const sessionSlice = createSlice({
                         is_playing?: boolean;
                         playback_target?: string | null;
                         timeline?: TimelineState;
+                        gpu_backend?: string;
                     };
                     state.runtime = {
                         device: payload.device,
@@ -1789,6 +1797,7 @@ const sessionSlice = createSlice({
                         playbackTarget: payload.playback_target ?? null,
                         playbackPositionSec: state.runtime.playbackPositionSec,
                         playbackDurationSec: state.runtime.playbackDurationSec,
+                        gpuBackend: payload.gpu_backend ?? "",
                     };
                     if (payload.timeline) {
                         applyTimelineState(state, payload.timeline, { force: true });
@@ -1885,10 +1894,15 @@ const sessionSlice = createSlice({
                     state.defaultHifiganMelStretch = Boolean((s as any).defaultHifiganMelStretch);
                 }
                 if (s.ortEp != null) {
-                    state.ortEp = s.ortEp;
+                    const normalized = String(s.ortEp).toLowerCase();
+                    state.ortEp = ["auto", "cpu", "gpu"].includes(normalized) ? normalized : "auto";
                 }
-                if (s.cudaDeviceId != null) {
-                    state.cudaDeviceId = Number(s.cudaDeviceId);
+                if (s.gpuDeviceId != null) {
+                    state.gpuDeviceId = Number(s.gpuDeviceId);
+                }
+                if ((s as any).ortDeviceId !== undefined) {
+                    const val = (s as any).ortDeviceId;
+                    state.ortDeviceId = val == null ? null : Number(val);
                 }
                 if ((s as any).autoBackgroundRender != null) {
                     state.autoBackgroundRender = Boolean((s as any).autoBackgroundRender);
@@ -3335,7 +3349,8 @@ export const {
     setDefaultStretchAlgorithm,
     setDefaultHifiganMelStretch,
     setOrtEp,
-    setCudaDeviceId,
+    setGpuDeviceId,
+    setOrtDeviceId,
     toggleAutoBackgroundRender,
     setVisibleReferenceRootTrackIds,
     toggleVisibleReferenceRootTrackId,

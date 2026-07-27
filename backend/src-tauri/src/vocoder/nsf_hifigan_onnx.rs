@@ -41,7 +41,7 @@ fn emit_chunk_progress(_local: f64) {
 /// Tracks which execution provider was actually selected during session creation.
 static ACTIVE_EP: OnceLock<String> = OnceLock::new();
 
-/// Returns the EP that was actually used for the live session (e.g. "cuda", "cpu").
+/// Returns the EP that was actually used for the live session (e.g. "directml", "opencl", "cpu").
 pub fn active_ep() -> String {
     ACTIVE_EP.get().cloned().unwrap_or_else(|| "unknown".to_string())
 }
@@ -49,6 +49,9 @@ pub fn active_ep() -> String {
 fn ensure_ort_init() -> Result<(), String> {
     match ORT_INIT.get_or_init(|| {
         ort::init().with_name("hachishifter").commit();
+        eprintln!("[ort] initialized: {}", ort::info());
+        let providers = crate::vocoder_ort_session::diagnose_available_providers();
+        eprintln!("[ort] available providers: {providers:?}");
         Ok(())
     }) {
         Ok(()) => Ok(()),
@@ -471,7 +474,7 @@ static SHARED_SESSION: OnceLock<Mutex<Option<Arc<Mutex<Session>>>>> = OnceLock::
 /// 递增此 Epoch 可以促使所有 Thread Local 重新加载 ONNX 实例以同步 EP 切换。
 static SESSION_EPOCH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-/// Drop the shared ORT session to release CUDA memory. Called on app exit.
+/// Drop the shared ORT session to release GPU memory. Called on app exit.
 pub fn drop_shared_session() {
     if let Some(mutex) = SHARED_SESSION.get() {
         if let Ok(mut guard) = mutex.lock() {
@@ -495,22 +498,24 @@ fn get_or_init_shared_session() -> Result<Arc<Mutex<Session>>, String> {
     Ok(arc)
 }
 
-pub fn update_ort_ep(choice: &str) {
+pub fn update_ort_ep(choice: &str, device_id: Option<i32>) {
     let ep_str = choice.trim().to_lowercase();
-    
+
     // 写入运行时 EP 覆盖设置（存储在 ort_session 模块中）
     crate::vocoder_ort_session::set_runtime_ep_override(Some(ep_str));
-    
+    // 写入 DirectML 设备 ID 覆盖
+    crate::vocoder_ort_session::set_runtime_dml_device_id(device_id);
+
     // 重置全局 Session，下一次渲染请求时将自动使用新 EP 重新创建
     if let Some(mutex) = SHARED_SESSION.get() {
         if let Ok(mut guard) = mutex.lock() {
             *guard = None;
         }
     }
-    
+
     // 更新 Epoch，这会告知所有的 TLS 缓存将他们的本地 NsfHifiganOnnx 实例作废并重新载入
     SESSION_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    
+
     // 清除全局 Active EP 状态
     // 我们必须允许 ACTIVE_EP 被重置。但是 OnceLock 无法被重写。
     // 在 active_ep() 中我们将利用动态逻辑或仅读取它。
@@ -722,6 +727,8 @@ impl NsfHifiganOnnx {
     }
 
     fn run_model(&mut self, mel: Vec<f32>, f0: Vec<f32>, t: usize) -> Result<Vec<f32>, String> {
+        let debug = std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1");
+        let t_total = if debug { Some(std::time::Instant::now()) } else { None };
         let mel_tensor =
             Tensor::from_array(([1usize, self.cfg.num_mels, t], mel.into_boxed_slice()))
                 .map_err(|e| format!("build mel tensor failed: {e}"))?;
@@ -748,6 +755,9 @@ impl NsfHifiganOnnx {
                 .map_err(|e| format!("ort output type mismatch: {e}"))?;
             data.to_vec()
         };
+        if let Some(t0) = t_total {
+            eprintln!("[nsf_hifigan] run_model t={t}: {:.1}ms", t0.elapsed().as_secs_f64() * 1000.0);
+        }
         Ok(result)
     }
 
@@ -1142,8 +1152,8 @@ pub struct OnnxDiagnosticInfo {
     pub active_ep: String,
     pub onnx_version: Option<String>,
     pub providers: Option<Vec<String>>,
-    /// Full CUDA diagnostic info (available providers, DLL status, smoke test, etc.)
-    pub cuda_diagnostic: Option<crate::vocoder_ort_session::CudaDiagnostic>,
+    /// Full GPU diagnostic info (available providers, smoke test, etc.)
+    pub gpu_diagnostic: Option<crate::vocoder_ort_session::GpuDiagnostic>,
 }
 
 pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
@@ -1159,7 +1169,7 @@ pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
             active_ep: "none".to_string(),
             onnx_version: None,
             providers: None,
-            cuda_diagnostic: None,
+            gpu_diagnostic: None,
         };
     }
 
@@ -1175,71 +1185,12 @@ pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
 
     let onnx_version = Some(format!("ort {}", env!("CARGO_PKG_VERSION")));
 
-    // Gather CUDA diagnostic, including smoke test if possible
-    let cuda_diagnostic = if ensure_ort_init().is_ok() {
-        let mut diag = crate::vocoder_ort_session::diagnose_cuda();
-        // Try smoke test with real model using model-appropriate input shapes
-        if diag.available_providers.iter().any(|p| p.contains("CUDA")) {
-            match try_create_cuda_smoke_session() {
-                Ok(mut session) => {
-                    match run_cuda_smoke_test(&mut session) {
-                        Ok(()) => {
-                            diag.cuda_smoke_test_passed = true;
-                            diag.cuda_smoke_test_error = None;
-                        }
-                        Err(e) => {
-                            diag.cuda_smoke_test_passed = false;
-                            diag.cuda_smoke_test_error = Some(e);
-                        }
-                    }
-                }
-                Err(e) => {
-                    diag.cuda_smoke_test_passed = false;
-                    diag.cuda_smoke_test_error = Some(format!("Cannot create CUDA session: {e}"));
-                }
-            }
-        }
-        Some(diag)
+    // Gather GPU diagnostic
+    let gpu_diagnostic = if ensure_ort_init().is_ok() {
+        Some(crate::vocoder_ort_session::diagnose_gpu())
     } else {
         None
     };
-
-    // Helper: run a minimal inference through a CUDA session to verify GPU execution.
-    // Uses the model's actual input shapes so ORT can't reject based on shape mismatch.
-    fn run_cuda_smoke_test(session: &mut ort::session::Session) -> Result<(), String> {
-        // Read model config to get correct input shapes
-        let (_onnx_path, cfg_path) = resolve_model_paths()?;
-        let cfg = read_config(&cfg_path)?;
-
-        let t = 2usize; // Minimal: 2 mel frames
-        let mel = vec![0.0f32; cfg.num_mels * t];
-        let f0 = vec![0.0f32; t];
-        let mel_tensor = Tensor::from_array(([1usize, cfg.num_mels, t], mel.into_boxed_slice()))
-            .map_err(|e| format!("CUDA smoke test: mel tensor build failed: {e}"))?;
-        let f0_tensor = Tensor::from_array(([1usize, t], f0.into_boxed_slice()))
-            .map_err(|e| format!("CUDA smoke test: f0 tensor build failed: {e}"))?;
-
-        let result = session.run(ort::inputs![mel_tensor, f0_tensor]);
-        match result {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                let msg = format!("{e}");
-                if msg.contains("cublas")
-                    || msg.contains("cudnn")
-                    || msg.contains("CUDA")
-                    || msg.contains("cuda")
-                {
-                    Err(format!(
-                        "CUDA EP registered but inference FAILED — likely missing CUDA runtime DLLs (cuBLAS/cuDNN). \
-                         Run '.\\scripts\\download-cuda-runtime.ps1' to install. \
-                         Error: {msg}"
-                    ))
-                } else {
-                    Err(format!("CUDA EP inference FAILED: {msg}"))
-                }
-            }
-        }
-    }
 
     OnnxDiagnosticInfo {
         compiled,
@@ -1249,7 +1200,7 @@ pub fn diagnose_onnx_availability() -> OnnxDiagnosticInfo {
         active_ep: active_ep(),
         onnx_version,
         providers,
-        cuda_diagnostic,
+        gpu_diagnostic,
     }
 }
 
@@ -2363,35 +2314,23 @@ pub struct BenchmarkResults {
     pub cpu_rt_factor: f64,
     pub gpu_median_ms: Option<f64>,
     pub gpu_rt_factor: Option<f64>,
+    pub dml_median_ms: Option<f64>,
+    pub dml_rt_factor: Option<f64>,
     pub benchmark_samples: usize,
-    /// True when CUDA EP was available and used for the GPU benchmark.
-    pub cuda_available: bool,
-    /// CUDA device ID that was used (0 if CUDA not available).
-    pub cuda_device_id: i32,
+    /// True when GPU EP was available and used for the GPU benchmark.
+    pub gpu_available: bool,
+    /// True when DirectML EP was available and used for the benchmark.
+    pub dml_available: bool,
+    /// GPU device ID that was used (0 if GPU not available).
+    pub gpu_device_id: i32,
     /// Execution providers available in the ONNX Runtime DLL.
     pub available_providers: Vec<String>,
-    /// Whether critical CUDA runtime DLLs (cuBLAS, cuDNN) were found on disk.
-    pub cuda_dlls_found: bool,
     /// ORT build info string.
     pub ort_build_info: String,
-    /// All NVIDIA GPUs discovered via NVML (name, memory, device ID).
-    pub gpu_devices: Vec<crate::cuda_info::GpuDeviceInfo>,
-}
-
-/// Create a minimal CUDA session for smoke-testing GPU execution.
-///
-/// This is used by `ort_session::diagnose_cuda()` to verify that CUDA
-/// can actually execute (not just register). Uses the NSF-HiFiGAN model
-/// since we know it's available.
-pub fn try_create_cuda_smoke_session() -> Result<ort::session::Session, String> {
-    ensure_ort_init()?;
-    let (onnx_path, _cfg_path) = resolve_model_paths()?;
-    let _guard = crate::vocoder_ort_session::EpOverrideGuard::new("cuda".to_string());
-    let (session, _ep) = crate::vocoder_ort_session::build_ort_session(
-        &onnx_path,
-        crate::vocoder_ort_session::OrtSessionRole::Vocoder,
-    )?;
-    Ok(session)
+    /// All GPUs discovered via NVML (name, memory, device ID).
+    pub gpu_devices: Vec<crate::gpu_info::GpuDeviceInfo>,
+    /// All DirectML-compatible GPU adapters discovered via DXGI.
+    pub dml_adapters: Vec<crate::dml_adapters::DmlAdapterInfo>,
 }
 
 pub fn run_benchmark() -> Result<BenchmarkResults, String> {
@@ -2405,18 +2344,35 @@ pub fn run_benchmark() -> Result<BenchmarkResults, String> {
 
     // Collect diagnostic info before benchmark
     let available_providers = crate::vocoder_ort_session::diagnose_available_providers();
-    let cuda_device_id = crate::vocoder_ort_session::diagnose_cuda().cuda_device_id;
-    let cuda_dll_status = crate::vocoder_ort_session::probe_cuda_dlls();
-    let cuda_dlls_found = cuda_dll_status.iter().all(|(_, found)| *found);
+    let gpu_device_id = crate::vocoder_ort_session::diagnose_gpu().gpu_device_id;
     let ort_build_info = ort::info().to_string();
-    let cuda_available = available_providers.iter().any(|p| p.contains("CUDA"));
-    let gpu_devices = crate::cuda_info::enumerate_gpus().devices;
+    let gpu_available = available_providers.iter().any(|p| p.contains("OpenCL"));
+    let gpu_devices = crate::gpu_info::enumerate_gpus().devices;
+    let dml_adapters = crate::dml_adapters::enumerate_dml_adapters().adapters;
+    let cpu_cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
+
+    eprintln!("[benchmark] ========================================");
+    eprintln!("[benchmark] model={} frames={frames} audio_sec={audio_sec:.2}s runs={runs}",
+        onnx_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default());
+    eprintln!("[benchmark] model_sr={} num_mels={} hop={} n_fft={}",
+        cfg.sampling_rate, cfg.num_mels, cfg.hop_size, cfg.n_fft);
+    eprintln!("[benchmark] cpu_cores={cpu_cores} ort={ort_build_info}");
+    eprintln!("[benchmark] providers={available_providers:?}");
+    eprintln!("[benchmark] dml_adapters={dml_adapters:?}");
+    eprintln!("[benchmark] gpu_devices(NVML)={gpu_devices:?}");
+    eprintln!("[benchmark] env HACHISHIFTER_ORT_EP={:?} HACHISHIFTER_HIFIGAN_ORT_EP={:?} HACHISHIFTER_DML_DEVICE_ID={:?}",
+        std::env::var("HACHISHIFTER_ORT_EP").ok(),
+        std::env::var("HACHISHIFTER_HIFIGAN_ORT_EP").ok(),
+        std::env::var("HACHISHIFTER_DML_DEVICE_ID").ok());
 
     // 1. Benchmark CPU
     let mut cpu_times = Vec::new();
+    let t_cpu_total = std::time::Instant::now();
     {
         let _guard = crate::vocoder_ort_session::EpOverrideGuard::new("cpu".to_string());
+        let t_session = std::time::Instant::now();
         let (mut cpu_session, _) = crate::vocoder_ort_session::build_ort_session(&onnx_path, crate::vocoder_ort_session::OrtSessionRole::Vocoder)?;
+        eprintln!("[benchmark] CPU session created in {}ms", t_session.elapsed().as_millis());
 
         // Warmup
         let mel = vec![0.0f32; cfg.num_mels * frames];
@@ -2436,51 +2392,114 @@ pub fn run_benchmark() -> Result<BenchmarkResults, String> {
     cpu_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let cpu_median = cpu_times[cpu_times.len() / 2];
     let cpu_rt_factor = audio_sec / (cpu_median / 1000.0);
+    eprintln!("[benchmark] CPU: total={}ms runs={:?} median={cpu_median:.1}ms rtf={cpu_rt_factor:.3}x",
+        t_cpu_total.elapsed().as_millis(), cpu_times);
 
-    // 2. Benchmark GPU (CUDA) if available
+    // 2. Benchmark GPU (OpenCL) if available
     let mut gpu_median = None;
     let mut gpu_rt_factor = None;
-    let mut cuda_actually_working = false;
+    let mut gpu_actually_working = false;
 
-    let mut gpu_times = Vec::new();
-    let gpu_session_res = {
-        let _guard = crate::vocoder_ort_session::EpOverrideGuard::new("cuda".to_string());
-        crate::vocoder_ort_session::build_ort_session(&onnx_path, crate::vocoder_ort_session::OrtSessionRole::Vocoder)
-    };
+    let opencl_available = available_providers.iter().any(|p| p.contains("OpenCL"));
+    if opencl_available {
+        let gpu_session_res = {
+            let _guard = crate::vocoder_ort_session::EpOverrideGuard::new("opencl".to_string());
+            crate::vocoder_ort_session::build_ort_session(&onnx_path, crate::vocoder_ort_session::OrtSessionRole::Vocoder)
+        };
 
-    if let Ok((mut gpu_session, ep)) = gpu_session_res {
-        if ep == "cuda" {
-            // Warmup
-            let mel = vec![0.0f32; cfg.num_mels * frames];
-            let f0 = vec![440.0f32; frames];
-            let mt = Tensor::from_array(([1, cfg.num_mels, frames], mel.clone().into_boxed_slice())).unwrap();
-            let ft = Tensor::from_array(([1, frames], f0.clone().into_boxed_slice())).unwrap();
-            if gpu_session.run(ort::inputs![mt, ft]).is_ok() {
-                cuda_actually_working = true;
-                for _ in 0..runs {
-                    let mt = Tensor::from_array(([1, cfg.num_mels, frames], mel.clone().into_boxed_slice())).unwrap();
-                    let ft = Tensor::from_array(([1, frames], f0.clone().into_boxed_slice())).unwrap();
-                    let t = std::time::Instant::now();
-                    let _ = gpu_session.run(ort::inputs![mt, ft]).unwrap();
-                    gpu_times.push(t.elapsed().as_secs_f64() * 1000.0);
+        if let Ok((mut gpu_session, ep)) = gpu_session_res {
+            if ep == "opencl" {
+                let mel = vec![0.0f32; cfg.num_mels * frames];
+                let f0 = vec![440.0f32; frames];
+                let mt = Tensor::from_array(([1, cfg.num_mels, frames], mel.clone().into_boxed_slice())).unwrap();
+                let ft = Tensor::from_array(([1, frames], f0.clone().into_boxed_slice())).unwrap();
+                if gpu_session.run(ort::inputs![mt, ft]).is_ok() {
+                    gpu_actually_working = true;
+                    let mut gpu_times = Vec::new();
+                    for _ in 0..runs {
+                        let mt = Tensor::from_array(([1, cfg.num_mels, frames], mel.clone().into_boxed_slice())).unwrap();
+                        let ft = Tensor::from_array(([1, frames], f0.clone().into_boxed_slice())).unwrap();
+                        let t = std::time::Instant::now();
+                        let _ = gpu_session.run(ort::inputs![mt, ft]).unwrap();
+                        gpu_times.push(t.elapsed().as_secs_f64() * 1000.0);
+                    }
+                    gpu_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let median = gpu_times[gpu_times.len() / 2];
+                    gpu_median = Some(median);
+                    gpu_rt_factor = Some(audio_sec / (median / 1000.0));
+                } else {
+                    eprintln!(
+                        "[benchmark] WARNING: OpenCL EP registered but warmup inference FAILED."
+                    );
                 }
-                gpu_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
-                let median = gpu_times[gpu_times.len() / 2];
-                gpu_median = Some(median);
-                gpu_rt_factor = Some(audio_sec / (median / 1000.0));
-            } else {
-                eprintln!(
-                    "[benchmark] WARNING: CUDA EP registered but warmup inference FAILED. \
-                     CUDA runtime DLLs (cuBLAS/cuDNN) may be missing. GPU benchmark skipped."
-                );
             }
+        }
+    }
+
+    // 3. Benchmark DirectML if available
+    let dml_available = available_providers.iter().any(|p| p.contains("Dml"));
+    let mut dml_median = None;
+    let mut dml_rt_factor = None;
+
+    if dml_available {
+        let dml_total = std::time::Instant::now();
+        let dml_session_res = {
+            let _guard = crate::vocoder_ort_session::EpOverrideGuard::new("directml".to_string());
+            crate::vocoder_ort_session::build_ort_session(
+                &onnx_path,
+                crate::vocoder_ort_session::OrtSessionRole::Vocoder,
+            )
+        };
+
+        if let Ok((mut dml_session, ep)) = dml_session_res {
+            eprintln!("[benchmark] DirectML session created in {}ms (ep={ep})", dml_total.elapsed().as_millis());
+            if ep == "directml" {
+                let mut dml_times = Vec::new();
+                let mel = vec![0.0f32; cfg.num_mels * frames];
+                let f0 = vec![440.0f32; frames];
+
+                // Warmup
+                let mt = Tensor::from_array(
+                    ([1, cfg.num_mels, frames], mel.clone().into_boxed_slice()),
+                )
+                .unwrap();
+                let ft = Tensor::from_array(([1, frames], f0.clone().into_boxed_slice())).unwrap();
+                if dml_session.run(ort::inputs![mt, ft]).is_ok() {
+                    for run_i in 0..runs {
+                        let mt = Tensor::from_array(
+                            ([1, cfg.num_mels, frames], mel.clone().into_boxed_slice()),
+                        )
+                        .unwrap();
+                        let ft =
+                            Tensor::from_array(([1, frames], f0.clone().into_boxed_slice()))
+                                .unwrap();
+                        let t = std::time::Instant::now();
+                        let _ = dml_session.run(ort::inputs![mt, ft]).unwrap();
+                        let ms = t.elapsed().as_secs_f64() * 1000.0;
+                        eprintln!("[benchmark] DirectML run {run_i}: {ms:.1}ms");
+                        dml_times.push(ms);
+                    }
+                    dml_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                    let median = dml_times[dml_times.len() / 2];
+                    dml_median = Some(median);
+                    dml_rt_factor = Some(audio_sec / (median / 1000.0));
+                    eprintln!("[benchmark] DirectML: total={}ms runs={dml_times:?} median={median:.1}ms rtf={:.3}x",
+                        dml_total.elapsed().as_millis(), audio_sec / (median / 1000.0));
+                } else {
+                    eprintln!(
+                        "[benchmark] WARNING: DirectML EP registered but warmup inference FAILED."
+                    );
+                }
+            }
+        } else {
+            eprintln!("[benchmark] DirectML session creation FAILED");
         }
     }
 
     // Log diagnostic info for debugging
     eprintln!(
-        "[benchmark] Providers: {:?} | CUDA device_id: {} | DLLs found: {} | CUDA inference works: {}",
-        available_providers, cuda_device_id, cuda_dlls_found, cuda_actually_working
+        "[benchmark] Providers: {:?} | GPU device_id: {} | GPU works: {} | DirectML available: {}",
+        available_providers, gpu_device_id, gpu_actually_working, dml_available
     );
 
     Ok(BenchmarkResults {
@@ -2488,12 +2507,15 @@ pub fn run_benchmark() -> Result<BenchmarkResults, String> {
         cpu_rt_factor,
         gpu_median_ms: gpu_median,
         gpu_rt_factor,
+        dml_median_ms: dml_median,
+        dml_rt_factor,
         benchmark_samples: runs,
-        cuda_available,
-        cuda_device_id,
+        gpu_available,
+        dml_available,
+        gpu_device_id,
         available_providers,
-        cuda_dlls_found,
         ort_build_info,
         gpu_devices,
+        dml_adapters,
     })
 }

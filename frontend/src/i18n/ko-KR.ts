@@ -948,4 +948,35 @@ export const koKR = {
     melodyne_edge_drag_hint: "음표 가장자리를 드래그해 늘리고 정렬선을 두 번 클릭해 그리드에 맞춥니다",
     melodyne_game_alignment_hint: "각 GAME note를 하나의 음절로 사용하고 시작점을 리듬 정렬점으로 유지합니다. 어택/치찰음을 뒤로 분석해 앞선 자음 시작점을 찾습니다.",
     sample_timing_save: "저장",
+
+    // Upstream GPU and source-change notifications.
+    benchmark_gpu_device_label: "GPU 장치",
+    benchmark_gpu_label: "GPU",
+    benchmark_ort_info_label: "ONNX Runtime:",
+    menu_gpu_auto_select: "자동 선택 (권장)",
+    menu_gpu_device: "GPU 장치",
+    menu_inference_gpu: "GPU",
+    source_file_changed_modified_desc:
+        '다음 오디오 파일이 외부에서 수정되었습니다. 프로젝트에 다시 로드하시겠습니까?',
+    source_file_changed_deleted_desc:
+        '다음 오디오 파일이 이동 또는 삭제되었습니다. 대체 파일을 선택하시겠습니까?',
+    source_file_changed_ignore: "무시",
+    source_file_changed_reload: "다시 로드",
+    source_file_changed_status_deleted: "삭제됨",
+    source_file_changed_status_modified: "수정됨",
+    source_file_changed_title: "소스 파일 변경됨",
+
+    // Melodyne large-project import progress.
+    melodyne_import_title: 'Melodyne 프로젝트 가져오는 중',
+    melodyne_import_stage_open: '프로젝트 여는 중',
+    melodyne_import_stage_scan: '프로젝트 컨테이너 검색 중',
+    melodyne_import_stage_decompress: '프로젝트 그래프 압축 해제 중',
+    melodyne_import_stage_parse: '프로젝트 그래프 분석 중',
+    melodyne_import_stage_tracks: 'Melodyne 트랙 읽는 중',
+    melodyne_import_stage_media: '오디오 미디어 찾는 중',
+    melodyne_import_stage_samples: '샘플 그룹화 중',
+    melodyne_import_stage_clips: '타임라인 클립 생성 중',
+    melodyne_import_stage_edits: 'Melodyne 편집 복원 중',
+    melodyne_import_stage_legacy: '레거시 프로젝트 검색 중',
+    melodyne_import_stage_finalize: '프로젝트 마무리 중',
 } as const;

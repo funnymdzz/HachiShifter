@@ -44,7 +44,8 @@ export interface UiSettings {
     midiImportTargetReaperClipboard?: string;
     midiImportTargetParamEditor?: string;
     ortEp?: string;
-    cudaDeviceId?: number;
+    gpuDeviceId?: number;
+    ortDeviceId?: number | null;
     autoBackgroundRender?: boolean;
     customScalePresets?: Array<{
         id: string;

@@ -932,4 +932,35 @@ export const jaJP = {
     melodyne_edge_drag_hint: "ノート端をドラッグして伸縮し、整列線をダブルクリックしてグリッドへスナップ",
     melodyne_game_alignment_hint: "各 GAME note を1音節として扱い、先頭をリズム整列点に固定します。そこからアタック／歯擦音を後方解析し、直前の子音開始点を検出します。",
     sample_timing_save: "保存",
+
+    // Upstream GPU and source-change notifications.
+    benchmark_gpu_device_label: "GPU デバイス",
+    benchmark_gpu_label: "GPU",
+    benchmark_ort_info_label: "ONNX Runtime:",
+    menu_gpu_auto_select: "自動選択（推奨）",
+    menu_gpu_device: "GPU デバイス",
+    menu_inference_gpu: "GPU",
+    source_file_changed_modified_desc:
+        '以下の音声ファイルが外部で変更されました。プロジェクトに再読み込みしますか？',
+    source_file_changed_deleted_desc:
+        '以下の音声ファイルが移動または削除されました。代替ファイルを選択しますか？',
+    source_file_changed_ignore: "無視",
+    source_file_changed_reload: "再読み込み",
+    source_file_changed_status_deleted: "削除済み",
+    source_file_changed_status_modified: "変更済み",
+    source_file_changed_title: "ソースファイルが変更されました",
+
+    // Melodyne large-project import progress.
+    melodyne_import_title: 'Melodyneプロジェクトを読み込み中',
+    melodyne_import_stage_open: 'プロジェクトを開いています',
+    melodyne_import_stage_scan: 'プロジェクトコンテナをスキャン中',
+    melodyne_import_stage_decompress: 'プロジェクトグラフを展開中',
+    melodyne_import_stage_parse: 'プロジェクトグラフを解析中',
+    melodyne_import_stage_tracks: 'Melodyneトラックを読み込み中',
+    melodyne_import_stage_media: 'オーディオ素材を検索中',
+    melodyne_import_stage_samples: 'サンプルをグループ化中',
+    melodyne_import_stage_clips: 'タイムラインクリップを作成中',
+    melodyne_import_stage_edits: 'Melodyne編集を復元中',
+    melodyne_import_stage_legacy: '旧形式プロジェクトをスキャン中',
+    melodyne_import_stage_finalize: 'プロジェクトを仕上げています',
 } as const;

@@ -1,55 +1,60 @@
-﻿<#
+<#
 .SYNOPSIS
-    将 HachiShifter 打包为便携版压缩包（Portable ZIP）
+    Pack HachiShifter into a model-free overwrite ZIP archive
 
 .DESCRIPTION
-    此脚本在 `cargo tauri build` 构建完成后，从产物目录中收集 exe、
-    资源文件和依赖 DLL，打成一个免安装的 .zip 便携包。
+    After a successful `cargo tauri build`, this script collects the exe,
+    runtime files and GPU-dependent DLLs (OpenCL/DirectML) from
+    the build output directory and packages them into a portable .zip file.
+    All DLLs located in the release directory are automatically collected.
 
 .PARAMETER SkipBuild
-    跳过构建步骤，直接从已有产物打包（用于构建已完成的情况）
+    Skip the build step and package from existing artifacts (useful when a
+    build has already been performed).
 
 .PARAMETER OutputDir
-    输出目录，默认为项目根目录下的 dist 文件夹
+    Output directory, defaults to the dist folder under the project root.
 
 .EXAMPLE
     .\scripts\pack-portable.ps1
-    # 完整构建 + 打包
+    # Full build + packaging
 
 .EXAMPLE
     .\scripts\pack-portable.ps1 -SkipBuild
-    # 跳过构建，直接打包已有产物
+    # Skip build, package existing artifacts
 
 .EXAMPLE
     .\scripts\pack-portable.ps1 -OutputDir "C:\output"
-    # 指定输出目录
+    # Specify output directory
 #>
 
 param(
     [switch]$SkipBuild,
+    [switch]$NoZip,
     [string]$OutputDir,
     [string]$Version
 )
 
 $ErrorActionPreference = "Stop"
 
-# ===== 路径定义 =====
+# ===== Path definitions =====
 $ProjectRoot = Resolve-Path "$PSScriptRoot\.."
 $TauriDir = Join-Path $ProjectRoot "backend\src-tauri"
 $TauriTargetRoot = Join-Path $TauriDir "target"
 $SetVersionScript = Join-Path $ProjectRoot "scripts\set-version.ps1"
 
-# 若传入 -Version，则先统一改版本号，后续构建与打包直接使用该版本
+# If -Version is provided, update the version number first; subsequent build
+# and packaging will use that version.
 if ($Version) {
     if (-not (Test-Path $SetVersionScript)) {
-        throw "找不到版本脚本: $SetVersionScript"
+        throw "Version script not found: $SetVersionScript"
     }
-    Write-Host "[预处理] 应用版本号: $Version" -ForegroundColor Yellow
+    Write-Host "[Preprocessing] Applying version: $Version" -ForegroundColor Yellow
     & powershell -NoProfile -ExecutionPolicy Bypass -File $SetVersionScript -Version $Version
     if ($LASTEXITCODE -ne 0) {
-        throw "版本号更新失败，退出码: $LASTEXITCODE"
+        throw "Version update failed, exit code: $LASTEXITCODE"
     }
-    Write-Host "[预处理] 版本号更新完成 ✓" -ForegroundColor Green
+    Write-Host "[Preprocessing] Version update completed [OK]" -ForegroundColor Green
 }
 
 # Detect target triple: prefer x86_64 but fall back to aarch64 if present.
@@ -64,18 +69,19 @@ foreach ($t in $PossibleTriples) {
     }
 }
 
-# If no triple-specific release directory exists yet, default to x86_64 path (build may create it later).
+# If no triple-specific release directory exists yet, default to x86_64 path
+# (build may create it later).
 if (-not $DetectedTriple) {
     $DetectedTriple = "x86_64-pc-windows-msvc"
     $TargetRelease = Join-Path $TauriTargetRoot "x86_64-pc-windows-msvc\release"
 }
 
-# 从 tauri.conf.json 读取版本号和产品名
+# Read version and product name from tauri.conf.json
 $TauriConf = Get-Content (Join-Path $TauriDir "tauri.conf.json") -Raw | ConvertFrom-Json
 $ProductName = $TauriConf.productName
 $Version = $TauriConf.version
 
-# 输出目录
+# Output directory
 if (-not $OutputDir) {
     $OutputDir = Join-Path $ProjectRoot "dist"
 }
@@ -91,26 +97,26 @@ else {
     $ArchShort = "x64"
 }
 
-$NoModelZipName = "$ProductName-v$Version-no-model-portable-win-$ArchShort.zip"
-$NoModelZipPath = Join-Path $OutputDir $NoModelZipName
+$ZipName = "$ProductName-v$Version-no-model-portable-win-$ArchShort.zip"
+$ZipPath = Join-Path $OutputDir $ZipName
 
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  HachiShifter 便携版打包工具" -ForegroundColor Cyan
+Write-Host "  HachiShifter Model-free Packaging Tool" -ForegroundColor Cyan
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host ""
-Write-Host "  产品名称: $ProductName"
-Write-Host "  版本:     $Version"
-Write-Host "  输出路径: $NoModelZipPath"
+Write-Host "  Product Name: $ProductName"
+Write-Host "  Version:      $Version"
+Write-Host "  Output Path:  $ZipPath"
 Write-Host ""
 
-# ===== 交互式选择（未指定 -SkipBuild 时） =====
+# ===== Interactive choice (when -SkipBuild is not specified) =====
 if (-not $SkipBuild) {
-    Write-Host "请选择操作：" -ForegroundColor White
-    Write-Host "  [1] 完整构建 + 打包" -ForegroundColor Yellow
-    Write-Host "  [2] 跳过构建，直接打包（使用已有产物）" -ForegroundColor Yellow
+    Write-Host "Please select an action:" -ForegroundColor White
+    Write-Host "  [1] Full build + packaging" -ForegroundColor Yellow
+    Write-Host "  [2] Skip build, package directly (use existing artifacts)" -ForegroundColor Yellow
     Write-Host ""
     do {
-        $choice = Read-Host "请输入选项 (1/2)"
+        $choice = Read-Host "Enter option (1/2)"
         if ($choice -eq "2") {
             $SkipBuild = $true
             Write-Host ""
@@ -121,64 +127,52 @@ if (-not $SkipBuild) {
             break
         }
         else {
-            Write-Host "无效输入，请输入 1 或 2" -ForegroundColor Red
+            Write-Host "Invalid input, please enter 1 or 2" -ForegroundColor Red
         }
     } while ($true)
 }
 
-# ===== 步骤 1: 构建（可选） =====
+# ===== Step 1: Build (optional) =====
 if (-not $SkipBuild) {
-    Write-Host "[1/5] 正在构建 Release 版本..." -ForegroundColor Yellow
+    Write-Host "[1/5] Building Release version..." -ForegroundColor Yellow
     Push-Location $TauriDir
     try {
         cargo tauri build
         if ($LASTEXITCODE -ne 0) {
-            throw "构建失败，退出码: $LASTEXITCODE"
+            throw "Build failed, exit code: $LASTEXITCODE"
         }
     }
     finally {
         Pop-Location
     }
-    Write-Host "[1/5] 构建完成 ✓" -ForegroundColor Green
+    Write-Host "[1/5] Build completed [OK]" -ForegroundColor Green
 }
 else {
-    Write-Host "[1/5] 跳过构建步骤（-SkipBuild）" -ForegroundColor DarkGray
+    Write-Host "[1/5] Skipping build step (-SkipBuild)" -ForegroundColor DarkGray
 }
 
-# ===== 步骤 2: 检查产物 =====
-Write-Host "[2/5] 检查构建产物..." -ForegroundColor Yellow
+# ===== Step 2: Check artifacts =====
+Write-Host "[2/5] Checking build artifacts..." -ForegroundColor Yellow
 
 $ExePath = Join-Path $TargetRelease "$ProductName.exe"
 if (-not (Test-Path $ExePath)) {
-    throw "找不到 exe: $ExePath`n请先运行 'cargo tauri build' 或移除 -SkipBuild 参数"
+    throw "Cannot find exe: $ExePath`nPlease run 'cargo tauri build' first or remove the -SkipBuild parameter"
 }
 
-# 定义需要收集的资源文件（源路径 -> 目标相对路径）
+# Define resource files to collect (source path -> target relative path)
 $Resources = @(
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\pc_nsf_hifigan.onnx"; Dst = "models\nsf_hifigan\pc_nsf_hifigan.onnx" },
     @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\config.json";          Dst = "models\nsf_hifigan\config.json" },
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\hnsep.onnx";                 Dst = "models\hnsep\hnsep.onnx" },
     @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" },
     @{ Src = Join-Path $TauriDir "resources\models\fcpe\fcpe.onnx";                   Dst = "models\fcpe\fcpe.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\encoder.onnx";               Dst = "models\game\encoder.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\segmenter.onnx";             Dst = "models\game\segmenter.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\estimator.onnx";             Dst = "models\game\estimator.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\bd2dur.onnx";                Dst = "models\game\bd2dur.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\dur2bd.onnx";                Dst = "models\game\dur2bd.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\config.json";                Dst = "models\game\config.json" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\encoder.onnx";         Dst = "models\game\small\encoder.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\segmenter.onnx";       Dst = "models\game\small\segmenter.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\estimator.onnx";       Dst = "models\game\small\estimator.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\bd2dur.onnx";          Dst = "models\game\small\bd2dur.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\dur2bd.onnx";          Dst = "models\game\small\dur2bd.onnx" }
-    @{ Src = Join-Path $TauriDir "resources\models\game\small\config.json";          Dst = "models\game\small\config.json" }
 )
 
 if ($ArchShort -eq "x64") {
     $Resources += @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll"; Dst = "vslib_x64.dll" }
 }
 
-# 检查所有资源文件是否存在
+# Check that all resource files exist
 $Missing = @()
 foreach ($res in $Resources) {
     if (-not (Test-Path $res.Src)) {
@@ -186,36 +180,35 @@ foreach ($res in $Resources) {
     }
 }
 if ($Missing.Count -gt 0) {
-    Write-Host "以下资源文件缺失:" -ForegroundColor Red
+    Write-Host "The following resource files are missing:" -ForegroundColor Red
     $Missing | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
-    throw "资源文件不完整，无法打包"
+    throw "Resource files are incomplete, cannot package."
 }
 
-Write-Host "[2/5] 产物检查通过 ✓" -ForegroundColor Green
+Write-Host "[2/5] Artifacts check passed [OK]" -ForegroundColor Green
 
-# ===== 步骤 3: 组装目录 =====
-Write-Host "[3/5] 组装便携包目录..." -ForegroundColor Yellow
+# ===== Step 3: Assemble directory =====
+Write-Host "[3/5] Assembling portable package directory..." -ForegroundColor Yellow
 
-# 清理旧的临时目录和 zip
+# Clean up old temporary directory and zip
 if (Test-Path $TempDir) {
     Remove-Item $TempDir -Recurse -Force
 }
-if (Test-Path $NoModelZipPath) {
-    Remove-Item $NoModelZipPath -Force
+if (Test-Path $ZipPath) {
+    Remove-Item $ZipPath -Force
 }
 
-# 创建输出目录
+# Create output directory
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-# 复制 exe
+# Copy exe
 Copy-Item $ExePath -Destination $TempDir
-Write-Host "  ✓ $ProductName.exe" -ForegroundColor DarkGreen
+Write-Host "  [OK] $ProductName.exe" -ForegroundColor DarkGreen
 
-# 复制资源文件
+# Copy resource files
 foreach ($res in $Resources) {
-    # Cloud builds validate/download model resources, but overwrite/update
-    # packages intentionally contain runtime files only. Existing installed
-    # models remain untouched when the ZIP is extracted over the app.
+    # Models already present beside an installed copy remain untouched when
+    # this overwrite package is extracted.
     if ($res.Dst -like "models\*") {
         continue
     }
@@ -225,54 +218,64 @@ foreach ($res in $Resources) {
         New-Item -ItemType Directory -Path $DstDir -Force | Out-Null
     }
     Copy-Item $res.Src -Destination $DstFull
-    Write-Host "  ✓ $($res.Dst)" -ForegroundColor DarkGreen
+    Write-Host "  [OK] $($res.Dst)" -ForegroundColor DarkGreen
 }
 
-# 复制 LICENSE
+# Copy LICENSE
 $LicensePath = Join-Path $ProjectRoot "LICENSE"
 if (Test-Path $LicensePath) {
     Copy-Item $LicensePath -Destination $TempDir
-    Write-Host "  ✓ LICENSE" -ForegroundColor DarkGreen
+    Write-Host "  [OK] LICENSE" -ForegroundColor DarkGreen
 }
 
-# Copy any DLLs from the release directory produced by build.rs
-# (SoundTouchDLL.dll, onnxruntime.dll, etc.)
+# Copy any DLLs from the release directory (SoundTouchDLL, ORT, etc.).
 # Exclude vslib_x64.dll which is handled separately above from the third_party source.
 Get-ChildItem -Path $TargetRelease -Filter "*.dll" -ErrorAction SilentlyContinue | ForEach-Object {
     if ($_.Name -ne "vslib_x64.dll") {
         Copy-Item $_.FullName -Destination $TempDir
-        Write-Host "  ✓ $($_.Name)" -ForegroundColor DarkGreen
+        Write-Host "  [OK] $($_.Name)" -ForegroundColor DarkGreen
     }
 }
 
-
-# 检查 WebView2Loader.dll（Tauri 可能需要）
+# Check WebView2Loader.dll (may be needed by Tauri)
 $Wv2Dll = Join-Path $TargetRelease "WebView2Loader.dll"
 if (Test-Path $Wv2Dll) {
     Copy-Item $Wv2Dll -Destination $TempDir
-    Write-Host "  ✓ WebView2Loader.dll" -ForegroundColor DarkGreen
+    Write-Host "  [OK] WebView2Loader.dll" -ForegroundColor DarkGreen
 }
 
-Write-Host "[3/5] 目录组装完成 ✓" -ForegroundColor Green
+Write-Host "[3/5] Directory assembly completed [OK]" -ForegroundColor Green
 
-# ===== 步骤 4: 压缩 =====
-Write-Host "[4/5] 正在压缩为 ZIP..." -ForegroundColor Yellow
+# ===== Step 4: Compress =====
+if (-not $NoZip) {
+    Write-Host "[4/5] Compressing to ZIP..." -ForegroundColor Yellow
 
-Compress-Archive -Path $TempDir -DestinationPath $NoModelZipPath -CompressionLevel Optimal
+    Compress-Archive -Path $TempDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
-# 清理临时目录
-Remove-Item $TempDir -Recurse -Force
+    # Clean up temporary directory
+    Remove-Item $TempDir -Recurse -Force
 
-$NoModelZipSize = (Get-Item $NoModelZipPath).Length
-$NoModelZipSizeMB = [math]::Round($NoModelZipSize / 1MB, 2)
+    $ZipSize = (Get-Item $ZipPath).Length
+    $ZipSizeMB = [math]::Round($ZipSize / 1MB, 2)
 
-Write-Host "[4/5] 压缩完成 ✓" -ForegroundColor Green
+    Write-Host "[4/5] Compression completed [OK]" -ForegroundColor Green
+}
+else {
+    Write-Host "[4/5] Skipping ZIP compression (-NoZip)" -ForegroundColor DarkGray
+    Write-Host "       Portable dir staged at: $TempDir" -ForegroundColor Green
+}
 
-Write-Host "[5/5] 仅保留不带模型的覆盖更新包 ✓" -ForegroundColor Green
+Write-Host "[5/5] Model-free overwrite package ready [OK]" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "============================================" -ForegroundColor Cyan
-Write-Host "  打包成功！" -ForegroundColor Green
-Write-Host "  覆盖更新包（不带模型）: $NoModelZipPath" -ForegroundColor Green
-Write-Host "  大小:   $NoModelZipSizeMB MB" -ForegroundColor Green
+if (-not $NoZip) {
+    Write-Host "  Packaging successful!" -ForegroundColor Green
+    Write-Host "  Portable: $ZipPath" -ForegroundColor Green
+    Write-Host "  Size:     $($ZipSizeMB) MB" -ForegroundColor Green
+}
+else {
+    Write-Host "  Portable directory staged successfully!" -ForegroundColor Green
+    Write-Host "  Location: $TempDir" -ForegroundColor Green
+}
 Write-Host "============================================" -ForegroundColor Cyan

@@ -17,12 +17,13 @@ import {
     saveProjectAsRemote,
     setDefaultStretchAlgorithm,
     setOrtEp,
-    setCudaDeviceId,
+    setOrtDeviceId,
     toggleAutoBackgroundRender,
     setProjectStretchSettingsRemote,
 } from "../../features/session/sessionSlice";
-import { coreApi } from "../../services/api/core";
-import type { GpuDeviceInfo } from "../../types/api";
+
+
+
 import {
     importAudioFromDialog,
     importMultipleAudioAtPosition,
@@ -90,26 +91,28 @@ export const MenuBar: React.FC<MenuBarProps> = ({
     const [exportDialogOpen, setExportDialogOpen] = useState(false);
     const [autoBackupDialogOpen, setAutoBackupDialogOpen] = useState(false);
     const [benchmarkDialogOpen, setBenchmarkDialogOpen] = useState(false);
-    const [gpuDevices, setGpuDevices] = useState<GpuDeviceInfo[]>([]);
-    const [gpuDevicesLoaded, setGpuDevicesLoaded] = useState(false);
+    const [dmlAdapters, setDmlAdapters] = useState<
+        { deviceId: number; name: string; memoryMb: number }[]
+    >([]);
 
-    // Load GPU devices on mount
+    // Fetch DML adapters on mount for GPU device selector
     useEffect(() => {
-        let cancelled = false;
-        coreApi
-            .getGpuDevices()
+        import("../../services/api/core")
+            .then(({ coreApi }) => coreApi.getDmlAdapters())
             .then((result) => {
-                if (!cancelled) {
-                    setGpuDevices(result.devices ?? []);
-                    setGpuDevicesLoaded(true);
+                if (result.adapters && result.adapters.length > 0) {
+                    setDmlAdapters(
+                        result.adapters.map((a) => ({
+                            deviceId: a.deviceId,
+                            name: a.name,
+                            memoryMb: a.dedicatedVideoMemoryMb,
+                        })),
+                    );
                 }
             })
             .catch(() => {
-                if (!cancelled) setGpuDevicesLoaded(true);
+                // DML adapters unavailable — device selector won't show
             });
-        return () => {
-            cancelled = true;
-        };
     }, []);
 
     // Edit dialog states
@@ -680,20 +683,19 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                     {/* Inference Device */}
                     <DropdownMenu.Sub>
                         <DropdownMenu.SubTrigger>
-                            {`${t("menu_inference_device")}: ${s.ortEp === "auto" ? t("menu_inference_auto") : s.ortEp === "cpu" ? t("menu_inference_cpu") : s.ortEp === "cuda" ? t("menu_inference_cuda") : s.ortEp}`}
+                            {`${t("menu_inference_device")}: ${s.ortEp === "auto" ? t("menu_inference_auto") : s.ortEp === "cpu" ? t("menu_inference_cpu") : `${t("menu_inference_gpu")} (${s.runtime.gpuBackend || "GPU"})`}`}
                         </DropdownMenu.SubTrigger>
                         <DropdownMenu.SubContent>
-                            {(["auto", "cpu", "cuda"] as const).map((ep) => {
+                            {(["auto", "cpu", "gpu"] as const).map((ep) => {
                                 const labels: Record<string, string> = {
                                     auto: t("menu_inference_auto"),
                                     cpu: t("menu_inference_cpu"),
-                                    cuda: t("menu_inference_cuda"),
+                                    gpu: `${t("menu_inference_gpu")} (${s.runtime.gpuBackend || "GPU"})`,
                                 };
                                 return (
                                     <DropdownMenu.Item
                                         key={ep}
-                                        onSelect={(e) => {
-                                            e.preventDefault(); // Keep menu open so GPU list appears
+                                        onSelect={() => {
                                             dispatch(setOrtEp(ep));
                                             void dispatch(persistUiSettings());
                                         }}
@@ -703,35 +705,39 @@ export const MenuBar: React.FC<MenuBarProps> = ({
                                 );
                             })}
 
-                            {/* GPU device selector (appears when CUDA selected, menu stays open) */}
-                            {s.ortEp === "cuda" && gpuDevices.length > 0 && (
+                            {/* GPU Device Selector — shown when GPU EP is selected */}
+                            {s.ortEp === "gpu" && dmlAdapters.length > 0 && (
                                 <>
                                     <DropdownMenu.Separator />
                                     <DropdownMenu.Label>
-                                        {t("menu_select_gpu_device")}
+                                        {tAny("menu_gpu_device")}
                                     </DropdownMenu.Label>
-                                    {gpuDevices.map((gpu) => (
+                                    <DropdownMenu.Item
+                                        onSelect={() => {
+                                            dispatch(setOrtDeviceId(null));
+                                            void dispatch(persistUiSettings());
+                                        }}
+                                    >
+                                        {withCheck(
+                                            s.ortDeviceId == null,
+                                            tAny("menu_gpu_auto_select"),
+                                        )}
+                                    </DropdownMenu.Item>
+                                    {dmlAdapters.map((adapter) => (
                                         <DropdownMenu.Item
-                                            key={gpu.deviceId}
+                                            key={adapter.deviceId}
                                             onSelect={() => {
-                                                dispatch(setCudaDeviceId(gpu.deviceId));
+                                                dispatch(setOrtDeviceId(adapter.deviceId));
                                                 void dispatch(persistUiSettings());
                                             }}
                                         >
                                             {withCheck(
-                                                s.cudaDeviceId === gpu.deviceId,
-                                                `${gpu.name} (${(gpu.memoryMb / 1024).toFixed(1)} GB)`,
+                                                s.ortDeviceId === adapter.deviceId,
+                                                `${adapter.name} (${adapter.memoryMb} MB)`,
                                             )}
                                         </DropdownMenu.Item>
                                     ))}
                                 </>
-                            )}
-                            {s.ortEp === "cuda" && gpuDevicesLoaded && gpuDevices.length === 0 && (
-                                <DropdownMenu.Item disabled>
-                                    <span style={{ color: "var(--gray-9)" }}>
-                                        {t("menu_no_gpu_detected")}
-                                    </span>
-                                </DropdownMenu.Item>
                             )}
 
                             <DropdownMenu.Separator />

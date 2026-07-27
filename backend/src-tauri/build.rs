@@ -1,12 +1,5 @@
 fn main() {
-    // Always purge stale ORT/CUDA DLLs from the cargo output directory so
-    // they don't leak from a previous GPU build into a non-GPU portable ZIP.
-    // Fresh DLLs are only staged when the `cuda` feature is active.
-    clean_stale_ort_dlls();
-
-    // GAME stays out of Git to keep the checkout small. CI/release builds
-    // materialize the large (default) and small (performance) ONNX packs in
-    // the runner workspace. Neither model pack is stored in Git.
+    // GAME large (default) and small (performance) packs are fetched only in CI.
     prepare_game_models();
 
     build_frontend();
@@ -35,20 +28,23 @@ fn main() {
         }
     }
 
-    // Write or update tauri.windows.conf.json so that Tauri/NSIS bundles
-    // SoundTouchDLL.dll and other runtime DLLs for all Windows builds.
-    // On GPU builds this also preserves the ort-bundle/ entries written
-    // earlier by stage-tauri-resources.ps1.
-    update_windows_bundle_config();
+    // Create placeholder for vslib_x64.dll on non-x86_64 Windows targets
+    // so tauri_build resource validation passes.
+    create_vslib_placeholder();
 
-    // tauri_build validates resources, so soundtouch must run first to populate
-    // the shared library at the resource path.
+    // Copy DirectML.dll from the ORT build output to the resources directory
+    // so Tauri can bundle it into the NSIS installer. DirectML.dll is loaded
+    // dynamically by ONNX Runtime (not linked at compile time), so Tauri's
+    // dependency scanner does not detect it. Explicit resource listing in
+    // tauri.windows.conf.json handles the bundling.
+    copy_directml_dll();
+
+    // tauri_build validates resources listed in tauri.conf.json and its
+    // platform-specific merges (tauri.windows.conf.json, tauri.macos.conf.json).
+    // All resource files must exist before this call.
     tauri_build::build();
 
-    // The existing Linux workflow packages `resources/models` directly after
-    // `cargo build`.  Keep cloud artifacts suitable for overwrite updates by
-    // pruning those downloaded build-time resources after Tauri has validated
-    // them. Windows uses pack-portable.ps1, which already filters models.
+    // Build-time models are removed before no-model overwrite artifacts are packed.
     if std::env::var("GITHUB_ACTIONS").ok().as_deref() == Some("true")
         && std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("linux")
     {
@@ -58,6 +54,7 @@ fn main() {
         println!("cargo:warning=[Package] pruned models for no-model Linux update artifact");
     }
 }
+
 
 fn prepare_game_models() {
     use std::path::{Path, PathBuf};
@@ -762,90 +759,6 @@ fn build_soundtouch() {
 
 }
 
-/// Write or update `tauri.windows.conf.json` with the correct resource entries
-/// for DLLs that are NOT auto-detected by Tauri (SoundTouch, vslib).
-///
-/// This runs AFTER `build_soundtouch()` and `build_vslib()` have populated the
-/// DLL files, so they exist on disk for resource validation.
-///
-/// IMPORTANT: This MERGES with any existing `tauri.windows.conf.json` (e.g.,
-/// written earlier by `stage-tauri-resources.ps1` for GPU builds) rather than
-/// overwriting it.  This ensures GPU-only DLL entries from `ort-bundle/` are
-/// preserved alongside the SoundTouch / vslib entries added here.
-fn update_windows_bundle_config() {
-    // Only for Windows targets — other platforms use their own configs.
-    if !cfg!(target_os = "windows") {
-        return;
-    }
-
-    use std::collections::BTreeMap;
-    use std::path::Path;
-
-    let config_path = Path::new("tauri.windows.conf.json");
-
-    // --- 1. Read existing config if present (preserve GPU entries etc.) ---
-    let mut resources: BTreeMap<String, String> = BTreeMap::new();
-    if config_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(config_path) {
-            if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(res_obj) = config
-                    .get("bundle")
-                    .and_then(|b| b.get("resources"))
-                    .and_then(|r| r.as_object())
-                {
-                    for (k, v) in res_obj {
-                        if let Some(s) = v.as_str() {
-                            resources.insert(k.clone(), s.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // --- 2. Add vslib_x64.dll (if the `vslib` feature is active) ---
-    if cfg!(feature = "vslib") {
-        let target = std::env::var("TARGET").unwrap_or_default();
-        let target_lc = target.to_lowercase();
-        let is_x86_64_windows =
-            target_lc.contains("windows") && target_lc.contains("x86_64");
-        if is_x86_64_windows {
-            let vslib_src = Path::new("third_party/vslib/vslib_x64.dll");
-            if vslib_src.exists() {
-                resources.insert(
-                    "third_party/vslib/vslib_x64.dll".to_string(),
-                    "vslib_x64.dll".to_string(),
-                );
-            }
-        }
-    }
-
-    // --- 3. Add SoundTouchDLL.dll ---
-    let st_dll = Path::new("third_party/soundtouch-static/soundtouch/SoundTouchDLL.dll");
-    if st_dll.exists() {
-        resources.insert(
-            "third_party/soundtouch-static/soundtouch/SoundTouchDLL.dll".to_string(),
-            "SoundTouchDLL.dll".to_string(),
-        );
-    }
-
-    // --- 4. Write the merged config ---
-    let config = serde_json::json!({
-        "bundle": {
-            "resources": resources
-        }
-    });
-
-    let json = serde_json::to_string_pretty(&config)
-        .expect("[build.rs] failed to serialize tauri.windows.conf.json");
-    std::fs::write(config_path, &json)
-        .expect("[build.rs] failed to write tauri.windows.conf.json");
-    println!(
-        "cargo:warning=[build.rs] Wrote tauri.windows.conf.json with {} resource(s)",
-        resources.len()
-    );
-}
-
 /// Recursively search for a file by name under `dir`.
 fn find_file(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
     if !dir.is_dir() {
@@ -878,90 +791,78 @@ fn find_file(dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Remove stale ORT/CUDA DLLs from the cargo output directory and stage
-/// fresh GPU DLLs from `third_party/ort-bundle/`.
+/// Create a placeholder for vslib_x64.dll on non-x86_64 Windows targets
+/// so tauri_build resource validation passes.  On x86_64 with the vslib
+/// feature active, the real DLL is linked by build_vslib().
+fn create_vslib_placeholder() {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+    let target = std::env::var("TARGET").unwrap_or_default();
+    // Only needed when vslib is not available (ARM64 or vslib feature disabled).
+    if target.contains("x86_64") && cfg!(feature = "vslib") {
+        return;
+    }
+    let p = std::path::Path::new("third_party/vslib/vslib_x64.dll");
+    if !p.exists() {
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(p, b"");
+    }
+}
+
+/// Copy DirectML.dll from the ORT build output (placed by ort-sys copy-dylibs)
+/// to the resources directory so Tauri can validate and bundle it into the
+/// NSIS installer. DirectML.dll is loaded dynamically by ONNX Runtime, so
+/// Tauri's dependency scanner does not detect it; explicit resource listing
+/// in tauri.windows.conf.json compensates for this.
 ///
-/// This function ONLY runs for CUDA builds.  For plain CPU builds, the
-/// `ort` crate's own `download-binaries` feature handles fetching ONNX
-/// Runtime — we must not interfere by deleting the DLLs it places.
-///
-/// `cargo build` never cleans the output dir, so DLLs from a previous GPU
-/// build could otherwise persist and leak into a subsequent non-GPU portable
-/// ZIP.  By scoping the purge to CUDA builds only we eliminate that risk
-/// without breaking CPU-only compilation.
-fn clean_stale_ort_dlls() {
-    // For CPU builds, ort-sys handles everything via download-binaries.
-    if !cfg!(feature = "cuda") {
+/// Only runs on Windows x86_64 (DirectML is Windows-only, and aarch64 uses
+/// a different build path).
+fn copy_directml_dll() {
+    use std::path::Path;
+
+    if !cfg!(target_os = "windows") {
         return;
     }
 
-    let stale_dlls = [
-        "onnxruntime.dll",
-        "onnxruntime_providers_cuda.dll",
-        "onnxruntime_providers_shared.dll",
-        "onnxruntime_providers_tensorrt.dll",
-        "cudart64_12.dll",
-        "cublas64_12.dll",
-        "cublasLt64_12.dll",
-        "cudnn64_9.dll",
-        "cudnn_adv64_9.dll",
-        "cudnn_cnn64_9.dll",
-        "cudnn_ops64_9.dll",
-        "cudnn_graph64_9.dll",
-        "cudnn_engines_precompiled64_9.dll",
-        "cudnn_engines_runtime_compiled64_9.dll",
-        "cudnn_heuristic64_9.dll",
-        "cufft64_11.dll",
-        "cufftw64_11.dll",
-        "curand64_10.dll",
-    ];
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+    // OUT_DIR = .../target/<triple>/<profile>/build/<crate>-<hash>/out
+    // DLL is at   .../target/<triple>/<profile>/DirectML.dll
+    let target_dir = Path::new(&out_dir).ancestors().nth(3).unwrap();
+    let dll_src = target_dir.join("DirectML.dll");
 
-    // OUT_DIR is target/<triple>/<profile>/build/<crate>-<hash>/out
-    // Navigate up to the profile dir (target/<triple>/<profile>/)
-    if let Ok(out_dir) = std::env::var("OUT_DIR") {
-        let path = std::path::PathBuf::from(&out_dir);
-        if let Some(profile_dir) = path.ancestors().find(|p| {
-            p.join("build").is_dir() && p.join("deps").is_dir()
-        }) {
-            // -- remove any stale GPU DLLs from a previous build ----------
-            for dll in &stale_dlls {
-                let dll_path = profile_dir.join(dll);
-                if dll_path.exists() {
-                    let _ = std::fs::remove_file(&dll_path);
-                    println!("cargo:warning=[build.rs] Removed stale DLL: {}", dll);
-                }
-            }
+    if !dll_src.exists() {
+        println!(
+            "cargo:warning=[ort] DirectML.dll not found at {}",
+            dll_src.display()
+        );
+        return;
+    }
 
-            // -- stage fresh DLLs from ort-bundle ----------
-            if cfg!(feature = "cuda") {
-                let bundle = std::path::Path::new("third_party/ort-bundle");
-                if bundle.is_dir() {
-                    if let Ok(entries) = std::fs::read_dir(bundle) {
-                        for entry in entries.flatten() {
-                            let src = entry.path();
-                            if src.extension().map_or(false, |e| e.eq_ignore_ascii_case("dll")) {
-                                if let Some(name) = src.file_name() {
-                                    let dst = profile_dir.join(name);
-                                    let should_copy = if dst.exists() {
-                                        if let (Ok(sm), Ok(dm)) = (src.metadata(), dst.metadata()) {
-                                            sm.modified().ok() > dm.modified().ok()
-                                        } else { false }
-                                    } else { true };
-                                    if should_copy {
-                                        if let Err(e) = std::fs::copy(&src, &dst) {
-                                            println!("cargo:warning=[build.rs] Failed to stage {}: {}",
-                                                name.to_string_lossy(), e);
-                                        } else {
-                                            println!("cargo:warning=[build.rs] Staged: {}",
-                                                name.to_string_lossy());
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    let resource_dir = Path::new("resources");
+    let _ = std::fs::create_dir_all(resource_dir);
+    let dll_dst = resource_dir.join("DirectML.dll");
+
+    // Only write if bytes differ to avoid infinite dev rebuild loops.
+    let src_bytes = std::fs::read(&dll_src).unwrap_or_default();
+    let dst_bytes = std::fs::read(&dll_dst).unwrap_or_default();
+    if src_bytes != dst_bytes {
+        if let Err(e) = std::fs::write(&dll_dst, &src_bytes) {
+            println!(
+                "cargo:warning=[ort] could not copy DirectML.dll to {}: {}",
+                dll_dst.display(),
+                e
+            );
+        } else {
+            println!(
+                "cargo:warning=[ort] copied DirectML.dll ({} bytes) to {}",
+                src_bytes.len(),
+                dll_dst.display()
+            );
         }
+    } else {
+        println!("cargo:warning=[ort] DirectML.dll resource unchanged, skipping write");
     }
 }

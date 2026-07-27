@@ -924,4 +924,35 @@ export const enUS = {
     melodyne_edge_drag_hint: "Drag note edges to stretch; double-click alignment line to snap to grid",
     melodyne_game_alignment_hint: "Each GAME note is one syllable. Its start stays the beat-alignment point; backward attack/sibilant analysis finds the preceding consonant onset.",
     sample_timing_save: "Save",
+
+    // Upstream GPU and source-change notifications.
+    benchmark_gpu_device_label: "GPU Device",
+    benchmark_gpu_label: "GPU",
+    benchmark_ort_info_label: "ONNX Runtime:",
+    menu_gpu_auto_select: "Auto-select (Recommended)",
+    menu_gpu_device: "GPU Device",
+    menu_inference_gpu: "GPU",
+    source_file_changed_modified_desc:
+        'The following audio file(s) have been modified externally. Do you want to reload them into the project?',
+    source_file_changed_deleted_desc:
+        'The following audio file(s) have been moved or deleted. Do you want to pick replacement files?',
+    source_file_changed_ignore: "Ignore",
+    source_file_changed_reload: "Reload Files",
+    source_file_changed_status_deleted: "DELETED",
+    source_file_changed_status_modified: "MODIFIED",
+    source_file_changed_title: "Source File Changed",
+
+    // Melodyne large-project import progress.
+    melodyne_import_title: 'Importing Melodyne project',
+    melodyne_import_stage_open: 'Opening project',
+    melodyne_import_stage_scan: 'Scanning project container',
+    melodyne_import_stage_decompress: 'Decompressing project graph',
+    melodyne_import_stage_parse: 'Parsing project graph',
+    melodyne_import_stage_tracks: 'Reading Melodyne tracks',
+    melodyne_import_stage_media: 'Resolving audio media',
+    melodyne_import_stage_samples: 'Grouping samples',
+    melodyne_import_stage_clips: 'Creating timeline clips',
+    melodyne_import_stage_edits: 'Restoring Melodyne edits',
+    melodyne_import_stage_legacy: 'Scanning legacy project',
+    melodyne_import_stage_finalize: 'Finalizing project',
 } as const;

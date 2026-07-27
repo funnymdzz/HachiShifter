@@ -74,12 +74,14 @@ pub(crate) fn get_timeline_state_from_ref(state: &AppState) -> crate::models::Ti
 pub(super) fn get_timeline_state_lite(
     state: State<'_, AppState>,
 ) -> crate::models::TimelineStatePayload {
-    let tl = state
+    // `to_payload_lite` only clones the fields it returns. Avoid cloning the
+    // complete timeline first: on imported Melodyne sessions that needlessly
+    // duplicated every dense pitch/formant curve during regular UI polling.
+    let mut payload = state
         .timeline
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    let mut payload = tl.to_payload_lite();
+        .to_payload_lite();
     payload.project = Some(state.project_meta_payload());
     payload
 }

@@ -14,6 +14,8 @@ export interface RuntimeInfo {
     is_playing?: boolean;
     playback_target?: string | null;
     timeline?: TimelineState;
+    /** GPU backend name for this build: "DirectML", "OpenCL", "CoreML", or "". */
+    gpuBackend: string;
 }
 
 export interface TimelineTrack {
@@ -273,27 +275,26 @@ export interface OnnxDiagnosticResult {
     active_ep?: string;
     onnx_version?: string;
     providers?: string[];
-    cudaDiagnostic?: CudaDiagnostic | null;
+    gpuDiagnostic?: GpuDiagnostic | null;
 }
 
-export interface CudaDiagnostic {
+export interface GpuDiagnostic {
     availableProviders: string[];
     selectedEp: string;
-    cudaDeviceId: number;
-    cudaSmokeTestPassed: boolean;
-    cudaSmokeTestError?: string | null;
+    gpuDeviceId: number;
+    gpuSmokeTestPassed: boolean;
+    gpuSmokeTestError?: string | null;
     ortBuildInfo: string;
-    cudaDllStatus: [string, boolean][];
+    gpuDllStatus: [string, boolean][];
 }
 
-/** Info about a single NVIDIA GPU discovered via NVML. */
+/** Info about a single GPU device. */
 export interface GpuDeviceInfo {
     deviceId: number;
     name: string;
     memoryMb: number;
     computeMajor: number;
     computeMinor: number;
-    cudaCapable: boolean;
 }
 
 export interface GpuEnumerationResult {
@@ -301,31 +302,54 @@ export interface GpuEnumerationResult {
     note?: string | null;
 }
 
-export interface BenchmarkResult {
-    cpuMedianMs: number;
-    cpuRtFactor: number;
-    gpuMedianMs?: number | null;
-    gpuRtFactor?: number | null;
-    benchmarkSamples: number;
-    /** True when CUDA EP was available and used for GPU benchmark. */
-    cudaAvailable: boolean;
-    /** CUDA device ID that was used. */
-    cudaDeviceId: number;
-    /** All execution providers available in the ONNX Runtime DLL. */
-    availableProviders: string[];
-    /** Whether critical CUDA DLLs (cuBLAS, cuDNN) were found on disk. */
-    cudaDllsFound: boolean;
-    /** ORT build info string for debugging. */
-    ortBuildInfo: string;
-    /** All NVIDIA GPUs discovered via NVML (name, memory, device ID). */
-    gpuDevices: GpuDeviceInfo[];
+/** DirectML-compatible GPU adapter info from DXGI enumeration. */
+export interface DmlAdapterInfo {
+    deviceId: number;
+    name: string;
+    dedicatedVideoMemoryMb: number;
+    sharedSystemMemoryMb: number;
+    vendorId: number;
+    deviceIdPci: number;
+}
+
+export interface DmlAdapterList {
+    adapters: DmlAdapterInfo[];
+    note?: string | null;
 }
 
 export interface BenchmarkResult {
     cpuMedianMs: number;
     cpuRtFactor: number;
+    /** OpenCL GPU inference time (ms), null if unavailable or failed. */
+    gpuMedianMs?: number | null;
+    /** OpenCL GPU real-time factor, null if unavailable or failed. */
+    gpuRtFactor?: number | null;
+    /** DirectML GPU inference time (ms), null if unavailable or failed. */
+    dmlMedianMs?: number | null;
+    /** DirectML GPU real-time factor, null if unavailable or failed. */
+    dmlRtFactor?: number | null;
+    benchmarkSamples: number;
+    /** True when OpenCL EP was available and used for GPU benchmark. */
+    gpuAvailable: boolean;
+    /** True when DirectML EP was available and used for benchmark. */
+    dmlAvailable: boolean;
+    /** GPU device ID that was used. */
+    gpuDeviceId: number;
+    /** All execution providers available in the ONNX Runtime DLL. */
+    availableProviders: string[];
+    /** ORT build info string for debugging. */
+    ortBuildInfo: string;
+    /** All GPUs discovered (name, memory, device ID). */
+    gpuDevices: GpuDeviceInfo[];
+}
+
+export interface BenchmarkResult_simple {
+    cpuMedianMs: number;
+    cpuRtFactor: number;
     gpuMedianMs?: number | null;
     gpuRtFactor?: number | null;
+    dmlMedianMs?: number | null;
+    dmlRtFactor?: number | null;
     benchmarkSamples: number;
 }
 

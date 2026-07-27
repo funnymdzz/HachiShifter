@@ -15,6 +15,10 @@ This document records the clean-room observations used by HachiShifter's
 - HachiShifter bounds-checks the container, caps an inflated entry at 256 MiB,
   and reads the key/class/object tables of the graph. Object, class, field and
   allocation counts are capped before any graph data is used.
+- The desktop importer scans the outer archive through a 64 KiB buffered
+  reader and inflates only the object-graph entry. The compressed project and
+  unrelated archive entries are never copied into memory. Legacy full-file
+  scanning is limited to small archives.
 - `MUPerformance.rootTrack`, `MUTrack.subtracks` and `MUTrack.elements` restore
   Melodyne's track assignment instead of creating one track for every file.
   Track titles, mute/solo state and the original order are retained.
@@ -46,6 +50,25 @@ Touching source clips on one track receive a short smooth contour bridge. This
 matches Melodyne's connected-note transport and avoids a discontinuity at a
 multi-sample edit. Raw media remains available immediately, while Compose uses
 the reconstructed curve without requiring a GAME model download.
+
+## Large-project loading
+
+- Import progress is emitted for container scanning, graph inflation/parsing,
+  track and media discovery, sample grouping, clip creation, edit restoration,
+  and finalization. The UI remains responsive and shows a localized progress
+  overlay throughout the operation.
+- Media locations are indexed once instead of rescanning the project directory
+  for every source. Clip grouping uses quantized placement buckets rather than
+  comparing every element with every existing group.
+- Source pitch property points are decoded once per source item and frame
+  lookup uses binary search. This removes the previous quadratic behaviour on
+  long, densely analysed recordings referenced by many notes.
+- Dense imported pitch/formant/volume curves share a 64 MiB aggregate budget;
+  long or highly multitrack sessions automatically use a coarser frame period.
+  Curves that contain no edits are omitted.
+- Initial waveform decoding, pitch analysis, stretching, and background
+  rendering are deferred. Only the 30-second playback window near the playhead
+  is prefetched, and lightweight timeline polling no longer clones edit curves.
 
 ## Observed note/audio model
 

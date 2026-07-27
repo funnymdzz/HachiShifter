@@ -63,6 +63,18 @@ export interface OtoConversionResult {
     warnings: string[];
 }
 
+export interface SourceFileChange {
+    clip_id: string;
+    clip_name: string;
+    source_path: string;
+    /** "deleted" | "modified" */
+    change: string;
+}
+
+export interface CheckSourceFilesChangedResult {
+    changed: SourceFileChange[];
+}
+
 export const timelineApi = {
     // Undo/Redo (backend-authoritative)
     undoTimeline: () => invoke<TimelineResult>("undo_timeline"),
@@ -371,4 +383,9 @@ export const timelineApi = {
         invoke<TimelineResult>("update_pitch_reference", clipIds),
 
     selectClip: (clipId: string | null) => invoke<TimelineResult>("select_clip", clipId),
+
+    /// 检查所有已导入的音频源文件是否被外部修改或删除。
+    /// 前端在窗口重新获得焦点时调用此方法。
+    checkSourceFilesChanged: () =>
+        invoke<CheckSourceFilesChangedResult>("check_source_files_changed"),
 };

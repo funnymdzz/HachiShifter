@@ -911,4 +911,35 @@ export const zhCN = {
     melodyne_edge_drag_hint: "拖动音符块边缘拉伸；双击对齐线吸附网格",
     melodyne_game_alignment_hint: "每个 GAME note 直接作为一个音节，其开头固定为节奏对齐点；向前回溯瞬态与齿音来寻找之前真正的辅音起点。",
     sample_timing_save: "保存",
+
+    // Upstream GPU and source-change notifications.
+    benchmark_gpu_device_label: "GPU 设备",
+    benchmark_gpu_label: "GPU",
+    benchmark_ort_info_label: "ONNX Runtime:",
+    menu_gpu_auto_select: "自动选择（推荐）",
+    menu_gpu_device: "GPU 设备",
+    menu_inference_gpu: "GPU",
+    source_file_changed_modified_desc:
+        '以下音频文件已在外部被修改。是否重新加载到工程中？',
+    source_file_changed_deleted_desc:
+        '以下音频文件已被移动或删除。是否选择替代文件？',
+    source_file_changed_ignore: "忽略",
+    source_file_changed_reload: "重新加载",
+    source_file_changed_status_deleted: "已删除",
+    source_file_changed_status_modified: "已修改",
+    source_file_changed_title: "源文件已变更",
+
+    // Melodyne large-project import progress.
+    melodyne_import_title: '正在导入 Melodyne 工程',
+    melodyne_import_stage_open: '正在打开工程',
+    melodyne_import_stage_scan: '正在扫描工程容器',
+    melodyne_import_stage_decompress: '正在解压工程对象图',
+    melodyne_import_stage_parse: '正在解析工程对象图',
+    melodyne_import_stage_tracks: '正在读取 Melodyne 轨道',
+    melodyne_import_stage_media: '正在定位音频素材',
+    melodyne_import_stage_samples: '正在整理采样分组',
+    melodyne_import_stage_clips: '正在创建时间轴片段',
+    melodyne_import_stage_edits: '正在还原 Melodyne 编辑',
+    melodyne_import_stage_legacy: '正在扫描旧版工程',
+    melodyne_import_stage_finalize: '正在完成工程加载',
 } as const;

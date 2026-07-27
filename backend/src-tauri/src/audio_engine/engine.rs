@@ -550,6 +550,9 @@ impl AudioEngine {
                             meter_generation: &meter_generation,
                         };
                         match cmd {
+                            EngineCommand::EvictSourcePath { path } => {
+                                handle_evict_source_path(&mut state, &path);
+                            }
                             EngineCommand::Stop => handle_stop(&mut state),
                             EngineCommand::SeekSec { sec } => handle_seek_sec(&mut state, sec),
                             EngineCommand::SetPlaying { playing, target } => {
@@ -611,6 +614,16 @@ impl AudioEngine {
     pub fn shutdown(&self) {
         self.meter_shutdown.store(true, Ordering::Relaxed);
         let _ = self.tx.send(EngineCommand::Shutdown);
+    }
+
+    /// 使指定源路径的解码缓存和拉伸缓存失效。
+    ///
+    /// 在 `replace_clip_source` 中被调用，早于 `update_timeline` 发送，
+    /// 确保引擎在重建 snapshot 时不会使用旧文件的解码/拉伸数据。
+    pub fn evict_source_path(&self, path: &str) {
+        let _ = self.tx.send(EngineCommand::EvictSourcePath {
+            path: path.to_string(),
+        });
     }
 
     pub fn update_timeline(&self, timeline: TimelineState) {
@@ -737,6 +750,37 @@ fn handle_seek_sec(s: &mut EngineWorkerState, sec: f64) {
     // Timeline playback reports absolute position via position_frames.
     s.base_frames.store(0, Ordering::Relaxed);
     s.position_frames.store(frame, Ordering::Relaxed);
+
+    // Large imported sessions intentionally avoid decoding every source at
+    // open. Seeking requests only the next playback window, keeping cache and
+    // decoder concurrency bounded regardless of total project size.
+    if let Some(timeline) = s.last_timeline.as_ref() {
+        if timeline.defer_initial_processing {
+            let end = sec + 30.0;
+            let track_gain = super::snapshot::compute_track_gains(&timeline.tracks);
+            for clip in &timeline.clips {
+                if clip.muted
+                    || clip.start_sec > end
+                    || clip.start_sec + clip.length_sec < sec
+                {
+                    continue;
+                }
+                let audible = track_gain
+                    .get(clip.track_id.as_str())
+                    .map(|(_, muted, solo_ok)| !*muted && *solo_ok)
+                    .unwrap_or(true);
+                if !audible {
+                    continue;
+                }
+                if let Some(path) = clip.source_path.as_deref() {
+                    let path = Path::new(path);
+                    if super::io::is_audio_path(path) {
+                        let _ = s.resources.get_or_request(path, s.sr);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn handle_set_playing(s: &mut EngineWorkerState, playing: bool, target: Option<String>) {
@@ -750,6 +794,7 @@ fn handle_set_playing(s: &mut EngineWorkerState, playing: bool, target: Option<S
 }
 
 fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
+    let defer_initial_processing = tl.defer_initial_processing;
     eprintln!(
         "[engine] handle_update_timeline: tracks={}, clips={}",
         tl.tracks.len(),
@@ -805,17 +850,89 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                         || (old.playback_rate - clip.playback_rate).abs() > 1e-6
                         || old.reversed != clip.reversed
                         || (old.length_sec - clip.length_sec).abs() > 1e-6
+                        // 检测同路径文件替换：
+                        // - duration_frames / source_sample_rate：文件长度或采样率变化
+                        // - source_file_mtime：文件修改时间变化（最可靠的检测信号，
+                        //   replace_clip_sources 每次都会更新此字段，即使文件长度未变也能检测到替换）
+                        || old.duration_frames != clip.duration_frames
+                        || old.source_sample_rate != clip.source_sample_rate
+                        || old.source_file_mtime != clip.source_file_mtime
                 })
                 .unwrap_or(false);
+
+            // 收集需要清理旧源文件缓存的路径（源文件发生变更时）
+            let mut stale_source_paths: Vec<String> = Vec::new();
+            if let Some(old) = old_clip {
+                let source_changed = old.source_path != clip.source_path
+                    || old.duration_frames != clip.duration_frames
+                    || old.source_sample_rate != clip.source_sample_rate
+                    || old.source_file_mtime != clip.source_file_mtime;
+                if source_changed {
+                    // 旧的源路径（如果与新路径不同，旧的也需要清理）
+                    if let Some(ref old_path) = old.source_path {
+                        if old.source_path != clip.source_path {
+                            stale_source_paths.push(old_path.clone());
+                        }
+                    }
+                    // 当前源路径（即使是同一路径，文件内容也可能已变）
+                    if let Some(ref cur_path) = clip.source_path {
+                        stale_source_paths.push(cur_path.clone());
+                    }
+                }
+            }
 
             if render_shape_changed {
                 // 片段源范围/轨道归属/速率/长度等变化后，旧渲染结果不可安全复用。
                 crate::synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+                // 同时使 formant 缓存失效（formant 缓存按 clip_id + source_path 双重 key）
+                crate::formant_cache::invalidate_formant_cache_for_clip(&clip.id);
                 any_cache_invalidated = true;
             } else if pitch_changed {
                 // 仅 pitch 曲线变化时保留最近一次完整渲染，允许短时无缝垫音。
                 crate::synth_clip_cache::invalidate_clip_for_pitch_edit(&clip.id);
                 any_cache_invalidated = true;
+            }
+
+            // ── 清理路径级缓存（解码缓存 + stretch 缓存 + inflight）──────────
+            // 当源文件变更时（包括同路径替换），必须使所有以文件路径为 key 的缓存失效。
+            // 使用字符串比较（与 handle_evict_source_path 保持一致），兼容不同 PathBuf 表示形式。
+            for stale_path in &stale_source_paths {
+
+                // 1. 解码缓存（ResourceManager LRU）
+                if let Ok(mut cache) = s.cache.lock() {
+                    let keys_to_evict: Vec<(std::path::PathBuf, u32)> = cache
+                        .iter()
+                        .filter(|((p, _), _)| p.to_string_lossy().as_ref() == stale_path.as_str())
+                        .map(|(k, _)| k.clone())
+                        .collect();
+                    for k in keys_to_evict {
+                        cache.pop(&k);
+                    }
+                }
+
+                // 2. Stretch 缓存
+                if let Ok(mut sc) = s.stretch_cache.lock() {
+                    let stretch_keys: Vec<StretchKey> = sc
+                        .keys()
+                        .filter(|k| k.path.to_string_lossy().as_ref() == stale_path.as_str())
+                        .cloned()
+                        .collect();
+                    for k in stretch_keys {
+                        sc.remove(&k);
+                    }
+                }
+
+                // 3. Stretch inflight
+                if let Ok(mut si) = s.stretch_inflight.lock() {
+                    let inflight_keys: Vec<StretchKey> = si
+                        .iter()
+                        .filter(|k| k.path.to_string_lossy().as_ref() == stale_path.as_str())
+                        .cloned()
+                        .collect();
+                    for k in inflight_keys {
+                        si.remove(&k);
+                    }
+                }
             }
         }
     }
@@ -823,7 +940,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     // ── 后台预渲染自动触发 ──────────────────────────────────────────────────
     // 仅当本次 update_timeline 确实使缓存失效时才触发（避免形成反馈循环）。
     // any_cache_invalidated 由上方的 clip 变化检测代码设置。
-    if any_cache_invalidated {
+    if any_cache_invalidated && !defer_initial_processing {
         use std::sync::atomic::Ordering;
         let enabled = crate::commands::playback::AUTO_BG_RENDER_ENABLED
             .load(Ordering::Relaxed);
@@ -926,7 +1043,8 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
         eprintln!("[engine] First timeline update (no last_timeline), forcing pitch schedule");
     }
 
-    let needs_pitch_schedule = clip_changed || track_pitch_settings_changed;
+    let needs_pitch_schedule =
+        !defer_initial_processing && (clip_changed || track_pitch_settings_changed);
     eprintln!("[engine] Pitch schedule check: clips={}, clip_changed={}, track_changed={}, pitch_edit_changed={}, needs_schedule={}",
         tl.clips.len(), clip_changed, track_pitch_settings_changed, track_pitch_edit_changed, needs_pitch_schedule);
 
@@ -963,8 +1081,18 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
                 audible_tracks.insert(tid);
             }
         }
+        let prefetch_end = if defer_initial_processing {
+            tl.playhead_sec + 30.0
+        } else {
+            f64::INFINITY
+        };
         for clip in &tl.clips {
             if clip.muted {
+                continue;
+            }
+            if clip.start_sec > prefetch_end
+                || clip.start_sec + clip.length_sec < tl.playhead_sec
+            {
                 continue;
             }
             if !audible_tracks.contains(clip.track_id.as_str()) {
@@ -982,7 +1110,7 @@ fn handle_update_timeline(s: &mut EngineWorkerState, tl: TimelineState) {
     }
 
     // Schedule stretch work in background (do not block snapshot build).
-    if crate::sstretch::is_available() {
+    if !defer_initial_processing && crate::sstretch::is_available() {
         schedule_stretch_jobs(
             &tl,
             s.sr,
@@ -1190,6 +1318,69 @@ fn handle_clip_pitch_ready(s: &mut EngineWorkerState, clip_id: String) {
         s.snapshot.store(Arc::new(snap));
         idle_track_meter_state(s.meter_state, s.meter_generation);
         debug_eprintln!("[engine] Snapshot stored, handle_clip_pitch_ready done");
+    }
+}
+
+/// 使指定源路径的所有解码缓存和拉伸缓存条目失效。
+///
+/// 在源文件被替换（`replace_clip_source`）时由 command handler 直接发送到引擎，
+/// 确保在 `UpdateTimeline` 处理之前缓存已被清空，避免 `build_snapshot` 使用旧数据。
+fn handle_evict_source_path(s: &mut EngineWorkerState, path: &str) {
+    // 1. 解码缓存（ResourceManager LRU）—— 使用字符串比较以兼容不同 PathBuf 表示
+    if let Ok(mut cache) = s.cache.lock() {
+        let keys: Vec<(std::path::PathBuf, u32)> = cache
+            .iter()
+            .filter(|((p, _), _)| p.to_string_lossy().as_ref() == path)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in &keys {
+            cache.pop(k);
+        }
+        if !keys.is_empty() {
+            eprintln!(
+                "[engine:evict] decode cache: evicted {} entries for path={}",
+                keys.len(),
+                path
+            );
+        }
+    }
+
+    // 2. 拉伸缓存
+    if let Ok(mut sc) = s.stretch_cache.lock() {
+        let stretch_keys: Vec<StretchKey> = sc
+            .keys()
+            .filter(|k| k.path.to_string_lossy().as_ref() == path)
+            .cloned()
+            .collect();
+        for k in &stretch_keys {
+            sc.remove(k);
+        }
+        if !stretch_keys.is_empty() {
+            eprintln!(
+                "[engine:evict] stretch cache: evicted {} entries for path={}",
+                stretch_keys.len(),
+                path
+            );
+        }
+    }
+
+    // 3. 拉伸 inflight
+    if let Ok(mut si) = s.stretch_inflight.lock() {
+        let inflight_keys: Vec<StretchKey> = si
+            .iter()
+            .filter(|k| k.path.to_string_lossy().as_ref() == path)
+            .cloned()
+            .collect();
+        for k in &inflight_keys {
+            si.remove(k);
+        }
+        if !inflight_keys.is_empty() {
+            eprintln!(
+                "[engine:evict] stretch inflight: removed {} entries for path={}",
+                inflight_keys.len(),
+                path
+            );
+        }
     }
 }
 
@@ -1419,6 +1610,8 @@ fn emit_clip_pitch_data_for_clip(
 /// 而是由 moved_clip_ids 分支重新推送 trim+resample 后的 pitch 数据。
 fn clip_pitch_params_changed(old: &crate::state::Clip, new: &crate::state::Clip) -> bool {
     old.source_path != new.source_path
+        // 同路径文件替换：mtime 变化说明文件内容已变，必须重新分析 pitch
+        || old.source_file_mtime != new.source_file_mtime
 }
 
 #[cfg(test)]
@@ -1449,6 +1642,9 @@ mod tests {
             duration_sec: Some(1.0),
             duration_frames: Some(44_100),
             source_sample_rate: Some(44_100),
+            source_file_mtime: None,
+            source_file_size: None,
+            source_file_fingerprint: None,
             waveform_preview: None,
             pitch_range: None,
             gain: 1.0,

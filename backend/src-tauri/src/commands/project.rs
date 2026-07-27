@@ -11,7 +11,7 @@ use chrono::Local;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use tauri::{Manager, State, Window};
+use tauri::{Emitter, Manager, State, Window};
 use zip::write::FileOptions;
 
 fn normalize_scale_key(raw: &str) -> String {
@@ -78,7 +78,7 @@ fn normalize_grid_size(raw: &str) -> String {
 }
 
 use super::common::ok_bool;
-use super::core::{get_timeline_state, get_timeline_state_from_ref};
+use super::core::{get_timeline_state, get_timeline_state_from_ref, get_timeline_state_lite};
 
 fn update_window_title(window: &Window, name: &str, dirty: bool) {
     let suffix = if dirty { "*" } else { "" };
@@ -854,14 +854,43 @@ pub(super) fn open_project(
     project_path: String,
 ) -> crate::models::TimelineStatePayload {
     let path = PathBuf::from(&project_path);
-    // 读取字节流，自动检测 MessagePack（v2）或 JSON（v1 兼容）格式。
-    let bytes = fs::read(&path).unwrap_or_default();
 
     if is_melodyne_project_path(&path) {
-        let imported = match crate::melodyne_import::import_mpd(&path, &bytes) {
+        #[derive(Clone, serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct ImportProgressEvent<'a> {
+            active: bool,
+            progress: f64,
+            stage: &'a str,
+            current: usize,
+            total: usize,
+        }
+        let emit_progress = |progress: f64, stage: &str, current: usize, total: usize| {
+            let _ = window.emit(
+                "melodyne_import_progress",
+                ImportProgressEvent {
+                    active: true,
+                    progress: progress.clamp(0.0, 1.0),
+                    stage,
+                    current,
+                    total,
+                },
+            );
+        };
+        let imported = match crate::melodyne_import::import_mpd_file(&path, &emit_progress) {
             Ok(imported) => imported,
             Err(error) => {
                 eprintln!("[open_project] Melodyne import failed: {error}");
+                let _ = window.emit(
+                    "melodyne_import_progress",
+                    ImportProgressEvent {
+                        active: false,
+                        progress: 0.0,
+                        stage: "error",
+                        current: 0,
+                        total: 0,
+                    },
+                );
                 let mut payload = get_timeline_state(state);
                 payload.ok = false;
                 return payload;
@@ -878,7 +907,22 @@ pub(super) fn open_project(
             let mut timeline = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
             *timeline = imported.timeline;
             timeline.project_scale_notes = base_scale_notes("C");
-            state.audio_engine.update_timeline(timeline.clone());
+            // Keep the editable state complete, but send the engine a lean
+            // initial copy. Large MPD sessions otherwise duplicate previews
+            // and original pitch curves and eagerly decode every source.
+            let mut engine_timeline = timeline.clone();
+            engine_timeline.defer_initial_processing = true;
+            for clip in &mut engine_timeline.clips {
+                clip.waveform_preview = None;
+            }
+            for params in engine_timeline.params_by_root_track.values_mut() {
+                params.pitch_orig.clear();
+            }
+            // This flag applies to the one engine snapshot above. Keep the
+            // editable project in normal mode so later pitch/stretch edits
+            // schedule their required work as usual.
+            timeline.defer_initial_processing = false;
+            state.audio_engine.update_timeline(engine_timeline);
             state.audio_engine.seek_sec(0.0);
         }
         state.clear_history();
@@ -908,12 +952,28 @@ pub(super) fn open_project(
         }
         sync_runtime_stretch_settings(state.inner());
         save_recent_projects(state.inner());
-        let mut payload = get_timeline_state(state);
+        let _ = window.emit(
+            "melodyne_import_progress",
+            ImportProgressEvent {
+                active: false,
+                progress: 1.0,
+                stage: "done",
+                current: imported.referenced_files.len(),
+                total: imported.referenced_files.len(),
+            },
+        );
+        // Avoid cloning and serializing thousands of waveform previews in the
+        // command response; the frontend waveform cache loads them on demand.
+        let mut payload = get_timeline_state_lite(state);
         if !imported.missing_files.is_empty() {
             payload.missing_files = Some(imported.missing_files);
         }
         return payload;
     }
+
+    // Read bytes only for native HachiShifter/JSON projects. MPD uses the
+    // bounded streaming reader above.
+    let bytes = fs::read(&path).unwrap_or_default();
 
     let parsed = load_project_file(&bytes);
     let Ok(mut pf) = parsed else {
@@ -942,6 +1002,11 @@ pub(super) fn open_project(
     {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
         *tl = pf.timeline.clone();
+        // 打开工程时为所有含 source_path 的 clip 初始化文件元数据 + 内容指纹，
+        // 用于本会话中的外部文件变更检测。此数据仅在程序运行期间有效，不持久化。
+        for clip in &mut tl.clips {
+            crate::state::TimelineState::populate_clip_file_metadata(clip);
+        }
         let normalized_base_scale = normalize_scale_key(&pf.base_scale);
         let normalized_custom_scale = normalize_custom_scale(pf.custom_scale.clone());
         let normalized_use_custom_scale = pf.use_custom_scale && normalized_custom_scale.is_some();

@@ -589,6 +589,9 @@ fn create_midi_clip_from_file(
         duration_sec: None,
         duration_frames: None,
         source_sample_rate: None,
+        source_file_mtime: None,
+        source_file_size: None,
+        source_file_fingerprint: None,
         waveform_preview: None,
         pitch_range: Some(PitchRange {
             min: min_note,
@@ -973,6 +976,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     duration_sec,
                     duration_frames,
                     source_sample_rate: source_sr,
+                    source_file_mtime: None,
+                    source_file_size: None,
+                    source_file_fingerprint: None,
                     waveform_preview: waveform_preview.clone(),
                     pitch_range: Some(PitchRange {
                         min: -24.0,
@@ -1078,6 +1084,9 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 duration_sec,
                 duration_frames,
                 source_sample_rate: source_sr,
+                source_file_mtime: None,
+                source_file_size: None,
+                source_file_fingerprint: None,
                 waveform_preview,
                 pitch_range: Some(PitchRange {
                     min: -24.0,
@@ -1206,6 +1215,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         disabled_group_ids: HashSet::new(),
+        defer_initial_processing: false,
         next_track_order: track_order,
     };
 
@@ -1696,6 +1706,9 @@ pub fn import_vsp_clipboard(
                     duration_sec,
                     duration_frames,
                     source_sample_rate: source_sr,
+                    source_file_mtime: None,
+                    source_file_size: None,
+                    source_file_fingerprint: None,
                     waveform_preview: waveform_preview.clone(),
                     pitch_range: Some(PitchRange {
                         min: -24.0,
@@ -1800,6 +1813,9 @@ pub fn import_vsp_clipboard(
                 duration_sec,
                 duration_frames,
                 source_sample_rate: source_sr,
+                source_file_mtime: None,
+                source_file_size: None,
+                source_file_fingerprint: None,
                 waveform_preview,
                 pitch_range: Some(PitchRange {
                     min: -24.0,
@@ -1923,6 +1939,7 @@ pub fn import_vsp_clipboard(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         disabled_group_ids: HashSet::new(),
+        defer_initial_processing: false,
         next_track_order: next_order,
     };
 
@@ -2240,6 +2257,9 @@ fn import_vsp_clipboard_selected_tracks(
                     duration_sec,
                     duration_frames,
                     source_sample_rate: source_sr,
+                    source_file_mtime: None,
+                    source_file_size: None,
+                    source_file_fingerprint: None,
                     waveform_preview: waveform_preview.clone(),
                     pitch_range: Some(PitchRange {
                         min: -24.0,
@@ -2342,6 +2362,9 @@ fn import_vsp_clipboard_selected_tracks(
                 duration_sec,
                 duration_frames,
                 source_sample_rate: source_sr,
+                source_file_mtime: None,
+                source_file_size: None,
+                source_file_fingerprint: None,
                 waveform_preview,
                 pitch_range: Some(PitchRange {
                     min: -24.0,
@@ -2462,6 +2485,7 @@ fn import_vsp_clipboard_selected_tracks(
         params_by_root_track,
         project_scale_notes: vec![0, 2, 4, 5, 7, 9, 11],
         disabled_group_ids: HashSet::new(),
+        defer_initial_processing: false,
         next_track_order: track_order,
     };
 
