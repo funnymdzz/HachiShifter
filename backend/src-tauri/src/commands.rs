@@ -566,6 +566,44 @@ pub fn apply_clip_linked_params(
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn set_melodyne_note_boundary(
+    state: State<'_, AppState>,
+    clip_id: String,
+    source_start_sec: f64,
+    source_end_sec: f64,
+    edge: String,
+    timeline_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    timeline::set_melodyne_note_boundary(
+        state,
+        clip_id,
+        source_start_sec,
+        source_end_sec,
+        edge,
+        timeline_sec,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_melodyne_note_connection(
+    state: State<'_, AppState>,
+    clip_id: String,
+    source_start_sec: f64,
+    source_end_sec: f64,
+    connected: bool,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    timeline::set_melodyne_note_connection(
+        state,
+        clip_id,
+        source_start_sec,
+        source_end_sec,
+        connected,
+        checkpoint,
+    )
+}
+
+#[tauri::command(rename_all = "camelCase")]
 #[allow(clippy::too_many_arguments)]
 pub fn set_clip_state(
     state: State<'_, AppState>,

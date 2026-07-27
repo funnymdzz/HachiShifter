@@ -81,6 +81,13 @@ export interface ClipInfo {
     midiNoteCount?: number;
     midiNoteData?: MidiNoteEvent[];
     midiFillGaps?: boolean;
+    melodyneWarpSegments?: Array<{
+        timelineStartSec: number;
+        timelineEndSec: number;
+        sourceStartSec: number;
+        sourceEndSec: number;
+        connectedToNext: boolean;
+    }>;
 }
 
 export interface ClipFormantMorph {

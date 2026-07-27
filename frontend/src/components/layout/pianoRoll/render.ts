@@ -911,6 +911,7 @@ export function drawPianoRoll(args: {
             const x0 = note.startSec * pxPerSec - scrollLeft;
             const x1 = note.endSec * pxPerSec - scrollLeft;
             if (x1 < 0 || x0 > w) continue;
+            const drawX1 = Math.max(x0 + 4, x1);
             const y0 = valueToY("pitch", note.midiNote, h);
             const y1 = valueToY("pitch", note.midiNote + 1, h);
             const rowTop = Math.min(y0, y1);
@@ -925,38 +926,42 @@ export function drawPianoRoll(args: {
             const confidence = clamp(note.confidence || 0.7, 0.25, 1);
             const gradient = ctx.createLinearGradient(0, top, 0, top + noteHeight);
             if (selectedNote) {
-                gradient.addColorStop(0, isDark ? "rgba(147, 197, 253, 0.96)" : "rgba(96, 165, 250, 0.92)");
-                gradient.addColorStop(1, isDark ? "rgba(37, 99, 235, 0.92)" : "rgba(59, 130, 246, 0.88)");
+                gradient.addColorStop(0, isDark ? "rgba(255, 190, 76, 0.98)" : "rgba(255, 177, 55, 0.96)");
+                gradient.addColorStop(1, isDark ? "rgba(224, 103, 28, 0.96)" : "rgba(224, 98, 25, 0.93)");
             } else {
-                gradient.addColorStop(0, `rgba(96, 165, 250, ${0.38 + confidence * 0.26})`);
-                gradient.addColorStop(1, `rgba(37, 99, 235, ${0.30 + confidence * 0.22})`);
+                gradient.addColorStop(0, `rgba(247, 157, 62, ${0.48 + confidence * 0.34})`);
+                gradient.addColorStop(1, `rgba(210, 82, 30, ${0.42 + confidence * 0.30})`);
             }
             ctx.fillStyle = gradient;
             ctx.strokeStyle = selectedNote
-                ? (isDark ? "rgba(219, 234, 254, 0.98)" : "rgba(30, 64, 175, 0.96)")
-                : (isDark ? "rgba(96, 165, 250, 0.82)" : "rgba(37, 99, 235, 0.78)");
+                ? isDark
+                    ? "rgba(255, 231, 179, 0.98)"
+                    : "rgba(137, 54, 15, 0.96)"
+                : isDark
+                  ? "rgba(255, 174, 70, 0.90)"
+                  : "rgba(158, 59, 21, 0.84)";
             ctx.lineWidth = selectedNote ? 1.6 : 1;
             ctx.beginPath();
-            ctx.roundRect(x0 + 0.5, top, Math.max(2, x1 - x0 - 1), noteHeight, 3);
+            ctx.roundRect(x0 + 0.5, top, Math.max(3, drawX1 - x0 - 1), noteHeight, 3);
             ctx.fill();
             ctx.stroke();
 
             // Melodyne-style pitch-center guide and edge separators.
             const centerY = top + noteHeight * 0.5;
             ctx.strokeStyle = selectedNote
-                ? "rgba(15, 23, 42, 0.82)"
-                : "rgba(15, 49, 105, 0.58)";
+                ? "rgba(78, 31, 13, 0.86)"
+                : "rgba(104, 39, 15, 0.64)";
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x0 + 4, centerY + 0.5);
-            ctx.lineTo(Math.max(x0 + 4, x1 - 4), centerY + 0.5);
+            ctx.lineTo(Math.max(x0 + 3, drawX1 - 3), centerY + 0.5);
             ctx.stroke();
-            if (x1 - x0 >= 10) {
+            if (drawX1 - x0 >= 4) {
                 ctx.fillStyle = selectedNote
-                    ? "rgba(239, 246, 255, 0.92)"
-                    : "rgba(191, 219, 254, 0.66)";
+                    ? "rgba(255, 245, 218, 0.94)"
+                    : "rgba(255, 213, 151, 0.76)";
                 ctx.fillRect(x0 + 1, top + 2, 1.5, Math.max(1, noteHeight - 4));
-                ctx.fillRect(x1 - 2.5, top + 2, 1.5, Math.max(1, noteHeight - 4));
+                ctx.fillRect(drawX1 - 2.5, top + 2, 1.5, Math.max(1, noteHeight - 4));
             }
             ctx.restore();
         }

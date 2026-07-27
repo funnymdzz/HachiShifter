@@ -295,6 +295,7 @@ export const MelodyneWrenchPanel: React.FC<{
                     <Flex gap="3" mt="1" wrap="wrap">
                         <Text size="1" color="gray">{tAny("melodyne_edge_drag_hint")}</Text>
                         <Text size="1" color="gray">{tAny("melodyne_game_alignment_hint")}</Text>
+                        <Text size="1" color="gray">{tAny("melodyne_connection_hint")}</Text>
                     </Flex>
                 </div>
             )}

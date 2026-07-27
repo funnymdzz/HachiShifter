@@ -630,6 +630,213 @@ fn remap_edited_pitch_for_clip_geometry(
     }
 }
 
+fn remap_curve_across_note_boundary(
+    curve: &mut Vec<f32>,
+    frame_sec: f64,
+    outer_start: f64,
+    old_boundary: f64,
+    new_boundary: f64,
+    outer_end: f64,
+    preserve_unvoiced: bool,
+) {
+    if curve.is_empty() || outer_end <= outer_start || frame_sec <= 0.0 {
+        return;
+    }
+    let original = curve.clone();
+    let first = ((outer_start / frame_sec).floor().max(0.0) as usize).min(curve.len());
+    let last = ((outer_end / frame_sec).ceil().max(0.0) as usize)
+        .saturating_add(1)
+        .min(curve.len());
+    let sample = |time: f64| {
+        let frame = (time.max(0.0) / frame_sec).clamp(0.0, original.len().saturating_sub(1) as f64);
+        let left = frame.floor() as usize;
+        let right = left.saturating_add(1).min(original.len().saturating_sub(1));
+        let unit = (frame - left as f64) as f32;
+        let a = original[left];
+        let b = original[right];
+        if preserve_unvoiced && (a <= 0.0 || b <= 0.0) {
+            if unit < 0.5 { a } else { b }
+        } else {
+            a + (b - a) * unit
+        }
+    };
+    let old_left_span = (old_boundary - outer_start).max(frame_sec);
+    let old_right_span = (outer_end - old_boundary).max(frame_sec);
+    let new_left_span = (new_boundary - outer_start).max(frame_sec);
+    let new_right_span = (outer_end - new_boundary).max(frame_sec);
+    for index in first..last {
+        let destination = index as f64 * frame_sec;
+        let source = if destination <= new_boundary {
+            let unit = ((destination - outer_start) / new_left_span).clamp(0.0, 1.0);
+            outer_start + unit * old_left_span
+        } else {
+            let unit = ((destination - new_boundary) / new_right_span).clamp(0.0, 1.0);
+            old_boundary + unit * old_right_span
+        };
+        curve[index] = sample(source);
+    }
+}
+
+/// Move one shared Melodyne timing handle. The two adjacent pronunciations
+/// are warped independently while every frame curve follows the same
+/// piecewise source-time mapping, so edited pitch remains attached to audio.
+pub(super) fn set_melodyne_note_boundary(
+    state: State<'_, AppState>,
+    clip_id: String,
+    source_start_sec: f64,
+    source_end_sec: f64,
+    edge: String,
+    timeline_sec: f64,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(clip_index) = tl.clips.iter().position(|clip| clip.id == clip_id) else {
+        return tl.to_payload();
+    };
+    let root_track_id = tl.resolve_root_track_id(&tl.clips[clip_index].track_id);
+    let mut segments = tl.clips[clip_index].melodyne_warp_segments.clone();
+    let mut order: Vec<usize> = (0..segments.len()).collect();
+    order.sort_by(|a, b| segments[*a].timeline_start_sec.total_cmp(&segments[*b].timeline_start_sec));
+    let target = order.iter().position(|segment_index| {
+        let segment = &segments[*segment_index];
+        let overlap = (segment.source_end_sec.min(source_end_sec)
+            - segment.source_start_sec.max(source_start_sec)).max(0.0);
+        let note_span = (source_end_sec - source_start_sec).max(0.001);
+        overlap / note_span > 0.35
+            || (segment.source_start_sec - source_start_sec).abs() < 0.01
+    });
+    let Some(target_order_index) = target else {
+        return tl.to_payload();
+    };
+    let pair = if edge == "start" && target_order_index > 0 {
+        Some((order[target_order_index - 1], order[target_order_index]))
+    } else if edge == "end" && target_order_index + 1 < order.len() {
+        Some((order[target_order_index], order[target_order_index + 1]))
+    } else {
+        None
+    };
+    let Some((left_index, right_index)) = pair else {
+        return tl.to_payload();
+    };
+    let left = segments[left_index].clone();
+    let right = segments[right_index].clone();
+    let outer_start = left.timeline_start_sec;
+    let outer_end = right.timeline_end_sec;
+    let min_note = 0.02;
+    if outer_end - outer_start <= min_note * 2.0 {
+        return tl.to_payload();
+    }
+    let new_boundary = timeline_sec
+        .clamp(outer_start + min_note, outer_end - min_note);
+    let old_boundary = (left.timeline_end_sec + right.timeline_start_sec) * 0.5;
+    if (new_boundary - old_boundary).abs() < 1e-7 {
+        return tl.to_payload();
+    }
+    state.checkpoint_timeline(&tl);
+    segments[left_index].timeline_end_sec = new_boundary;
+    segments[right_index].timeline_start_sec = new_boundary;
+    tl.clips[clip_index].melodyne_warp_segments = segments;
+
+    if let Some(root_track_id) = root_track_id {
+        if let Some(params) = tl.params_by_root_track.get_mut(&root_track_id) {
+            let frame_sec = params.frame_period_ms.max(0.1) / 1000.0;
+            remap_curve_across_note_boundary(
+                &mut params.pitch_orig,
+                frame_sec,
+                outer_start,
+                old_boundary,
+                new_boundary,
+                outer_end,
+                true,
+            );
+            remap_curve_across_note_boundary(
+                &mut params.pitch_edit,
+                frame_sec,
+                outer_start,
+                old_boundary,
+                new_boundary,
+                outer_end,
+                true,
+            );
+            remap_curve_across_note_boundary(
+                &mut params.tension_orig,
+                frame_sec,
+                outer_start,
+                old_boundary,
+                new_boundary,
+                outer_end,
+                false,
+            );
+            remap_curve_across_note_boundary(
+                &mut params.tension_edit,
+                frame_sec,
+                outer_start,
+                old_boundary,
+                new_boundary,
+                outer_end,
+                false,
+            );
+            for curve in params.extra_curves.values_mut() {
+                remap_curve_across_note_boundary(
+                    curve,
+                    frame_sec,
+                    outer_start,
+                    old_boundary,
+                    new_boundary,
+                    outer_end,
+                    false,
+                );
+            }
+            params.pitch_orig_key = None;
+        }
+    }
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
+pub(super) fn set_melodyne_note_connection(
+    state: State<'_, AppState>,
+    clip_id: String,
+    source_start_sec: f64,
+    source_end_sec: f64,
+    connected: bool,
+    checkpoint: Option<bool>,
+) -> crate::models::TimelineStatePayload {
+    let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(clip_index) = tl.clips.iter().position(|clip| clip.id == clip_id) else {
+        return tl.to_payload();
+    };
+    let target = tl.clips[clip_index]
+        .melodyne_warp_segments
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| {
+            let overlap_a = (a.source_end_sec.min(source_end_sec)
+                - a.source_start_sec.max(source_start_sec))
+                .max(0.0);
+            let overlap_b = (b.source_end_sec.min(source_end_sec)
+                - b.source_start_sec.max(source_start_sec))
+                .max(0.0);
+            overlap_a.total_cmp(&overlap_b)
+        })
+        .map(|(index, _)| index);
+    let Some(target) = target else {
+        return tl.to_payload();
+    };
+    if tl.clips[clip_index].melodyne_warp_segments[target].connected_to_next == connected {
+        return tl.to_payload();
+    }
+    if checkpoint.unwrap_or(true) {
+        state.checkpoint_timeline(&tl);
+    }
+    tl.clips[clip_index].melodyne_warp_segments[target].connected_to_next = connected;
+    state.audio_engine.update_timeline(tl.clone());
+    let mut payload = tl.to_payload();
+    payload.project = Some(state.project_meta_payload());
+    payload
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn set_clip_state(
     state: State<'_, AppState>,

@@ -117,6 +117,8 @@ export const webApi = {
     moveClips: timelineApi.moveClips,
     getClipLinkedParams: timelineApi.getClipLinkedParams,
     applyClipLinkedParams: timelineApi.applyClipLinkedParams,
+    setMelodyneNoteBoundary: timelineApi.setMelodyneNoteBoundary,
+    setMelodyneNoteConnection: timelineApi.setMelodyneNoteConnection,
     setClipState: timelineApi.setClipState,
     setClipsStateBulk: timelineApi.setClipsStateBulk,
     duplicateClipsBulk: timelineApi.duplicateClipsBulk,

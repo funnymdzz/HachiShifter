@@ -951,4 +951,5 @@ export const zhCN = {
     melodyne_sibilant: "齿音平衡",
     melodyne_attack: "起音时长",
     melodyne_project_model: "Melodyne 工程",
+    melodyne_connection_hint: "工程导入默认不新增平滑，连接仅作用于所选边界；退出原始编辑后拖动音符边缘，可将该发音及其音高线一起拉伸。",
 } as const;

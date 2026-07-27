@@ -369,6 +369,8 @@ pub fn run() {
             commands::move_clips,
             commands::get_clip_linked_params,
             commands::apply_clip_linked_params,
+            commands::set_melodyne_note_boundary,
+            commands::set_melodyne_note_connection,
             commands::set_clip_state,
             commands::set_clips_state_bulk,
             commands::duplicate_clips_bulk,

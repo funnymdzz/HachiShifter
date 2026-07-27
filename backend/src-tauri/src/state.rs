@@ -148,6 +148,11 @@ pub struct MelodyneWarpSegment {
     pub timeline_end_sec: f64,
     pub source_start_sec: f64,
     pub source_end_sec: f64,
+    /// Melodyne's persisted note-connection state. This controls only the
+    /// short phase-continuity splice at the boundary; imported pitch curves
+    /// are never smoothed implicitly.
+    #[serde(default)]
+    pub connected_to_next: bool,
 }
 
 impl Default for ClipFormantMorph {
@@ -1950,6 +1955,7 @@ impl TimelineState {
                 } else {
                     None
                 },
+                melodyne_warp_segments: c.melodyne_warp_segments.clone(),
             })
             .collect::<Vec<_>>();
 
@@ -2019,6 +2025,13 @@ impl TimelineState {
                     Some(c.midi_fill_gaps)
                 } else {
                     None
+                },
+                melodyne_warp_segments: if self.selected_clip_id.as_deref()
+                    == Some(c.id.as_str())
+                {
+                    c.melodyne_warp_segments.clone()
+                } else {
+                    Vec::new()
                 },
             })
             .collect::<Vec<_>>();

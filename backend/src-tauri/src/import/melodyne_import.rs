@@ -1171,24 +1171,6 @@ fn source_pitch_at(
     ))
 }
 
-fn smooth_curve(curve: &mut [f32], center: usize, radius: usize) {
-    if curve.is_empty() || center == 0 || center >= curve.len() || radius == 0 {
-        return;
-    }
-    let left = center.saturating_sub(radius);
-    let right = center.saturating_add(radius).min(curve.len() - 1);
-    let a = curve[left];
-    let b = curve[right];
-    if a <= 0.0 || b <= 0.0 || right <= left {
-        return;
-    }
-    for (offset, value) in curve[left..=right].iter_mut().enumerate() {
-        let phase = offset as f32 / (right - left) as f32;
-        let eased = phase * phase * (3.0 - 2.0 * phase);
-        *value = a + (b - a) * eased;
-    }
-}
-
 fn build_track_params(
     graph: &Graph,
     track: &ImportedTrack,
@@ -1274,21 +1256,9 @@ fn build_track_params(
         }
     }
 
-    // Preserve Melodyne joins.  Additionally bridge touching samples on one
-    // track so their contours do not click or visually break at the edit.
-    for pair in track.elements.windows(2) {
-        let gap = pair[1].start - (pair[0].start + pair[0].duration);
-        if pair[0].join_next || gap.abs() <= 0.05 {
-            let boundary = ((pair[1].start + shift) / frame_period_sec).round().max(0.0) as usize;
-            let transition = if pair[0].join_duration > 0.0 {
-                pair[0].join_duration
-            } else {
-                0.06
-            };
-            let radius = ((transition * 0.5) / frame_period_sec).round().max(1.0) as usize;
-            smooth_curve(&mut pitch_edit, boundary, radius);
-        }
-    }
+    // Import the exact stored contours. Connections are intentionally left
+    // untouched on open; the wrench's Connect action can later smooth only a
+    // narrow interval centred on the selected note boundary.
 
     let mut extra_curves = HashMap::new();
     extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);
@@ -1500,8 +1470,8 @@ fn import_graph(
                 clip.source_start_sec = group.source_start.max(0.0);
                 clip.source_end_sec = group.source_end.max(clip.source_start_sec + 0.001);
                 clip.playback_rate = (source_length / timeline_length).clamp(0.05, 20.0) as f32;
-                clip.fade_in_sec = clip.fade_in_sec.max(0.005).min(timeline_length * 0.25);
-                clip.fade_out_sec = clip.fade_out_sec.max(0.005).min(timeline_length * 0.25);
+                clip.fade_in_sec = 0.0;
+                clip.fade_out_sec = 0.0;
                 clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
                     let element = track.elements.get(*index)?;
                     Some(crate::state::MelodyneWarpSegment {
@@ -1510,6 +1480,7 @@ fn import_graph(
                         source_start_sec: source_time(&graph, element, 0.0).max(0.0),
                         source_end_sec: source_time(&graph, element, element.duration)
                             .max(source_time(&graph, element, 0.0) + 0.001),
+                        connected_to_next: element.join_next,
                     })
                 }).collect();
             }
@@ -1599,7 +1570,7 @@ pub fn import_mpd_file(
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_utf16_paths, has_audio_extension, smooth_curve};
+    use super::{extract_utf16_paths, has_audio_extension};
 
     #[test]
     fn extracts_gnfilepath_utf16_audio() {
@@ -1617,12 +1588,4 @@ mod tests {
         assert!(!has_audio_extension("project.mpd"));
     }
 
-    #[test]
-    fn connection_smoothing_keeps_endpoints() {
-        let mut curve = vec![60.0, 60.0, 60.0, 72.0, 72.0, 72.0];
-        smooth_curve(&mut curve, 3, 2);
-        assert_eq!(curve[1], 60.0);
-        assert_eq!(curve[5], 72.0);
-        assert!(curve[3] > 60.0 && curve[3] < 72.0);
-    }
 }

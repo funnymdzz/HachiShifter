@@ -754,6 +754,13 @@ function applyTimelineState(
                 }),
             ),
             midiFillGaps: clip.midi_fill_gaps ?? false,
+            melodyneWarpSegments: clip.melodyne_warp_segments?.map((segment) => ({
+                timelineStartSec: Number(segment.timelineStartSec),
+                timelineEndSec: Number(segment.timelineEndSec),
+                sourceStartSec: Number(segment.sourceStartSec),
+                sourceEndSec: Number(segment.sourceEndSec),
+                connectedToNext: Boolean(segment.connectedToNext),
+            })),
             groupId: clip.group_id ?? undefined,
         };
 

@@ -89,6 +89,8 @@ pub struct TimelineClip {
     pub midi_note_data: Option<Vec<MidiNoteEvent>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub midi_fill_gaps: Option<bool>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub melodyne_warp_segments: Vec<crate::state::MelodyneWarpSegment>,
 }
 
 #[derive(Debug, Clone, Serialize)]

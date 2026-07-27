@@ -67,23 +67,9 @@ fn apply_melodyne_note_controls(
         entry.extra_curves.get_mut("volume").unwrap()[frame] = volume;
         entry.extra_curves.get_mut("mld5_sibilant_balance").unwrap()[frame] = sibilant;
     }
-    // Rebuild the short pitch-transition ramps stored on each note object.
-    for row in annotations.iter().filter(|row| row.melodyne_project_data && row.melodyne_transition_sec > 0.0) {
-        let boundary_sec = clip.start_sec + (row.region_end_sec - clip.source_start_sec) / rate;
-        let center = (boundary_sec / fp_sec).round().max(0.0) as usize;
-        let radius = ((row.melodyne_transition_sec * 0.5) / fp_sec).round().max(1.0) as usize;
-        if center == 0 || center >= entry.pitch_edit.len() { continue; }
-        let left = center.saturating_sub(radius);
-        let right = (center + radius).min(entry.pitch_edit.len() - 1);
-        let a = entry.pitch_edit[left];
-        let b = entry.pitch_edit[right];
-        if a <= 0.0 || b <= 0.0 || right <= left { continue; }
-        for (offset, value) in entry.pitch_edit[left..=right].iter_mut().enumerate() {
-            let x = offset as f32 / (right - left) as f32;
-            let eased = x * x * (3.0 - 2.0 * x);
-            *value = a + (b - a) * eased;
-        }
-    }
+    // Do not infer or apply joins while saving source-note metadata. Explicit
+    // Connect/Disconnect actions own pitch smoothing and operate on the small
+    // selection centred on the chosen boundary.
     entry.pitch_edit_user_modified = true;
 }
 

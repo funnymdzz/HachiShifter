@@ -241,6 +241,24 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 linkedParams: args[1],
             };
 
+        case "set_melodyne_note_boundary":
+            return {
+                clipId: args[0],
+                sourceStartSec: args[1],
+                sourceEndSec: args[2],
+                edge: args[3],
+                timelineSec: args[4],
+            };
+
+        case "set_melodyne_note_connection":
+            return {
+                clipId: args[0],
+                sourceStartSec: args[1],
+                sourceEndSec: args[2],
+                connected: args[3],
+                checkpoint: args[4],
+            };
+
         case "set_clip_state":
             return {
                 clipId: args[0],

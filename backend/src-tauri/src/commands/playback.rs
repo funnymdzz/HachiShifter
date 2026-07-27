@@ -60,6 +60,17 @@ fn is_clip_pitch_analysis_ready(
     clip_pitch.is_some()
 }
 
+fn raw_playback_fallback(mut timeline: crate::state::TimelineState) -> crate::state::TimelineState {
+    for track in &mut timeline.tracks {
+        track.compose_enabled = false;
+    }
+    for params in timeline.params_by_root_track.values_mut() {
+        params.pitch_edit_user_modified = false;
+        params.has_pitch_adjustment_active = false;
+    }
+    timeline
+}
+
 pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde_json::Value {
     guard_json_command("play_original", || {
         eprintln!("[play_original] called start_sec={start_sec}");
@@ -115,20 +126,13 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
         }
 
         if !need_prerender && snapshot_has_pending {
-            eprintln!("[play_original] clips_needing_render=0 but snapshot has pending synthesis — waiting for render");
+            eprintln!("[play_original] stale pending snapshot without render targets — starting raw fallback");
             state.audio_engine.seek_sec(start_sec);
-            state.audio_engine.update_timeline(timeline);
-            if let Some(app) = state.app_handle.get().cloned() {
-                let _ = app.emit(
-                    "playback_rendering_state",
-                    PlaybackRenderingStateEvent {
-                        active: true,
-                        progress: Some(0.0),
-                        target: Some("original".to_string()),
-                    },
-                );
-            }
-            return serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec, "waiting_for_render": true});
+            state
+                .audio_engine
+                .update_timeline(raw_playback_fallback(timeline));
+            state.audio_engine.set_playing(true, Some("original"));
+            return serde_json::json!({"ok": true, "playing": "original", "start_sec": start_sec, "raw_fallback": true});
         }
 
         // ── 有 pitch edit：Clip 级增量预渲染 + 实时混音 ──────────────────────────
@@ -146,6 +150,14 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
             let engine_for_sr = state.audio_engine.clone();
 
             std::thread::spawn(move || {
+                struct IncrementalRenderGuard;
+                impl Drop for IncrementalRenderGuard {
+                    fn drop(&mut self) {
+                        BG_RENDER_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+                    }
+                }
+                BG_RENDER_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+                let _incremental_render_guard = IncrementalRenderGuard;
                 let cache_log = std::env::var("HACHISHIFTER_RENDER_CACHE_LOG")
                     .ok()
                     .as_deref()
@@ -194,15 +206,30 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 // 收集需要预渲染的 clip 列表，按时间线顺序排序
                 let collect_started_at = std::time::Instant::now();
                 let mut clips_to_render = collect_clips_needing_render(&tl_for_render, engine_sr);
-                clips_to_render.sort_by(|a, b| a.clip.start_sec.total_cmp(&b.clip.start_sec));
+                // Render the clip at/after the playhead first. This gives the
+                // transport an audible result after one clip instead of
+                // blocking on an entire large MPD project.
+                clips_to_render.sort_by(|a, b| {
+                    let priority = |clip: &crate::state::Clip| {
+                        let end = clip.start_sec + clip.length_sec.max(0.0);
+                        if clip.start_sec <= render_start_sec && end > render_start_sec {
+                            (0u8, 0.0)
+                        } else if clip.start_sec > render_start_sec {
+                            (1u8, clip.start_sec - render_start_sec)
+                        } else {
+                            (2u8, render_start_sec - end)
+                        }
+                    };
+                    let pa = priority(&a.clip);
+                    let pb = priority(&b.clip);
+                    pa.0.cmp(&pb.0).then_with(|| pa.1.total_cmp(&pb.1))
+                });
                 let collect_elapsed = collect_started_at.elapsed();
 
                 let ready_filter_started_at = std::time::Instant::now();
                 clips_to_render
                     .retain(|info| is_clip_pitch_analysis_ready(&tl_for_render, &info.clip));
                 let ready_filter_elapsed = ready_filter_started_at.elapsed();
-
-                clips_to_render.sort_by(|a, b| a.clip.start_sec.total_cmp(&b.clip.start_sec));
 
                 if cache_log {
                     eprintln!(
@@ -230,7 +257,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                         return;
                     }
                     engine.seek_sec(render_start_sec);
-                    engine.update_timeline(tl_for_render);
+                    engine.update_timeline(raw_playback_fallback(tl_for_render));
                     engine.set_playing(true, Some("original"));
 
                     let _ = app.emit(
@@ -298,6 +325,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                 let mut timeline_sig_check_elapsed = std::time::Duration::ZERO;
                 let mut any_error = false;
                 let mut cancelled = false;
+                let mut playback_started = false;
                 let mut pending_clip_ids_written: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
 
@@ -427,6 +455,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                     }
 
                     if let Some(base_entry) = base_entry.as_ref() {
+                        let mut clip_ready = true;
                         let tension_started_at = std::time::Instant::now();
                         match ensure_hifigan_tension_cache(
                             &tl_for_render,
@@ -450,6 +479,7 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                 }
                             }
                             Err(e) => {
+                                clip_ready = false;
                                 tension_elapsed += tension_started_at.elapsed();
                                 eprintln!(
                                     "play_original: tension render failed: clip_id={} err={}",
@@ -467,6 +497,23 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                                         Some(e.clone()),
                                     );
                                 }
+                            }
+                        }
+
+                        // Publish each newly ready clip. BG_RENDER_ACTIVE keeps
+                        // the engine from halting merely because later clips
+                        // are still pending. Playback begins after the first
+                        // usable clip and the remaining project fills in. A
+                        // four-clip batch avoids cloning a huge project for
+                        // every short source occurrence.
+                        if clip_ready {
+                            if !playback_started {
+                                engine.update_timeline(tl_for_render.clone());
+                                engine.seek_sec(render_start_sec);
+                                engine.set_playing(true, Some("original"));
+                                playback_started = true;
+                            } else if rendered_count % 4 == 3 {
+                                engine.update_timeline(tl_for_render.clone());
                             }
                         }
                     }
@@ -537,15 +584,10 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
                             },
                         );
                     }
-                    // 降级：直接播放——audio engine 会使用源 PCM，不经过 rendered_pcm 路径
-                    // 注意：此时 engine 中没有该 clip 的 rendered_pcm，
-                    //   build_snapshot 在找不到缓存时会设 needs_synthesis=true, rendered_pcm=None。
-                    //   这会导致 has_pending_clip=true → 静音。
-                    //   因此改用 update_timeline 但不传 pitch edit 标记的 timeline（无此机制），
-                    //   最简单的降级是：直接 seek + play，让 audio engine 用原始 PCM 播放
-                    //   （此时 pitch_edit_user_modified 仍为 true，engine 仍会尝试查找 rendered_pcm
-                    //    并找不到，因此改为 stop 旧播放状态并提示用户）。
-                    engine.stop();
+                    crate::nsf_hifigan_onnx::set_chunk_progress_callback(None);
+                    engine.seek_sec(render_start_sec);
+                    engine.update_timeline(raw_playback_fallback(tl_for_render));
+                    engine.set_playing(true, Some("original"));
                     return;
                 }
 
@@ -582,9 +624,13 @@ pub(super) fn play_original(state: State<'_, AppState>, start_sec: f64) -> serde
 
                 let update_started_at = std::time::Instant::now();
                 crate::nsf_hifigan_onnx::set_chunk_progress_callback(None);
-                engine.seek_sec(render_start_sec);
+                if !playback_started {
+                    engine.seek_sec(render_start_sec);
+                }
                 engine.update_timeline(tl_for_render);
-                engine.set_playing(true, Some("original"));
+                if !playback_started {
+                    engine.set_playing(true, Some("original"));
+                }
                 let update_elapsed = update_started_at.elapsed();
 
                 eprintln!(

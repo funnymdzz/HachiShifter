@@ -988,4 +988,5 @@ export const koKR = {
     melodyne_sibilant: "치찰음 밸런스",
     melodyne_attack: "어택 길이",
     melodyne_project_model: "Melodyne 프로젝트",
+    melodyne_connection_hint: "프로젝트를 불러올 때 스무딩을 추가하지 않으며 연결은 선택한 경계에만 적용됩니다. 소스 편집 밖에서 음표 가장자리를 끌면 해당 발음과 피치선이 함께 늘어납니다.",
 } as const;

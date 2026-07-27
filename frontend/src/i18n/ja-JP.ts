@@ -972,4 +972,5 @@ export const jaJP = {
     melodyne_sibilant: "歯擦音バランス",
     melodyne_attack: "アタック長",
     melodyne_project_model: "Melodyneプロジェクト",
+    melodyne_connection_hint: "プロジェクト読込時は平滑化を追加せず、接続は選択境界だけに作用します。ソース編集の外ではノート端をドラッグすると、その発音とピッチ線が一緒に伸縮します。",
 } as const;

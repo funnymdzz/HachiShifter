@@ -852,6 +852,88 @@ pub fn time_stretch_interleaved(
 /// note object owns its source interval and destination interval; rendering
 /// them independently preserves manual time handles that a single clip-wide
 /// playback-rate ratio would discard.
+fn continue_periodic_phase_at_join(
+    audio: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+    boundary: usize,
+    available_right: usize,
+    connected: bool,
+) {
+    if channels == 0 || boundary < 4 || available_right < 2 {
+        return;
+    }
+    let total_frames = audio.len() / channels;
+    if boundary >= total_frames {
+        return;
+    }
+
+    // Melodyne's renderer exposes `continueAllPhasesByDefault` and
+    // `resetAllPhasesAtAttack`. For a note connection, continue the measured
+    // periodic phase briefly and hand it to the independently warped right
+    // element with a raised-cosine blend. For an unconnected cut, use only a
+    // compact de-click bridge. No pitch curve is changed here.
+    let min_period = (sample_rate as usize / 900).max(2);
+    let max_period = (sample_rate as usize / 65).max(min_period + 1);
+    let search_window = (sample_rate as usize / 80).max(32); // 12.5 ms
+    let mut best_period = 0usize;
+    let mut best_corr = -1.0f64;
+    for period in min_period..=max_period.min(boundary.saturating_sub(2)) {
+        let window = search_window.min(boundary.saturating_sub(period));
+        if window < 16 {
+            continue;
+        }
+        let start = boundary - window;
+        let mut dot = 0.0f64;
+        let mut aa = 0.0f64;
+        let mut bb = 0.0f64;
+        for frame in start..boundary {
+            let older = frame - period;
+            let mut a = 0.0f64;
+            let mut b = 0.0f64;
+            for channel in 0..channels {
+                a += audio[older * channels + channel] as f64;
+                b += audio[frame * channels + channel] as f64;
+            }
+            a /= channels as f64;
+            b /= channels as f64;
+            dot += a * b;
+            aa += a * a;
+            bb += b * b;
+        }
+        let corr = dot / (aa * bb).sqrt().max(1e-12);
+        if corr > best_corr {
+            best_corr = corr;
+            best_period = period;
+        }
+    }
+
+    let requested = if connected { 12 } else { 2 };
+    let fade = ((sample_rate as usize * requested) / 1000)
+        .max(8)
+        .min(available_right)
+        .min(total_frames - boundary);
+    if fade < 2 {
+        return;
+    }
+    let periodic = connected && best_period > 0 && best_corr >= 0.32;
+    for i in 0..fade {
+        let x = i as f32 / (fade - 1) as f32;
+        let right_gain = 0.5 - 0.5 * (std::f32::consts::PI * x).cos();
+        let left_gain = 1.0 - right_gain;
+        for channel in 0..channels {
+            let predictor = if periodic {
+                let phase_frame = boundary - best_period + (i % best_period);
+                audio[phase_frame * channels + channel]
+            } else {
+                audio[(boundary - 1) * channels + channel]
+            };
+            let index = (boundary + i) * channels + channel;
+            audio[index] = predictor * left_gain + audio[index] * right_gain;
+        }
+    }
+}
+
 pub fn render_melodyne_warp_segments(
     input: &[f32],
     channels: usize,
@@ -866,6 +948,7 @@ pub fn render_melodyne_warp_segments(
     if input_frames == 0 || target_frames == 0 || segments.is_empty() { return input.to_vec(); }
     let mut out = vec![0.0f32; target_frames * channels];
     let mut weights = vec![0.0f32; target_frames];
+    let mut rendered_ranges = Vec::<(usize, usize, bool)>::new();
     let edge = ((sample_rate as usize * 5) / 1000).max(4);
     for segment in segments {
         let src_start = ((segment.source_start_sec - clip_source_start_sec).max(0.0)
@@ -891,6 +974,7 @@ pub fn render_melodyne_warp_segments(
             dst_end - dst_start,
             StretchAlgorithm::MelodyneHybrid,
         );
+        rendered_ranges.push((dst_start, dst_end, segment.connected_to_next));
         for local in 0..(dst_end - dst_start) {
             let frame = dst_start + local;
             let left = (local as f32 / edge as f32).clamp(0.0, 1.0);
@@ -906,6 +990,28 @@ pub fn render_melodyne_warp_segments(
         if weights[frame] > 1e-6 {
             for channel in 0..channels { out[frame * channels + channel] /= weights[frame]; }
         }
+    }
+    rendered_ranges.sort_by_key(|range| range.0);
+    let join_tolerance = ((sample_rate as usize * 2) / 1000).max(2);
+    for pair in rendered_ranges.windows(2) {
+        let (left_start, left_end, connected) = pair[0];
+        let (right_start, right_end, _) = pair[1];
+        if left_end <= left_start || right_end <= right_start {
+            continue;
+        }
+        // Preserve intentional rests. Touching notes and tiny rounding gaps
+        // are treated as one acoustic connection.
+        if right_start > left_end.saturating_add(join_tolerance) {
+            continue;
+        }
+        continue_periodic_phase_at_join(
+            &mut out,
+            channels,
+            sample_rate,
+            right_start,
+            right_end.saturating_sub(right_start),
+            connected,
+        );
     }
     out
 }

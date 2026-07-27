@@ -76,6 +76,13 @@ export interface TimelineClip {
         channel?: number;
     }>;
     midi_fill_gaps?: boolean;
+    melodyne_warp_segments?: Array<{
+        timelineStartSec: number;
+        timelineEndSec: number;
+        sourceStartSec: number;
+        sourceEndSec: number;
+        connectedToNext: boolean;
+    }>;
 }
 
 export interface ProjectMeta {

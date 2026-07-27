@@ -294,6 +294,38 @@ export const timelineApi = {
     applyClipLinkedParams: (payload: { clipId: string; linkedParams: LinkedParamCurves }) =>
         invoke<TimelineResult>("apply_clip_linked_params", payload.clipId, payload.linkedParams),
 
+    setMelodyneNoteBoundary: (payload: {
+        clipId: string;
+        sourceStartSec: number;
+        sourceEndSec: number;
+        edge: "start" | "end";
+        timelineSec: number;
+    }) =>
+        invoke<TimelineResult>(
+            "set_melodyne_note_boundary",
+            payload.clipId,
+            payload.sourceStartSec,
+            payload.sourceEndSec,
+            payload.edge,
+            payload.timelineSec,
+        ),
+
+    setMelodyneNoteConnection: (payload: {
+        clipId: string;
+        sourceStartSec: number;
+        sourceEndSec: number;
+        connected: boolean;
+        checkpoint?: boolean;
+    }) =>
+        invoke<TimelineResult>(
+            "set_melodyne_note_connection",
+            payload.clipId,
+            payload.sourceStartSec,
+            payload.sourceEndSec,
+            payload.connected,
+            payload.checkpoint,
+        ),
+
     setClipState: (payload: {
         clipId: string;
         name?: string;

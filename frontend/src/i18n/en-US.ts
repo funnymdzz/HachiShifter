@@ -964,4 +964,5 @@ export const enUS = {
     melodyne_sibilant: "Sibilant balance",
     melodyne_attack: "Attack length",
     melodyne_project_model: "Melodyne project",
+    melodyne_connection_hint: "Project import adds no smoothing; Connect affects only the selected boundary. Outside source edit, drag a note edge to warp that pronunciation together with its pitch line.",
 } as const;

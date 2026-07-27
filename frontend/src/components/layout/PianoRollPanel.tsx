@@ -39,6 +39,7 @@ import {
     addTrackRemote,
     importMidiAsClip,
     setClipStateRemote,
+    fetchTimeline,
     setProjectStretchSettingsRemote,
 } from "../../features/session/sessionSlice";
 import { resolveRootTrackId } from "../../features/session/trackUtils";
@@ -1772,15 +1773,18 @@ export const PianoRollPanel: React.FC = () => {
     } => {
         const clip = selectedAudioClip;
         const analysis = sampleAnalysis;
-        if (!clip || !analysis || clip.reversed || editParam !== "pitch") {
+        if (!clip || clip.reversed || editParam !== "pitch") {
             return { notes: [], timing: null };
         }
         const sourceStart = Math.max(0, clip.sourceStartSec);
         const sourceEnd = Math.max(sourceStart + 1e-6, clip.sourceEndSec);
         const sourceSpan = sourceEnd - sourceStart;
         const targetSpan = Math.max(1e-6, clip.lengthSec);
+        const warpSegments = [...(clip.melodyneWarpSegments ?? [])].sort(
+            (a, b) => a.timelineStartSec - b.timelineStartSec,
+        );
         const active =
-            analysis.annotations[
+            analysis?.annotations[
                 Math.min(analysis.active_annotation_index, analysis.annotations.length - 1)
             ] ?? null;
         const requestedFixed = active
@@ -1798,6 +1802,25 @@ export const PianoRollPanel: React.FC = () => {
             Math.max(0, targetSpan - 1e-6),
         );
         const mapSourceToFinalTimeline = (sourceSec: number) => {
+            const warp = warpSegments.find(
+                (segment) =>
+                    sourceSec >= segment.sourceStartSec - 0.005 &&
+                    sourceSec <= segment.sourceEndSec + 0.005,
+            );
+            if (warp) {
+                const sourceLength = Math.max(
+                    1e-6,
+                    warp.sourceEndSec - warp.sourceStartSec,
+                );
+                const unit = Math.max(
+                    0,
+                    Math.min(1, (sourceSec - warp.sourceStartSec) / sourceLength),
+                );
+                return (
+                    warp.timelineStartSec +
+                    unit * (warp.timelineEndSec - warp.timelineStartSec)
+                );
+            }
             const local = Math.max(0, Math.min(sourceSpan, sourceSec - sourceStart));
             let timelineLocal: number;
             if (fixed > 1e-6 && fixed < sourceSpan - 1e-6) {
@@ -1813,12 +1836,12 @@ export const PianoRollPanel: React.FC = () => {
         };
         const sourceDuration = Math.max(
             sourceEnd,
-            Number(analysis.source_duration_sec) || 0,
-            analysis.annotations.reduce(
+            Number(analysis?.source_duration_sec) || 0,
+            (analysis?.annotations ?? []).reduce(
                 (latest, row) => Math.max(latest, row.region_end_sec),
                 0,
             ),
-            analysis.pitch_notes.reduce(
+            (analysis?.pitch_notes ?? []).reduce(
                 (latest, note) => Math.max(latest, note.end_sec),
                 0,
             ),
@@ -1854,7 +1877,8 @@ export const PianoRollPanel: React.FC = () => {
             return count > 0 ? sum / count : null;
         };
 
-        const notes = analysis.pitch_notes
+        const detectedNotes = analysis?.pitch_notes ?? [];
+        const notesFromAnalysis = detectedNotes
             .map((note, noteIndex) => {
                 const clippedStart = showMelodyneWrench
                     ? Math.max(0, note.start_sec)
@@ -1875,7 +1899,7 @@ export const PianoRollPanel: React.FC = () => {
                         ? noteDragPreview.midiNote
                         : null;
                 const relativePitchCents =
-                    analysis.annotations[noteIndex]?.relative_pitch_cents ?? 0;
+                    analysis?.annotations[noteIndex]?.relative_pitch_cents ?? 0;
                 return {
                     noteIndex,
                     startSec,
@@ -1894,6 +1918,59 @@ export const PianoRollPanel: React.FC = () => {
                 };
             })
             .filter((note): note is Exclude<typeof note, null> => note !== null);
+        // MPD elements are authoritative note objects. GAME/source analysis
+        // may still be loading or may omit a quiet element; deriving blobs
+        // from the persisted warp map keeps every Melodyne timing handle
+        // visible instead of leaving only the pitch line.
+        const notes = warpSegments.length
+            ? warpSegments.map((segment, segmentIndex) => {
+                  let matchedIndex = -1;
+                  let matchedOverlap = 0;
+                  detectedNotes.forEach((note, noteIndex) => {
+                      const overlap = Math.max(
+                          0,
+                          Math.min(segment.sourceEndSec, note.end_sec) -
+                              Math.max(segment.sourceStartSec, note.start_sec),
+                      );
+                      if (overlap > matchedOverlap) {
+                          matchedOverlap = overlap;
+                          matchedIndex = noteIndex;
+                      }
+                  });
+                  const matched = matchedIndex >= 0 ? detectedNotes[matchedIndex] : null;
+                  const finalStartSec = segment.timelineStartSec;
+                  const finalEndSec = segment.timelineEndSec;
+                  const curveMidi = curveMidiForRange(finalStartSec, finalEndSec);
+                  const originalMidi = matched?.midi_note ?? curveMidi ?? 60;
+                  const noteIndex = matchedIndex >= 0 ? matchedIndex : segmentIndex;
+                  const relativePitchCents =
+                      analysis?.annotations[noteIndex]?.relative_pitch_cents ?? 0;
+                  const preview =
+                      noteDragPreview?.noteIndex === noteIndex
+                          ? noteDragPreview.midiNote
+                          : null;
+                  return {
+                      noteIndex,
+                      startSec: showMelodyneWrench
+                          ? clip.startSec + segment.sourceStartSec
+                          : finalStartSec,
+                      endSec: showMelodyneWrench
+                          ? clip.startSec + segment.sourceEndSec
+                          : finalEndSec,
+                      sourceStartSec: segment.sourceStartSec,
+                      sourceEndSec: segment.sourceEndSec,
+                      finalStartSec,
+                      finalEndSec,
+                      originalMidi,
+                      midiNote:
+                          preview ??
+                          (showMelodyneWrench
+                              ? originalMidi + relativePitchCents / 100
+                              : curveMidi ?? originalMidi),
+                      confidence: matched?.confidence ?? 1,
+                  };
+              })
+            : notesFromAnalysis;
         const timing = active
             ? {
                   regionStartSec: mapSourceToEditor(active.region_start_sec),
@@ -3369,9 +3446,27 @@ export const PianoRollPanel: React.FC = () => {
                 // smoothing bridge while leaving both note contours intact.
                 await handleEditOp("initialize");
             }
+            if (selectedAudioClip?.melodyneWarpSegments?.length) {
+                await webApi.setMelodyneNoteConnection({
+                    clipId: selectedAudioClip.id,
+                    sourceStartSec: current.sourceStartSec,
+                    sourceEndSec: current.sourceEndSec,
+                    connected: connect,
+                    checkpoint: false,
+                });
+                await dispatch(fetchTimeline());
+            }
             invalidate();
         },
-        [activeSampleNoteIndex, handleEditOp, invalidate, sampleNoteDisplay.notes, secPerBeat],
+        [
+            activeSampleNoteIndex,
+            dispatch,
+            handleEditOp,
+            invalidate,
+            sampleNoteDisplay.notes,
+            secPerBeat,
+            selectedAudioClip,
+        ],
     );
 
     // Listen for edit operations dispatched from MenuBar
@@ -3916,6 +4011,49 @@ export const PianoRollPanel: React.FC = () => {
                         window.removeEventListener("pointercancel", onUp);
                         if (moved) {
                             if (edgeMode && selectedAudioClip) {
+                                const orderedWarp = [
+                                    ...(selectedAudioClip.melodyneWarpSegments ?? []),
+                                ].sort((a, b) => a.timelineStartSec - b.timelineStartSec);
+                                const warpIndex = orderedWarp.findIndex((segment) => {
+                                    const overlap = Math.max(
+                                        0,
+                                        Math.min(segment.sourceEndSec, hit.sourceEndSec) -
+                                            Math.max(segment.sourceStartSec, hit.sourceStartSec),
+                                    );
+                                    return (
+                                        overlap /
+                                            Math.max(
+                                                0.001,
+                                                hit.sourceEndSec - hit.sourceStartSec,
+                                            ) >
+                                            0.35 ||
+                                        Math.abs(
+                                            segment.sourceStartSec - hit.sourceStartSec,
+                                        ) < 0.01
+                                    );
+                                });
+                                const hasSharedWarpBoundary =
+                                    warpIndex >= 0 &&
+                                    (edgeMode === "start"
+                                        ? warpIndex > 0
+                                        : warpIndex + 1 < orderedWarp.length);
+                                if (hasSharedWarpBoundary) {
+                                    await webApi.setMelodyneNoteBoundary({
+                                        clipId: selectedAudioClip.id,
+                                        sourceStartSec: hit.sourceStartSec,
+                                        sourceEndSec: hit.sourceEndSec,
+                                        edge: edgeMode,
+                                        timelineSec: targetEdgeSec,
+                                    });
+                                    await dispatch(fetchTimeline());
+                                    // The backend applies the identical piecewise
+                                    // warp to audio, imported pitch and every
+                                    // per-frame control curve.
+                                    bumpRefreshToken();
+                                    setNoteDragPreview(null);
+                                    invalidate();
+                                    return;
+                                }
                                 const delta =
                                     edgeMode === "end"
                                         ? targetEdgeSec - hit.endSec
