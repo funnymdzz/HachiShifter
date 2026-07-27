@@ -114,6 +114,10 @@ The model-free `mld5` path now performs:
 6. The edited curve drives WORLD as an absolute F0 trajectory. A new detector
    is used only for periodic/voicing analysis and no longer adds its pitch error
    to Melodyne's stored contour.
+7. Short MPD note clips receive temporary reflected analysis context before
+   periodic synthesis and are cropped back sample-exactly. This avoids resetting
+   F0 analysis on an isolated 30--200 ms fragment while keeping project timing
+   and source boundaries unchanged.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from
