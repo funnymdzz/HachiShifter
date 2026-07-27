@@ -818,10 +818,12 @@ struct ImportedElement {
     amplitude_factor: f32,
     sibilant_balance: f32,
     attack_duration: f64,
+    attack_time_slope: f64,
     decay_elongation: f32,
     anchor_point: f64,
     muted: bool,
     join_next: bool,
+    join_phase_next: bool,
     join_duration: f64,
     fade_in_sec: f64,
     fade_out_sec: f64,
@@ -1007,11 +1009,17 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     amplitude_factor: graph.f32(element_id, "amplitudeFactor").unwrap_or(1.0),
                     sibilant_balance: graph.f32(element_id, "sibilantBalance").unwrap_or(0.0),
                     attack_duration: graph.f64(element_id, "attackDuration").unwrap_or(0.0),
+                    attack_time_slope: graph
+                        .f64(element_id, "sourceTimeForElementTimeFunctionAttackSlope")
+                        .unwrap_or(1.0),
                     decay_elongation: graph.f32(element_id, "decayElongation").unwrap_or(0.0),
                     anchor_point: graph.f64(element_id, "anchorPoint").unwrap_or(0.0),
                     muted: graph.bool(element_id, "isMuted"),
                     join_next: following_join
                         .map(|join| graph.bool(join, "joinsPitches"))
+                        .unwrap_or(false),
+                    join_phase_next: following_join
+                        .map(|join| graph.bool(join, "joinsPhases"))
                         .unwrap_or(false),
                     join_duration: following_join
                         .and_then(|join| graph.f64(join, "pitchTransitionDuration"))
@@ -1251,27 +1259,10 @@ struct CachedPitchPoint {
 }
 
 struct SourcePitchCache {
-    source_duration: f64,
     item_start: f64,
     time_slice_count: f64,
+    slices_per_second: f64,
     points: Vec<CachedPitchPoint>,
-}
-
-fn eval_cached_function(points: &[(f64, f64)], x: f64) -> f64 {
-    if points.is_empty() {
-        return x;
-    }
-    if points.len() == 1 || x <= points[0].0 {
-        return points[0].1;
-    }
-    for pair in points.windows(2) {
-        if x <= pair[1].0 {
-            let span = (pair[1].0 - pair[0].0).max(1e-9);
-            let fraction = ((x - pair[0].0) / span).clamp(0.0, 1.0);
-            return pair[0].1 + (pair[1].1 - pair[0].1) * fraction;
-        }
-    }
-    points.last().map(|point| point.1).unwrap_or(x)
 }
 
 fn build_source_pitch_cache(
@@ -1300,8 +1291,31 @@ fn build_source_pitch_cache(
         });
     }
     points.sort_by(|left, right| left.slice.total_cmp(&right.slice));
+    let source_duration = sample_count / sample_rate;
+    // Melodyne stores property-point positions in analysis-slice units.  In
+    // MPD5 `parameterValuesPerSecond` is the authoritative conversion (441
+    // for the common 100-sample hop at 44.1 kHz), not an arbitrary metadata
+    // value.  Normalising by the complete file length accumulates drift and
+    // can select the neighbouring phoneme near the end of a long source.
+    let explicit_distance = graph
+        .f64(element.source_description_id, "explicitTimeSliceTimeDistance")
+        .filter(|value| *value > 1e-9);
+    let slices_per_second = explicit_distance
+        .map(|distance| 1.0 / distance)
+        .or_else(|| {
+            graph
+                .f64(element.source_description_id, "parameterValuesPerSecond")
+                .filter(|value| *value > 1.0)
+        })
+        .unwrap_or_else(|| {
+            graph
+                .i32(element.source_description_id, "timeSliceCount")
+                .unwrap_or(points.len() as i32)
+                .saturating_sub(1)
+                .max(1) as f64
+                / source_duration.max(1e-9)
+        });
     Some(SourcePitchCache {
-        source_duration: sample_count / sample_rate,
         item_start: graph
             .i64(element.source_item_id, "startSampleIndex")
             .unwrap_or(0)
@@ -1311,26 +1325,26 @@ fn build_source_pitch_cache(
             .i32(element.source_description_id, "timeSliceCount")
             .unwrap_or(points.len() as i32)
             .max(1) as f64,
+        slices_per_second,
         points,
     })
 }
 
 fn source_pitch_at(
+    graph: &Graph,
     cache: &SourcePitchCache,
-    time_function: &[(f64, f64)],
+    time_function: Option<u32>,
     local_time: f64,
 ) -> Option<(f32, f32)> {
     if cache.points.is_empty() {
         return None;
     }
-    let mapped_time = eval_cached_function(time_function, local_time).max(0.0);
-    // `timeSliceIndex` is global to the audio-source description, not local to
-    // an item's property-point list.  Derive its position from the full source
-    // duration; `parameterValuesPerSecond` is not a reliable hop-rate field in
-    // Melodyne 5 archives (the observed value is commonly 441).
-    let slice_position = ((cache.item_start + mapped_time) / cache.source_duration)
-        .clamp(0.0, 1.0)
-        * (cache.time_slice_count - 1.0).max(0.0);
+    let mapped_time = time_function
+        .map(|function| graph.eval_function(function, local_time))
+        .unwrap_or(local_time)
+        .max(0.0);
+    let slice_position = ((cache.item_start + mapped_time) * cache.slices_per_second)
+        .clamp(0.0, (cache.time_slice_count - 1.0).max(0.0));
     // The former linear scan made long, densely analysed sources quadratic:
     // every 5 ms output frame walked the complete source point list.  Melodyne
     // stores points sorted by time slice, so a binary partition is sufficient.
@@ -1376,13 +1390,8 @@ fn build_track_params(
         .elements
         .iter()
         .any(|element| element.formant_offset.abs() > 1e-6);
-    let has_volume = track
-        .elements
-        .iter()
-        .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
     let has_sibilant = track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6);
     let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
-    let mut volume = has_volume.then(|| vec![1.0f32; frame_count]);
     let mut sibilant = has_sibilant.then(|| vec![0.0f32; frame_count]);
     // A source item is commonly referenced by hundreds of Melodyne elements.
     // Decode its property-point list once instead of cloning it per note.
@@ -1407,10 +1416,6 @@ fn build_track_params(
         let pitch_cache = pitch_cache_by_item
             .get(&element.source_item_id)
             .and_then(Option::as_ref);
-        let time_function = element
-            .source_function_id
-            .map(|function| graph.sampled_function_points(function))
-            .unwrap_or_default();
         let start = element.start + shift;
         let first = (start / frame_period_sec).floor().max(0.0) as usize;
         let last = ((start + element.duration) / frame_period_sec)
@@ -1422,7 +1427,9 @@ fn build_track_params(
         for frame in first..last.min(frame_count) {
             let local_time = frame as f64 * frame_period_sec - start;
             let (raw, without_vibrato) = pitch_cache
-                .and_then(|cache| source_pitch_at(cache, &time_function, local_time))
+                .and_then(|cache| {
+                    source_pitch_at(graph, cache, element.source_function_id, local_time)
+                })
                 .unwrap_or((source_center, source_center));
             let edited = element.pitch_center
                 + element.pitch_drift * (without_vibrato - source_center)
@@ -1432,9 +1439,6 @@ fn build_track_params(
             pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
             if let Some(curve) = formant.as_mut() {
                 curve[frame] = element.formant_offset;
-            }
-            if let Some(curve) = volume.as_mut() {
-                curve[frame] = element.amplitude_factor.max(0.0);
             }
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
@@ -1450,9 +1454,6 @@ fn build_track_params(
     extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);
     if let Some(curve) = formant {
         extra_curves.insert("formant_shift_cents".to_string(), curve);
-    }
-    if let Some(curve) = volume {
-        extra_curves.insert("volume".to_string(), curve);
     }
     if let Some(curve) = sibilant {
         extra_curves.insert("mld5_sibilant_balance".to_string(), curve);
@@ -1489,10 +1490,6 @@ fn build_group_source_pitch_curve(
         let pitch_cache = pitch_cache_by_item
             .get(&element.source_item_id)
             .and_then(Option::as_ref);
-        let time_function = element
-            .source_function_id
-            .map(|function| graph.sampled_function_points(function))
-            .unwrap_or_default();
         let destination_start = element.start + shift;
         let first = ((destination_start - clip_start) / frame_sec).floor().max(0.0) as usize;
         let last = ((destination_start + element.duration - clip_start) / frame_sec)
@@ -1502,7 +1499,9 @@ fn build_group_source_pitch_curve(
             let destination_time = clip_start + local_frame as f64 * frame_sec;
             let element_time = destination_time - destination_start;
             if let Some((raw, _)) =
-                pitch_cache.and_then(|cache| source_pitch_at(cache, &time_function, element_time))
+                pitch_cache.and_then(|cache| {
+                    source_pitch_at(graph, cache, element.source_function_id, element_time)
+                })
             {
                 curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
             }
@@ -1532,11 +1531,7 @@ fn choose_frame_period_ms(tracks: &[ImportedTrack], project_sec: f64) -> f64 {
                 .elements
                 .iter()
                 .any(|element| element.formant_offset.abs() > 1e-6);
-            let has_volume = track
-                .elements
-                .iter()
-                .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
-            12 + usize::from(has_formant) * 4 + usize::from(has_volume) * 4
+            12 + usize::from(has_formant) * 4
                 + usize::from(track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6)) * 4
         })
         .sum();
@@ -1602,6 +1597,7 @@ fn import_graph(
     graph: Graph,
     progress: &ImportProgress<'_>,
     compose_track_indices: Option<&[usize]>,
+    reanalyze_pitch_with_game_fcpe: bool,
 ) -> Result<MelodyneImportResult, String> {
     progress(0.25, "read_tracks", 0, 1);
     let (tracks, sources) = collect_project(&graph)?;
@@ -1716,11 +1712,13 @@ fn import_graph(
                                 .total_cmp(&(right.start + right.duration))
                         })?;
                     let boundary_gap = group.timeline_start - previous.timeline_end;
-                    (boundary_gap <= 0.002 && boundary_gap >= -0.5).then_some(
+                    (boundary_gap < -0.001 && boundary_gap >= -0.5).then_some(
                         if previous_element.join_amplitude {
-                            previous_element.amplitude_transition_duration.max(0.008)
+                            previous_element.amplitude_transition_duration
+                                .max(0.001)
+                                .min(-boundary_gap)
                         } else {
-                            (-boundary_gap).max(0.008)
+                            -boundary_gap
                         }
                         .min(0.1),
                     )
@@ -1735,11 +1733,13 @@ fn import_graph(
                                 .total_cmp(&(right.start + right.duration))
                         })?;
                     let boundary_gap = next.timeline_start - group.timeline_end;
-                    (boundary_gap <= 0.002 && boundary_gap >= -0.5).then_some(
+                    (boundary_gap < -0.001 && boundary_gap >= -0.5).then_some(
                         if last_element.join_amplitude {
-                            last_element.amplitude_transition_duration.max(0.008)
+                            last_element.amplitude_transition_duration
+                                .max(0.001)
+                                .min(-boundary_gap)
                         } else {
-                            (-boundary_gap).max(0.008)
+                            -boundary_gap
                         }
                         .min(0.1),
                     )
@@ -1763,7 +1763,11 @@ fn import_graph(
                         source_end_sec: source_time(&graph, element, element.duration)
                             .max(source_time(&graph, element, 0.0) + 0.001),
                         time_map_points: element_time_map_points(&graph, element, shift),
+                        attack_duration_sec: element.attack_duration.max(0.0),
+                        attack_source_sec: source_time(&graph, element, element.attack_duration),
+                        attack_time_slope: element.attack_time_slope.max(1e-6),
                         connected_to_next: element.join_next,
+                        connected_phase_to_next: element.join_phase_next,
                         amplitude_factor: element.amplitude_factor.max(0.0),
                         fade_in_sec: element.fade_in_sec,
                         fade_out_sec: element.fade_out_sec,
@@ -1798,6 +1802,28 @@ fn import_graph(
                     tracks.len(),
                     progress,
                 );
+            let project_pitch_offset = params
+                .pitch_edit
+                .iter()
+                .zip(params.pitch_orig.iter())
+                .map(|(edited, original)| {
+                    if *edited > 0.0 && *original > 0.0 { edited - original } else { 0.0 }
+                })
+                .collect::<Vec<_>>();
+            params.extra_curves.insert(
+                "mld5_project_pitch_offset".to_string(),
+                project_pitch_offset,
+            );
+            params.extra_params.insert(
+                "mld5_pitch_source".to_string(),
+                if reanalyze_pitch_with_game_fcpe { 1.0 } else { 0.0 },
+            );
+            // In the optional path the imported contour is only a temporary
+            // preview.  Once GAME/FCPE source analysis is ready, the scheduler
+            // replaces both curves and reapplies the exact MPD note offsets.
+            if reanalyze_pitch_with_game_fcpe {
+                params.pitch_edit_user_modified = false;
+            }
             for (clip_id, curve) in clip_source_pitch_curves {
                 params
                     .extra_curves
@@ -1835,18 +1861,25 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
         Ok(graph) => graph,
         Err(_) => return import_flat_paths(path, data),
     };
-    import_graph(path, graph, &|_, _, _, _| {}, None)
+    import_graph(path, graph, &|_, _, _, _| {}, None, false)
 }
 
 pub fn import_mpd_file(
     path: &Path,
     progress: &ImportProgress<'_>,
     compose_track_indices: Option<&[usize]>,
+    pitch_source: Option<&str>,
 ) -> Result<MelodyneImportResult, String> {
     progress(0.0, "open", 0, 1);
     match decode_graph_file(path, progress).and_then(Graph::parse) {
         Ok(graph) if graph.find_first_class("MUPerformance").is_some() => {
-            import_graph(path, graph, progress, compose_track_indices)
+            import_graph(
+                path,
+                graph,
+                progress,
+                compose_track_indices,
+                pitch_source == Some("game_fcpe"),
+            )
         }
         Ok(_) => {
             // Compatibility path for older MPD variants.  It is reached only

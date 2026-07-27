@@ -516,19 +516,29 @@ function AppInner() {
         tracks: MelodyneTrackChoice[];
         selected: Set<number>;
         processingOrder: "note_first" | "track_first";
-        resolve: (choice: { composeTrackIndices: number[]; processingOrder: "note_first" | "track_first" }) => void;
+        pitchSource: "project" | "game_fcpe";
+        resolve: (choice: {
+            composeTrackIndices: number[];
+            processingOrder: "note_first" | "track_first";
+            pitchSource: "project" | "game_fcpe";
+        }) => void;
     } | null>(null);
 
     useEffect(() => {
         const handler = (event: Event) => {
             const detail = (event as CustomEvent).detail as {
                 tracks: MelodyneTrackChoice[];
-                resolve: (choice: { composeTrackIndices: number[]; processingOrder: "note_first" | "track_first" }) => void;
+                resolve: (choice: {
+                    composeTrackIndices: number[];
+                    processingOrder: "note_first" | "track_first";
+                    pitchSource: "project" | "game_fcpe";
+                }) => void;
             };
             setMelodyneComposePrompt({
                 tracks: detail.tracks,
                 selected: new Set(detail.tracks.filter((track) => track.suggestedCompose).map((track) => track.index)),
                 processingOrder: "note_first",
+                pitchSource: "project",
                 resolve: detail.resolve,
             });
         };
@@ -1998,11 +2008,32 @@ function AppInner() {
                             </label>
                         ))}
                     </Flex>
+                    <Text size="2" weight="bold" mt="4">{t("melodyne_pitch_source")}</Text>
+                    <Flex direction="column" gap="2" mt="2">
+                        {(["project", "game_fcpe"] as const).map((mode) => (
+                            <label key={mode} className="flex items-start gap-2">
+                                <input
+                                    type="radio"
+                                    name="melodyne-pitch-source"
+                                    checked={melodyneComposePrompt?.pitchSource === mode}
+                                    onChange={() => setMelodyneComposePrompt((current) => current ? { ...current, pitchSource: mode } : current)}
+                                />
+                                <span>
+                                    <Text as="div" size="2" weight="medium">{t(mode === "project" ? "melodyne_pitch_source_project" : "melodyne_pitch_source_game_fcpe")}</Text>
+                                    <Text as="div" size="1" color="gray">{t(mode === "project" ? "melodyne_pitch_source_project_hint" : "melodyne_pitch_source_game_fcpe_hint")}</Text>
+                                </span>
+                            </label>
+                        ))}
+                    </Flex>
                     <Flex justify="end" mt="4">
                         <Button onClick={() => {
                             const prompt = melodyneComposePrompt;
                             if (!prompt) return;
-                            prompt.resolve({ composeTrackIndices: [...prompt.selected].sort((a, b) => a - b), processingOrder: prompt.processingOrder });
+                            prompt.resolve({
+                                composeTrackIndices: [...prompt.selected].sort((a, b) => a - b),
+                                processingOrder: prompt.processingOrder,
+                                pitchSource: prompt.pitchSource,
+                            });
                             setMelodyneComposePrompt(null);
                         }}>{t("melodyne_import_continue")}</Button>
                     </Flex>

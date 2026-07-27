@@ -13,13 +13,22 @@ pub(super) fn apply_melodyne_correction(
     clip_id: String,
     settings: MelodyneCorrectionSettings,
 ) -> serde_json::Value {
-    let clip = {
+    let (clip, use_game_fcpe) = {
         let timeline = state
             .timeline
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         match timeline.clips.iter().find(|clip| clip.id == clip_id) {
-            Some(clip) => clip.clone(),
+            Some(clip) => {
+                let use_game_fcpe = timeline
+                    .resolve_root_track_id(&clip.track_id)
+                    .and_then(|root| timeline.params_by_root_track.get(&root))
+                    .and_then(|params| params.extra_params.get("mld5_pitch_source"))
+                    .copied()
+                    .unwrap_or(0.0)
+                    >= 0.5;
+                (clip.clone(), use_game_fcpe)
+            }
             None => {
                 return serde_json::json!({"ok": false, "error": format!("clip not found: {clip_id}")})
             }
@@ -28,7 +37,7 @@ pub(super) fn apply_melodyne_correction(
     let Some(source) = clip.source_path.as_deref() else {
         return serde_json::json!({"ok": false, "error": "selected clip has no audio source"});
     };
-    let analysis_result = if clip.melodyne_warp_segments.is_empty() {
+    let analysis_result = if clip.melodyne_warp_segments.is_empty() || use_game_fcpe {
         crate::sample_annotations::load_or_detect_with_game_mode(
             Path::new(source),
             settings.performance_mode,

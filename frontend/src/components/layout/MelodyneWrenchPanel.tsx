@@ -271,7 +271,7 @@ export const MelodyneWrenchPanel: React.FC<{
                                   ["melodyne_formant_offset_cents", "melodyne_formant", -1200, 1200, 1],
                                   ["melodyne_amplitude_factor", "melodyne_amplitude", 0, 2, 0.01],
                                   ["melodyne_sibilant_balance", "melodyne_sibilant", -1, 1, 0.01],
-                                  ["melodyne_attack_duration_sec", "melodyne_attack", 0, 1, 0.001],
+                                  ["melodyne_attack_duration_sec", "melodyne_consonant_length", 0, 1, 0.001],
                                 ] as Array<[NumericField, string, number, number, number]>
                               ).map(([field, label, min, max, step]) => (
                                 <label key={field} className="grid min-w-0 gap-0.5">

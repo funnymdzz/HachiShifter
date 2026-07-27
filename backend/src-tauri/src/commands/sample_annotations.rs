@@ -8,6 +8,17 @@ use tauri::State;
 
 const ACTIVE_ANNOTATION_PARAM: &str = "hachi_active_annotation";
 
+fn uses_game_fcpe_mpd_source(state: &AppState, clip: &crate::state::Clip) -> bool {
+    let timeline = state.timeline.lock().unwrap_or_else(|error| error.into_inner());
+    timeline
+        .resolve_root_track_id(&clip.track_id)
+        .and_then(|root| timeline.params_by_root_track.get(&root))
+        .and_then(|params| params.extra_params.get("mld5_pitch_source"))
+        .copied()
+        .unwrap_or(0.0)
+        >= 0.5
+}
+
 fn apply_melodyne_note_controls(
     timeline: &mut crate::state::TimelineState,
     clip: &crate::state::Clip,
@@ -50,21 +61,17 @@ fn apply_melodyne_note_controls(
             frame,
             (edited / 100.0).clamp(0.0, 127.0),
             row.melodyne_formant_offset_cents as f32,
-            row.melodyne_amplitude_factor as f32,
             row.melodyne_sibilant_balance as f32,
         ));
     }
     if updates.is_empty() { return; }
     entry.extra_curves.entry("formant_shift_cents".to_string())
         .or_insert_with(|| vec![0.0; curve_len]).resize(curve_len, 0.0);
-    entry.extra_curves.entry("volume".to_string())
-        .or_insert_with(|| vec![1.0; curve_len]).resize(curve_len, 1.0);
     entry.extra_curves.entry("mld5_sibilant_balance".to_string())
         .or_insert_with(|| vec![0.0; curve_len]).resize(curve_len, 0.0);
-    for (frame, pitch, formant, volume, sibilant) in updates {
+    for (frame, pitch, formant, sibilant) in updates {
         entry.pitch_edit[frame] = pitch;
         entry.extra_curves.get_mut("formant_shift_cents").unwrap()[frame] = formant;
-        entry.extra_curves.get_mut("volume").unwrap()[frame] = volume;
         entry.extra_curves.get_mut("mld5_sibilant_balance").unwrap()[frame] = sibilant;
     }
     // Do not infer or apply joins while saving source-note metadata. Explicit
@@ -133,7 +140,8 @@ pub(super) fn get_clip_sample_annotations(
     // MPD clips must remain entirely graph-driven. Their note identity,
     // boundaries, timing handles and controls were already restored during
     // import; running GAME here would silently replace that information.
-    let loaded = if clip.melodyne_warp_segments.is_empty() {
+    let use_game_fcpe = uses_game_fcpe_mpd_source(&state, &clip);
+    let loaded = if clip.melodyne_warp_segments.is_empty() || use_game_fcpe {
         sample_annotations::load_or_detect(Path::new(&source))
     } else {
         sample_annotations::melodyne_project_analysis(Path::new(&source))
@@ -223,6 +231,45 @@ pub(super) fn save_clip_sample_annotations(
                 .extra_params
                 .get_or_insert_with(Default::default)
                 .insert(ACTIVE_ANNOTATION_PARAM.to_string(), selected_index as f64);
+
+            // Melodyne's consonant/attack handle is the middle destination
+            // anchor of the element time map. Move that anchor horizontally
+            // while retaining its source coordinate, so only the attack
+            // length changes and the vowel remains tied to the same material.
+            for segment in &mut target.melodyne_warp_segments {
+                let midpoint = (segment.source_start_sec + segment.source_end_sec) * 0.5;
+                let Some(row) = annotations.iter().find(|row| {
+                    row.melodyne_project_data
+                        && midpoint >= row.region_start_sec - 0.001
+                        && midpoint <= row.region_end_sec + 0.001
+                }) else { continue; };
+                segment.amplitude_factor = row.melodyne_amplitude_factor.max(0.0) as f32;
+                segment.amplitude_transition_sec = row.melodyne_transition_sec.max(0.0);
+                let maximum = (segment.timeline_end_sec - segment.timeline_start_sec)
+                    .max(0.0);
+                let attack = row.melodyne_attack_duration_sec.clamp(0.0, maximum);
+                segment.attack_duration_sec = attack;
+                let attack_timeline = segment.timeline_start_sec + attack;
+                let attack_source_sec = segment.attack_source_sec;
+                if attack_source_sec.is_finite() && attack_source_sec > 0.0 {
+                    if let Some(point) = segment.time_map_points.iter_mut().min_by(|left, right| {
+                        (left.source_sec - attack_source_sec)
+                            .abs()
+                            .total_cmp(&(right.source_sec - attack_source_sec).abs())
+                    }) {
+                        point.timeline_sec = attack_timeline;
+                        point.source_sec = attack_source_sec;
+                    } else {
+                        segment.time_map_points.push(crate::state::MelodyneTimeMapPoint {
+                            timeline_sec: attack_timeline,
+                            source_sec: attack_source_sec,
+                        });
+                    }
+                    segment.time_map_points.sort_by(|left, right| {
+                        left.timeline_sec.total_cmp(&right.timeline_sec)
+                    });
+                }
+            }
         }
         apply_melodyne_note_controls(&mut timeline, &clip, &annotations);
         crate::synth_clip_cache::invalidate_clip_all_caches(&clip_id);
@@ -256,7 +303,8 @@ pub(super) fn redetect_clip_sample_annotations(
         Ok(value) => value,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
-    let analysis_result = if clip.melodyne_warp_segments.is_empty() {
+    let use_game_fcpe = uses_game_fcpe_mpd_source(&state, &clip);
+    let analysis_result = if clip.melodyne_warp_segments.is_empty() || use_game_fcpe {
         sample_annotations::reanalyze_audio(Path::new(&source))
     } else {
         // "Redetect" on an MPD clip means reload its persisted Melodyne

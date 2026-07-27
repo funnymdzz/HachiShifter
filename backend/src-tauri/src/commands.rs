@@ -156,8 +156,16 @@ pub async fn open_project(
     project_path: String,
     compose_track_indices: Option<Vec<usize>>,
     melodyne_processing_order: Option<String>,
+    melodyne_pitch_source: Option<String>,
 ) -> Result<crate::models::TimelineStatePayload, String> {
-    Ok(project::open_project(state, window, project_path, compose_track_indices, melodyne_processing_order))
+    Ok(project::open_project(
+        state,
+        window,
+        project_path,
+        compose_track_indices,
+        melodyne_processing_order,
+        melodyne_pitch_source,
+    ))
 }
 
 #[tauri::command(rename_all = "camelCase")]

@@ -94,7 +94,14 @@ export const projectApi = {
         projectPath: string,
         composeTrackIndices?: number[],
         melodyneProcessingOrder?: "note_first" | "track_first",
-    ) => invoke<TimelineResult>("open_project", projectPath, composeTrackIndices, melodyneProcessingOrder),
+        melodynePitchSource?: "project" | "game_fcpe",
+    ) => invoke<TimelineResult>(
+        "open_project",
+        projectPath,
+        composeTrackIndices,
+        melodyneProcessingOrder,
+        melodynePitchSource,
+    ),
 
     saveProject: (notesMarkdown?: string) => invoke<any>("save_project", notesMarkdown),
 

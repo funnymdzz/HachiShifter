@@ -977,5 +977,11 @@ export const enUS = {
     melodyne_track_first: "Splice/stretch, then tune",
     melodyne_track_first_hint: "DAW-style: assemble the track first, then apply pitch processing across it.",
     melodyne_import_continue: "Import project",
+    melodyne_pitch_source: "Original pitch source",
+    melodyne_pitch_source_project: "Melodyne project (precise)",
+    melodyne_pitch_source_project_hint: "Use the stored source pitch points, exact time maps, and edit parameters without replacing them with a new analysis.",
+    melodyne_pitch_source_game_fcpe: "GAME + FCPE reanalysis",
+    melodyne_pitch_source_game_fcpe_hint: "Detect syllables with GAME and source F0 with FCPE, then move that contour by the target offsets stored in the project.",
+    melodyne_consonant_length: "Consonant / attack length",
 
 } as const;

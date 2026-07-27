@@ -14,6 +14,23 @@ pub(crate) fn assemble_pitch_orig_from_cache(
 ) -> Option<(Vec<f32>, bool, bool)> {
     let fp = tl.frame_period_ms();
     let target_frames = tl.target_param_frames(fp);
+    // MPD already contains the source analysis used by Melodyne.  Keep that
+    // contour authoritative in the normal import path instead of replacing it
+    // asynchronously with FCPE and comparing two unrelated estimators.
+    if let Some(params) = tl.params_by_root_track.get(root_track_id) {
+        let is_strict_mpd = params.extra_curves.contains_key("mld5_project_pitch_offset")
+            && params
+                .extra_params
+                .get("mld5_pitch_source")
+                .copied()
+                .unwrap_or(0.0)
+                < 0.5;
+        if is_strict_mpd && !params.pitch_orig.is_empty() {
+            let mut curve = params.pitch_orig.clone();
+            curve.resize(target_frames.max(curve.len()), 0.0);
+            return Some((curve, true, true));
+        }
+    }
     let bpm = if tl.bpm.is_finite() && tl.bpm > 0.0 {
         tl.bpm
     } else {
@@ -285,6 +302,30 @@ pub fn maybe_schedule_pitch_orig(state: &AppState, root_track_id: &str) -> bool 
                     entry.pitch_orig = curve;
                     entry.pitch_orig_key = Some(job.key.clone());
                     entry.has_pitch_adjustment_active = has_pitch_adjustment;
+
+                    let use_game_fcpe = entry
+                        .extra_params
+                        .get("mld5_pitch_source")
+                        .copied()
+                        .unwrap_or(0.0)
+                        >= 0.5;
+                    if use_game_fcpe {
+                        if let Some(offsets) = entry
+                            .extra_curves
+                            .get("mld5_project_pitch_offset")
+                            .cloned()
+                        {
+                            entry.pitch_edit.clone_from(&entry.pitch_orig);
+                            let len = entry.pitch_edit.len().min(offsets.len());
+                            for index in 0..len {
+                                if entry.pitch_orig[index] > 0.0 {
+                                    entry.pitch_edit[index] =
+                                        (entry.pitch_orig[index] + offsets[index]).clamp(0.0, 127.0);
+                                }
+                            }
+                            entry.pitch_edit_user_modified = true;
+                        }
+                    }
 
                     // 应用 Reaper 导入的待定音高偏移
                     if let Some(offsets) = entry.pending_pitch_offset.take() {

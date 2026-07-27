@@ -160,11 +160,24 @@ pub struct MelodyneWarpSegment {
     /// stretch ratios inside one note.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub time_map_points: Vec<MelodyneTimeMapPoint>,
+    /// Destination-time length of Melodyne's attack/consonant part.  The
+    /// corresponding source-time handle remains fixed when this value is
+    /// edited, which is how Melodyne changes consonant length without moving
+    /// the vowel material.
+    #[serde(default)]
+    pub attack_duration_sec: f64,
+    #[serde(default)]
+    pub attack_source_sec: f64,
+    #[serde(default = "default_one_f64")]
+    pub attack_time_slope: f64,
     /// Melodyne's persisted note-connection state. This controls only the
     /// short phase-continuity splice at the boundary; imported pitch curves
     /// are never smoothed implicitly.
     #[serde(default)]
     pub connected_to_next: bool,
+    /// Phase joins are persisted independently from pitch joins in MPD.
+    #[serde(default)]
+    pub connected_phase_to_next: bool,
     #[serde(default = "default_one_f32")]
     pub amplitude_factor: f32,
     #[serde(default)]
@@ -182,6 +195,7 @@ pub struct MelodyneWarpSegment {
 }
 
 fn default_one_f32() -> f32 { 1.0 }
+fn default_one_f64() -> f64 { 1.0 }
 
 impl Default for ClipFormantMorph {
     fn default() -> Self {

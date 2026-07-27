@@ -603,6 +603,7 @@ fn try_render_mpd_vocal_from_args() -> Option<Result<(), String>> {
             // the reference project index 0 is the MixDown track, not vocal),
             // so selecting index 0 would silently skip the vocal note edits.
             None,
+            None,
         )?;
         let vocal_track_id = imported
             .timeline

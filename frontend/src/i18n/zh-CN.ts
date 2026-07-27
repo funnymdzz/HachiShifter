@@ -964,5 +964,11 @@ export const zhCN = {
     melodyne_track_first: "先拉伸拼接，后修音",
     melodyne_track_first_hint: "DAW 式：先组装完整轨道，再跨采样进行整体音高处理。",
     melodyne_import_continue: "导入工程",
+    melodyne_pitch_source: "原始音高线来源",
+    melodyne_pitch_source_project: "Melodyne 工程（高精度）",
+    melodyne_pitch_source_project_hint: "严格读取工程保存的原始音高点、时间映射和修改参数，不再分析覆盖。",
+    melodyne_pitch_source_game_fcpe: "GAME + FCPE 重新识别",
+    melodyne_pitch_source_game_fcpe_hint: "用 GAME 识别音节、FCPE 提取素材音高线，再应用工程中的目标音高偏移。",
+    melodyne_consonant_length: "辅音 / 起音长度",
 
 } as const;

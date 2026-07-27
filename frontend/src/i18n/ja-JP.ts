@@ -985,5 +985,11 @@ export const jaJP = {
     melodyne_track_first: "接続・伸縮してから補正",
     melodyne_track_first_hint: "DAW 方式：トラックを先に組み立ててから全体へピッチ処理を適用します。",
     melodyne_import_continue: "プロジェクトを読み込む",
+    melodyne_pitch_source: "元ピッチカーブのソース",
+    melodyne_pitch_source_project: "Melodyne プロジェクト（高精度）",
+    melodyne_pitch_source_project_hint: "保存済みの元ピッチ点、正確な時間マップ、編集値を使い、再解析で上書きしません。",
+    melodyne_pitch_source_game_fcpe: "GAME + FCPE 再解析",
+    melodyne_pitch_source_game_fcpe_hint: "GAME で音節、FCPE で元 F0 を検出し、プロジェクトの目標ピッチ差を適用します。",
+    melodyne_consonant_length: "子音 / アタック長",
 
 } as const;

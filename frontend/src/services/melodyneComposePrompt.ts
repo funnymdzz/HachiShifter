@@ -7,7 +7,11 @@ export interface MelodyneTrackChoice {
 
 export function requestMelodyneComposeSelection(
     tracks: MelodyneTrackChoice[],
-): Promise<{ composeTrackIndices: number[]; processingOrder: "note_first" | "track_first" }> {
+): Promise<{
+    composeTrackIndices: number[];
+    processingOrder: "note_first" | "track_first";
+    pitchSource: "project" | "game_fcpe";
+}> {
     return new Promise((resolve) => {
         window.dispatchEvent(
             new CustomEvent("hachi:melodyne-compose-selection", {

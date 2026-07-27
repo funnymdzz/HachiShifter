@@ -909,9 +909,9 @@ fn continue_periodic_phase_at_join(
         }
     }
 
-    // Auto crossfade is enabled by default. Disconnected pitch objects keep
-    // independent contours, but their PCM boundary still receives an 8 ms
-    // equal-power-compatible de-click bridge.
+    // This is a phase-continuity/de-click splice, not an automatic crossfade:
+    // automatic crossfades are created only where two source regions overlap.
+    // A touching discontinuity still needs a compact bridge to avoid a click.
     let requested = if connected { 12 } else { 8 };
     let default_fade = ((sample_rate as usize * requested) / 1000).max(8);
     // `joinsAmplitudes` carries its own transition duration. Honour that
@@ -959,7 +959,7 @@ pub fn render_melodyne_warp_segments(
     if input_frames == 0 || target_frames == 0 || segments.is_empty() { return input.to_vec(); }
     let mut out = vec![0.0f32; target_frames * channels];
     let mut weights = vec![0.0f32; target_frames];
-    let mut rendered_ranges = Vec::<(usize, usize, bool, bool, usize)>::new();
+    let mut rendered_ranges = Vec::<(usize, usize, bool, bool, bool, usize)>::new();
     let edge = ((sample_rate as usize * 5) / 1000).max(4);
     for segment in segments {
         let src_start = ((segment.source_start_sec - clip_source_start_sec).max(0.0)
@@ -1056,10 +1056,10 @@ pub fn render_melodyne_warp_segments(
                     .clamp(0.0, 1.0)
                     .powf(segment.fade_out_shape_pow.clamp(0.1, 8.0))
             } else { 1.0 };
-            // Note amplitude is restored by the MLD5 per-frame volume curve;
-            // this stage owns only the persisted element fades, avoiding a
-            // second multiplication of amplitudeFactor.
-            let gain = in_gain * out_gain;
+            // Apply the element gain before overlap composition. A single
+            // track-wide volume curve cannot represent two concurrent source
+            // elements and was the cause of level steps at sample joins.
+            let gain = in_gain * out_gain * segment.amplitude_factor.max(0.0);
             for channel in 0..channels {
                 stretched[local * channels + channel] *= gain;
             }
@@ -1068,6 +1068,7 @@ pub fn render_melodyne_warp_segments(
             dst_start,
             dst_end,
             segment.connected_to_next,
+            segment.connected_phase_to_next,
             segment.connected_amplitude_to_next,
             (segment.amplitude_transition_sec.max(0.0) * sample_rate as f64).round() as usize,
         ));
@@ -1090,8 +1091,8 @@ pub fn render_melodyne_warp_segments(
     rendered_ranges.sort_by_key(|range| range.0);
     let join_tolerance = ((sample_rate as usize * 2) / 1000).max(2);
     for pair in rendered_ranges.windows(2) {
-        let (left_start, left_end, connected, joins_amplitude, amplitude_transition_frames) = pair[0];
-        let (right_start, right_end, _, _, _) = pair[1];
+        let (left_start, left_end, connected, joins_phase, joins_amplitude, amplitude_transition_frames) = pair[0];
+        let (right_start, right_end, _, _, _, _) = pair[1];
         if left_end <= left_start || right_end <= right_start {
             continue;
         }
@@ -1100,13 +1101,19 @@ pub fn render_melodyne_warp_segments(
         if right_start > left_end.saturating_add(join_tolerance) {
             continue;
         }
+        // Actual overlaps have already been gain-balanced by the weighted
+        // source composition above. Do not add a synthetic bridge unless the
+        // MPD explicitly requests phase/pitch continuity.
+        if right_start < left_end && !(connected || joins_phase) {
+            continue;
+        }
         continue_periodic_phase_at_join(
             &mut out,
             channels,
             sample_rate,
             right_start,
             right_end.saturating_sub(right_start),
-            connected,
+            connected || joins_phase,
             if joins_amplitude { amplitude_transition_frames } else { 0 },
         );
     }

@@ -854,6 +854,7 @@ pub(super) fn open_project(
     project_path: String,
     compose_track_indices: Option<Vec<usize>>,
     melodyne_processing_order: Option<String>,
+    melodyne_pitch_source: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let path = PathBuf::from(&project_path);
 
@@ -883,6 +884,7 @@ pub(super) fn open_project(
             &path,
             &emit_progress,
             compose_track_indices.as_deref(),
+            melodyne_pitch_source.as_deref(),
         ) {
             Ok(imported) => imported,
             Err(error) => {

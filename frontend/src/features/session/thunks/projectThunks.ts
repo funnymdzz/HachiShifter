@@ -8,15 +8,22 @@ import { requestMelodyneComposeSelection } from "../../../services/melodyneCompo
 async function openProjectWithComposeChoice(projectPath: string) {
     let composeTrackIndices: number[] | undefined;
     let melodyneProcessingOrder: "note_first" | "track_first" | undefined;
+    let melodynePitchSource: "project" | "game_fcpe" | undefined;
     if (/\.mpd$/i.test(projectPath)) {
         const inspection = await webApi.inspectMelodyneProjectTracks(projectPath);
         if (inspection.ok && inspection.tracks) {
             const choice = await requestMelodyneComposeSelection(inspection.tracks);
             composeTrackIndices = choice.composeTrackIndices;
             melodyneProcessingOrder = choice.processingOrder;
+            melodynePitchSource = choice.pitchSource;
         }
     }
-    return webApi.openProject(projectPath, composeTrackIndices, melodyneProcessingOrder);
+    return webApi.openProject(
+        projectPath,
+        composeTrackIndices,
+        melodyneProcessingOrder,
+        melodynePitchSource,
+    );
 }
 
 async function resolveMissingFilesInteractively(timeline: any, missingFiles: string[] | undefined) {

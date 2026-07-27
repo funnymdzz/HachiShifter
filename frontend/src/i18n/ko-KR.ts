@@ -1001,5 +1001,11 @@ export const koKR = {
     melodyne_track_first: "연결·늘이기 후 보정",
     melodyne_track_first_hint: "DAW 방식: 트랙을 먼저 조립한 뒤 전체 피치 처리를 적용합니다.",
     melodyne_import_continue: "프로젝트 가져오기",
+    melodyne_pitch_source: "원본 피치 커브 소스",
+    melodyne_pitch_source_project: "Melodyne 프로젝트(고정밀)",
+    melodyne_pitch_source_project_hint: "저장된 원본 피치 포인트, 정확한 시간 맵, 편집 값을 사용하고 재분석으로 덮어쓰지 않습니다.",
+    melodyne_pitch_source_game_fcpe: "GAME + FCPE 재분석",
+    melodyne_pitch_source_game_fcpe_hint: "GAME으로 음절, FCPE로 원본 F0를 검출한 뒤 프로젝트의 목표 피치 오프셋을 적용합니다.",
+    melodyne_consonant_length: "자음 / 어택 길이",
 
 } as const;
