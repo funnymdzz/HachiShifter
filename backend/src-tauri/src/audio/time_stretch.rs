@@ -598,6 +598,89 @@ pub(crate) fn preserve_mld5_cepstral_formants(
     }
 }
 
+/// Move the low-quefrency spectral envelope independently of F0. Melodyne's
+/// project stores `formantOffset` in cents; sampling the envelope at
+/// `frequency / 2^(cent/1200)` moves its peaks by that ratio while preserving
+/// the synthesized harmonic phases.
+pub(crate) fn apply_mld5_formant_curve(
+    output: &mut [f32],
+    sample_rate: u32,
+    segment_start_sec: f64,
+    frame_period_ms: f64,
+    curve: &[f32],
+) {
+    if output.len() < 512 || sample_rate == 0 || curve.is_empty() {
+        return;
+    }
+    let fft_size = if sample_rate >= 24_000 { 2048 } else { 1024 };
+    if output.len() < fft_size / 2 { return; }
+    let hop = fft_size / 4;
+    let half = fft_size / 2 + 1;
+    let window: Vec<f32> = (0..fft_size).map(|i| {
+        0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos()
+    }).collect();
+    let mut planner = FftPlanner::<f32>::new();
+    let forward = planner.plan_fft_forward(fft_size);
+    let inverse = planner.plan_fft_inverse(fft_size);
+    let mut reconstructed = vec![0.0f32; output.len()];
+    let mut normalization = vec![0.0f32; output.len()];
+    let mut spectrum = vec![Complex32::new(0.0, 0.0); fft_size];
+    let mut cepstrum = vec![Complex32::new(0.0, 0.0); fft_size];
+    let mut envelope = vec![0.0f32; half];
+    let lifter = ((sample_rate as usize * 13) / 10_000).clamp(24, fft_size / 6);
+    let inv_n = 1.0 / fft_size as f32;
+
+    for start in (0..output.len()).step_by(hop) {
+        let center_sec = segment_start_sec + (start + fft_size / 2) as f64 / sample_rate as f64;
+        let curve_index = ((center_sec.max(0.0) * 1000.0) / frame_period_ms.max(0.1))
+            .round().max(0.0) as usize;
+        let cents = curve.get(curve_index).copied().unwrap_or(0.0).clamp(-2400.0, 2400.0);
+        for i in 0..fft_size {
+            spectrum[i] = Complex32::new(
+                output.get(start + i).copied().unwrap_or(0.0) * window[i], 0.0,
+            );
+        }
+        forward.process(&mut spectrum);
+        if cents.abs() >= 0.5 {
+            for i in 0..fft_size {
+                cepstrum[i] = Complex32::new(spectrum[i].norm().max(1e-8).ln(), 0.0);
+            }
+            inverse.process(&mut cepstrum);
+            for i in 0..fft_size {
+                if i <= lifter || i >= fft_size - lifter {
+                    cepstrum[i] *= inv_n;
+                } else {
+                    cepstrum[i] = Complex32::new(0.0, 0.0);
+                }
+            }
+            forward.process(&mut cepstrum);
+            for i in 0..half { envelope[i] = cepstrum[i].re.exp().max(1e-8); }
+            let ratio = 2.0f32.powf(cents / 1200.0);
+            for i in 0..half {
+                let source = (i as f32 / ratio).clamp(0.0, (half - 1) as f32);
+                let lo = source.floor() as usize;
+                let hi = (lo + 1).min(half - 1);
+                let frac = source - lo as f32;
+                let shifted = envelope[lo] + (envelope[hi] - envelope[lo]) * frac;
+                let gain = (shifted / envelope[i].max(1e-8)).clamp(0.35, 2.85);
+                spectrum[i] *= gain;
+            }
+            for i in 1..half - 1 { spectrum[fft_size - i] = spectrum[i].conj(); }
+        }
+        inverse.process(&mut spectrum);
+        for i in 0..fft_size {
+            let frame = start + i;
+            if frame >= output.len() { break; }
+            reconstructed[frame] += spectrum[i].re * inv_n * window[i];
+            normalization[frame] += window[i] * window[i];
+        }
+    }
+    for i in 0..output.len() {
+        if normalization[i] > 1e-6 { output[i] = reconstructed[i] / normalization[i]; }
+        if !output[i].is_finite() { output[i] = 0.0; }
+    }
+}
+
 /// Keep the broad spectral tilt of a stretched/synthesized vocal close to its
 /// source. This is deliberately gentle: it does not move formant peaks, but it
 /// prevents accumulated stretch + pitch processing from turning the voice
@@ -763,6 +846,68 @@ pub fn time_stretch_interleaved(
             linear_time_stretch_interleaved(input, channels, out_frames)
         }
     }
+}
+
+/// Render Melodyne's piecewise source-time/warp-time mapping. Each persisted
+/// note object owns its source interval and destination interval; rendering
+/// them independently preserves manual time handles that a single clip-wide
+/// playback-rate ratio would discard.
+pub fn render_melodyne_warp_segments(
+    input: &[f32],
+    channels: usize,
+    sample_rate: u32,
+    clip_start_sec: f64,
+    clip_source_start_sec: f64,
+    target_frames: usize,
+    segments: &[crate::state::MelodyneWarpSegment],
+) -> Vec<f32> {
+    let channels = channels.max(1);
+    let input_frames = input.len() / channels;
+    if input_frames == 0 || target_frames == 0 || segments.is_empty() { return input.to_vec(); }
+    let mut out = vec![0.0f32; target_frames * channels];
+    let mut weights = vec![0.0f32; target_frames];
+    let edge = ((sample_rate as usize * 5) / 1000).max(4);
+    for segment in segments {
+        let src_start = ((segment.source_start_sec - clip_source_start_sec).max(0.0)
+            * sample_rate as f64).round() as usize;
+        let src_end = ((segment.source_end_sec - clip_source_start_sec).max(0.0)
+            * sample_rate as f64).round() as usize;
+        let src_start = src_start.min(input_frames);
+        if src_start >= input_frames { continue; }
+        let src_end = src_end.clamp(src_start.saturating_add(1), input_frames);
+        if src_end <= src_start { continue; }
+        let dst_start = ((segment.timeline_start_sec - clip_start_sec).max(0.0)
+            * sample_rate as f64).round() as usize;
+        let dst_end = ((segment.timeline_end_sec - clip_start_sec).max(0.0)
+            * sample_rate as f64).round() as usize;
+        let dst_start = dst_start.min(target_frames);
+        if dst_start >= target_frames { continue; }
+        let dst_end = dst_end.clamp(dst_start.saturating_add(1), target_frames);
+        if dst_end <= dst_start { continue; }
+        let stretched = time_stretch_interleaved(
+            &input[src_start * channels..src_end * channels],
+            channels,
+            sample_rate,
+            dst_end - dst_start,
+            StretchAlgorithm::MelodyneHybrid,
+        );
+        for local in 0..(dst_end - dst_start) {
+            let frame = dst_start + local;
+            let left = (local as f32 / edge as f32).clamp(0.0, 1.0);
+            let right = ((dst_end - dst_start - 1 - local) as f32 / edge as f32).clamp(0.0, 1.0);
+            let weight = (left.min(right) * std::f32::consts::FRAC_PI_2).sin().max(0.001);
+            weights[frame] += weight;
+            for channel in 0..channels {
+                out[frame * channels + channel] += stretched[local * channels + channel] * weight;
+            }
+        }
+    }
+    for frame in 0..target_frames {
+        if weights[frame] > 1e-6 {
+            for channel in 0..channels { out[frame * channels + channel] /= weights[frame]; }
+        }
+    }
+    out
 }
 
 /// Preserve the source prefix at 1:1 speed and apply the selected stretcher

@@ -946,4 +946,9 @@ export const zhTW = {
     melodyne_source_file: "原始音訊",
     melodyne_source_original_mode: "原始狀態編輯 · 禁止拉伸",
     melodyne_edit_sample_details: "精細編輯別名與原始時間",
+    melodyne_formant: "共振峰",
+    melodyne_amplitude: "振幅",
+    melodyne_sibilant: "齒音平衡",
+    melodyne_attack: "起音時長",
+    melodyne_project_model: "Melodyne 工程",
 } as const;

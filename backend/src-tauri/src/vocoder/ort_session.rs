@@ -242,22 +242,28 @@ pub fn build_ort_session(onnx_path: &Path, role: OrtSessionRole) -> Result<(Sess
         return build_cpu_session(onnx_path, role, &choice);
     }
 
+    // FCPE is instantiated automatically as soon as an audio file is
+    // imported and uses highly dynamic time axes. Several Windows DML drivers
+    // terminate the host while compiling that graph. Keep the lightweight
+    // detector on CPU; DirectML remains active for the much heavier HiFiGAN
+    // vocoder where it provides the useful acceleration.
+    #[cfg(target_os = "windows")]
+    if matches!(role, OrtSessionRole::PitchDetector) && choice == "directml" {
+        return build_cpu_session(onnx_path, role, "directml_pitch_cpu_guard");
+    }
+
     // ── GPU path: try DirectML first (Windows) ──────────────────────────
     #[cfg(target_os = "windows")]
     {
-        // Attempt 1: strict DirectML (no CPU fallback).
-        // If all operators in the model have native DirectML support,
-        // the entire graph runs on GPU with ZERO partition boundaries.
-        match build_dml_session_inner(onnx_path, role, &choice, true) {
+        // DirectML requires sequential graph execution and disabled memory
+        // patterns.  A strict all-GPU probe followed by a second session used
+        // to leave native D3D resources alive while an audio import was also
+        // creating FCPE/HiFiGAN sessions; on some drivers that terminated the
+        // process instead of returning an ORT error.  Build exactly one stable
+        // session and leave unsupported operators on the CPU provider.
+        match build_dml_session_inner(onnx_path, role, &choice) {
             Ok((session, ep)) => return Ok((session, ep)),
-            Err(e) => eprintln!(
-                "ort_session[{role:?}]: strict DirectML failed (will retry with CPU fallback): {e}"
-            ),
-        }
-        // Attempt 2: DirectML with CPU fallback.
-        match build_dml_session_inner(onnx_path, role, &choice, false) {
-            Ok((session, ep)) => return Ok((session, ep)),
-            Err(e) => eprintln!("ort_session[{role:?}]: DirectML with fallback failed: {e}"),
+            Err(e) => eprintln!("ort_session[{role:?}]: DirectML failed: {e}"),
         }
     }
 
@@ -297,13 +303,12 @@ pub fn build_ort_session(onnx_path: &Path, role: OrtSessionRole) -> Result<(Sess
     build_cpu_session(onnx_path, role, &choice)
 }
 
-/// Build a DirectML session with optional strict mode (no CPU fallback).
+/// Build one DirectML session using the execution rules required by ORT's DML EP.
 #[cfg(target_os = "windows")]
 fn build_dml_session_inner(
     onnx_path: &Path,
     role: OrtSessionRole,
     choice: &str,
-    strict: bool,
 ) -> Result<(Session, String), String> {
     let mut builder =
         Session::builder().map_err(|e| format!("create ort session builder failed: {e}"))?;
@@ -311,7 +316,7 @@ fn build_dml_session_inner(
     let (builder, selected) = try_register_directml_ep(builder, role)?;
 
     eprintln!(
-        "ort_session[{role:?}]: model={} ep={selected} strict={strict} (choice={choice}, global_env={})",
+        "ort_session[{role:?}]: model={} ep={selected} (choice={choice}, global_env={})",
         onnx_path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default(),
         env_ep_choice(),
     );
@@ -328,47 +333,22 @@ fn build_dml_session_inner(
         .map_err(|e| format!("enable flush-to-zero failed: {e}"))?
         .with_prepacking(false)
         .map_err(|e| format!("disable prepacking failed: {e}"))?
-        // Override dynamic dimensions to fixed values. DirectML performs
-        // best when shapes are known at session creation time because it
-        // can pre-compile shaders and optimize GPU memory layouts. Dynamic
-        // dimensions force DML to use less-optimized generic kernels.
-        .with_dimension_override("batch", 1)
-        .map_err(|e| format!("override batch dim failed: {e}"))?
-        .with_dimension_override_by_denotation("time", 4096)
-        .map_err(|e| format!("override time dim failed: {e}"))?;
+        // DML has native state shared by graph nodes. Parallel graph
+        // execution is unsupported by the provider and can hard-exit inside
+        // the driver when sessions are first exercised during audio import.
+        .with_parallel_execution(false)
+        .map_err(|e| format!("disable parallel execution failed: {e}"))?;
 
-    if strict {
-        // Disable CPU fallback: if ANY op can't run on DirectML, session
-        // creation FAILS. If it succeeds, the ENTIRE graph runs on GPU
-        // with ZERO partition boundaries → no GPU↔CPU copies → maximum
-        // throughput. This is the key to unlocking Pascal (GTX 10xx)
-        // performance where ORT's partitioner otherwise sends too many
-        // ops to CPU.
-        builder = builder
-            .with_disable_cpu_fallback()
-            .map_err(|e| format!("disable cpu fallback failed: {e}"))?;
-    } else {
-        builder = builder
-            .with_parallel_execution(true)
-            .map_err(|e| format!("enable parallel execution failed: {e}"))?
-            .with_inter_threads(2)
-            .map_err(|e| format!("set inter threads failed: {e}"))?;
-    }
+    // Do not override dynamic `time` dimensions. FCPE, HNSEP and HiFiGAN use
+    // different input lengths, so forcing all of them to 4096 made the first
+    // imported file violate the compiled DML tensor shape.
 
     // ── Thread config ───────────────────────────────────────────────────
     let cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4)
         .max(2);
-    let threads = if strict {
-        // Strict mode: ALL ops on GPU. CPU threads are irrelevant —
-        // keep 2 to avoid overhead.
-        2
-    } else {
-        // Fallback mode: CPU handles unsupported ops.
-        // Max threads for fastest CPU fallback throughput.
-        cores.max(4)
-    };
+    let threads = (cores / 2).clamp(1, 8);
 
     builder = builder
         .with_intra_threads(threads)
@@ -382,7 +362,7 @@ fn build_dml_session_inner(
 
     // ── Detailed diagnostic logging ────────────────────────────────────
     eprintln!(
-        "ort_session[{role:?}]: created session ep={selected} strict={strict} intra_threads={threads} commit_ms={create_ms}",
+        "ort_session[{role:?}]: created session ep={selected} sequential=true intra_threads={threads} commit_ms={create_ms}",
     );
     // Log session I/O metadata (names, shapes, types)
     for input in session.inputs() {

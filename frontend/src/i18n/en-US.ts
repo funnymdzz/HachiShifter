@@ -959,4 +959,9 @@ export const enUS = {
     melodyne_source_file: "Source file",
     melodyne_source_original_mode: "Original source · stretch disabled",
     melodyne_edit_sample_details: "Edit alias and source times",
+    melodyne_formant: "Formant",
+    melodyne_amplitude: "Amplitude",
+    melodyne_sibilant: "Sibilant balance",
+    melodyne_attack: "Attack length",
+    melodyne_project_model: "Melodyne project",
 } as const;

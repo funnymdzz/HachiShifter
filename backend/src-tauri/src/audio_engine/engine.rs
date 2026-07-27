@@ -1662,6 +1662,7 @@ mod tests {
             formant_morph: None,
             group_id: None,
             midi_fill_gaps: false,
+            melodyne_warp_segments: Vec::new(),
             midi_note_data: None,
         });
         timeline

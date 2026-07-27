@@ -983,4 +983,9 @@ export const koKR = {
     melodyne_source_file: "원본 오디오",
     melodyne_source_original_mode: "원본 상태 편집 · 늘이기 비활성",
     melodyne_edit_sample_details: "별칭과 원본 시간 정밀 편집",
+    melodyne_formant: "포먼트",
+    melodyne_amplitude: "진폭",
+    melodyne_sibilant: "치찰음 밸런스",
+    melodyne_attack: "어택 길이",
+    melodyne_project_model: "Melodyne 프로젝트",
 } as const;

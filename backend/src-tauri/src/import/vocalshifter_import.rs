@@ -612,6 +612,7 @@ fn create_midi_clip_from_file(
         formant_morph: None,
         midi_note_data: Some(notes),
         midi_fill_gaps: false,
+    melodyne_warp_segments: Vec::new(),
     })
 }
 
@@ -999,6 +1000,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                     formant_morph: None,
                     midi_note_data: None,
                     midi_fill_gaps: false,
+                melodyne_warp_segments: Vec::new(),
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -1107,6 +1109,7 @@ pub fn import_vsp(data: &[u8], vsp_file_dir: &Path) -> Result<VspImportResult, S
                 formant_morph: None,
                 midi_note_data: None,
                 midi_fill_gaps: false,
+            melodyne_warp_segments: Vec::new(),
             });
 
             // 写入 pitch 数据
@@ -1729,6 +1732,7 @@ pub fn import_vsp_clipboard(
                     formant_morph: None,
                     midi_note_data: None,
                     midi_fill_gaps: false,
+                melodyne_warp_segments: Vec::new(),
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -1836,6 +1840,7 @@ pub fn import_vsp_clipboard(
                 formant_morph: None,
                 midi_note_data: None,
                 midi_fill_gaps: false,
+            melodyne_warp_segments: Vec::new(),
             });
 
             write_pitch_data_for_segment(
@@ -2280,6 +2285,7 @@ fn import_vsp_clipboard_selected_tracks(
                     formant_morph: None,
                     midi_note_data: None,
                     midi_fill_gaps: false,
+                melodyne_warp_segments: Vec::new(),
                 });
                 segment_clip_indices.push(clip_index);
                 segment_actual_pre_tl.push(actual_pre_tl);
@@ -2385,6 +2391,7 @@ fn import_vsp_clipboard_selected_tracks(
                 formant_morph: None,
                 midi_note_data: None,
                 midi_fill_gaps: false,
+            melodyne_warp_segments: Vec::new(),
             });
 
             write_pitch_data_for_segment(

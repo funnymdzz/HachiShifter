@@ -946,4 +946,9 @@ export const zhCN = {
     melodyne_source_file: "原始音频",
     melodyne_source_original_mode: "原始状态编辑 · 禁止拉伸",
     melodyne_edit_sample_details: "精细编辑别名和原始时间",
+    melodyne_formant: "共振峰",
+    melodyne_amplitude: "振幅",
+    melodyne_sibilant: "齿音平衡",
+    melodyne_attack: "起音时长",
+    melodyne_project_model: "Melodyne 工程",
 } as const;

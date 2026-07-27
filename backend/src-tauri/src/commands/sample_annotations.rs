@@ -8,6 +8,85 @@ use tauri::State;
 
 const ACTIVE_ANNOTATION_PARAM: &str = "hachi_active_annotation";
 
+fn apply_melodyne_note_controls(
+    timeline: &mut crate::state::TimelineState,
+    clip: &crate::state::Clip,
+    annotations: &[SampleRegionAnnotation],
+) {
+    if clip.reversed || !annotations.iter().any(|row| row.melodyne_project_data) {
+        return;
+    }
+    let Some(root) = timeline.resolve_root_track_id(&clip.track_id).map(str::to_string) else {
+        return;
+    };
+    let Some(entry) = timeline.params_by_root_track.get_mut(&root) else { return; };
+    if entry.pitch_edit.is_empty() { return; }
+    let fp_sec = entry.frame_period_ms.max(0.1) / 1000.0;
+    let rate = (clip.playback_rate as f64).max(1e-6);
+    let first = (clip.start_sec.max(0.0) / fp_sec).floor().max(0.0) as usize;
+    let last = ((clip.start_sec + clip.length_sec.max(0.0)) / fp_sec)
+        .ceil().max(0.0) as usize;
+    let curve_len = entry.pitch_edit.len();
+    let mut updates = Vec::new();
+    for frame in first..last.min(curve_len) {
+        let timeline_sec = frame as f64 * fp_sec;
+        let source_sec = clip.source_start_sec + (timeline_sec - clip.start_sec) * rate;
+        let Some(row) = annotations.iter().find(|row| {
+            row.melodyne_project_data
+                && source_sec >= row.region_start_sec
+                && source_sec <= row.region_end_sec
+        }) else { continue; };
+        let raw = entry.pitch_orig.get(frame).copied().unwrap_or(0.0) * 100.0;
+        if raw <= 0.0 { continue; }
+        let without = entry.extra_curves.get("mld5_pitch_without_vibrato")
+            .and_then(|curve| curve.get(frame)).copied().unwrap_or(raw / 100.0) * 100.0;
+        let original_center = if row.melodyne_original_pitch_center_cents > 0.0 {
+            row.melodyne_original_pitch_center_cents as f32
+        } else { raw };
+        let edited = row.melodyne_pitch_center_cents as f32
+            + row.melodyne_pitch_drift_factor as f32 * (without - original_center)
+            + row.melodyne_pitch_modulation_factor as f32 * (raw - without);
+        updates.push((
+            frame,
+            (edited / 100.0).clamp(0.0, 127.0),
+            row.melodyne_formant_offset_cents as f32,
+            row.melodyne_amplitude_factor as f32,
+            row.melodyne_sibilant_balance as f32,
+        ));
+    }
+    if updates.is_empty() { return; }
+    entry.extra_curves.entry("formant_shift_cents".to_string())
+        .or_insert_with(|| vec![0.0; curve_len]).resize(curve_len, 0.0);
+    entry.extra_curves.entry("volume".to_string())
+        .or_insert_with(|| vec![1.0; curve_len]).resize(curve_len, 1.0);
+    entry.extra_curves.entry("mld5_sibilant_balance".to_string())
+        .or_insert_with(|| vec![0.0; curve_len]).resize(curve_len, 0.0);
+    for (frame, pitch, formant, volume, sibilant) in updates {
+        entry.pitch_edit[frame] = pitch;
+        entry.extra_curves.get_mut("formant_shift_cents").unwrap()[frame] = formant;
+        entry.extra_curves.get_mut("volume").unwrap()[frame] = volume;
+        entry.extra_curves.get_mut("mld5_sibilant_balance").unwrap()[frame] = sibilant;
+    }
+    // Rebuild the short pitch-transition ramps stored on each note object.
+    for row in annotations.iter().filter(|row| row.melodyne_project_data && row.melodyne_transition_sec > 0.0) {
+        let boundary_sec = clip.start_sec + (row.region_end_sec - clip.source_start_sec) / rate;
+        let center = (boundary_sec / fp_sec).round().max(0.0) as usize;
+        let radius = ((row.melodyne_transition_sec * 0.5) / fp_sec).round().max(1.0) as usize;
+        if center == 0 || center >= entry.pitch_edit.len() { continue; }
+        let left = center.saturating_sub(radius);
+        let right = (center + radius).min(entry.pitch_edit.len() - 1);
+        let a = entry.pitch_edit[left];
+        let b = entry.pitch_edit[right];
+        if a <= 0.0 || b <= 0.0 || right <= left { continue; }
+        for (offset, value) in entry.pitch_edit[left..=right].iter_mut().enumerate() {
+            let x = offset as f32 / (right - left) as f32;
+            let eased = x * x * (3.0 - 2.0 * x);
+            *value = a + (b - a) * eased;
+        }
+    }
+    entry.pitch_edit_user_modified = true;
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 struct ClipAnnotationPayload {
@@ -129,6 +208,7 @@ pub(super) fn save_clip_sample_annotations(
         Ok(path) => path,
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
+    sample_annotations::update_melodyne_project_annotations(Path::new(&source), &annotations);
 
     let selected_index = active_annotation_index
         .unwrap_or_else(|| active_annotation_index_from_clip(&clip))
@@ -149,6 +229,8 @@ pub(super) fn save_clip_sample_annotations(
                 .get_or_insert_with(Default::default)
                 .insert(ACTIVE_ANNOTATION_PARAM.to_string(), selected_index as f64);
         }
+        apply_melodyne_note_controls(&mut timeline, &clip, &annotations);
+        crate::synth_clip_cache::invalidate_clip_all_caches(&clip_id);
         state.audio_engine.update_timeline(timeline.clone());
     }
     state.bump_timeline_version();

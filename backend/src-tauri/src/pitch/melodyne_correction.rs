@@ -57,6 +57,14 @@ fn source_to_timeline(
     annotation: Option<&SampleRegionAnnotation>,
     source_sec: f64,
 ) -> f64 {
+    if let Some(segment) = clip.melodyne_warp_segments.iter().find(|segment| {
+        source_sec >= segment.source_start_sec && source_sec <= segment.source_end_sec
+    }) {
+        let source_span = (segment.source_end_sec - segment.source_start_sec).max(1e-9);
+        let phase = ((source_sec - segment.source_start_sec) / source_span).clamp(0.0, 1.0);
+        return segment.timeline_start_sec
+            + phase * (segment.timeline_end_sec - segment.timeline_start_sec);
+    }
     let source_start = clip.source_start_sec.max(0.0);
     let source_end = clip.source_end_sec.max(source_start + 1e-6);
     let source_span = (source_end - source_start).max(1e-6);

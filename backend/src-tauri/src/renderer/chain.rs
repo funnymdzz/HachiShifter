@@ -125,7 +125,9 @@ impl ClipProcessor for ProcessorChain {
     fn capabilities(&self) -> ProcessorCapabilities {
         ProcessorCapabilities {
             handles_time_stretch: self.handles_time_stretch,
-            supports_formant: false,
+            supports_formant: self.stages.iter().any(|stage| {
+                matches!(stage.id(), "mld5" | "nsf_hifigan")
+            }),
             supports_breathiness: self.stages.iter().any(|stage| stage.id() == "nsf_hifigan"),
         }
     }
@@ -229,12 +231,48 @@ impl ProcessingStage for Mld5VocoderStage {
             cc.sample_rate,
             0.92,
         );
+        if let Some(curve) = cc.extra_curves.get("formant_shift_cents") {
+            crate::time_stretch::apply_mld5_formant_curve(
+                &mut output,
+                cc.sample_rate,
+                cc.seg_start_sec,
+                cc.frame_period_ms,
+                curve,
+            );
+        }
         crate::time_stretch::anchor_mld5_attack_residuals(
             &input_pcm,
             &mut output,
             1,
             cc.sample_rate,
         );
+        if let Some(sibilant) = cc.extra_curves.get("mld5_sibilant_balance") {
+            // Apply the stored balance only to the non-periodic high band;
+            // the principal/F0 component remains untouched.
+            let alpha = (-2.0f32 * std::f32::consts::PI * 3_200.0
+                / cc.sample_rate.max(1) as f32).exp();
+            let mut low = output.first().copied().unwrap_or(0.0);
+            for (sample_index, sample) in output.iter_mut().enumerate() {
+                low = (1.0 - alpha) * *sample + alpha * low;
+                let high = *sample - low;
+                let abs_sec = cc.seg_start_sec + sample_index as f64 / cc.sample_rate.max(1) as f64;
+                let balance = sample_curve_at_abs_sec(
+                    Some(sibilant), abs_sec, cc.frame_period_ms, 0.0,
+                ).clamp(-1.0, 1.0);
+                *sample = low + high * (1.0 + 0.65 * balance);
+            }
+        }
+        // Melodyne amplitude is an element automation value, not merely the
+        // visual clip gain. Apply it after component reconstruction so attack
+        // residuals and the periodic principal retain their stored balance.
+        if let Some(volume) = cc.extra_curves.get("volume") {
+            for (sample_index, sample) in output.iter_mut().enumerate() {
+                let abs_sec = cc.seg_start_sec + sample_index as f64 / cc.sample_rate.max(1) as f64;
+                let gain = sample_curve_at_abs_sec(Some(volume), abs_sec, cc.frame_period_ms, 1.0)
+                    .clamp(0.0, 4.0);
+                *sample *= gain;
+            }
+        }
         Ok(output)
     }
 }

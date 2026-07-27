@@ -729,6 +729,10 @@ struct ImportedElement {
     pitch_modulation: f32,
     formant_offset: f32,
     amplitude_factor: f32,
+    sibilant_balance: f32,
+    attack_duration: f64,
+    decay_elongation: f32,
+    anchor_point: f64,
     muted: bool,
     join_next: bool,
     join_duration: f64,
@@ -861,6 +865,10 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         .unwrap_or(1.0),
                     formant_offset: graph.f32(element_id, "formantOffset").unwrap_or(0.0),
                     amplitude_factor: graph.f32(element_id, "amplitudeFactor").unwrap_or(1.0),
+                    sibilant_balance: graph.f32(element_id, "sibilantBalance").unwrap_or(0.0),
+                    attack_duration: graph.f64(element_id, "attackDuration").unwrap_or(0.0),
+                    decay_elongation: graph.f32(element_id, "decayElongation").unwrap_or(0.0),
+                    anchor_point: graph.f64(element_id, "anchorPoint").unwrap_or(0.0),
                     muted: graph.bool(element_id, "isMuted"),
                     join_next: following_join
                         .map(|join| graph.bool(join, "joinsPitches"))
@@ -905,11 +913,91 @@ fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64
     item_start_samples / sample_rate + mapped.max(0.0)
 }
 
+fn register_project_note_objects(
+    graph: &Graph,
+    tracks: &[ImportedTrack],
+    resolved_sources: &BTreeMap<u32, Option<PathBuf>>,
+) {
+    use crate::sample_annotations::{
+        NoteDetectorKind, SampleAnalysis, SamplePitchNote, SampleRegionAnnotation,
+    };
+
+    for (source_id, resolved) in resolved_sources {
+        let Some(path) = resolved.as_ref() else { continue; };
+        let mut rows = Vec::new();
+        let mut notes = Vec::new();
+        for track in tracks {
+            for element in track.elements.iter().filter(|item| item.source_id == *source_id) {
+                let start = source_time(graph, element, 0.0).max(0.0);
+                let end = source_time(graph, element, element.duration).max(start + 0.001);
+                // The persisted anchor is Melodyne's timing handle within the
+                // note object. Clamp it into the source region because older
+                // graph versions occasionally retain an out-of-range value.
+                let anchor_local = element.anchor_point.clamp(0.0, element.duration);
+                let alignment = source_time(graph, element, anchor_local).clamp(start, end);
+                let original_center = graph
+                    .f32(element.source_item_id, "pitchCenter")
+                    .unwrap_or(element.pitch_center);
+
+                // Reused elements can occur on more than one composition
+                // track. The source editor needs one source-time boundary.
+                if rows.iter().any(|row: &SampleRegionAnnotation| {
+                    (row.region_start_sec - start).abs() < 0.0005
+                        && (row.region_end_sec - end).abs() < 0.0005
+                }) {
+                    continue;
+                }
+                let index = rows.len() + 1;
+                rows.push(SampleRegionAnnotation {
+                    name: format!("Melodyne {index}"),
+                    region_start_sec: start,
+                    region_end_sec: end,
+                    note_alignment_sec: alignment,
+                    fixed_duration_sec: (alignment - start).max(0.0),
+                    relative_pitch_cents: 0.0,
+                    melodyne_project_data: true,
+                    melodyne_pitch_center_cents: element.pitch_center as f64,
+                    melodyne_original_pitch_center_cents: original_center as f64,
+                    melodyne_pitch_drift_factor: element.pitch_drift as f64,
+                    melodyne_pitch_modulation_factor: element.pitch_modulation as f64,
+                    melodyne_transition_sec: element.join_duration.max(0.0),
+                    melodyne_formant_offset_cents: element.formant_offset as f64,
+                    melodyne_amplitude_factor: element.amplitude_factor as f64,
+                    melodyne_sibilant_balance: element.sibilant_balance as f64,
+                    melodyne_attack_duration_sec: element.attack_duration.max(0.0),
+                    melodyne_decay_elongation: element.decay_elongation as f64,
+                });
+                notes.push(SamplePitchNote {
+                    start_sec: start,
+                    end_sec: end,
+                    midi_note: (element.pitch_center / 100.0).clamp(0.0, 127.0),
+                    confidence: 1.0,
+                });
+            }
+        }
+        if rows.is_empty() { continue; }
+        let mut paired: Vec<_> = rows.into_iter().zip(notes).collect();
+        paired.sort_by(|left, right| left.0.region_start_sec.total_cmp(&right.0.region_start_sec));
+        let (annotations, pitch_notes) = paired.into_iter().unzip();
+        crate::sample_annotations::register_melodyne_project_analysis(
+            path,
+            SampleAnalysis {
+                annotations,
+                pitch_notes,
+                audio_events: Vec::new(),
+                note_detector: NoteDetectorKind::Melodyne,
+                detector_message: Some("Restored from Melodyne project note objects".to_string()),
+            },
+        );
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ClipGroup {
     source_id: u32,
     placement: f64,
     element_count: usize,
+    element_indices: Vec<usize>,
     timeline_start: f64,
     timeline_end: f64,
     source_start: f64,
@@ -919,7 +1007,7 @@ struct ClipGroup {
 fn group_clips(graph: &Graph, track: &ImportedTrack) -> Vec<ClipGroup> {
     let mut groups: Vec<ClipGroup> = Vec::new();
     let mut placement_bins: HashMap<(u32, i64), Vec<usize>> = HashMap::new();
-    for element in &track.elements {
+    for (element_index, element) in track.elements.iter().enumerate() {
         let source_start = source_time(graph, element, 0.0);
         let source_end = source_time(graph, element, element.duration).max(source_start + 1e-6);
         let placement = element.start - source_start;
@@ -939,6 +1027,7 @@ fn group_clips(graph: &Graph, track: &ImportedTrack) -> Vec<ClipGroup> {
         if let Some(group_index) = matching_index {
             let group = &mut groups[group_index];
             group.element_count += 1;
+            group.element_indices.push(element_index);
             group.timeline_start = group.timeline_start.min(element.start);
             group.timeline_end = group.timeline_end.max(element.start + element.duration);
             group.source_start = group.source_start.min(source_start);
@@ -951,6 +1040,7 @@ fn group_clips(graph: &Graph, track: &ImportedTrack) -> Vec<ClipGroup> {
                 source_id: element.source_id,
                 placement,
                 element_count: 1,
+                element_indices: vec![element_index],
                 timeline_start: element.start,
                 timeline_end: element.start + element.duration,
                 source_start,
@@ -1113,6 +1203,7 @@ fn build_track_params(
     let frame_count = (project_sec / frame_period_sec).ceil().max(1.0) as usize + 1;
     let mut pitch_orig = vec![0.0f32; frame_count];
     let mut pitch_edit = vec![0.0f32; frame_count];
+    let mut pitch_without_vibrato = vec![0.0f32; frame_count];
     let has_formant = track
         .elements
         .iter()
@@ -1121,8 +1212,10 @@ fn build_track_params(
         .elements
         .iter()
         .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
+    let has_sibilant = track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6);
     let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
     let mut volume = has_volume.then(|| vec![1.0f32; frame_count]);
+    let mut sibilant = has_sibilant.then(|| vec![0.0f32; frame_count]);
     // A source item is commonly referenced by hundreds of Melodyne elements.
     // Decode its property-point list once instead of cloning it per note.
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
@@ -1167,12 +1260,16 @@ fn build_track_params(
                 + element.pitch_drift * (without_vibrato - source_center)
                 + element.pitch_modulation * (raw - without_vibrato);
             pitch_orig[frame] = (raw / 100.0).clamp(0.0, 127.0);
+            pitch_without_vibrato[frame] = (without_vibrato / 100.0).clamp(0.0, 127.0);
             pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
             if let Some(curve) = formant.as_mut() {
                 curve[frame] = element.formant_offset;
             }
             if let Some(curve) = volume.as_mut() {
                 curve[frame] = element.amplitude_factor.max(0.0);
+            }
+            if let Some(curve) = sibilant.as_mut() {
+                curve[frame] = element.sibilant_balance;
             }
         }
     }
@@ -1194,11 +1291,15 @@ fn build_track_params(
     }
 
     let mut extra_curves = HashMap::new();
+    extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);
     if let Some(curve) = formant {
         extra_curves.insert("formant_shift_cents".to_string(), curve);
     }
     if let Some(curve) = volume {
         extra_curves.insert("volume".to_string(), curve);
+    }
+    if let Some(curve) = sibilant {
+        extra_curves.insert("mld5_sibilant_balance".to_string(), curve);
     }
     TrackParamsState {
         frame_period_ms,
@@ -1235,7 +1336,8 @@ fn choose_frame_period_ms(tracks: &[ImportedTrack], project_sec: f64) -> f64 {
                 .elements
                 .iter()
                 .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
-            8 + usize::from(has_formant) * 4 + usize::from(has_volume) * 4
+            12 + usize::from(has_formant) * 4 + usize::from(has_volume) * 4
+                + usize::from(track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6)) * 4
         })
         .sum();
     if bytes_per_project_frame == 0 || project_sec <= 0.0 {
@@ -1400,6 +1502,16 @@ fn import_graph(
                 clip.playback_rate = (source_length / timeline_length).clamp(0.05, 20.0) as f32;
                 clip.fade_in_sec = clip.fade_in_sec.max(0.005).min(timeline_length * 0.25);
                 clip.fade_out_sec = clip.fade_out_sec.max(0.005).min(timeline_length * 0.25);
+                clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
+                    let element = track.elements.get(*index)?;
+                    Some(crate::state::MelodyneWarpSegment {
+                        timeline_start_sec: element.start + shift,
+                        timeline_end_sec: element.start + element.duration + shift,
+                        source_start_sec: source_time(&graph, element, 0.0).max(0.0),
+                        source_end_sec: source_time(&graph, element, element.duration)
+                            .max(source_time(&graph, element, 0.0) + 0.001),
+                    })
+                }).collect();
             }
         }
         if track.melodic {
@@ -1421,6 +1533,11 @@ fn import_graph(
             timeline.selected_track_id = Some(track_id);
         }
     }
+
+    // Keep Melodyne's persisted segmentation and note-object controls
+    // available to the original-source wrench editor. This avoids replacing
+    // them with a new GAME pass when an imported MPD clip is selected.
+    register_project_note_objects(&graph, &tracks, &resolved_sources);
 
     timeline.playhead_sec = 0.0;
     timeline.project_sec = project_sec;

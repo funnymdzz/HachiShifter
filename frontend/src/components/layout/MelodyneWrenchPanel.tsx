@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Flex, IconButton, Select, Text, TextField } from "@radix-ui/themes";
+import { Button, Flex, Select, Text, TextField } from "@radix-ui/themes";
 import type { StretchAlgorithmOption } from "../../services/api/settings";
 import type {
     ClipSampleAnnotationsResult,
@@ -8,7 +8,7 @@ import type {
 import { useI18n } from "../../i18n/I18nProvider";
 
 type Analysis = Extract<ClipSampleAnnotationsResult, { ok: true }>;
-type NumericField = Exclude<keyof SampleRegionAnnotation, "name">;
+type NumericField = Exclude<keyof SampleRegionAnnotation, "name" | "melodyne_project_data">;
 
 export const MelodyneWrenchPanel: React.FC<{
     analysis: Analysis | null;
@@ -205,26 +205,17 @@ export const MelodyneWrenchPanel: React.FC<{
                         {analysis.annotations.map((row, index) => {
                             const note = analysis.pitch_notes[index];
                             return (
-                                <Flex key={`${row.region_start_sec}-${index}`} gap="1" align="center" className="shrink-0">
-                                    <Button
-                                        size="1"
-                                        variant={index === analysis.active_annotation_index ? "solid" : "soft"}
-                                        color={index === analysis.active_annotation_index ? "blue" : "gray"}
-                                        onClick={() => selectMergedRegion(index)}
-                                        title={`${row.region_start_sec.toFixed(3)}–${row.region_end_sec.toFixed(3)} s`}
-                                    >
-                                        {`${index + 1} · ${row.name}${note ? ` · MIDI ${note.midi_note.toFixed(1)}` : ""}`}
-                                    </Button>
-                                    <IconButton
-                                        size="1"
-                                        variant={expandedRegionIndex === index ? "solid" : "soft"}
-                                        color={expandedRegionIndex === index ? "blue" : "gray"}
-                                        title={tAny("melodyne_edit_sample_details")}
-                                        onClick={() => selectMergedRegion(index, true)}
-                                    >
-                                        ⋯
-                                    </IconButton>
-                                </Flex>
+                                <Button
+                                    key={`${row.region_start_sec}-${index}`}
+                                    size="1"
+                                    className="shrink-0"
+                                    variant={index === analysis.active_annotation_index ? "solid" : "soft"}
+                                    color={index === analysis.active_annotation_index ? "blue" : "gray"}
+                                    onClick={() => selectMergedRegion(index, true)}
+                                    title={`${tAny("melodyne_edit_sample_details")} · ${row.region_start_sec.toFixed(3)}–${row.region_end_sec.toFixed(3)} s`}
+                                >
+                                    {`${index + 1} · ${row.name}${note ? ` · MIDI ${note.midi_note.toFixed(1)}` : ""}`}
+                                </Button>
                             );
                         })}
                         <div className="h-5 w-px shrink-0 bg-qt-border" />
@@ -236,7 +227,8 @@ export const MelodyneWrenchPanel: React.FC<{
                         </Button>
                     </Flex>
                     {expandedRegion && expandedRegionIndex != null ? (
-                        <div className="mt-1 grid grid-cols-[minmax(150px,1.4fr)_repeat(4,minmax(108px,1fr))] gap-1 rounded border border-qt-border bg-qt-window/60 p-1">
+                        <div className="mt-1 rounded border border-qt-border bg-qt-window/60 p-1">
+                          <div className="grid grid-cols-[minmax(150px,1.4fr)_repeat(4,minmax(108px,1fr))] gap-1">
                             <label className="grid gap-0.5">
                                 <Text size="1" color="gray">{tAny("sample_timing_name")}</Text>
                                 <TextField.Root
@@ -265,6 +257,39 @@ export const MelodyneWrenchPanel: React.FC<{
                                     />
                                 </label>
                             ))}
+                          </div>
+                          {expandedRegion.melodyne_project_data ? (
+                            <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-qt-border pt-2 md:grid-cols-4 xl:grid-cols-8">
+                              {(
+                                [
+                                  ["melodyne_pitch_center_cents", "melodyne_pitch_center", 0, 12700, 1],
+                                  ["melodyne_pitch_drift_factor", "melodyne_pitch_drift", 0, 2, 0.01],
+                                  ["melodyne_pitch_modulation_factor", "melodyne_pitch_modulation", 0, 2, 0.01],
+                                  ["melodyne_transition_sec", "melodyne_transition", 0, 1, 0.001],
+                                  ["melodyne_formant_offset_cents", "melodyne_formant", -1200, 1200, 1],
+                                  ["melodyne_amplitude_factor", "melodyne_amplitude", 0, 2, 0.01],
+                                  ["melodyne_sibilant_balance", "melodyne_sibilant", -1, 1, 0.01],
+                                  ["melodyne_attack_duration_sec", "melodyne_attack", 0, 1, 0.001],
+                                ] as Array<[NumericField, string, number, number, number]>
+                              ).map(([field, label, min, max, step]) => (
+                                <label key={field} className="grid min-w-0 gap-0.5">
+                                  <Flex align="center" justify="between" gap="1">
+                                    <Text size="1" color="gray" className="truncate">{tAny(label)}</Text>
+                                    <Text size="1" className="tabular-nums">{Number(expandedRegion[field]).toFixed(step < 0.01 ? 3 : step < 1 ? 2 : 0)}</Text>
+                                  </Flex>
+                                  <input
+                                    className="h-4 w-full accent-orange-500"
+                                    type="range"
+                                    min={min}
+                                    max={max}
+                                    step={step}
+                                    value={Number(expandedRegion[field])}
+                                    onChange={(event) => updateRegion(expandedRegionIndex, field, event.target.value)}
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                          ) : null}
                         </div>
                     ) : null}
                     <Flex gap="3" mt="1" wrap="wrap">

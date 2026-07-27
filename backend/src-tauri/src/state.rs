@@ -141,6 +141,15 @@ pub struct ClipFormantMorph {
     pub strength: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MelodyneWarpSegment {
+    pub timeline_start_sec: f64,
+    pub timeline_end_sec: f64,
+    pub source_start_sec: f64,
+    pub source_end_sec: f64,
+}
+
 impl Default for ClipFormantMorph {
     fn default() -> Self {
         Self {
@@ -321,6 +330,10 @@ pub struct Clip {
     /// 是否在 pitch_orig 组装时填补 MIDI 音符之间的空隙。
     #[serde(default)]
     pub midi_fill_gaps: bool,
+    /// Piecewise source-time/warp-time map restored from Melodyne note
+    /// objects. Empty for native HachiShifter clips.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub melodyne_warp_segments: Vec<MelodyneWarpSegment>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -2483,6 +2496,7 @@ impl TimelineState {
             formant_morph: None,
             midi_note_data: None,
             midi_fill_gaps: false,
+        melodyne_warp_segments: Vec::new(),
         };
         self.clips.push(clip);
         // 确保文件元数据始终被填充（包括继承 waveform 但未计算 metadata 的情况）

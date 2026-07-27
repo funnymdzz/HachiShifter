@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 const SIDECAR_SUFFIX: &str = ".hachi.csv";
-const CSV_HEADER: &str =
-    "name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec,relative_pitch_cents\n";
+const CSV_HEADER: &str = "name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec,relative_pitch_cents,melodyne_project_data,melodyne_pitch_center_cents,melodyne_original_pitch_center_cents,melodyne_pitch_drift_factor,melodyne_pitch_modulation_factor,melodyne_transition_sec,melodyne_formant_offset_cents,melodyne_amplitude_factor,melodyne_sibilant_balance,melodyne_attack_duration_sec,melodyne_decay_elongation\n";
+
+fn one_f64() -> f64 { 1.0 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SampleRegionAnnotation {
@@ -29,6 +30,30 @@ pub struct SampleRegionAnnotation {
     /// stretched/processed contour as a delta, never by flattening the line.
     #[serde(default)]
     pub relative_pitch_cents: f64,
+    /// Controls restored directly from a Melodyne element. They remain in
+    /// source time so the wrench editor can show the same note-object values.
+    #[serde(default)]
+    pub melodyne_project_data: bool,
+    #[serde(default)]
+    pub melodyne_pitch_center_cents: f64,
+    #[serde(default)]
+    pub melodyne_original_pitch_center_cents: f64,
+    #[serde(default = "one_f64")]
+    pub melodyne_pitch_drift_factor: f64,
+    #[serde(default = "one_f64")]
+    pub melodyne_pitch_modulation_factor: f64,
+    #[serde(default)]
+    pub melodyne_transition_sec: f64,
+    #[serde(default)]
+    pub melodyne_formant_offset_cents: f64,
+    #[serde(default = "one_f64")]
+    pub melodyne_amplitude_factor: f64,
+    #[serde(default)]
+    pub melodyne_sibilant_balance: f64,
+    #[serde(default)]
+    pub melodyne_attack_duration_sec: f64,
+    #[serde(default)]
+    pub melodyne_decay_elongation: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -68,6 +93,7 @@ pub struct SampleAnalysis {
 #[serde(rename_all = "snake_case")]
 pub enum NoteDetectorKind {
     Game,
+    Melodyne,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +137,7 @@ struct CachedSampleAnalysis {
 }
 
 static ANALYSIS_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSampleAnalysis>>> = OnceLock::new();
+static MELODYNE_PROJECT_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSampleAnalysis>>> = OnceLock::new();
 
 fn analysis_fingerprint(path: &Path) -> Option<(u64, u128)> {
     let metadata = fs::metadata(path).ok()?;
@@ -158,6 +185,41 @@ fn cached_analysis(path: &Path) -> Option<SampleAnalysis> {
         .then(|| cached.analysis.clone())
 }
 
+/// Register boundaries and note controls read from an MPD object graph. This
+/// cache deliberately precedes GAME/sidecars while the imported project is
+/// open, so opening its wrench view shows Melodyne's stored segmentation.
+pub fn register_melodyne_project_analysis(path: &Path, analysis: SampleAnalysis) {
+    let Some((file_len, modified_ns)) = analysis_fingerprint(path) else { return; };
+    if let Ok(mut cache) = MELODYNE_PROJECT_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        if cache.len() >= 512 && !cache.contains_key(path) {
+            if let Some(key) = cache.keys().next().cloned() { cache.remove(&key); }
+        }
+        cache.insert(path.to_path_buf(), CachedSampleAnalysis { file_len, modified_ns, analysis });
+    }
+}
+
+fn melodyne_project_analysis(path: &Path) -> Option<SampleAnalysis> {
+    let (file_len, modified_ns) = analysis_fingerprint(path)?;
+    let cache = MELODYNE_PROJECT_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new())).lock().ok()?;
+    let item = cache.get(path)?;
+    (item.file_len == file_len && item.modified_ns == modified_ns)
+        .then(|| item.analysis.clone())
+}
+
+pub fn update_melodyne_project_annotations(path: &Path, annotations: &[SampleRegionAnnotation]) {
+    if let Ok(mut cache) = MELODYNE_PROJECT_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new())).lock()
+    {
+        if let Some(item) = cache.get_mut(path) {
+            item.analysis.annotations = annotations.to_vec();
+        }
+    }
+}
+
 pub fn sidecar_path(audio_path: &Path) -> PathBuf {
     let mut os = audio_path.as_os_str().to_os_string();
     os.push(SIDECAR_SUFFIX);
@@ -177,6 +239,16 @@ pub fn validate_annotations(
             annotation.note_alignment_sec,
             annotation.fixed_duration_sec,
             annotation.relative_pitch_cents,
+            annotation.melodyne_pitch_center_cents,
+            annotation.melodyne_original_pitch_center_cents,
+            annotation.melodyne_pitch_drift_factor,
+            annotation.melodyne_pitch_modulation_factor,
+            annotation.melodyne_transition_sec,
+            annotation.melodyne_formant_offset_cents,
+            annotation.melodyne_amplitude_factor,
+            annotation.melodyne_sibilant_balance,
+            annotation.melodyne_attack_duration_sec,
+            annotation.melodyne_decay_elongation,
         ];
         if values.iter().any(|value| !value.is_finite()) {
             return Err(format!(
@@ -212,6 +284,17 @@ pub fn validate_annotations(
             note_alignment_sec: alignment,
             fixed_duration_sec: fixed,
             relative_pitch_cents: annotation.relative_pitch_cents.clamp(-4800.0, 4800.0),
+            melodyne_project_data: annotation.melodyne_project_data,
+            melodyne_pitch_center_cents: annotation.melodyne_pitch_center_cents.clamp(0.0, 12700.0),
+            melodyne_original_pitch_center_cents: annotation.melodyne_original_pitch_center_cents.clamp(0.0, 12700.0),
+            melodyne_pitch_drift_factor: annotation.melodyne_pitch_drift_factor.clamp(0.0, 2.0),
+            melodyne_pitch_modulation_factor: annotation.melodyne_pitch_modulation_factor.clamp(0.0, 2.0),
+            melodyne_transition_sec: annotation.melodyne_transition_sec.clamp(0.0, 2.0),
+            melodyne_formant_offset_cents: annotation.melodyne_formant_offset_cents.clamp(-2400.0, 2400.0),
+            melodyne_amplitude_factor: annotation.melodyne_amplitude_factor.clamp(0.0, 4.0),
+            melodyne_sibilant_balance: annotation.melodyne_sibilant_balance.clamp(-1.0, 1.0),
+            melodyne_attack_duration_sec: annotation.melodyne_attack_duration_sec.clamp(0.0, 2.0),
+            melodyne_decay_elongation: annotation.melodyne_decay_elongation.clamp(-2.0, 4.0),
         });
     }
     out.sort_by(|a, b| {
@@ -248,6 +331,17 @@ pub fn write_sidecar(
         csv.push_str(&format_time(row.fixed_duration_sec));
         csv.push(',');
         csv.push_str(&format_time(row.relative_pitch_cents));
+        csv.push(','); csv.push_str(if row.melodyne_project_data { "1" } else { "0" });
+        csv.push(','); csv.push_str(&format_time(row.melodyne_pitch_center_cents));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_original_pitch_center_cents));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_pitch_drift_factor));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_pitch_modulation_factor));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_transition_sec));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_formant_offset_cents));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_amplitude_factor));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_sibilant_balance));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_attack_duration_sec));
+        csv.push(','); csv.push_str(&format_time(row.melodyne_decay_elongation));
         csv.push('\n');
     }
     fs::write(&path, csv.as_bytes())
@@ -266,6 +360,11 @@ pub fn load_or_detect_with_game_mode(
     audio_path: &Path,
     performance_mode: bool,
 ) -> Result<SampleAnalysis, String> {
+    if !performance_mode {
+        if let Some(analysis) = melodyne_project_analysis(audio_path) {
+            return Ok(analysis);
+        }
+    }
     let detected = if performance_mode {
         analyze_audio_uncached(audio_path, true)?
     } else {
@@ -452,6 +551,17 @@ fn analyze_audio_uncached(
                 note_alignment_sec: note.start_sec,
                 fixed_duration_sec: (note.start_sec - start).max(0.0),
                 relative_pitch_cents: 0.0,
+                melodyne_project_data: false,
+                melodyne_pitch_center_cents: 0.0,
+                melodyne_original_pitch_center_cents: 0.0,
+                melodyne_pitch_drift_factor: 1.0,
+                melodyne_pitch_modulation_factor: 1.0,
+                melodyne_transition_sec: 0.0,
+                melodyne_formant_offset_cents: 0.0,
+                melodyne_amplitude_factor: 1.0,
+                melodyne_sibilant_balance: 0.0,
+                melodyne_attack_duration_sec: 0.0,
+                melodyne_decay_elongation: 0.0,
             }
         })
         .collect();
@@ -760,6 +870,17 @@ pub fn convert_oto_path(path: &Path) -> Result<OtoConversionResult, String> {
                     note_alignment_sec: (start + entry.preutter_ms / 1000.0).clamp(start, end),
                     fixed_duration_sec: (entry.consonant_ms / 1000.0).clamp(0.0, end - start),
                     relative_pitch_cents: 0.0,
+                    melodyne_project_data: false,
+                    melodyne_pitch_center_cents: 0.0,
+                    melodyne_original_pitch_center_cents: 0.0,
+                    melodyne_pitch_drift_factor: 1.0,
+                    melodyne_pitch_modulation_factor: 1.0,
+                    melodyne_transition_sec: 0.0,
+                    melodyne_formant_offset_cents: 0.0,
+                    melodyne_amplitude_factor: 1.0,
+                    melodyne_sibilant_balance: 0.0,
+                    melodyne_attack_duration_sec: 0.0,
+                    melodyne_decay_elongation: 0.0,
                 });
         }
     }
@@ -936,6 +1057,17 @@ fn parse_csv(text: &str) -> Result<Vec<SampleRegionAnnotation>, String> {
             note_alignment_sec: number(3)?,
             fixed_duration_sec: number(4)?,
             relative_pitch_cents: if fields.len() >= 6 { number(5)? } else { 0.0 },
+            melodyne_project_data: fields.get(6).map(|v| v.trim() == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(false),
+            melodyne_pitch_center_cents: if fields.len() >= 8 { number(7)? } else { 0.0 },
+            melodyne_original_pitch_center_cents: if fields.len() >= 9 { number(8)? } else { 0.0 },
+            melodyne_pitch_drift_factor: if fields.len() >= 10 { number(9)? } else { 1.0 },
+            melodyne_pitch_modulation_factor: if fields.len() >= 11 { number(10)? } else { 1.0 },
+            melodyne_transition_sec: if fields.len() >= 12 { number(11)? } else { 0.0 },
+            melodyne_formant_offset_cents: if fields.len() >= 13 { number(12)? } else { 0.0 },
+            melodyne_amplitude_factor: if fields.len() >= 14 { number(13)? } else { 1.0 },
+            melodyne_sibilant_balance: if fields.len() >= 15 { number(14)? } else { 0.0 },
+            melodyne_attack_duration_sec: if fields.len() >= 16 { number(15)? } else { 0.0 },
+            melodyne_decay_elongation: if fields.len() >= 17 { number(16)? } else { 0.0 },
         });
     }
     validate_annotations(&rows, None)

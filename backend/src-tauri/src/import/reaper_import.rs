@@ -955,6 +955,7 @@ fn process_item(
                 formant_morph: None,
                 midi_note_data: None,
                 midi_fill_gaps: false,
+            melodyne_warp_segments: Vec::new(),
             });
             if let Some(gid) = item.group_id {
                 reaper_group_map.entry(gid).or_default().push(clip_id);
@@ -1091,6 +1092,7 @@ fn process_item(
             formant_morph: None,
             midi_note_data: None,
             midi_fill_gaps: false,
+        melodyne_warp_segments: Vec::new(),
         });
 
         if let Some(gid) = item.group_id {
@@ -1483,6 +1485,7 @@ fn process_midi_item(
         formant_morph: None,
         midi_note_data: Some(notes),
         midi_fill_gaps: false,
+    melodyne_warp_segments: Vec::new(),
     });
 
     if let Some(gid) = item.group_id {

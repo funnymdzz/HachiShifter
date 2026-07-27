@@ -11,6 +11,17 @@ export interface SampleRegionAnnotation {
     note_alignment_sec: number;
     fixed_duration_sec: number;
     relative_pitch_cents: number;
+    melodyne_project_data: boolean;
+    melodyne_pitch_center_cents: number;
+    melodyne_original_pitch_center_cents: number;
+    melodyne_pitch_drift_factor: number;
+    melodyne_pitch_modulation_factor: number;
+    melodyne_transition_sec: number;
+    melodyne_formant_offset_cents: number;
+    melodyne_amplitude_factor: number;
+    melodyne_sibilant_balance: number;
+    melodyne_attack_duration_sec: number;
+    melodyne_decay_elongation: number;
 }
 
 export interface SamplePitchNote {
@@ -27,7 +38,7 @@ export interface SampleAudioEvent {
     confidence: number;
 }
 
-export type NoteDetectorKind = "game";
+export type NoteDetectorKind = "game" | "melodyne";
 
 export type ClipSampleAnnotationsResult =
     | {

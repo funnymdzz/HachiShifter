@@ -926,6 +926,23 @@ fn render_single_clip(
     };
     let mut segment = segment;
 
+    // MPD clips carry a piecewise source/warp map. Apply it before pitch
+    // synthesis so manual Melodyne timing edits and note boundaries survive
+    // import instead of being reduced to one average playback rate.
+    let melodyne_warp_applied = !clip.melodyne_warp_segments.is_empty();
+    if melodyne_warp_applied {
+        let target_frames = (clip.length_sec.max(0.001) * out_rate as f64).round().max(2.0) as usize;
+        segment = crate::time_stretch::render_melodyne_warp_segments(
+            &segment,
+            2,
+            out_rate,
+            clip.start_sec,
+            clip.source_start_sec.max(0.0),
+            target_frames,
+            &clip.melodyne_warp_segments,
+        );
+    }
+
     if let Some(params) = clip.formant_morph.as_ref().filter(|params| params.enabled) {
         let key = crate::formant_cache::make_formant_cache_key(
             &clip.id,
@@ -977,8 +994,9 @@ fn render_single_clip(
             .unwrap_or(false)
     };
     let annotation_timing = crate::sample_annotations::timing_for_clip(clip);
-    let mut annotation_stretch_applied = false;
+    let mut annotation_stretch_applied = melodyne_warp_applied;
     if (playback_rate - 1.0).abs() > 1e-6
+        && !melodyne_warp_applied
         && (annotation_timing.is_some() || !processor_handles_stretch)
     {
         let seg_frames_in = segment.len() / 2;

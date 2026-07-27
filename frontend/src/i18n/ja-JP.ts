@@ -967,4 +967,9 @@ export const jaJP = {
     melodyne_source_file: "元のオーディオ",
     melodyne_source_original_mode: "オリジナル状態を編集 · 伸縮無効",
     melodyne_edit_sample_details: "エイリアスと元時間を詳細編集",
+    melodyne_formant: "フォルマント",
+    melodyne_amplitude: "振幅",
+    melodyne_sibilant: "歯擦音バランス",
+    melodyne_attack: "アタック長",
+    melodyne_project_model: "Melodyneプロジェクト",
 } as const;
