@@ -233,6 +233,7 @@ export const SampleAnnotationDialog: React.FC<{
                                     region_end_sec: start + 0.5,
                                     note_alignment_sec: start,
                                     fixed_duration_sec: 0,
+                                    relative_pitch_cents: 0,
                                 },
                             ]);
                             setActiveIndex(rows.length);

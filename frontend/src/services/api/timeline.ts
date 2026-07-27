@@ -10,6 +10,7 @@ export interface SampleRegionAnnotation {
     region_end_sec: number;
     note_alignment_sec: number;
     fixed_duration_sec: number;
+    relative_pitch_cents: number;
 }
 
 export interface SamplePitchNote {
@@ -34,6 +35,7 @@ export type ClipSampleAnnotationsResult =
           clip_id: string;
           audio_path: string;
           sidecar_path: string;
+          source_duration_sec: number;
           annotations: SampleRegionAnnotation[];
           pitch_notes: SamplePitchNote[];
           audio_events?: SampleAudioEvent[];

@@ -945,7 +945,7 @@ export const koKR = {
     melodyne_variable_hop: "가변 Hop Mel",
     melodyne_connect_pitch: "피치 선 연결",
     melodyne_disconnect_pitch: "피치 선 끊기",
-    melodyne_edge_drag_hint: "음표 가장자리를 드래그해 늘리고 정렬선을 두 번 클릭해 그리드에 맞춥니다",
+    melodyne_edge_drag_hint: "음표를 위아래로 움직여 피치선과 건반의 상대 관계를 정합니다. 시간선은 원본 구간만 편집하며 늘이지 않습니다",
     melodyne_game_alignment_hint: "각 GAME note를 하나의 음절로 사용하고 시작점을 리듬 정렬점으로 유지합니다. 어택/치찰음을 뒤로 분석해 앞선 자음 시작점을 찾습니다.",
     sample_timing_save: "저장",
 
@@ -979,4 +979,8 @@ export const koKR = {
     melodyne_import_stage_edits: 'Melodyne 편집 복원 중',
     melodyne_import_stage_legacy: '레거시 프로젝트 검색 중',
     melodyne_import_stage_finalize: '프로젝트 마무리 중',
+    melodyne_sample_note_lane: "샘플 구간 및 음표 영역",
+    melodyne_source_file: "원본 오디오",
+    melodyne_source_original_mode: "원본 상태 편집 · 늘이기 비활성",
+    melodyne_edit_sample_details: "별칭과 원본 시간 정밀 편집",
 } as const;

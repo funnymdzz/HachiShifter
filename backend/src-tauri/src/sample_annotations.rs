@@ -1,7 +1,7 @@
 //! Per-sample timing annotations backed by authoritative GAME syllable notes.
 //!
 //! The sidecar format intentionally stays small and human-editable:
-//! `name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec`.
+//! `name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec,relative_pitch_cents`.
 //! The non-stretched part is `[region_start, region_start + fixed_duration]` and
 //! the stretchable part is the remainder of the region.  Times are relative to
 //! the source audio file, not to a timeline clip.
@@ -15,7 +15,7 @@ use std::sync::{Mutex, OnceLock};
 
 const SIDECAR_SUFFIX: &str = ".hachi.csv";
 const CSV_HEADER: &str =
-    "name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec\n";
+    "name,region_start_sec,region_end_sec,note_alignment_sec,fixed_duration_sec,relative_pitch_cents\n";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SampleRegionAnnotation {
@@ -24,6 +24,11 @@ pub struct SampleRegionAnnotation {
     pub region_end_sec: f64,
     pub note_alignment_sec: f64,
     pub fixed_duration_sec: f64,
+    /// Piano-key relation of this syllable in the original-source editor.
+    /// Zero preserves the detected GAME pitch; edits are applied to the final
+    /// stretched/processed contour as a delta, never by flattening the line.
+    #[serde(default)]
+    pub relative_pitch_cents: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -171,6 +176,7 @@ pub fn validate_annotations(
             annotation.region_end_sec,
             annotation.note_alignment_sec,
             annotation.fixed_duration_sec,
+            annotation.relative_pitch_cents,
         ];
         if values.iter().any(|value| !value.is_finite()) {
             return Err(format!(
@@ -205,6 +211,7 @@ pub fn validate_annotations(
             region_end_sec: end,
             note_alignment_sec: alignment,
             fixed_duration_sec: fixed,
+            relative_pitch_cents: annotation.relative_pitch_cents.clamp(-4800.0, 4800.0),
         });
     }
     out.sort_by(|a, b| {
@@ -239,6 +246,8 @@ pub fn write_sidecar(
         csv.push_str(&format_time(row.note_alignment_sec));
         csv.push(',');
         csv.push_str(&format_time(row.fixed_duration_sec));
+        csv.push(',');
+        csv.push_str(&format_time(row.relative_pitch_cents));
         csv.push('\n');
     }
     fs::write(&path, csv.as_bytes())
@@ -442,6 +451,7 @@ fn analyze_audio_uncached(
                 region_end_sec: end,
                 note_alignment_sec: note.start_sec,
                 fixed_duration_sec: (note.start_sec - start).max(0.0),
+                relative_pitch_cents: 0.0,
             }
         })
         .collect();
@@ -749,6 +759,7 @@ pub fn convert_oto_path(path: &Path) -> Result<OtoConversionResult, String> {
                     region_end_sec: end,
                     note_alignment_sec: (start + entry.preutter_ms / 1000.0).clamp(start, end),
                     fixed_duration_sec: (entry.consonant_ms / 1000.0).clamp(0.0, end - start),
+                    relative_pitch_cents: 0.0,
                 });
         }
     }
@@ -924,6 +935,7 @@ fn parse_csv(text: &str) -> Result<Vec<SampleRegionAnnotation>, String> {
             region_end_sec: number(2)?,
             note_alignment_sec: number(3)?,
             fixed_duration_sec: number(4)?,
+            relative_pitch_cents: if fields.len() >= 6 { number(5)? } else { 0.0 },
         });
     }
     validate_annotations(&rows, None)

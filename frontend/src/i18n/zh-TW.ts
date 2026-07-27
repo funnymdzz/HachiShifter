@@ -908,7 +908,7 @@ export const zhTW = {
     melodyne_variable_hop: "可變 Hop Mel",
     melodyne_connect_pitch: "連接音高線",
     melodyne_disconnect_pitch: "中斷音高線",
-    melodyne_edge_drag_hint: "拖曳音符塊邊緣可拉伸；雙擊對齊線可吸附網格",
+    melodyne_edge_drag_hint: "上下移動音符定義音高線與鋼琴鍵的相對關係；拖曳時間線只編輯原始分段，不執行拉伸",
     melodyne_game_alignment_hint: "每個 GAME note 直接作為一個音節，其開頭固定為節奏對齊點；向前回溯瞬態與齒音來尋找之前真正的輔音起點。",
     sample_timing_save: "儲存",
 
@@ -942,4 +942,8 @@ export const zhTW = {
     melodyne_import_stage_edits: '正在還原 Melodyne 編輯',
     melodyne_import_stage_legacy: '正在掃描舊版工程',
     melodyne_import_stage_finalize: '正在完成工程載入',
+    melodyne_sample_note_lane: "採樣分段與音符選區",
+    melodyne_source_file: "原始音訊",
+    melodyne_source_original_mode: "原始狀態編輯 · 禁止拉伸",
+    melodyne_edit_sample_details: "精細編輯別名與原始時間",
 } as const;

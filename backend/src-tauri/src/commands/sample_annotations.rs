@@ -15,6 +15,7 @@ struct ClipAnnotationPayload {
     clip_id: String,
     audio_path: String,
     sidecar_path: String,
+    source_duration_sec: f64,
     annotations: Vec<SampleRegionAnnotation>,
     pitch_notes: Vec<SamplePitchNote>,
     audio_events: Vec<SampleAudioEvent>,
@@ -65,21 +66,43 @@ pub(super) fn get_clip_sample_annotations(
         Err(error) => return serde_json::json!({"ok": false, "error": error}),
     };
     match sample_annotations::load_or_detect(Path::new(&source)) {
-        Ok(analysis) => serde_json::to_value(ClipAnnotationPayload {
-            ok: true,
-            clip_id,
-            audio_path: source.clone(),
-            sidecar_path: sample_annotations::sidecar_path(Path::new(&source))
-                .display()
-                .to_string(),
-            active_annotation_index: active_annotation_index(&clip, analysis.annotations.len()),
-            annotations: analysis.annotations,
-            pitch_notes: analysis.pitch_notes,
-            audio_events: analysis.audio_events,
-            note_detector: analysis.note_detector,
-            detector_message: analysis.detector_message,
-        })
-        .unwrap_or_else(|error| serde_json::json!({"ok": false, "error": error.to_string()})),
+        Ok(analysis) => {
+            let detected_end = analysis
+                .annotations
+                .iter()
+                .map(|row| row.region_end_sec)
+                .chain(analysis.pitch_notes.iter().map(|note| note.end_sec))
+                .chain(analysis.audio_events.iter().map(|event| event.end_sec))
+                .fold(0.0f64, f64::max);
+            let source_duration_sec = clip
+                .duration_sec
+                .filter(|duration| duration.is_finite() && *duration > 0.0)
+                .or_else(|| {
+                    crate::audio_utils::try_read_wav_info(Path::new(&source), 16)
+                        .map(|info| info.duration_sec)
+                })
+                .unwrap_or(detected_end)
+                .max(detected_end);
+            serde_json::to_value(ClipAnnotationPayload {
+                ok: true,
+                clip_id,
+                audio_path: source.clone(),
+                sidecar_path: sample_annotations::sidecar_path(Path::new(&source))
+                    .display()
+                    .to_string(),
+                source_duration_sec,
+                active_annotation_index: active_annotation_index(
+                    &clip,
+                    analysis.annotations.len(),
+                ),
+                annotations: analysis.annotations,
+                pitch_notes: analysis.pitch_notes,
+                audio_events: analysis.audio_events,
+                note_detector: analysis.note_detector,
+                detector_message: analysis.detector_message,
+            })
+            .unwrap_or_else(|error| serde_json::json!({"ok": false, "error": error.to_string()}))
+        }
         Err(error) => serde_json::json!({"ok": false, "error": error}),
     }
 }
@@ -165,11 +188,19 @@ pub(super) fn redetect_clip_sample_annotations(
                 Ok(rows) => rows,
                 Err(error) => return serde_json::json!({"ok": false, "error": error}),
             };
+            let detected_end = annotations
+                .iter()
+                .map(|row| row.region_end_sec)
+                .chain(analysis.pitch_notes.iter().map(|note| note.end_sec))
+                .chain(analysis.audio_events.iter().map(|event| event.end_sec))
+                .fold(0.0f64, f64::max);
+            let source_duration_sec = clip.duration_sec.unwrap_or(detected_end).max(detected_end);
             serde_json::json!({
                 "ok": true,
                 "clip_id": clip_id,
                 "audio_path": source,
                 "sidecar_path": sample_annotations::sidecar_path(Path::new(&source)).display().to_string(),
+                "source_duration_sec": source_duration_sec,
                 "annotations": annotations,
                 "pitch_notes": analysis.pitch_notes,
                 "audio_events": analysis.audio_events,

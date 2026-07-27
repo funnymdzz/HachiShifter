@@ -921,7 +921,7 @@ export const enUS = {
     melodyne_variable_hop: "Variable-hop Mel",
     melodyne_connect_pitch: "Connect pitch line",
     melodyne_disconnect_pitch: "Disconnect pitch line",
-    melodyne_edge_drag_hint: "Drag note edges to stretch; double-click alignment line to snap to grid",
+    melodyne_edge_drag_hint: "Move a note vertically to define its pitch-line/key relation; timing lines edit the original source without stretching",
     melodyne_game_alignment_hint: "Each GAME note is one syllable. Its start stays the beat-alignment point; backward attack/sibilant analysis finds the preceding consonant onset.",
     sample_timing_save: "Save",
 
@@ -955,4 +955,8 @@ export const enUS = {
     melodyne_import_stage_edits: 'Restoring Melodyne edits',
     melodyne_import_stage_legacy: 'Scanning legacy project',
     melodyne_import_stage_finalize: 'Finalizing project',
+    melodyne_sample_note_lane: "Samples and note regions",
+    melodyne_source_file: "Source file",
+    melodyne_source_original_mode: "Original source · stretch disabled",
+    melodyne_edit_sample_details: "Edit alias and source times",
 } as const;

@@ -929,7 +929,7 @@ export const jaJP = {
     melodyne_variable_hop: "可変 Hop Mel",
     melodyne_connect_pitch: "ピッチ線を接続",
     melodyne_disconnect_pitch: "ピッチ線を切断",
-    melodyne_edge_drag_hint: "ノート端をドラッグして伸縮し、整列線をダブルクリックしてグリッドへスナップ",
+    melodyne_edge_drag_hint: "ノートを上下に動かしてピッチ線と鍵盤の相対関係を定義。時間線は元音声の区間だけを編集し、伸縮しません",
     melodyne_game_alignment_hint: "各 GAME note を1音節として扱い、先頭をリズム整列点に固定します。そこからアタック／歯擦音を後方解析し、直前の子音開始点を検出します。",
     sample_timing_save: "保存",
 
@@ -963,4 +963,8 @@ export const jaJP = {
     melodyne_import_stage_edits: 'Melodyne編集を復元中',
     melodyne_import_stage_legacy: '旧形式プロジェクトをスキャン中',
     melodyne_import_stage_finalize: 'プロジェクトを仕上げています',
+    melodyne_sample_note_lane: "サンプル区間とノート領域",
+    melodyne_source_file: "元のオーディオ",
+    melodyne_source_original_mode: "オリジナル状態を編集 · 伸縮無効",
+    melodyne_edit_sample_details: "エイリアスと元時間を詳細編集",
 } as const;

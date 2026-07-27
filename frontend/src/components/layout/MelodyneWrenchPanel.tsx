@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Flex, Select, Text, TextField } from "@radix-ui/themes";
+import { Button, Flex, IconButton, Select, Text, TextField } from "@radix-ui/themes";
 import type { StretchAlgorithmOption } from "../../services/api/settings";
 import type {
     ClipSampleAnnotationsResult,
@@ -12,6 +12,7 @@ type NumericField = Exclude<keyof SampleRegionAnnotation, "name">;
 
 export const MelodyneWrenchPanel: React.FC<{
     analysis: Analysis | null;
+    sourceLabel?: string | null;
     activeNoteIndex: number | null;
     stretchAlgorithm: StretchAlgorithmOption;
     showHifiganMelHop?: boolean;
@@ -26,6 +27,7 @@ export const MelodyneWrenchPanel: React.FC<{
     onStretchAlgorithmChange: (value: StretchAlgorithmOption) => void;
 }> = ({
     analysis,
+    sourceLabel,
     activeNoteIndex,
     stretchAlgorithm,
     showHifiganMelHop = false,
@@ -41,7 +43,16 @@ export const MelodyneWrenchPanel: React.FC<{
 }) => {
     const { t } = useI18n();
     const tAny = t as (key: string) => string;
-    const [lane, setLane] = React.useState<"notes" | "segments" | "events">("notes");
+    const [lane, setLane] = React.useState<"samples" | "events">("samples");
+    const [expandedRegionIndex, setExpandedRegionIndex] = React.useState<number | null>(null);
+
+    React.useEffect(() => {
+        if (!analysis) {
+            setExpandedRegionIndex(null);
+            return;
+        }
+        setExpandedRegionIndex(analysis.active_annotation_index);
+    }, [analysis?.audio_path]);
 
     const updateRegion = (
         index: number,
@@ -58,6 +69,34 @@ export const MelodyneWrenchPanel: React.FC<{
         );
     };
 
+    const selectMergedRegion = (index: number, expand = false) => {
+        if (!analysis) return;
+        onSelectRegion(index);
+        if (expand) setExpandedRegionIndex(index);
+        const row = analysis.annotations[index];
+        if (!row || analysis.pitch_notes.length === 0) return;
+        let nearestIndex = 0;
+        let nearestDistance = Number.POSITIVE_INFINITY;
+        analysis.pitch_notes.forEach((note, noteIndex) => {
+            const distance =
+                row.note_alignment_sec < note.start_sec
+                    ? note.start_sec - row.note_alignment_sec
+                    : row.note_alignment_sec > note.end_sec
+                      ? row.note_alignment_sec - note.end_sec
+                      : 0;
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestIndex = noteIndex;
+            }
+        });
+        onSelectNote(nearestIndex);
+    };
+
+    const expandedRegion =
+        analysis && expandedRegionIndex != null
+            ? analysis.annotations[expandedRegionIndex] ?? null
+            : null;
+
     return (
         <div className="border-b border-qt-border bg-qt-base px-2 py-2 text-qt-text">
             <Flex align="center" gap="2" wrap="wrap">
@@ -66,19 +105,11 @@ export const MelodyneWrenchPanel: React.FC<{
                 </Text>
                 <Button
                     size="1"
-                    variant={lane === "notes" ? "solid" : "soft"}
-                    color={lane === "notes" ? "blue" : "gray"}
-                    onClick={() => setLane("notes")}
+                    variant={lane === "samples" ? "solid" : "soft"}
+                    color={lane === "samples" ? "blue" : "gray"}
+                    onClick={() => setLane("samples")}
                 >
-                    {tAny("melodyne_note_lane")}
-                </Button>
-                <Button
-                    size="1"
-                    variant={lane === "segments" ? "solid" : "soft"}
-                    color={lane === "segments" ? "blue" : "gray"}
-                    onClick={() => setLane("segments")}
-                >
-                    {tAny("melodyne_segment_lane")}
+                    {tAny("melodyne_sample_note_lane")}
                 </Button>
                 <Button
                     size="1"
@@ -89,10 +120,20 @@ export const MelodyneWrenchPanel: React.FC<{
                     {tAny("melodyne_event_lane")}
                 </Button>
                 <div className="h-5 w-px bg-qt-border" />
+                {sourceLabel ? (
+                    <Text size="1" color="gray" title={sourceLabel} className="max-w-52 truncate">
+                        {tAny("melodyne_source_file")}: {sourceLabel}
+                    </Text>
+                ) : null}
+                <Text size="1" color="gray">
+                    {tAny("melodyne_source_original_mode")}
+                </Text>
+                <div className="h-5 w-px bg-qt-border" />
                 <Text size="1" color="gray">
                     {tAny("stretch_algorithm")}
                 </Text>
                 <Select.Root
+                    disabled
                     value={
                         stretchAlgorithm === "hifigan_mel_hop" && !showHifiganMelHop
                             ? "signalsmith"
@@ -136,34 +177,6 @@ export const MelodyneWrenchPanel: React.FC<{
                 <Text size="1" color="gray" as="div" mt="2">
                     {tAny("sample_timing_analyzing")}
                 </Text>
-            ) : lane === "notes" ? (
-                <Flex gap="1" mt="2" align="center" className="overflow-x-auto pb-1">
-                    {analysis.pitch_notes.map((note, index) => (
-                        <Button
-                            key={`${note.start_sec}-${index}`}
-                            size="1"
-                            variant={activeNoteIndex === index ? "solid" : "soft"}
-                            color={activeNoteIndex === index ? "blue" : "gray"}
-                            onClick={() => onSelectNote(index)}
-                            title={`${note.start_sec.toFixed(3)}–${note.end_sec.toFixed(3)} s`}
-                        >
-                            {`${index + 1} · MIDI ${note.midi_note.toFixed(1)}`}
-                        </Button>
-                    ))}
-                    <div className="h-5 w-px shrink-0 bg-qt-border" />
-                    <Button size="1" variant="soft" disabled={activeNoteIndex == null} onClick={onConnect}>
-                        {tAny("melodyne_connect_pitch")}
-                    </Button>
-                    <Button size="1" variant="soft" disabled={activeNoteIndex == null} onClick={onDisconnect}>
-                        {tAny("melodyne_disconnect_pitch")}
-                    </Button>
-                    <Text size="1" color="gray" className="shrink-0">
-                        {tAny("melodyne_edge_drag_hint")}
-                    </Text>
-                    <Text size="1" color="gray" className="shrink-0">
-                        {tAny("melodyne_game_alignment_hint")}
-                    </Text>
-                </Flex>
             ) : lane === "events" ? (
                 <Flex gap="1" mt="2" align="center" className="overflow-x-auto pb-1">
                     {(analysis.audio_events ?? []).map((event, index) => (
@@ -187,50 +200,77 @@ export const MelodyneWrenchPanel: React.FC<{
                     ) : null}
                 </Flex>
             ) : (
-                <div className="mt-2 max-h-28 overflow-auto">
-                    {analysis.annotations.map((row, index) => (
-                        <div
-                            key={index}
-                            className={`mb-1 grid grid-cols-[22px_1.3fr_repeat(4,minmax(76px,1fr))] gap-1 rounded p-1 ${
-                                index === analysis.active_annotation_index
-                                    ? "bg-qt-highlight/15"
-                                    : ""
-                            }`}
-                            onClick={() => onSelectRegion(index)}
-                        >
-                            <input
-                                type="radio"
-                                checked={index === analysis.active_annotation_index}
-                                onChange={() => onSelectRegion(index)}
-                            />
-                            <TextField.Root
-                                size="1"
-                                value={row.name}
-                                onChange={(event) => updateRegion(index, "name", event.target.value)}
-                            />
+                <div className="mt-2">
+                    <Flex gap="1" align="center" className="overflow-x-auto pb-1">
+                        {analysis.annotations.map((row, index) => {
+                            const note = analysis.pitch_notes[index];
+                            return (
+                                <Flex key={`${row.region_start_sec}-${index}`} gap="1" align="center" className="shrink-0">
+                                    <Button
+                                        size="1"
+                                        variant={index === analysis.active_annotation_index ? "solid" : "soft"}
+                                        color={index === analysis.active_annotation_index ? "blue" : "gray"}
+                                        onClick={() => selectMergedRegion(index)}
+                                        title={`${row.region_start_sec.toFixed(3)}–${row.region_end_sec.toFixed(3)} s`}
+                                    >
+                                        {`${index + 1} · ${row.name}${note ? ` · MIDI ${note.midi_note.toFixed(1)}` : ""}`}
+                                    </Button>
+                                    <IconButton
+                                        size="1"
+                                        variant={expandedRegionIndex === index ? "solid" : "soft"}
+                                        color={expandedRegionIndex === index ? "blue" : "gray"}
+                                        title={tAny("melodyne_edit_sample_details")}
+                                        onClick={() => selectMergedRegion(index, true)}
+                                    >
+                                        ⋯
+                                    </IconButton>
+                                </Flex>
+                            );
+                        })}
+                        <div className="h-5 w-px shrink-0 bg-qt-border" />
+                        <Button size="1" variant="soft" disabled={activeNoteIndex == null} onClick={onConnect}>
+                            {tAny("melodyne_connect_pitch")}
+                        </Button>
+                        <Button size="1" variant="soft" disabled={activeNoteIndex == null} onClick={onDisconnect}>
+                            {tAny("melodyne_disconnect_pitch")}
+                        </Button>
+                    </Flex>
+                    {expandedRegion && expandedRegionIndex != null ? (
+                        <div className="mt-1 grid grid-cols-[minmax(150px,1.4fr)_repeat(4,minmax(108px,1fr))] gap-1 rounded border border-qt-border bg-qt-window/60 p-1">
+                            <label className="grid gap-0.5">
+                                <Text size="1" color="gray">{tAny("sample_timing_name")}</Text>
+                                <TextField.Root
+                                    size="1"
+                                    value={expandedRegion.name}
+                                    onChange={(event) => updateRegion(expandedRegionIndex, "name", event.target.value)}
+                                />
+                            </label>
                             {(
                                 [
-                                    "region_start_sec",
-                                    "region_end_sec",
-                                    "note_alignment_sec",
-                                    "fixed_duration_sec",
-                                ] as NumericField[]
-                            ).map((field) => (
-                                <TextField.Root
-                                    key={field}
-                                    size="1"
-                                    type="number"
-                                    step="0.001"
-                                    min="0"
-                                    value={row[field]}
-                                    title={tAny(`sample_timing_${field}`)}
-                                    onChange={(event) =>
-                                        updateRegion(index, field, event.target.value)
-                                    }
-                                />
+                                    ["region_start_sec", "sample_timing_start"],
+                                    ["region_end_sec", "sample_timing_end"],
+                                    ["note_alignment_sec", "sample_timing_alignment"],
+                                    ["fixed_duration_sec", "sample_timing_fixed_duration"],
+                                ] as Array<[NumericField, string]>
+                            ).map(([field, label]) => (
+                                <label key={field} className="grid gap-0.5">
+                                    <Text size="1" color="gray">{tAny(label)}</Text>
+                                    <TextField.Root
+                                        size="1"
+                                        type="number"
+                                        step="0.001"
+                                        min="0"
+                                        value={expandedRegion[field]}
+                                        onChange={(event) => updateRegion(expandedRegionIndex, field, event.target.value)}
+                                    />
+                                </label>
                             ))}
                         </div>
-                    ))}
+                    ) : null}
+                    <Flex gap="3" mt="1" wrap="wrap">
+                        <Text size="1" color="gray">{tAny("melodyne_edge_drag_hint")}</Text>
+                        <Text size="1" color="gray">{tAny("melodyne_game_alignment_hint")}</Text>
+                    </Flex>
                 </div>
             )}
         </div>

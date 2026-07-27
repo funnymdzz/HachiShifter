@@ -908,7 +908,7 @@ export const zhCN = {
     melodyne_variable_hop: "变 Hop Mel",
     melodyne_connect_pitch: "连接音高线",
     melodyne_disconnect_pitch: "断开音高线",
-    melodyne_edge_drag_hint: "拖动音符块边缘拉伸；双击对齐线吸附网格",
+    melodyne_edge_drag_hint: "上下移动音符定义音高线与钢琴键的相对关系；拖动时间线仅编辑原始分段，不执行拉伸",
     melodyne_game_alignment_hint: "每个 GAME note 直接作为一个音节，其开头固定为节奏对齐点；向前回溯瞬态与齿音来寻找之前真正的辅音起点。",
     sample_timing_save: "保存",
 
@@ -942,4 +942,8 @@ export const zhCN = {
     melodyne_import_stage_edits: '正在还原 Melodyne 编辑',
     melodyne_import_stage_legacy: '正在扫描旧版工程',
     melodyne_import_stage_finalize: '正在完成工程加载',
+    melodyne_sample_note_lane: "采样分段与音符选区",
+    melodyne_source_file: "原始音频",
+    melodyne_source_original_mode: "原始状态编辑 · 禁止拉伸",
+    melodyne_edit_sample_details: "精细编辑别名和原始时间",
 } as const;
