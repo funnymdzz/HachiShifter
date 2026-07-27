@@ -488,6 +488,26 @@ pub fn render_mixdown_interleaved(
         };
         let mut segment = segment;
 
+        // MPD clips persist an independent source-time mapping for every
+        // Melodyne note object.  Export must use the same piecewise renderer
+        // as interactive playback; reducing the whole clip to playback_rate
+        // loses the stored note handles and makes the reference render drift.
+        let melodyne_warp_applied = !clip.melodyne_warp_segments.is_empty();
+        if melodyne_warp_applied {
+            let target_frames = (clip.length_sec.max(0.001) * out_rate as f64)
+                .round()
+                .max(2.0) as usize;
+            segment = crate::time_stretch::render_melodyne_warp_segments(
+                &segment,
+                2,
+                out_rate,
+                clip.start_sec,
+                clip.source_start_sec.max(0.0),
+                target_frames,
+                &clip.melodyne_warp_segments,
+            );
+        }
+
         if let Some(params) = clip.formant_morph.as_ref().filter(|params| params.enabled) {
             let key = crate::formant_cache::make_formant_cache_key(
                 &clip.id,
@@ -531,8 +551,12 @@ pub fn render_mixdown_interleaved(
         //   !processor_handles_stretch → 处理器不内部拉伸（World/HiFiGAN chain 内有 TimeStretchStage，vslib 原生拉伸）
         //   !opts.apply_pitch_edit    → pitch edit 链不会运行，内部拉伸无法触发，需回退到外部拉伸
         let annotation_timing = crate::sample_annotations::timing_for_clip(clip);
-        let mut annotation_stretch_applied = false;
+        // A piecewise MPD warp already has the requested timeline duration.
+        // Mark it as externally stretched so the pitch processor receives a
+        // neutral playback rate and does not stretch the result a second time.
+        let mut annotation_stretch_applied = melodyne_warp_applied;
         if (playback_rate - 1.0).abs() > 1e-6
+            && !melodyne_warp_applied
             && (annotation_timing.is_some() || !processor_handles_stretch || !opts.apply_pitch_edit)
         {
             let seg_frames_in = segment.len() / 2;
