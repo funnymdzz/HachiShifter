@@ -15,6 +15,7 @@ dependencies = [
  "clipboard-win",
  "cpal",
  "encoding_rs",
+ "flate2",
  "hound",
  "libc",
  "libloading 0.8.9",

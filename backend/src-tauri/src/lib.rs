@@ -78,6 +78,8 @@ mod config;
 mod hfspeaks_v2;
 #[path = "import/midi_import.rs"]
 mod midi_import;
+#[path = "import/melodyne_import.rs"]
+mod melodyne_import;
 mod project;
 #[path = "import/reaper_import.rs"]
 mod reaper_import;

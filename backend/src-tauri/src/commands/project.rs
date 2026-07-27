@@ -144,6 +144,13 @@ fn is_hachishifter_project_path(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn is_melodyne_project_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("mpd"))
+        .unwrap_or(false)
+}
+
 fn save_on_save_backup_path(path: &Path) -> PathBuf {
     // 保留原文件名与扩展名，在其后追加 "-bak"，例如：
     // "project.hshp" -> "project.hshp-bak"
@@ -830,6 +837,7 @@ pub(super) fn new_project(
 pub(super) fn open_project_dialog() -> serde_json::Value {
     let picked = rfd::FileDialog::new()
         .add_filter("HachiShifter Project", &["hshp", "hsp"])
+        .add_filter("Melodyne Project", &["mpd"])
         .add_filter("JSON Project", &["json"])
         .pick_file();
     match picked {
@@ -848,6 +856,65 @@ pub(super) fn open_project(
     let path = PathBuf::from(&project_path);
     // 读取字节流，自动检测 MessagePack（v2）或 JSON（v1 兼容）格式。
     let bytes = fs::read(&path).unwrap_or_default();
+
+    if is_melodyne_project_path(&path) {
+        let imported = match crate::melodyne_import::import_mpd(&path, &bytes) {
+            Ok(imported) => imported,
+            Err(error) => {
+                eprintln!("[open_project] Melodyne import failed: {error}");
+                let mut payload = get_timeline_state(state);
+                payload.ok = false;
+                return payload;
+            }
+        };
+        eprintln!(
+            "[open_project] Imported Melodyne project with {} media reference(s)",
+            imported.referenced_files.len()
+        );
+        for clip in &imported.timeline.clips {
+            synth_clip_cache::invalidate_clip_all_caches(&clip.id);
+        }
+        {
+            let mut timeline = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
+            *timeline = imported.timeline;
+            timeline.project_scale_notes = base_scale_notes("C");
+            state.audio_engine.update_timeline(timeline.clone());
+            state.audio_engine.seek_sec(0.0);
+        }
+        state.clear_history();
+        {
+            let mut project = state.project.lock().unwrap_or_else(|e| e.into_inner());
+            project.name = project_name_from_path(&path);
+            // MPD is imported rather than edited in place. Saving therefore
+            // opens Save As and never overwrites Melodyne's archive format.
+            project.path = None;
+            project.dirty = true;
+            project.notes_markdown = format!(
+                "Imported from Melodyne project: {}\n\nMedia references: {}",
+                path.display(),
+                imported.referenced_files.len()
+            );
+            project.base_scale = "C".to_string();
+            project.use_custom_scale = false;
+            project.custom_scale = None;
+            project.beats_per_bar = 4;
+            project.grid_size = "1/4".to_string();
+            project.stretch_algorithm_override = Some(UserStretchAlgorithm::MelodyneHybrid);
+            project.hifigan_mel_stretch_override = None;
+            project.recent.retain(|item| item != &project_path);
+            project.recent.insert(0, project_path.clone());
+            project.recent.truncate(10);
+            update_window_title(&window, &project.name, true);
+        }
+        sync_runtime_stretch_settings(state.inner());
+        save_recent_projects(state.inner());
+        let mut payload = get_timeline_state(state);
+        if !imported.missing_files.is_empty() {
+            payload.missing_files = Some(imported.missing_files);
+        }
+        return payload;
+    }
+
     let parsed = load_project_file(&bytes);
     let Ok(mut pf) = parsed else {
         let mut payload = get_timeline_state(state);

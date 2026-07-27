@@ -107,7 +107,7 @@ const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
 function detectExternalActionKindFromPath(path: string): ExternalFileActionKind | null {
     const normalized = String(path ?? "").trim();
     if (!normalized) return null;
-    if (/\.(hshp|hsp|json)$/i.test(normalized)) return "openProject";
+    if (/\.(hshp|hsp|json|mpd)$/i.test(normalized)) return "openProject";
     if (/\.rpp$/i.test(normalized)) return "importReaper";
     if (/\.(vshp|vsp)$/i.test(normalized)) return "importVocalShifter";
     if (/\.(wav|flac|mp3|ogg|m4a|aac|aif|aiff|wma|opus)$/i.test(normalized)) {

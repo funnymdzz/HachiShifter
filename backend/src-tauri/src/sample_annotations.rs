@@ -264,7 +264,28 @@ pub fn load_or_detect_with_game_mode(
     };
     let annotations = if sidecar_path(audio_path).is_file() {
         match read_sidecar(audio_path) {
-            Ok(rows) if !rows.is_empty() => rows,
+            Ok(rows) if !rows.is_empty() => {
+                // Migrate sidecars written by the first GAME integration,
+                // where the GAME beat point was also used as the region start.
+                // Auto-generated GAME rows now include the consonant/attack
+                // prefix found by the Melodyne-style backward analysis below.
+                let legacy_game_rows = rows.iter().all(|row| {
+                    row.name.starts_with("GAME ")
+                        && row.fixed_duration_sec <= 1e-6
+                        && (row.region_start_sec - row.note_alignment_sec).abs() <= 1e-6
+                });
+                if legacy_game_rows
+                    && detected
+                        .annotations
+                        .iter()
+                        .any(|row| row.fixed_duration_sec > 0.005)
+                {
+                    let _ = write_sidecar(audio_path, &detected.annotations);
+                    detected.annotations.clone()
+                } else {
+                    rows
+                }
+            }
             _ => {
                 // Analysis should still be usable for read-only sample
                 // locations. Explicit Save will report write failures.
@@ -388,18 +409,40 @@ fn analyze_audio_uncached(
             ),
         };
 
-    // GAME segmentation is authoritative: one GAME note is one syllable.
-    // No acoustic helper is allowed to split, merge, discard or redefine
-    // these syllable objects.
+    // GAME segmentation is authoritative: one GAME note is one syllable and
+    // the GAME note start is always the beat-alignment point. Melodyne's
+    // analysed principal/attack/sibilant split is used only to look backward
+    // from that vowel anchor for the consonant onset; it never creates another
+    // note. This supplies a fixed, non-stretched consonant prefix.
+    let syllable_starts = detect_consonant_onsets_before_game_notes(
+        &mono,
+        sample_rate,
+        &pitch_notes,
+    );
     let annotations: Vec<SampleRegionAnnotation> = pitch_notes
         .iter()
         .enumerate()
-        .map(|(index, note)| SampleRegionAnnotation {
-            name: format!("GAME {}", index + 1),
-            region_start_sec: note.start_sec,
-            region_end_sec: note.end_sec,
-            note_alignment_sec: note.start_sec,
-            fixed_duration_sec: 0.0,
+        .map(|(index, note)| {
+            let start = syllable_starts
+                .get(index)
+                .copied()
+                .unwrap_or(note.start_sec)
+                .clamp(0.0, note.start_sec);
+            // When GAME notes touch, the consonant of the next syllable may
+            // lie before its GAME vowel point. Assign that prefix to the next
+            // syllable instead of overlapping both sample regions.
+            let next_start = syllable_starts.get(index + 1).copied();
+            let end = next_start
+                .filter(|next| *next > note.start_sec + 0.005 && *next < note.end_sec)
+                .unwrap_or(note.end_sec)
+                .max(note.start_sec + 0.005);
+            SampleRegionAnnotation {
+                name: format!("GAME {}", index + 1),
+                region_start_sec: start,
+                region_end_sec: end,
+                note_alignment_sec: note.start_sec,
+                fixed_duration_sec: (note.start_sec - start).max(0.0),
+            }
         })
         .collect();
 
@@ -410,6 +453,141 @@ fn analyze_audio_uncached(
         note_detector,
         detector_message,
     })
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SyllableFrameFeature {
+    rms: f32,
+    high_frequency_ratio: f32,
+    zero_crossing_ratio: f32,
+    positive_flux: f32,
+}
+
+/// Locate a consonant/attack onset before every GAME vowel anchor.
+///
+/// Melodyne's internal representation separates principal (stable/periodic),
+/// attack and sibilant items.  This model-free pass mirrors those observable
+/// features with adaptive energy, pre-emphasized high-frequency energy,
+/// zero-crossing density and positive flux. It intentionally adjusts only the
+/// sample boundary; GAME remains the sole owner of note/syllable identity.
+fn detect_consonant_onsets_before_game_notes(
+    samples: &[f32],
+    sample_rate: u32,
+    notes: &[SamplePitchNote],
+) -> Vec<f64> {
+    if samples.is_empty() || sample_rate == 0 || notes.is_empty() {
+        return notes.iter().map(|note| note.start_sec).collect();
+    }
+    let window = ((sample_rate as f64 * 0.020).round() as usize).max(32);
+    let hop = ((sample_rate as f64 * 0.005).round() as usize).max(8);
+    let frame_count = samples.len().saturating_sub(1).div_ceil(hop).max(1);
+    let mut features = Vec::with_capacity(frame_count);
+    let mut previous_rms = 0.0f32;
+    for frame in 0..frame_count {
+        let start = frame.saturating_mul(hop).min(samples.len().saturating_sub(1));
+        let end = (start + window).min(samples.len());
+        let slice = &samples[start..end];
+        let count = slice.len().max(1) as f32;
+        let rms = (slice.iter().map(|value| value * value).sum::<f32>() / count).sqrt();
+        let mut difference_energy = 0.0f32;
+        let mut crossings = 0usize;
+        for pair in slice.windows(2) {
+            let difference = pair[1] - pair[0];
+            difference_energy += difference * difference;
+            crossings += ((pair[0] >= 0.0) != (pair[1] >= 0.0)) as usize;
+        }
+        let difference_rms =
+            (difference_energy / slice.len().saturating_sub(1).max(1) as f32).sqrt();
+        features.push(SyllableFrameFeature {
+            rms,
+            high_frequency_ratio: difference_rms / (rms * 2.0).max(1e-7),
+            zero_crossing_ratio: crossings as f32 / slice.len().saturating_sub(1).max(1) as f32,
+            positive_flux: (rms - previous_rms).max(0.0),
+        });
+        previous_rms = rms;
+    }
+
+    let peak = features.iter().map(|feature| feature.rms).fold(0.0f32, f32::max);
+    let mut levels: Vec<f32> = features.iter().map(|feature| feature.rms).collect();
+    levels.sort_by(f32::total_cmp);
+    let floor = levels[levels.len() / 6];
+    let active_threshold = (floor * 2.25).max(peak * 0.009).max(0.0006);
+    let frame_sec = hop as f64 / sample_rate as f64;
+    let inactive_stop_frames = ((0.020 / frame_sec).ceil() as usize).max(3);
+    let max_lookback_frames = ((0.320 / frame_sec).ceil() as usize).max(1);
+
+    let mut result = Vec::with_capacity(notes.len());
+    for (note_index, note) in notes.iter().enumerate() {
+        let alignment_frame = ((note.start_sec * sample_rate as f64) / hop as f64)
+            .round()
+            .clamp(0.0, features.len().saturating_sub(1) as f64) as usize;
+        let time_lower_bound = if note_index == 0 {
+            (note.start_sec - 0.320).max(0.0)
+        } else {
+            let previous = &notes[note_index - 1];
+            // A consonant may be labelled as the tail of the preceding GAME
+            // note, but never search before that preceding vowel anchor.
+            (note.start_sec - 0.320).max(previous.start_sec + 0.010)
+        };
+        let time_lower_frame = ((time_lower_bound * sample_rate as f64) / hop as f64)
+            .floor()
+            .clamp(0.0, alignment_frame as f64) as usize;
+        let lower_frame = alignment_frame
+            .saturating_sub(max_lookback_frames)
+            .max(time_lower_frame);
+
+        let mut earliest_active = alignment_frame;
+        let mut inactive_run = 0usize;
+        let mut found_silence_edge = false;
+        for frame in (lower_frame..=alignment_frame).rev() {
+            let feature = features[frame];
+            // Sibilants and plosives can sit below the vowel RMS, so their
+            // high-frequency/zero-crossing evidence lowers the activity gate.
+            let noisy_consonant = feature.high_frequency_ratio > 0.42
+                || feature.zero_crossing_ratio > 0.075;
+            let threshold = if noisy_consonant {
+                active_threshold * 0.68
+            } else {
+                active_threshold
+            };
+            if feature.rms >= threshold {
+                earliest_active = frame;
+                inactive_run = 0;
+            } else {
+                inactive_run += 1;
+                if inactive_run >= inactive_stop_frames {
+                    found_silence_edge = true;
+                    break;
+                }
+            }
+        }
+
+        // In legato material there may be no silence. Select the strongest
+        // attack/sibilant transition before the GAME principal/vowel anchor.
+        if !found_silence_edge && alignment_frame > lower_frame + 2 {
+            let mut best_frame = earliest_active;
+            let mut best_score = 0.0f32;
+            for frame in lower_frame + 1..alignment_frame.saturating_sub(1) {
+                let feature = features[frame];
+                let energy_gate = (feature.rms / active_threshold.max(1e-7)).clamp(0.0, 3.0);
+                let score = feature.positive_flux / active_threshold.max(1e-7)
+                    + feature.high_frequency_ratio * 0.42
+                    + feature.zero_crossing_ratio * 1.8
+                    + energy_gate * 0.08;
+                if feature.rms >= active_threshold * 0.62 && score > best_score {
+                    best_score = score;
+                    best_frame = frame;
+                }
+            }
+            if best_score > 0.42 {
+                earliest_active = best_frame;
+            }
+        }
+
+        let onset = (earliest_active * hop) as f64 / sample_rate as f64;
+        result.push(onset.clamp(time_lower_bound, note.start_sec));
+    }
+    result
 }
 
 /// Add explicit silence and breath/noise events around GAME's note output.
@@ -900,5 +1078,32 @@ mod tests {
         let start = entry.offset_ms / 1000.0;
         let end = start + (-entry.cutoff_ms / 1000.0);
         assert!((end - 0.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn consonant_onset_precedes_game_beat_without_splitting_note() {
+        let sample_rate = 16_000u32;
+        let mut audio = vec![0.0f32; (sample_rate as f32 * 0.20) as usize];
+        // Unvoiced consonant/attack from 200-280 ms.
+        for index in 0..(sample_rate as f32 * 0.08) as usize {
+            let sign = if index % 2 == 0 { 1.0 } else { -1.0 };
+            audio.push(sign * 0.025 * (index as f32 / 64.0).min(1.0));
+        }
+        // Vowel starts at the authoritative GAME beat point (280 ms).
+        for index in 0..(sample_rate as f32 * 0.30) as usize {
+            let phase = index as f32 * 2.0 * std::f32::consts::PI * 220.0
+                / sample_rate as f32;
+            audio.push(phase.sin() * 0.12);
+        }
+        let notes = vec![SamplePitchNote {
+            start_sec: 0.28,
+            end_sec: 0.58,
+            midi_note: 57.0,
+            confidence: 1.0,
+        }];
+        let starts = detect_consonant_onsets_before_game_notes(&audio, sample_rate, &notes);
+        assert_eq!(starts.len(), 1);
+        assert!(starts[0] < notes[0].start_sec - 0.02);
+        assert!(starts[0] >= 0.17);
     }
 }

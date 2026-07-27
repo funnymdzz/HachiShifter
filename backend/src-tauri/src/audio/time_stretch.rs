@@ -1,3 +1,4 @@
+use rustfft::{num_complex::Complex32, FftPlanner};
 use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -368,6 +369,230 @@ pub(crate) fn anchor_transients(
                 let src = input[source_frame * channels + channel];
                 let dst = &mut output[target_frame * channels + channel];
                 *dst = *dst * (1.0 - weight) + src * weight;
+            }
+        }
+    }
+}
+
+/// Reinsert only the non-periodic/high-frequency part of detected attacks.
+/// Keeping WORLD's low-frequency periodic component avoids leaking the old F0
+/// back into a pitch-shifted note, while source sibilants and plosive edges
+/// retain their original timing and phase reset.
+pub(crate) fn anchor_mld5_attack_residuals(
+    input: &[f32],
+    output: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+) {
+    if channels == 0 || input.len() < channels * 16 || output.len() < channels * 16 {
+        return;
+    }
+    let in_frames = input.len() / channels;
+    let out_frames = output.len() / channels;
+    let alpha = (-2.0f32 * std::f32::consts::PI * 1_600.0 / sample_rate.max(1) as f32).exp();
+    let mut input_high = vec![0.0f32; input.len()];
+    let mut output_low = vec![0.0f32; output.len()];
+    let mut output_high = vec![0.0f32; output.len()];
+    for channel in 0..channels {
+        let mut source_low = input[channel];
+        for frame in 0..in_frames {
+            let index = frame * channels + channel;
+            source_low = (1.0 - alpha) * input[index] + alpha * source_low;
+            input_high[index] = input[index] - source_low;
+        }
+        let mut synthesized_low = output[channel];
+        for frame in 0..out_frames {
+            let index = frame * channels + channel;
+            synthesized_low = (1.0 - alpha) * output[index] + alpha * synthesized_low;
+            output_low[index] = synthesized_low;
+            output_high[index] = output[index] - synthesized_low;
+        }
+    }
+
+    let block = ((sample_rate as usize) / 200).max(8);
+    let mut previous_energy = 0.0f32;
+    let mut flux = Vec::new();
+    for start in (0..in_frames).step_by(block) {
+        let end = (start + block).min(in_frames);
+        let mut energy = 0.0f32;
+        for frame in start..end {
+            for channel in 0..channels {
+                energy += input_high[frame * channels + channel].abs();
+            }
+        }
+        energy /= ((end - start).max(1) * channels) as f32;
+        flux.push((start, (energy - previous_energy).max(0.0)));
+        previous_energy = energy;
+    }
+    if flux.is_empty() {
+        return;
+    }
+    let mean_flux = flux.iter().map(|(_, value)| *value).sum::<f32>() / flux.len() as f32;
+    let threshold = (mean_flux * 2.8).max(0.0015);
+    let attack_frames = ((sample_rate as usize) * 12 / 1000).max(8);
+    for (source_center, value) in flux {
+        if value < threshold {
+            continue;
+        }
+        let target_center = ((source_center as f64) * out_frames as f64 / in_frames as f64)
+            .round() as usize;
+        for offset in 0..attack_frames {
+            let source_frame = source_center + offset;
+            let target_frame = target_center + offset;
+            if source_frame >= in_frames || target_frame >= out_frames {
+                break;
+            }
+            let phase = offset as f32 / attack_frames.max(1) as f32;
+            let weight = (1.0 - phase).powi(2) * 0.92;
+            for channel in 0..channels {
+                let source_index = source_frame * channels + channel;
+                let target_index = target_frame * channels + channel;
+                let high = output_high[target_index] * (1.0 - weight)
+                    + input_high[source_index] * weight;
+                output[target_index] = output_low[target_index] + high;
+            }
+        }
+    }
+}
+
+/// Match the slowly varying cepstral spectral envelope of synthesized speech
+/// to its source while keeping the synthesized phase/fundamental.  Melodyne's
+/// analysed pipeline treats pitch and formants as independent functions; this
+/// STFT/real-cepstrum pass implements the same separation for the model-free
+/// mld5 path.
+pub(crate) fn preserve_mld5_cepstral_formants(
+    reference: &[f32],
+    output: &mut [f32],
+    channels: usize,
+    sample_rate: u32,
+    amount: f32,
+) {
+    let channels = channels.max(1);
+    let reference_frames = reference.len() / channels;
+    let output_frames = output.len() / channels;
+    if reference_frames < 256 || output_frames < 256 || sample_rate == 0 {
+        return;
+    }
+    let nominal = ((sample_rate as usize * 23) / 1000).max(256);
+    let fft_size = nominal.next_power_of_two().clamp(512, 2048);
+    if reference_frames < fft_size / 2 || output_frames < fft_size / 2 {
+        return;
+    }
+    let hop = fft_size / 4;
+    let amount = amount.clamp(0.0, 1.0);
+    let lifter = ((sample_rate as usize * 13) / 10_000)
+        .clamp(24, fft_size / 6); // about 1.3 ms of low quefrency
+    let window: Vec<f32> = (0..fft_size)
+        .map(|index| {
+            0.5 - 0.5
+                * (2.0 * std::f32::consts::PI * index as f32 / fft_size as f32).cos()
+        })
+        .collect();
+    let mut planner = FftPlanner::<f32>::new();
+    let forward = planner.plan_fft_forward(fft_size);
+    let inverse = planner.plan_fft_inverse(fft_size);
+
+    for channel in 0..channels {
+        let before_rms = (output
+            .iter()
+            .skip(channel)
+            .step_by(channels)
+            .map(|value| value * value)
+            .sum::<f32>()
+            / output_frames.max(1) as f32)
+            .sqrt();
+        let mut reconstructed = vec![0.0f32; output_frames];
+        let mut normalization = vec![0.0f32; output_frames];
+        let mut output_spectrum = vec![Complex32::new(0.0, 0.0); fft_size];
+        let mut reference_spectrum = vec![Complex32::new(0.0, 0.0); fft_size];
+        let mut output_cepstrum = vec![Complex32::new(0.0, 0.0); fft_size];
+        let mut reference_cepstrum = vec![Complex32::new(0.0, 0.0); fft_size];
+
+        let mut output_start = 0usize;
+        while output_start < output_frames {
+            let output_center = output_start.saturating_add(fft_size / 2);
+            let reference_center = ((output_center as f64 / output_frames.max(1) as f64)
+                * reference_frames as f64)
+                .round() as usize;
+            let reference_start = reference_center.saturating_sub(fft_size / 2);
+            for bin in 0..fft_size {
+                let output_frame = output_start + bin;
+                let reference_frame = reference_start + bin;
+                output_spectrum[bin] = Complex32::new(
+                    output
+                        .get(output_frame * channels + channel)
+                        .copied()
+                        .unwrap_or(0.0)
+                        * window[bin],
+                    0.0,
+                );
+                reference_spectrum[bin] = Complex32::new(
+                    reference
+                        .get(reference_frame * channels + channel)
+                        .copied()
+                        .unwrap_or(0.0)
+                        * window[bin],
+                    0.0,
+                );
+            }
+            forward.process(&mut output_spectrum);
+            forward.process(&mut reference_spectrum);
+            for bin in 0..fft_size {
+                output_cepstrum[bin] =
+                    Complex32::new(output_spectrum[bin].norm().max(1e-8).ln(), 0.0);
+                reference_cepstrum[bin] =
+                    Complex32::new(reference_spectrum[bin].norm().max(1e-8).ln(), 0.0);
+            }
+            inverse.process(&mut output_cepstrum);
+            inverse.process(&mut reference_cepstrum);
+            let inverse_scale = 1.0 / fft_size as f32;
+            for bin in 0..fft_size {
+                let keep = bin <= lifter || bin >= fft_size.saturating_sub(lifter);
+                if keep {
+                    output_cepstrum[bin] *= inverse_scale;
+                    reference_cepstrum[bin] *= inverse_scale;
+                } else {
+                    output_cepstrum[bin] = Complex32::new(0.0, 0.0);
+                    reference_cepstrum[bin] = Complex32::new(0.0, 0.0);
+                }
+            }
+            forward.process(&mut output_cepstrum);
+            forward.process(&mut reference_cepstrum);
+            for bin in 0..fft_size {
+                let envelope_delta =
+                    (reference_cepstrum[bin].re - output_cepstrum[bin].re) * amount;
+                let gain = envelope_delta.exp().clamp(0.52, 1.92);
+                output_spectrum[bin] *= gain;
+            }
+            inverse.process(&mut output_spectrum);
+            for bin in 0..fft_size {
+                let frame = output_start + bin;
+                if frame >= output_frames {
+                    break;
+                }
+                let weight = window[bin];
+                reconstructed[frame] += output_spectrum[bin].re * inverse_scale * weight;
+                normalization[frame] += weight * weight;
+            }
+            output_start = output_start.saturating_add(hop);
+        }
+
+        let mut after_energy = 0.0f32;
+        for frame in 0..output_frames {
+            let index = frame * channels + channel;
+            let corrected = if normalization[frame] > 1e-6 {
+                reconstructed[frame] / normalization[frame]
+            } else {
+                output[index]
+            };
+            output[index] = output[index] * 0.08 + corrected * 0.92;
+            after_energy += output[index] * output[index];
+        }
+        let after_rms = (after_energy / output_frames.max(1) as f32).sqrt();
+        if before_rms > 1e-7 && after_rms > 1e-7 {
+            let gain = (before_rms / after_rms).clamp(0.84, 1.18);
+            for frame in 0..output_frames {
+                output[frame * channels + channel] *= gain;
             }
         }
     }

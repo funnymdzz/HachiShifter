@@ -219,8 +219,17 @@ impl ProcessingStage for Mld5VocoderStage {
             clip_id: cc.clip_id,
         };
         let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
-        crate::time_stretch::anchor_transients(&input_pcm, &mut output, 1, cc.sample_rate);
-        crate::time_stretch::stabilize_vocal_timbre(
+        // Reconstructed Melodyne-style order: synthesize the edited periodic
+        // principal, restore the independent source formant envelope, then
+        // re-anchor only attack/sibilant residuals (not the source F0).
+        crate::time_stretch::preserve_mld5_cepstral_formants(
+            &input_pcm,
+            &mut output,
+            1,
+            cc.sample_rate,
+            0.92,
+        );
+        crate::time_stretch::anchor_mld5_attack_residuals(
             &input_pcm,
             &mut output,
             1,

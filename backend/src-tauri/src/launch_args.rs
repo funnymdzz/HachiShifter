@@ -22,6 +22,7 @@ pub fn is_project_file_path(path: &Path) -> bool {
             ext.eq_ignore_ascii_case("hshp")
                 || ext.eq_ignore_ascii_case("hsp")
                 || ext.eq_ignore_ascii_case("json")
+                || ext.eq_ignore_ascii_case("mpd")
         })
         .unwrap_or(false)
 }

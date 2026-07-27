@@ -946,6 +946,6 @@ export const koKR = {
     melodyne_connect_pitch: "피치 선 연결",
     melodyne_disconnect_pitch: "피치 선 끊기",
     melodyne_edge_drag_hint: "음표 가장자리를 드래그해 늘리고 정렬선을 두 번 클릭해 그리드에 맞춥니다",
-    melodyne_game_alignment_hint: "각 GAME note를 하나의 음절로 사용하며 시작점이 리듬 정렬점입니다.",
+    melodyne_game_alignment_hint: "각 GAME note를 하나의 음절로 사용하고 시작점을 리듬 정렬점으로 유지합니다. 어택/치찰음을 뒤로 분석해 앞선 자음 시작점을 찾습니다.",
     sample_timing_save: "저장",
 } as const;
