@@ -101,6 +101,12 @@ fn resolve_model_path() -> Result<PathBuf, String> {
         return Ok(onnx);
     }
 
+    if let Some(onnx) = env_path("HACHISHIFTER_FCPE_ONNX") {
+        if onnx.is_file() {
+            return Ok(onnx);
+        }
+    }
+
     if let Some(dir) = env_path("HACHISHIFTER_FCPE_MODEL_DIR") {
         let p = dir.join("fcpe.onnx");
         if p.is_file() {

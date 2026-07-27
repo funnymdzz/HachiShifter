@@ -623,10 +623,11 @@ impl Graph {
         let (Some(first), Some(last)) = (anchors.first(), anchors.last()) else {
             return anchors;
         };
-        // Five-millisecond subdivisions retain MPD's Bezier attack slope while
-        // keeping large projects bounded. The renderer consumes these points
-        // through one persistent state, so subdivisions do not create joins.
-        let steps = (((last.0 - first.0).abs() / 0.005).ceil() as usize).clamp(2, 512);
+        // Two-millisecond subdivisions retain rapid attack/body ratio changes
+        // from MPD's Bezier function. The renderer consumes every subdivision
+        // through one persistent state, so the extra precision adds no phase
+        // resets at the consonant/vowel handle.
+        let steps = (((last.0 - first.0).abs() / 0.002).ceil() as usize).clamp(2, 2048);
         (0..=steps)
             .map(|index| {
                 let fraction = index as f64 / steps as f64;
@@ -1077,6 +1078,71 @@ fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64
     item_start_samples / sample_rate + mapped.max(0.0)
 }
 
+fn integer_field(graph: &Graph, object_id: u32, field: &str) -> Option<i64> {
+    graph
+        .i64(object_id, field)
+        .or_else(|| graph.i32(object_id, field).map(i64::from))
+}
+
+/// Reconstruct Melodyne's analysed sibilant component from the persisted
+/// principal-item boundaries.  Melodyne keeps leading and trailing sibilants
+/// outside the periodic body so pitch/time processing never turns /s/, /sh/
+/// or /ch/ noise into pitched, hoarse harmonics.
+fn source_sibilant_strength(
+    graph: &Graph,
+    element: &ImportedElement,
+    local_time: f64,
+) -> f32 {
+    let source_id = graph
+        .reference(element.source_description_id, "audioSource");
+    let sample_rate = source_id
+        .and_then(|source| graph.f64(source, "sampleRate"))
+        .unwrap_or(44_100.0)
+        .max(1.0);
+    let item_start = integer_field(graph, element.source_item_id, "startSampleIndex")
+        .unwrap_or(0)
+        .max(0) as f64;
+    let item_samples = integer_field(graph, element.source_item_id, "sampleCount")
+        .unwrap_or(0)
+        .max(0) as f64;
+    if item_samples <= 1.0 {
+        return 0.0;
+    }
+    let leading_end = integer_field(
+        graph,
+        element.source_item_id,
+        "startSibilantEndSampleOffset",
+    )
+    .unwrap_or(0)
+    .clamp(0, item_samples as i64) as f64;
+    let trailing_start = integer_field(
+        graph,
+        element.source_item_id,
+        "endSibilantStartSampleOffset",
+    )
+    .unwrap_or(item_samples as i64)
+    .clamp(0, item_samples as i64) as f64;
+    let mapped_sample = source_time(graph, element, local_time) * sample_rate - item_start;
+    if !mapped_sample.is_finite() {
+        return 0.0;
+    }
+    // Melodyne displays a soft component boundary rather than a binary gate.
+    // A 4-ms shoulder avoids introducing a new click at the sibilant/body
+    // split while retaining the exact stored sample offsets at its centre.
+    let shoulder = (sample_rate * 0.004).max(1.0);
+    let leading = if leading_end > 0.0 {
+        ((leading_end + shoulder - mapped_sample) / shoulder).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let trailing = if trailing_start < item_samples {
+        ((mapped_sample - trailing_start + shoulder) / shoulder).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    leading.max(trailing) as f32
+}
+
 fn element_time_map_points(
     graph: &Graph,
     element: &ImportedElement,
@@ -1413,6 +1479,7 @@ fn build_track_params(
     let has_sibilant = track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6);
     let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
     let mut sibilant = has_sibilant.then(|| vec![0.0f32; frame_count]);
+    let mut sibilant_mask = vec![0.0f32; frame_count];
     // A source item is commonly referenced by hundreds of Melodyne elements.
     // Decode its property-point list once instead of cloning it per note.
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
@@ -1463,6 +1530,8 @@ fn build_track_params(
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
             }
+            sibilant_mask[frame] = sibilant_mask[frame]
+                .max(source_sibilant_strength(graph, element, local_time));
         }
     }
 
@@ -1472,6 +1541,7 @@ fn build_track_params(
 
     let mut extra_curves = HashMap::new();
     extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);
+    extra_curves.insert("mld5_sibilant_mask".to_string(), sibilant_mask);
     if let Some(curve) = formant {
         extra_curves.insert("formant_shift_cents".to_string(), curve);
     }
@@ -1551,7 +1621,8 @@ fn choose_frame_period_ms(tracks: &[ImportedTrack], project_sec: f64) -> f64 {
                 .elements
                 .iter()
                 .any(|element| element.formant_offset.abs() > 1e-6);
-            12 + usize::from(has_formant) * 4
+            // pitch_orig + pitch_edit + without-vibrato + sibilant mask
+            16 + usize::from(has_formant) * 4
                 + usize::from(track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6)) * 4
         })
         .sum();

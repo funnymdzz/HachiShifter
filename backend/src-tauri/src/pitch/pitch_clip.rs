@@ -424,6 +424,27 @@ pub fn schedule_clip_pitch_jobs(
                 continue;
             }
         };
+        let root_id = tl.resolve_root_track_id(&clip.track_id).unwrap_or_default();
+        let strict_mpd_pitch = !clip.melodyne_warp_segments.is_empty()
+            && tl
+                .params_by_root_track
+                .get(&root_id)
+                .is_some_and(|params| {
+                    params
+                        .extra_curves
+                        .contains_key(&format!("mld5_source_pitch::{}", clip.id))
+                        && params
+                            .extra_params
+                            .get("mld5_pitch_source")
+                            .copied()
+                            .unwrap_or(0.0)
+                            < 0.5
+                });
+        if strict_mpd_pitch {
+            // The MPD property points are already more faithful than a new
+            // detector pass and are aligned through the exact Bezier warp.
+            continue;
+        }
         if !file_exists_cached(Path::new(source_path)) {
             eprintln!(
                 "[pitch_clip] clip '{}' skipped: file not found: {}",

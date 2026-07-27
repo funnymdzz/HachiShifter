@@ -541,11 +541,25 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
         let aligned = &rendered_pcm[offset_samples..(offset_samples + reference_pcm.len())
             .min(rendered_pcm.len())];
         let length = aligned.len().min(reference_pcm.len());
-        let reference_f0 = crate::world_vocoder::analyze_f0_harvest(
-            &reference_pcm[..length], target_rate, 5.0,
+        if !crate::fcpe_onnx::is_available() {
+            return Err(
+                "FCPE model is required for vocal F0 comparison; set HACHISHIFTER_FCPE_ONNX"
+                    .to_string(),
+            );
+        }
+        let reference_f0 = crate::fcpe_onnx::infer_f0_hz(
+            &reference_pcm[..length],
+            target_rate,
+            5.0,
+            crate::fcpe_onnx::FCPE_F0_MIN_HZ,
+            crate::fcpe_onnx::FCPE_F0_MAX_HZ,
         )?;
-        let rendered_f0 = crate::world_vocoder::analyze_f0_harvest(
-            &aligned[..length], target_rate, 5.0,
+        let rendered_f0 = crate::fcpe_onnx::infer_f0_hz(
+            &aligned[..length],
+            target_rate,
+            5.0,
+            crate::fcpe_onnx::FCPE_F0_MIN_HZ,
+            crate::fcpe_onnx::FCPE_F0_MAX_HZ,
         )?;
         let frame_count = reference_f0.len().min(rendered_f0.len());
         let mut errors = Vec::new();
@@ -569,7 +583,7 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
             if values.is_empty() { return 0.0; }
             values[((values.len() - 1) as f64 * fraction).round() as usize]
         };
-        println!("{{\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3}}}",
+        println!("{{\"detector\":\"fcpe\",\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3}}}",
             reference.display(), rendered.display(), offset_samples as f64 / target_rate as f64,
             best.0, frame_count, reference_voiced, rendered_voiced, errors.len(),
             percentile(&errors, 0.5), percentile(&errors, 0.9), percentile(&signed, 0.5));

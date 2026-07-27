@@ -50,6 +50,22 @@ fn is_clip_pitch_analysis_ready(
     let Some(entry) = timeline.params_by_root_track.get(&clip_root) else {
         return false;
     };
+    // Strict MPD imports already carry Melodyne's source F0 in destination
+    // time. They are render-ready immediately and must not wait for a second
+    // FCPE "original pitch" load which would replace that stored contour.
+    if !clip.melodyne_warp_segments.is_empty()
+        && entry
+            .extra_curves
+            .contains_key(&format!("mld5_source_pitch::{}", clip.id))
+        && entry
+            .extra_params
+            .get("mld5_pitch_source")
+            .copied()
+            .unwrap_or(0.0)
+            < 0.5
+    {
+        return true;
+    }
     // 检查 clip_pitch（原始 MIDI 曲线）是否已分析
     let clip_pitch = crate::pitch_clip::get_or_compute_clip_pitch_midi_global(
         timeline,

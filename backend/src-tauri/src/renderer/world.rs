@@ -39,21 +39,23 @@ impl Renderer for WorldRenderer {
             fp,
             f0_floor,
             f0_ceil,
-            move |abs_time_sec| {
+            move |abs_time_sec, detected_f0_hz| {
                 let orig = clip_midi_at_time(fp, clip_start, clip_midi, abs_time_sec);
                 if !(orig.is_finite() && orig > 0.0) {
-                    return 0.0;
+                    return detected_f0_hz;
                 }
                 let target = match edit_midi_at_time_or_none(fp, pitch_edit, abs_time_sec) {
                     Some(v) => v,
                     None => orig,
                 };
-                let shift = (target - orig).clamp(-24.0, 24.0);
-                if shift.is_finite() {
-                    shift
-                } else {
-                    0.0
-                }
+                // The MPD curve is an absolute edited F0 trajectory.  Using
+                // target/original as a multiplier reproduced WORLD's fresh
+                // detector error and could render an exact stored curve sharp
+                // or flat. Clamp the edit interval, then synthesize the
+                // persisted absolute trajectory directly.
+                let target = orig + (target - orig).clamp(-24.0, 24.0);
+                let hz = 440.0 * 2.0f64.powf((target - 69.0) / 12.0);
+                if hz.is_finite() && hz > 0.0 { hz } else { detected_f0_hz }
             },
         )
     }

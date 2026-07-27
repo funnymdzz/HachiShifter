@@ -383,13 +383,23 @@ pub(crate) fn anchor_mld5_attack_residuals(
     output: &mut [f32],
     channels: usize,
     sample_rate: u32,
+    sibilant_curve: Option<&[f32]>,
+    segment_start_sec: f64,
+    frame_period_ms: f64,
+    upward_shift_semitones: f32,
 ) {
     if channels == 0 || input.len() < channels * 16 || output.len() < channels * 16 {
         return;
     }
     let in_frames = input.len() / channels;
     let out_frames = output.len() / channels;
-    let alpha = (-2.0f32 * std::f32::consts::PI * 1_600.0 / sample_rate.max(1) as f32).exp();
+    // Keep periodic harmonics out of the residual path. The former 1.6-kHz
+    // split leaked many upper harmonics from the unshifted source; after a
+    // large upward edit they beat against WORLD and sound hoarse/gurgling.
+    let cutoff_hz = if upward_shift_semitones > 7.0 { 4_200.0 } else { 3_400.0 };
+    let alpha = (-2.0f32 * std::f32::consts::PI * cutoff_hz
+        / sample_rate.max(1) as f32)
+        .exp();
     let mut input_high = vec![0.0f32; input.len()];
     let mut output_low = vec![0.0f32; output.len()];
     let mut output_high = vec![0.0f32; output.len()];
@@ -409,7 +419,96 @@ pub(crate) fn anchor_mld5_attack_residuals(
         }
     }
 
-    let block = ((sample_rate as usize) / 200).max(8);
+    let curve_value = |frame: usize| -> f32 {
+        let Some(curve) = sibilant_curve else { return -1.0; };
+        if curve.is_empty() { return 0.0; }
+        let abs_sec = segment_start_sec + frame as f64 / sample_rate.max(1) as f64;
+        let position = abs_sec.max(0.0) * 1000.0 / frame_period_ms.max(0.1);
+        let left = (position.floor().max(0.0) as usize).min(curve.len() - 1);
+        let right = (left + 1).min(curve.len() - 1);
+        let fraction = (position - position.floor()).clamp(0.0, 1.0) as f32;
+        (curve[left] + (curve[right] - curve[left]) * fraction).clamp(0.0, 1.0)
+    };
+
+    // If no persisted MPD component exists, use the same observable cues as
+    // Melodyne's decomposed signal: high-band dominance, noise-like zero
+    // crossings and sustained energy. This yields an independent aperiodic
+    // component rather than treating every spectral-flux peak as a sibilant.
+    let detection_block = ((sample_rate as usize) / 200).max(8);
+    let mut detected_mask = vec![0.0f32; out_frames];
+    if sibilant_curve.is_none() {
+        for source_start in (0..in_frames).step_by(detection_block) {
+            let source_end = (source_start + detection_block).min(in_frames);
+            let mut high_energy = 0.0f32;
+            let mut total_energy = 0.0f32;
+            let mut crossings = 0usize;
+            let mut previous = input[source_start * channels];
+            for frame in source_start..source_end {
+                let sample = input[frame * channels];
+                high_energy += input_high[frame * channels].powi(2);
+                total_energy += sample.powi(2);
+                crossings += usize::from((sample >= 0.0) != (previous >= 0.0));
+                previous = sample;
+            }
+            let count = source_end.saturating_sub(source_start).max(1) as f32;
+            let ratio = high_energy / total_energy.max(1e-9);
+            let zcr = crossings as f32 / count;
+            let rms = (total_energy / count).sqrt();
+            if ratio > 0.46 && zcr > 0.10 && rms > 0.0012 {
+                let target_start = ((source_start as f64 * out_frames as f64
+                    / in_frames.max(1) as f64)
+                    .round() as usize)
+                    .min(out_frames);
+                let target_end = ((source_end as f64 * out_frames as f64
+                    / in_frames.max(1) as f64)
+                    .round() as usize)
+                    .clamp(target_start, out_frames);
+                let strength = ((ratio - 0.38) / 0.42).clamp(0.0, 1.0);
+                detected_mask[target_start..target_end].fill(strength);
+            }
+        }
+        // Expand both sides with an exponential 4-ms shoulder. A hard block
+        // mask itself creates a click at the aperiodic/periodic boundary and
+        // is especially audible after a large upward transposition.
+        let release = (-(1.0 / (sample_rate.max(1) as f32 * 0.004))).exp();
+        let mut envelope = 0.0f32;
+        for value in &mut detected_mask {
+            envelope = (*value).max(envelope * release);
+            *value = envelope;
+        }
+        envelope = 0.0;
+        for value in detected_mask.iter_mut().rev() {
+            envelope = (*value).max(envelope * release);
+            *value = (*value).max(envelope);
+        }
+    }
+
+    // Restore the complete analysed sibilant/noise component at its original
+    // timing. It bypasses F0 transposition but follows the element time map.
+    for target_frame in 0..out_frames {
+        let mask = if sibilant_curve.is_some() {
+            curve_value(target_frame)
+        } else {
+            detected_mask[target_frame]
+        };
+        if mask <= 1e-4 {
+            continue;
+        }
+        let source_frame = ((target_frame as f64 * in_frames as f64
+            / out_frames.max(1) as f64)
+            .round() as usize)
+            .min(in_frames - 1);
+        let weight = (mask * 0.94).clamp(0.0, 0.94);
+        for channel in 0..channels {
+            let source_index = source_frame * channels + channel;
+            let target_index = target_frame * channels + channel;
+            let high = output_high[target_index] * (1.0 - weight)
+                + input_high[source_index] * weight;
+            output[target_index] = output_low[target_index] + high;
+        }
+    }
+
+    let block = detection_block;
     let mut previous_energy = 0.0f32;
     let mut flux = Vec::new();
     for start in (0..in_frames).step_by(block) {
@@ -428,14 +527,23 @@ pub(crate) fn anchor_mld5_attack_residuals(
         return;
     }
     let mean_flux = flux.iter().map(|(_, value)| *value).sum::<f32>() / flux.len() as f32;
-    let threshold = (mean_flux * 2.8).max(0.0015);
-    let attack_frames = ((sample_rate as usize) * 12 / 1000).max(8);
+    let threshold = (mean_flux * 3.4).max(0.0020);
+    let attack_ms = if upward_shift_semitones > 7.0 { 5 } else { 8 };
+    let attack_frames = ((sample_rate as usize) * attack_ms / 1000).max(8);
     for (source_center, value) in flux {
         if value < threshold {
             continue;
         }
         let target_center = ((source_center as f64) * out_frames as f64 / in_frames as f64)
             .round() as usize;
+        let sibilant = if sibilant_curve.is_some() {
+            curve_value(target_center.min(out_frames - 1))
+        } else {
+            detected_mask[target_center.min(out_frames - 1)]
+        };
+        if sibilant > 0.10 {
+            continue;
+        }
         for offset in 0..attack_frames {
             let source_frame = source_center + offset;
             let target_frame = target_center + offset;
@@ -443,7 +551,8 @@ pub(crate) fn anchor_mld5_attack_residuals(
                 break;
             }
             let phase = offset as f32 / attack_frames.max(1) as f32;
-            let weight = (1.0 - phase).powi(2) * 0.92;
+            let base_weight = if upward_shift_semitones > 7.0 { 0.28 } else { 0.62 };
+            let weight = (1.0 - phase).powi(2) * base_weight;
             for channel in 0..channels {
                 let source_index = source_frame * channels + channel;
                 let target_index = target_frame * channels + channel;
@@ -788,7 +897,19 @@ pub fn time_stretch_interleaved(
         }
         StretchAlgorithm::MelodyneHybrid => {
             let mut out = signalsmith_stretch(input, channels, sample_rate, out_frames);
-            anchor_transients(input, &mut out, channels, sample_rate.max(1));
+            // Preserve attacks/sibilants as an aperiodic high-band component.
+            // Copying the complete broadband transient leaks the old F0 into a
+            // later pitch edit and causes doubled, hoarse high notes.
+            anchor_mld5_attack_residuals(
+                input,
+                &mut out,
+                channels,
+                sample_rate.max(1),
+                None,
+                0.0,
+                5.0,
+                0.0,
+            );
             stabilize_vocal_timbre(input, &mut out, channels, sample_rate.max(1));
             out
         }

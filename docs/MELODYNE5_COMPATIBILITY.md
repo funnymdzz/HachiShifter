@@ -83,6 +83,15 @@ separate objects and controls for:
 - independent formant offset/transition and sibilant balance;
 - source-time and warp-time functions.
 
+The component renderer additionally exposes a pulse timeline, original/current
+periods, source-sample-position increments, per-bin current/previous/accumulated
+phase, attack phase diffusion/continuation, and a dedicated `isSibilant` path.
+Its element layer stores separate attack duration/slope and decay elongation,
+while the registered stretch modes distinguish attack adjustment, body stretch,
+decay stretch/crop, and linear stretch. These observations are why HachiShifter
+evaluates the exact Bezier time function at 2-ms subdivisions through one
+persistent stretcher state, rather than restarting a resampler at each handle.
+
 The product UI also contains operations for moving an attack to the nearest
 left/right signal peak and splitting/reseparating elements at attacks. These
 observations support treating the note body, transient and sibilant residual as
@@ -99,6 +108,12 @@ The model-free `mld5` path now performs:
 4. High-frequency/non-periodic residual restoration at detected attacks. The
    low-frequency synthesized principal is retained so an attack does not leak
    the original pitch back into a shifted note.
+5. MPD `startSibilantEndSampleOffset` / `endSibilantStartSampleOffset` boundaries
+   are restored as a soft source-synchronous mask. For ordinary audio, an
+   adaptive high-band/zero-crossing detector supplies the equivalent component.
+6. The edited curve drives WORLD as an absolute F0 trajectory. A new detector
+   is used only for periodic/voicing analysis and no longer adds its pitch error
+   to Melodyne's stored contour.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

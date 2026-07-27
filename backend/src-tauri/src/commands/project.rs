@@ -927,16 +927,15 @@ pub(super) fn open_project(
                 }
             }
             timeline.project_scale_notes = base_scale_notes("C");
-            // Keep the editable state complete, but send the engine a lean
-            // initial copy. Large MPD sessions otherwise duplicate previews
-            // and original pitch curves and eagerly decode every source.
+            // Keep the MPD pitch curves in the first engine snapshot. They
+            // are already the authoritative source/edited contours and are
+            // small compared with decoded PCM. Clearing pitch_orig here made
+            // the renderer wait for a manual "load original pitch" action,
+            // which then replaced Melodyne's stored contour with a detector.
             let mut engine_timeline = timeline.clone();
             engine_timeline.defer_initial_processing = true;
             for clip in &mut engine_timeline.clips {
                 clip.waveform_preview = None;
-            }
-            for params in engine_timeline.params_by_root_track.values_mut() {
-                params.pitch_orig.clear();
             }
             // This flag applies to the one engine snapshot above. Keep the
             // editable project in normal mode so later pitch/stretch edits

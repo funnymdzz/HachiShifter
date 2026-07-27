@@ -175,10 +175,6 @@ pub fn is_available() -> bool {
     true
 }
 
-fn ratio_from_semitones(semitones: f64) -> f64 {
-    crate::pitch_editing::semitone_to_ratio(semitones)
-}
-
 fn clamp11(x: f64) -> f64 {
     x.clamp(-1.0, 1.0)
 }
@@ -503,7 +499,7 @@ fn vocode_one(
     f0_floor: f64,
     f0_ceil: f64,
     abs_time_start_sec: f64,
-    semitone_at_time: &impl Fn(f64) -> f64,
+    target_f0_at_time: &impl Fn(f64, f64) -> f64,
 ) -> Result<Vec<f64>, String> {
     if x_f64.is_empty() {
         return Ok(vec![]);
@@ -546,16 +542,19 @@ fn vocode_one(
     // Precompute voiced flags. WORLD uses 0 Hz for unvoiced.
     let voiced: Vec<bool> = f0.iter().map(|&hz| hz > 0.0).collect();
 
-    // Create shifted f0.
+    // Create the absolute edited F0 trajectory.
     let mut shifted_f0 = vec![0.0f64; f0.len()];
     for i in 0..f0.len() {
         let hz = f0[i];
         if hz > 0.0 {
             let t = temporal_positions.get(i).copied().unwrap_or(0.0);
             let abs_t = abs_time_start_sec + t;
-            let semitones = semitone_at_time(abs_t);
-            let r = ratio_from_semitones(semitones);
-            shifted_f0[i] = hz * r;
+            let target = target_f0_at_time(abs_t, hz);
+            shifted_f0[i] = if target.is_finite() && target > 0.0 {
+                target.clamp(f0_floor.max(20.0), f0_ceil.max(f0_floor + 1.0))
+            } else {
+                hz
+            };
         }
     }
 
@@ -676,7 +675,7 @@ fn vocode_one_streaming(
     f0_floor: f64,
     f0_ceil: f64,
     abs_time_start_sec: f64,
-    semitone_at_time: &impl Fn(f64) -> f64,
+    target_f0_at_time: &impl Fn(f64, f64) -> f64,
     synth: &mut crate::streaming_world::StreamingWorldSynthesizer,
 ) -> Result<Vec<f64>, String> {
     if x_f64.is_empty() {
@@ -714,16 +713,20 @@ fn vocode_one_streaming(
 
     let voiced: Vec<bool> = f0.iter().map(|&hz| hz > 0.0).collect();
 
-    // 应用音高偏移
+    // Apply the absolute edited trajectory. Imported MPD property points must
+    // not inherit a second detector's local F0 error.
     let mut shifted_f0 = vec![0.0f64; f0.len()];
     for i in 0..f0.len() {
         let hz = f0[i];
         if hz > 0.0 {
             let t = temporal_positions.get(i).copied().unwrap_or(0.0);
             let abs_t = abs_time_start_sec + t;
-            let semitones = semitone_at_time(abs_t);
-            let r = ratio_from_semitones(semitones);
-            shifted_f0[i] = hz * r;
+            let target = target_f0_at_time(abs_t, hz);
+            shifted_f0[i] = if target.is_finite() && target > 0.0 {
+                target.clamp(f0_floor.max(20.0), f0_ceil.max(f0_floor + 1.0))
+            } else {
+                hz
+            };
         }
     }
 
@@ -864,10 +867,10 @@ pub fn vocode_pitch_shift_chunked<F>(
     frame_period_ms: f64,
     f0_floor: f64,
     f0_ceil: f64,
-    semitone_at_time: F,
+    target_f0_at_time: F,
 ) -> Result<Vec<f32>, String>
 where
-    F: Fn(f64) -> f64,
+    F: Fn(f64, f64) -> f64,
 {
     if mono_pcm.is_empty() {
         return Ok(vec![]);
@@ -958,7 +961,7 @@ where
             f0_floor,
             f0_ceil,
             abs_time_start_sec,
-            &semitone_at_time,
+            &target_f0_at_time,
             &mut streaming_synth,
         )?;
 

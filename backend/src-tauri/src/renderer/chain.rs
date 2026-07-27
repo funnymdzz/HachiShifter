@@ -261,6 +261,7 @@ impl ProcessingStage for Mld5VocoderStage {
             clip_id: cc.clip_id,
         };
         let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
+        let upward_shift = estimate_max_upward_shift(cc);
         // Reconstructed Melodyne-style order: synthesize the edited periodic
         // principal, restore the independent source formant envelope, then
         // re-anchor only attack/sibilant residuals (not the source F0).
@@ -269,7 +270,10 @@ impl ProcessingStage for Mld5VocoderStage {
             &mut output,
             1,
             cc.sample_rate,
-            0.92,
+            // At large upward intervals, a full source-envelope replacement
+            // over-emphasises unresolved WORLD harmonics. Melodyne keeps the
+            // envelope independent but gradually reduces that correction.
+            (0.92 - (upward_shift - 5.0).max(0.0) * 0.035).clamp(0.58, 0.92),
         );
         if let Some(curve) = cc.extra_curves.get("formant_shift_cents") {
             crate::time_stretch::apply_mld5_formant_curve(
@@ -285,6 +289,12 @@ impl ProcessingStage for Mld5VocoderStage {
             &mut output,
             1,
             cc.sample_rate,
+            cc.extra_curves
+                .get("mld5_sibilant_mask")
+                .map(|curve| curve.as_slice()),
+            cc.seg_start_sec,
+            cc.frame_period_ms,
+            upward_shift,
         );
         if let Some(sibilant) = cc.extra_curves.get("mld5_sibilant_balance") {
             // Apply the stored balance only to the non-periodic high band;
@@ -315,6 +325,33 @@ impl ProcessingStage for Mld5VocoderStage {
         }
         Ok(output)
     }
+}
+
+fn estimate_max_upward_shift(ctx: &ClipProcessContext<'_>) -> f32 {
+    if ctx.clip_midi.is_empty() || ctx.pitch_edit.is_empty() {
+        return 0.0;
+    }
+    let duration = (ctx.seg_end_sec - ctx.seg_start_sec).max(0.0);
+    let steps = ((duration / 0.01).ceil() as usize).clamp(2, 512);
+    let mut maximum = 0.0f32;
+    for index in 0..=steps {
+        let abs_sec = ctx.seg_start_sec + duration * index as f64 / steps as f64;
+        let target = sample_curve_at_abs_sec(
+            Some(ctx.pitch_edit),
+            abs_sec,
+            ctx.frame_period_ms,
+            0.0,
+        );
+        let local_sec = (abs_sec - ctx.clip_start_sec).max(0.0);
+        let source_position = local_sec * 1000.0 / ctx.frame_period_ms.max(0.1);
+        let source_index = (source_position.round().max(0.0) as usize)
+            .min(ctx.clip_midi.len() - 1);
+        let source = ctx.clip_midi[source_index];
+        if target > 0.0 && source > 0.0 {
+            maximum = maximum.max(target - source);
+        }
+    }
+    maximum.max(0.0)
 }
 
 /// Stage 1b：NSF-HiFiGAN ONNX 合成。
