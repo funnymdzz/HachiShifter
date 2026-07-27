@@ -3946,7 +3946,11 @@ export const PianoRollPanel: React.FC = () => {
                                     aBeat: hit.startSec / secPerBeat,
                                     bBeat: hit.endSec / secPerBeat,
                                 };
-                                if (showMelodyneWrench && sampleAnalysis) {
+                                if (
+                                    showMelodyneWrench &&
+                                    sampleAnalysis &&
+                                    selectedAudioClip
+                                ) {
                                     const row = sampleAnalysis.annotations[hit.noteIndex];
                                     const oldRelative = row?.relative_pitch_cents ?? 0;
                                     const nextRelative =
