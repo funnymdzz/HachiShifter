@@ -8,7 +8,12 @@ import type {
     SampleRegionAnnotation,
 } from "../../services/api/timeline";
 
-type NumericField = Exclude<keyof SampleRegionAnnotation, "name">;
+type NumericField =
+    | "region_start_sec"
+    | "region_end_sec"
+    | "note_alignment_sec"
+    | "fixed_duration_sec"
+    | "relative_pitch_cents";
 
 function errorText(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -234,6 +239,17 @@ export const SampleAnnotationDialog: React.FC<{
                                     note_alignment_sec: start,
                                     fixed_duration_sec: 0,
                                     relative_pitch_cents: 0,
+                                    melodyne_project_data: false,
+                                    melodyne_pitch_center_cents: 0,
+                                    melodyne_original_pitch_center_cents: 0,
+                                    melodyne_pitch_drift_factor: 1,
+                                    melodyne_pitch_modulation_factor: 1,
+                                    melodyne_transition_sec: 0,
+                                    melodyne_formant_offset_cents: 0,
+                                    melodyne_amplitude_factor: 1,
+                                    melodyne_sibilant_balance: 0,
+                                    melodyne_attack_duration_sec: 0,
+                                    melodyne_decay_elongation: 0,
                                 },
                             ]);
                             setActiveIndex(rows.length);
