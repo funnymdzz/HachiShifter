@@ -16,7 +16,7 @@ fn apply_melodyne_note_controls(
     if clip.reversed || !annotations.iter().any(|row| row.melodyne_project_data) {
         return;
     }
-    let Some(root) = timeline.resolve_root_track_id(&clip.track_id).map(str::to_string) else {
+    let Some(root) = timeline.resolve_root_track_id(&clip.track_id) else {
         return;
     };
     let Some(entry) = timeline.params_by_root_track.get_mut(&root) else { return; };
