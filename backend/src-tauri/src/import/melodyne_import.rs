@@ -545,14 +545,17 @@ impl Graph {
 
     fn eval_function(&self, function_id: u32, x: f64) -> f64 {
         let points = self.function_points(function_id);
-        if points.is_empty() {
-            return x;
-        }
+        interpolate_function_points(&points, x).unwrap_or(x)
+    }
+}
+
+fn interpolate_function_points(points: &[(f64, f64)], x: f64) -> Option<f64> {
+        if points.is_empty() { return None; }
         if points.len() == 1 {
-            return points[0].1;
+            return Some(points[0].1);
         }
         if x <= points[0].0 {
-            return points[0].1;
+            return Some(points[0].1);
         }
         for pair in points.windows(2) {
             if x <= pair[1].0 {
@@ -561,11 +564,10 @@ impl Graph {
                 // A linear interpolation is deliberate here.  It keeps the
                 // exact endpoints of Melodyne's Bezier warp and gives stable
                 // transport in HachiShifter's uniform-rate clip engine.
-                return pair[0].1 + (pair[1].1 - pair[0].1) * fraction;
+                return Some(pair[0].1 + (pair[1].1 - pair[0].1) * fraction);
             }
         }
-        points.last().map(|point| point.1).unwrap_or(x)
-    }
+        points.last().map(|point| point.1)
 }
 
 fn has_audio_extension(value: &str) -> bool {
@@ -729,6 +731,7 @@ struct ImportedElement {
     pitch_modulation: f32,
     formant_offset: f32,
     amplitude_factor: f32,
+    amplitude_envelope_function_id: Option<u32>,
     sibilant_balance: f32,
     attack_duration: f64,
     decay_elongation: f32,
@@ -736,6 +739,12 @@ struct ImportedElement {
     muted: bool,
     join_next: bool,
     join_duration: f64,
+    fade_in_sec: f64,
+    fade_out_sec: f64,
+    fade_in_shape_pow: f32,
+    fade_out_shape_pow: f32,
+    join_amplitude: bool,
+    amplitude_transition_duration: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -744,6 +753,7 @@ struct ImportedTrack {
     muted: bool,
     solo: bool,
     melodic: bool,
+    volume: f32,
     elements: Vec<ImportedElement>,
 }
 
@@ -851,6 +861,16 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     continue;
                 }
                 let following_join = graph.reference(element_id, "followingJoin");
+                let source_start = source_time_for_ids(graph, source_item_id, source_description_id, 0.0);
+                let source_end = source_time_for_ids(graph, source_item_id, source_description_id, duration);
+                let fade_in_sec = graph.f64(element_id, "fadeInTime").unwrap_or_else(|| {
+                    graph.f64(element_id, "amplitudeFadeInEndSourceTime")
+                        .map(|value| value - source_start).unwrap_or(0.0)
+                }).clamp(0.0, duration);
+                let fade_out_sec = graph.f64(element_id, "fadeOutTime").unwrap_or_else(|| {
+                    graph.f64(element_id, "amplitudeFadeOutStartSourceTime")
+                        .map(|value| source_end - value).unwrap_or(0.0)
+                }).clamp(0.0, duration);
                 elements.push(ImportedElement {
                     start,
                     duration,
@@ -865,6 +885,9 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         .unwrap_or(1.0),
                     formant_offset: graph.f32(element_id, "formantOffset").unwrap_or(0.0),
                     amplitude_factor: graph.f32(element_id, "amplitudeFactor").unwrap_or(1.0),
+                    amplitude_envelope_function_id: graph
+                        .reference(element_id, "amplitudeEnvelope")
+                        .or_else(|| graph.reference(source_item_id, "amplitudeEnvelope")),
                     sibilant_balance: graph.f32(element_id, "sibilantBalance").unwrap_or(0.0),
                     attack_duration: graph.f64(element_id, "attackDuration").unwrap_or(0.0),
                     decay_elongation: graph.f32(element_id, "decayElongation").unwrap_or(0.0),
@@ -876,6 +899,12 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     join_duration: following_join
                         .and_then(|join| graph.f64(join, "pitchTransitionDuration"))
                         .unwrap_or(0.0),
+                    fade_in_sec,
+                    fade_out_sec,
+                    fade_in_shape_pow: graph.f32(element_id, "amplitudeFadeInShapePow").unwrap_or(1.0).clamp(0.1, 8.0),
+                    fade_out_shape_pow: graph.f32(element_id, "amplitudeFadeOutShapePow").unwrap_or(1.0).clamp(0.1, 8.0),
+                    join_amplitude: following_join.map(|join| graph.bool(join, "joinsAmplitudes")).unwrap_or(false),
+                    amplitude_transition_duration: following_join.and_then(|join| graph.f64(join, "amplitudeTransitionDuration")).unwrap_or(0.0).max(0.0),
                 });
             }
         }
@@ -886,6 +915,11 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 muted: graph.bool(track_id, "isMuted"),
                 solo: graph.bool(track_id, "isSolo"),
                 melodic,
+                volume: graph.f32(track_id, "volume").or_else(|| {
+                    graph.reference(track_id, "volumeFader").and_then(|fader| {
+                        graph.f32(fader, "allGain").or_else(|| graph.f32(fader, "volume"))
+                    })
+                }).unwrap_or(1.0).clamp(0.0, 4.0),
                 elements,
             });
         }
@@ -894,6 +928,13 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
         return Err("Melodyne project contains no playable track elements".to_string());
     }
     Ok((tracks, sources))
+}
+
+fn source_time_for_ids(graph: &Graph, source_item_id: u32, source_description_id: u32, local: f64) -> f64 {
+    let start = graph.i64(source_item_id, "startSampleIndex").unwrap_or(0).max(0) as f64;
+    let rate = graph.reference(source_description_id, "audioSource")
+        .and_then(|source| graph.f64(source, "sampleRate")).unwrap_or(44_100.0).max(1.0);
+    start / rate + local.max(0.0)
 }
 
 fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64 {
@@ -917,6 +958,7 @@ fn register_project_note_objects(
     graph: &Graph,
     tracks: &[ImportedTrack],
     resolved_sources: &BTreeMap<u32, Option<PathBuf>>,
+    compose_tracks: Option<&HashSet<usize>>,
 ) {
     use crate::sample_annotations::{
         NoteDetectorKind, SampleAnalysis, SamplePitchNote, SampleRegionAnnotation,
@@ -926,7 +968,10 @@ fn register_project_note_objects(
         let Some(path) = resolved.as_ref() else { continue; };
         let mut rows = Vec::new();
         let mut notes = Vec::new();
-        for track in tracks {
+        for (track_index, track) in tracks.iter().enumerate() {
+            if compose_tracks.is_some_and(|selected| !selected.contains(&track_index)) {
+                continue;
+            }
             for element in track.elements.iter().filter(|item| item.source_id == *source_id) {
                 let start = source_time(graph, element, 0.0).max(0.0);
                 let end = source_time(graph, element, element.duration).max(start + 0.001);
@@ -1193,7 +1238,10 @@ fn build_track_params(
     let has_volume = track
         .elements
         .iter()
-        .any(|element| (element.amplitude_factor - 1.0).abs() > 1e-6);
+        .any(|element| {
+            (element.amplitude_factor - 1.0).abs() > 1e-6
+                || element.amplitude_envelope_function_id.is_some()
+        });
     let has_sibilant = track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6);
     let mut formant = has_formant.then(|| vec![0.0f32; frame_count]);
     let mut volume = has_volume.then(|| vec![1.0f32; frame_count]);
@@ -1225,6 +1273,10 @@ fn build_track_params(
             .source_function_id
             .map(|function| graph.function_points(function))
             .unwrap_or_default();
+        let amplitude_envelope = element
+            .amplitude_envelope_function_id
+            .map(|function| graph.function_points(function))
+            .unwrap_or_default();
         let start = element.start + shift;
         let first = (start / frame_period_sec).floor().max(0.0) as usize;
         let last = ((start + element.duration) / frame_period_sec)
@@ -1248,7 +1300,14 @@ fn build_track_params(
                 curve[frame] = element.formant_offset;
             }
             if let Some(curve) = volume.as_mut() {
-                curve[frame] = element.amplitude_factor.max(0.0);
+                let envelope = element
+                    .amplitude_envelope_function_id
+                    .and_then(|_| interpolate_function_points(&amplitude_envelope, local_time))
+                    .map(|value| value as f32)
+                    .filter(|value| value.is_finite())
+                    .unwrap_or(1.0)
+                    .clamp(0.0, 4.0);
+                curve[frame] = element.amplitude_factor.max(0.0) * envelope;
             }
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
@@ -1371,6 +1430,7 @@ fn import_graph(
     path: &Path,
     graph: Graph,
     progress: &ImportProgress<'_>,
+    compose_track_indices: Option<&[usize]>,
 ) -> Result<MelodyneImportResult, String> {
     progress(0.25, "read_tracks", 0, 1);
     let (tracks, sources) = collect_project(&graph)?;
@@ -1426,6 +1486,7 @@ fn import_graph(
         .fold(4.0f64, f64::max);
     let project_sec = latest.ceil().max(4.0);
     let frame_period_ms = choose_frame_period_ms(&tracks, project_sec);
+    let compose_tracks = compose_track_indices.map(|indices| indices.iter().copied().collect::<HashSet<_>>());
 
     let mut timeline = TimelineState::default();
     timeline.clips.clear();
@@ -1434,6 +1495,7 @@ fn import_graph(
     timeline.next_track_order = 0;
 
     for (track_index, (track, clip_groups)) in tracks.iter().zip(grouped.iter()).enumerate() {
+        let compose = compose_tracks.as_ref().map_or(track.melodic, |selected| selected.contains(&track_index));
         progress(
             0.50 + 0.15 * track_index as f64 / tracks.len().max(1) as f64,
             "create_clips",
@@ -1444,8 +1506,9 @@ fn import_graph(
         if let Some(state_track) = timeline.tracks.iter_mut().find(|item| item.id == track_id) {
             state_track.muted = track.muted;
             state_track.solo = track.solo;
-            state_track.compose_enabled = track.melodic;
-            state_track.pitch_analysis_algo = PitchAnalysisAlgo::Mld5;
+            state_track.volume = track.volume;
+            state_track.compose_enabled = compose;
+            state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
         for group in clip_groups {
             let Some(source) = sources.get(&group.source_id) else {
@@ -1481,11 +1544,18 @@ fn import_graph(
                         source_end_sec: source_time(&graph, element, element.duration)
                             .max(source_time(&graph, element, 0.0) + 0.001),
                         connected_to_next: element.join_next,
+                        amplitude_factor: element.amplitude_factor.max(0.0),
+                        fade_in_sec: element.fade_in_sec,
+                        fade_out_sec: element.fade_out_sec,
+                        fade_in_shape_pow: element.fade_in_shape_pow,
+                        fade_out_shape_pow: element.fade_out_shape_pow,
+                        amplitude_transition_sec: element.amplitude_transition_duration,
+                        connected_amplitude_to_next: element.join_amplitude,
                     })
                 }).collect();
             }
         }
-        if track.melodic {
+        if compose {
             timeline.params_by_root_track.insert(
                 track_id.clone(),
                 build_track_params(
@@ -1508,7 +1578,7 @@ fn import_graph(
     // Keep Melodyne's persisted segmentation and note-object controls
     // available to the original-source wrench editor. This avoids replacing
     // them with a new GAME pass when an imported MPD clip is selected.
-    register_project_note_objects(&graph, &tracks, &resolved_sources);
+    register_project_note_objects(&graph, &tracks, &resolved_sources, compose_tracks.as_ref());
 
     timeline.playhead_sec = 0.0;
     timeline.project_sec = project_sec;
@@ -1530,17 +1600,18 @@ pub fn import_mpd(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, Stri
         Ok(graph) => graph,
         Err(_) => return import_flat_paths(path, data),
     };
-    import_graph(path, graph, &|_, _, _, _| {})
+    import_graph(path, graph, &|_, _, _, _| {}, None)
 }
 
 pub fn import_mpd_file(
     path: &Path,
     progress: &ImportProgress<'_>,
+    compose_track_indices: Option<&[usize]>,
 ) -> Result<MelodyneImportResult, String> {
     progress(0.0, "open", 0, 1);
     match decode_graph_file(path, progress).and_then(Graph::parse) {
         Ok(graph) if graph.find_first_class("MUPerformance").is_some() => {
-            import_graph(path, graph, progress)
+            import_graph(path, graph, progress, compose_track_indices)
         }
         Ok(_) => {
             // Compatibility path for older MPD variants.  It is reached only
@@ -1566,6 +1637,26 @@ pub fn import_mpd_file(
             }
         }
     }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MelodyneTrackInspection {
+    pub index: usize,
+    pub name: String,
+    pub suggested_compose: bool,
+    pub element_count: usize,
+}
+
+pub fn inspect_mpd_tracks(path: &Path) -> Result<Vec<MelodyneTrackInspection>, String> {
+    let graph = decode_graph_file(path, &|_, _, _, _| {}).and_then(Graph::parse)?;
+    let (tracks, _) = collect_project(&graph)?;
+    Ok(tracks.into_iter().enumerate().map(|(index, track)| MelodyneTrackInspection {
+        index,
+        name: track.name,
+        suggested_compose: track.melodic,
+        element_count: track.elements.len(),
+    }).collect())
 }
 
 #[cfg(test)]

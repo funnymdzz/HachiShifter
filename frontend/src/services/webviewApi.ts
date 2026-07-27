@@ -59,6 +59,7 @@ export const webApi = {
     newProject: projectApi.newProject,
     openProjectDialog: projectApi.openProjectDialog,
     openProject: projectApi.openProject,
+    inspectMelodyneProjectTracks: projectApi.inspectMelodyneProjectTracks,
     saveProject: projectApi.saveProject,
     saveProjectAs: projectApi.saveProjectAs,
     setProjectBaseScale: projectApi.setProjectBaseScale,

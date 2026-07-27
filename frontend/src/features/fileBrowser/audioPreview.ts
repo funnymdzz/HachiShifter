@@ -29,7 +29,7 @@ class AudioPreviewEngine {
     /**
      * 播放指定文件的预览，始终从头开始。
      */
-    async play(filePath: string, onEnd?: () => void): Promise<void> {
+    async play(filePath: string, onEnd?: () => void, startSec = 0): Promise<void> {
         this.stop();
         this.onEndCallback = onEnd ?? null;
         const { ctx, gain } = this.ensureContext();
@@ -65,7 +65,7 @@ class AudioPreviewEngine {
                 this.onEndCallback?.();
             }
         };
-        source.start();
+        source.start(0, Math.max(0, Math.min(startSec, Math.max(0, buffer.duration - 0.001))));
         this.source = source;
         this.currentFile = filePath;
     }

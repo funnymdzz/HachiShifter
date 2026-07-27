@@ -318,6 +318,7 @@ pub fn run() {
             commands::new_project,
             commands::open_project_dialog,
             commands::open_project,
+            commands::inspect_melodyne_project_tracks,
             commands::save_project,
             commands::save_project_as,
             commands::get_auto_backup_settings,

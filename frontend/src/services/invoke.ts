@@ -351,6 +351,13 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
             return { startSec: args[0] };
 
         case "open_project":
+            return {
+                projectPath: args[0],
+                composeTrackIndices: args[1],
+                melodyneProcessingOrder: args[2],
+            };
+
+        case "inspect_melodyne_project_tracks":
             return { projectPath: args[0] };
 
         case "run_timed_auto_backup":

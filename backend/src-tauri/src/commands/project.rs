@@ -852,6 +852,8 @@ pub(super) fn open_project(
     state: State<'_, AppState>,
     window: Window,
     project_path: String,
+    compose_track_indices: Option<Vec<usize>>,
+    melodyne_processing_order: Option<String>,
 ) -> crate::models::TimelineStatePayload {
     let path = PathBuf::from(&project_path);
 
@@ -877,7 +879,11 @@ pub(super) fn open_project(
                 },
             );
         };
-        let imported = match crate::melodyne_import::import_mpd_file(&path, &emit_progress) {
+        let imported = match crate::melodyne_import::import_mpd_file(
+            &path,
+            &emit_progress,
+            compose_track_indices.as_deref(),
+        ) {
             Ok(imported) => imported,
             Err(error) => {
                 eprintln!("[open_project] Melodyne import failed: {error}");
@@ -906,6 +912,18 @@ pub(super) fn open_project(
         {
             let mut timeline = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
             *timeline = imported.timeline;
+            let processing_order = if melodyne_processing_order.as_deref() == Some("track_first") { 1.0 } else { 0.0 };
+            let compose_track_ids = timeline
+                .tracks
+                .iter()
+                .filter(|track| track.compose_enabled)
+                .map(|track| track.id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for (track_id, params) in timeline.params_by_root_track.iter_mut() {
+                if compose_track_ids.contains(track_id) {
+                    params.extra_params.insert("mld5_processing_order".to_string(), processing_order);
+                }
+            }
             timeline.project_scale_notes = base_scale_notes("C");
             // Keep the editable state complete, but send the engine a lean
             // initial copy. Large MPD sessions otherwise duplicate previews

@@ -760,6 +760,13 @@ function applyTimelineState(
                 sourceStartSec: Number(segment.sourceStartSec),
                 sourceEndSec: Number(segment.sourceEndSec),
                 connectedToNext: Boolean(segment.connectedToNext),
+                amplitudeFactor: Number(segment.amplitudeFactor ?? 1),
+                fadeInSec: Number(segment.fadeInSec ?? 0),
+                fadeOutSec: Number(segment.fadeOutSec ?? 0),
+                fadeInShapePow: Number(segment.fadeInShapePow ?? 1),
+                fadeOutShapePow: Number(segment.fadeOutShapePow ?? 1),
+                amplitudeTransitionSec: Number(segment.amplitudeTransitionSec ?? 0),
+                connectedAmplitudeToNext: Boolean(segment.connectedAmplitudeToNext),
             })),
             groupId: clip.group_id ?? undefined,
         };

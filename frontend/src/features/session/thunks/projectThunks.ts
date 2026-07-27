@@ -3,6 +3,21 @@ import { webApi } from "../../../services/webviewApi";
 import type { SessionState } from "../sessionSlice";
 import { requestMissingFileReplacement } from "./missingFilePrompt";
 import { waveformMipmapStore } from "../../../utils/waveformMipmapStore";
+import { requestMelodyneComposeSelection } from "../../../services/melodyneComposePrompt";
+
+async function openProjectWithComposeChoice(projectPath: string) {
+    let composeTrackIndices: number[] | undefined;
+    let melodyneProcessingOrder: "note_first" | "track_first" | undefined;
+    if (/\.mpd$/i.test(projectPath)) {
+        const inspection = await webApi.inspectMelodyneProjectTracks(projectPath);
+        if (inspection.ok && inspection.tracks) {
+            const choice = await requestMelodyneComposeSelection(inspection.tracks);
+            composeTrackIndices = choice.composeTrackIndices;
+            melodyneProcessingOrder = choice.processingOrder;
+        }
+    }
+    return webApi.openProject(projectPath, composeTrackIndices, melodyneProcessingOrder);
+}
 
 async function resolveMissingFilesInteractively(timeline: any, missingFiles: string[] | undefined) {
     let latestTimeline = timeline;
@@ -58,7 +73,7 @@ export const openProjectFromDialog = createAsyncThunk(
         if (picked.canceled || !picked.path) {
             return { ok: true, canceled: true } as const;
         }
-        let timeline = await webApi.openProject(picked.path);
+        let timeline = await openProjectWithComposeChoice(picked.path);
         timeline = await resolveMissingFilesInteractively(timeline, timeline?.missing_files);
         return { ok: true, canceled: false, timeline } as const;
     },
@@ -67,7 +82,7 @@ export const openProjectFromDialog = createAsyncThunk(
 export const openProjectFromPath = createAsyncThunk(
     "session/openProjectFromPath",
     async (projectPath: string) => {
-        let timeline = await webApi.openProject(projectPath);
+        let timeline = await openProjectWithComposeChoice(projectPath);
         timeline = await resolveMissingFilesInteractively(timeline, timeline?.missing_files);
         return timeline;
     },

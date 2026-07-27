@@ -859,6 +859,7 @@ fn continue_periodic_phase_at_join(
     boundary: usize,
     available_right: usize,
     connected: bool,
+    amplitude_transition_frames: usize,
 ) {
     if channels == 0 || boundary < 4 || available_right < 2 {
         return;
@@ -909,7 +910,14 @@ fn continue_periodic_phase_at_join(
     }
 
     let requested = if connected { 12 } else { 2 };
-    let fade = ((sample_rate as usize * requested) / 1000)
+    let default_fade = ((sample_rate as usize * requested) / 1000).max(8);
+    // `joinsAmplitudes` carries its own transition duration. Honour that
+    // persisted boundary ramp while keeping it bounded so it cannot smear a
+    // whole note when an old project contains a stale duration.
+    let stored_fade = amplitude_transition_frames
+        .min((sample_rate as usize / 10).max(8));
+    let fade = default_fade
+        .max(stored_fade)
         .max(8)
         .min(available_right)
         .min(total_frames - boundary);
@@ -948,7 +956,7 @@ pub fn render_melodyne_warp_segments(
     if input_frames == 0 || target_frames == 0 || segments.is_empty() { return input.to_vec(); }
     let mut out = vec![0.0f32; target_frames * channels];
     let mut weights = vec![0.0f32; target_frames];
-    let mut rendered_ranges = Vec::<(usize, usize, bool)>::new();
+    let mut rendered_ranges = Vec::<(usize, usize, bool, bool, usize)>::new();
     let edge = ((sample_rate as usize * 5) / 1000).max(4);
     for segment in segments {
         let src_start = ((segment.source_start_sec - clip_source_start_sec).max(0.0)
@@ -967,14 +975,43 @@ pub fn render_melodyne_warp_segments(
         if dst_start >= target_frames { continue; }
         let dst_end = dst_end.clamp(dst_start.saturating_add(1), target_frames);
         if dst_end <= dst_start { continue; }
-        let stretched = time_stretch_interleaved(
+        let mut stretched = time_stretch_interleaved(
             &input[src_start * channels..src_end * channels],
             channels,
             sample_rate,
             dst_end - dst_start,
             StretchAlgorithm::MelodyneHybrid,
         );
-        rendered_ranges.push((dst_start, dst_end, segment.connected_to_next));
+        let piece_frames = dst_end - dst_start;
+        let fade_in = (segment.fade_in_sec.max(0.0) * sample_rate as f64).round() as usize;
+        let fade_out = (segment.fade_out_sec.max(0.0) * sample_rate as f64).round() as usize;
+        for local in 0..piece_frames {
+            let in_gain = if fade_in > 0 && local < fade_in {
+                (local as f32 / fade_in.max(1) as f32)
+                    .clamp(0.0, 1.0)
+                    .powf(segment.fade_in_shape_pow.clamp(0.1, 8.0))
+            } else { 1.0 };
+            let remaining = piece_frames.saturating_sub(local + 1);
+            let out_gain = if fade_out > 0 && remaining < fade_out {
+                (remaining as f32 / fade_out.max(1) as f32)
+                    .clamp(0.0, 1.0)
+                    .powf(segment.fade_out_shape_pow.clamp(0.1, 8.0))
+            } else { 1.0 };
+            // Note amplitude is restored by the MLD5 per-frame volume curve;
+            // this stage owns only the persisted element fades, avoiding a
+            // second multiplication of amplitudeFactor.
+            let gain = in_gain * out_gain;
+            for channel in 0..channels {
+                stretched[local * channels + channel] *= gain;
+            }
+        }
+        rendered_ranges.push((
+            dst_start,
+            dst_end,
+            segment.connected_to_next,
+            segment.connected_amplitude_to_next,
+            (segment.amplitude_transition_sec.max(0.0) * sample_rate as f64).round() as usize,
+        ));
         for local in 0..(dst_end - dst_start) {
             let frame = dst_start + local;
             let left = (local as f32 / edge as f32).clamp(0.0, 1.0);
@@ -994,8 +1031,8 @@ pub fn render_melodyne_warp_segments(
     rendered_ranges.sort_by_key(|range| range.0);
     let join_tolerance = ((sample_rate as usize * 2) / 1000).max(2);
     for pair in rendered_ranges.windows(2) {
-        let (left_start, left_end, connected) = pair[0];
-        let (right_start, right_end, _) = pair[1];
+        let (left_start, left_end, connected, joins_amplitude, amplitude_transition_frames) = pair[0];
+        let (right_start, right_end, _, _, _) = pair[1];
         if left_end <= left_start || right_end <= right_start {
             continue;
         }
@@ -1011,6 +1048,7 @@ pub fn render_melodyne_warp_segments(
             right_start,
             right_end.saturating_sub(right_start),
             connected,
+            if joins_amplitude { amplitude_transition_frames } else { 0 },
         );
     }
     out

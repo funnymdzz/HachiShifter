@@ -39,6 +39,7 @@ export function ActionBar() {
 
     const [pitchSnapOpen, setPitchSnapOpen] = useState(false);
     const [customScaleOpen, setCustomScaleOpen] = useState(false);
+    const [sourceEditPlaying, setSourceEditPlaying] = useState(false);
     const [gridSnapMenuPos, setGridSnapMenuPos] = useState<{ x: number; y: number } | null>(null);
 
     const baseScaleWheelOptions = [
@@ -55,6 +56,17 @@ export function ActionBar() {
             setBpmText(String(Math.round(s.bpm || 120)));
         }
     }, [s.bpm]);
+
+    useEffect(() => {
+        const update = (event: Event) => {
+            const playing = Boolean(
+                (event as CustomEvent<{ playing?: boolean }>).detail?.playing,
+            );
+            setSourceEditPlaying(playing);
+        };
+        window.addEventListener("hachi:melodyne-source-playback-state", update);
+        return () => window.removeEventListener("hachi:melodyne-source-playback-state", update);
+    }, []);
 
     function commitBpm(nextText?: string) {
         const raw = (nextText ?? bpmText).trim();
@@ -320,6 +332,10 @@ export function ActionBar() {
                     color="gray"
                     size="1"
                     onClick={() => {
+                        if (document.body.hasAttribute("data-hachi-melodyne-source-edit")) {
+                            window.dispatchEvent(new Event("hachi:stop-melodyne-source"));
+                            return;
+                        }
                         dispatch(stopAudioPlayback({ restoreAnchor: true }));
                     }}
                     title={t("action_stop")}
@@ -330,15 +346,20 @@ export function ActionBar() {
                     variant="solid"
                     size="1"
                     onClick={() => {
+                        if (document.body.hasAttribute("data-hachi-melodyne-source-edit")) {
+                            if (s.runtime.isPlaying) dispatch(stopAudioPlayback());
+                            window.dispatchEvent(new Event("hachi:play-melodyne-source"));
+                            return;
+                        }
                         if (s.runtime.isPlaying) {
                             dispatch(stopAudioPlayback());
                             return;
                         }
                         dispatch(playOriginal());
                     }}
-                    title={s.runtime.isPlaying ? tAny("action_pause") : t("action_play_out")}
+                    title={s.runtime.isPlaying || sourceEditPlaying ? tAny("action_pause") : t("action_play_out")}
                 >
-                    {s.runtime.isPlaying ? <PauseIcon /> : <PlayIcon />}
+                    {s.runtime.isPlaying || sourceEditPlaying ? <PauseIcon /> : <PlayIcon />}
                 </IconButton>
             </Flex>
 

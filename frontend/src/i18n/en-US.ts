@@ -965,4 +965,15 @@ export const enUS = {
     melodyne_attack: "Attack length",
     melodyne_project_model: "Melodyne project",
     melodyne_connection_hint: "Project import adds no smoothing; Connect affects only the selected boundary. Outside source edit, drag a note edge to warp that pronunciation together with its pitch line.",
+
+    // Melodyne track processing selection.
+    melodyne_compose_select_title: "Choose Compose tracks",
+    melodyne_compose_select_description: "Compose tracks restore Melodyne note objects and MLD5 processing. Other tracks remain ordinary audio without pitch analysis or correction.",
+    melodyne_processing_order: "Processing order",
+    melodyne_note_first: "Tune/stretch, then splice",
+    melodyne_note_first_hint: "UTAU-style: process each pronunciation first, then assemble the track.",
+    melodyne_track_first: "Splice/stretch, then tune",
+    melodyne_track_first_hint: "DAW-style: assemble the track first, then apply pitch processing across it.",
+    melodyne_import_continue: "Import project",
+
 } as const;

@@ -154,8 +154,23 @@ pub async fn open_project(
     state: State<'_, AppState>,
     window: Window,
     project_path: String,
+    compose_track_indices: Option<Vec<usize>>,
+    melodyne_processing_order: Option<String>,
 ) -> Result<crate::models::TimelineStatePayload, String> {
-    Ok(project::open_project(state, window, project_path))
+    Ok(project::open_project(state, window, project_path, compose_track_indices, melodyne_processing_order))
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub async fn inspect_melodyne_project_tracks(project_path: String) -> serde_json::Value {
+    let inspected = tauri::async_runtime::spawn_blocking(move || {
+        crate::melodyne_import::inspect_mpd_tracks(std::path::Path::new(&project_path))
+    })
+    .await;
+    match inspected {
+        Ok(Ok(tracks)) => serde_json::json!({"ok": true, "tracks": tracks}),
+        Ok(Err(error)) => serde_json::json!({"ok": false, "error": error}),
+        Err(error) => serde_json::json!({"ok": false, "error": error.to_string()}),
+    }
 }
 
 #[tauri::command(rename_all = "camelCase")]

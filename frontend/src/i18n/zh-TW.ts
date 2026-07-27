@@ -952,4 +952,15 @@ export const zhTW = {
     melodyne_attack: "起音時長",
     melodyne_project_model: "Melodyne 工程",
     melodyne_connection_hint: "工程匯入預設不新增平滑，連接僅作用於所選邊界；離開原始編輯後拖曳音符邊緣，可將該發音及其音高線一起拉伸。",
+
+    // Melodyne 軌道處理選擇。
+    melodyne_compose_select_title: "選擇 Compose 軌道",
+    melodyne_compose_select_description: "Compose 軌道會還原 Melodyne 音符物件並使用 MLD5 處理；其餘軌道作為普通音軌，不進行音高分析和修音。",
+    melodyne_processing_order: "處理順序",
+    melodyne_note_first: "先修音和拉伸，後拼接",
+    melodyne_note_first_hint: "UTAU 式：先處理每個發音，再組裝成完整軌道。",
+    melodyne_track_first: "先拉伸拼接，後修音",
+    melodyne_track_first_hint: "DAW 式：先組裝完整軌道，再跨取樣進行整體音高處理。",
+    melodyne_import_continue: "匯入專案",
+
 } as const;

@@ -83,7 +83,18 @@ export const projectApi = {
     openProjectDialog: () =>
         invoke<{ ok: boolean; canceled?: boolean; path?: string }>("open_project_dialog"),
 
-    openProject: (projectPath: string) => invoke<TimelineResult>("open_project", projectPath),
+    inspectMelodyneProjectTracks: (projectPath: string) =>
+        invoke<{
+            ok: boolean;
+            tracks?: Array<{ index: number; name: string; suggestedCompose: boolean; elementCount: number }>;
+            error?: string;
+        }>("inspect_melodyne_project_tracks", projectPath),
+
+    openProject: (
+        projectPath: string,
+        composeTrackIndices?: number[],
+        melodyneProcessingOrder?: "note_first" | "track_first",
+    ) => invoke<TimelineResult>("open_project", projectPath, composeTrackIndices, melodyneProcessingOrder),
 
     saveProject: (notesMarkdown?: string) => invoke<any>("save_project", notesMarkdown),
 

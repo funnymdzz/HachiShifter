@@ -43,6 +43,7 @@ import type { ActionId } from "./features/keybindings/types";
 import { store } from "./app/store";
 import { resolveRootTrackId } from "./features/session/trackUtils";
 import { getParamShiftStep } from "./components/layout/pianoRoll/paramShiftStep";
+import type { MelodyneTrackChoice } from "./services/melodyneComposePrompt";
 import { runConfirmedExitClose } from "./confirmedExitClose";
 import { paramsApi } from "./services/api";
 import { coreApi } from "./services/api/core";
@@ -511,6 +512,29 @@ function AppInner() {
         current: number;
         total: number;
     }>({ active: false, progress: 0, stage: "open", current: 0, total: 0 });
+    const [melodyneComposePrompt, setMelodyneComposePrompt] = useState<{
+        tracks: MelodyneTrackChoice[];
+        selected: Set<number>;
+        processingOrder: "note_first" | "track_first";
+        resolve: (choice: { composeTrackIndices: number[]; processingOrder: "note_first" | "track_first" }) => void;
+    } | null>(null);
+
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent).detail as {
+                tracks: MelodyneTrackChoice[];
+                resolve: (choice: { composeTrackIndices: number[]; processingOrder: "note_first" | "track_first" }) => void;
+            };
+            setMelodyneComposePrompt({
+                tracks: detail.tracks,
+                selected: new Set(detail.tracks.filter((track) => track.suggestedCompose).map((track) => track.index)),
+                processingOrder: "note_first",
+                resolve: detail.resolve,
+            });
+        };
+        window.addEventListener("hachi:melodyne-compose-selection", handler);
+        return () => window.removeEventListener("hachi:melodyne-compose-selection", handler);
+    }, []);
 
     // 波形分析进度状态
     const [waveformAnalysis, setWaveformAnalysis] = useState<{
@@ -1169,6 +1193,13 @@ function AppInner() {
         (actionId: ActionId) => {
             switch (actionId) {
                 case "playback.toggle":
+                    if (document.body.hasAttribute("data-hachi-melodyne-source-edit")) {
+                        if (runtimeRef.current.isPlaying) {
+                            void dispatch(stopAudioPlayback());
+                        }
+                        window.dispatchEvent(new Event("hachi:play-melodyne-source"));
+                        break;
+                    }
                     if (runtimeRef.current.isPlaying) {
                         void dispatch(stopAudioPlayback());
                     } else {
@@ -1176,6 +1207,10 @@ function AppInner() {
                     }
                     break;
                 case "playback.stop":
+                    if (document.body.hasAttribute("data-hachi-melodyne-source-edit")) {
+                        window.dispatchEvent(new Event("hachi:stop-melodyne-source"));
+                        break;
+                    }
                     if (runtimeRef.current.isPlaying) {
                         void dispatch(stopAudioPlayback({ restoreAnchor: true }));
                     } else {
@@ -1923,6 +1958,56 @@ function AppInner() {
                     </Flex>
                 )}
             </Flex>
+
+            <Dialog.Root open={melodyneComposePrompt != null}>
+                <Dialog.Content maxWidth="620px">
+                    <Dialog.Title>{t("melodyne_compose_select_title")}</Dialog.Title>
+                    <Dialog.Description>{t("melodyne_compose_select_description")}</Dialog.Description>
+                    <Flex direction="column" gap="2" my="4" style={{ maxHeight: 300, overflowY: "auto" }}>
+                        {melodyneComposePrompt?.tracks.map((track) => (
+                            <label key={track.index} className="flex items-center gap-2 rounded px-2 py-1" style={{ background: "var(--gray-3)" }}>
+                                <input
+                                    type="checkbox"
+                                    checked={melodyneComposePrompt.selected.has(track.index)}
+                                    onChange={(event) => setMelodyneComposePrompt((current) => {
+                                        if (!current) return current;
+                                        const selected = new Set(current.selected);
+                                        if (event.target.checked) selected.add(track.index); else selected.delete(track.index);
+                                        return { ...current, selected };
+                                    })}
+                                />
+                                <Text className="flex-1">{track.name}</Text>
+                                <Text size="1" color="gray">{track.elementCount}</Text>
+                            </label>
+                        ))}
+                    </Flex>
+                    <Text size="2" weight="bold">{t("melodyne_processing_order")}</Text>
+                    <Flex direction="column" gap="2" mt="2">
+                        {(["note_first", "track_first"] as const).map((mode) => (
+                            <label key={mode} className="flex items-start gap-2">
+                                <input
+                                    type="radio"
+                                    name="melodyne-processing-order"
+                                    checked={melodyneComposePrompt?.processingOrder === mode}
+                                    onChange={() => setMelodyneComposePrompt((current) => current ? { ...current, processingOrder: mode } : current)}
+                                />
+                                <span>
+                                    <Text as="div" size="2" weight="medium">{t(mode === "note_first" ? "melodyne_note_first" : "melodyne_track_first")}</Text>
+                                    <Text as="div" size="1" color="gray">{t(mode === "note_first" ? "melodyne_note_first_hint" : "melodyne_track_first_hint")}</Text>
+                                </span>
+                            </label>
+                        ))}
+                    </Flex>
+                    <Flex justify="end" mt="4">
+                        <Button onClick={() => {
+                            const prompt = melodyneComposePrompt;
+                            if (!prompt) return;
+                            prompt.resolve({ composeTrackIndices: [...prompt.selected].sort((a, b) => a - b), processingOrder: prompt.processingOrder });
+                            setMelodyneComposePrompt(null);
+                        }}>{t("melodyne_import_continue")}</Button>
+                    </Flex>
+                </Dialog.Content>
+            </Dialog.Root>
 
             {melodyneImport.active ? (
                 <div

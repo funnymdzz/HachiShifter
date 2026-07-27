@@ -989,4 +989,15 @@ export const koKR = {
     melodyne_attack: "어택 길이",
     melodyne_project_model: "Melodyne 프로젝트",
     melodyne_connection_hint: "프로젝트를 불러올 때 스무딩을 추가하지 않으며 연결은 선택한 경계에만 적용됩니다. 소스 편집 밖에서 음표 가장자리를 끌면 해당 발음과 피치선이 함께 늘어납니다.",
+
+    // Melodyne 트랙 처리 선택.
+    melodyne_compose_select_title: "Compose 트랙 선택",
+    melodyne_compose_select_description: "Compose 트랙은 Melodyne 노트 객체와 MLD5 처리를 복원합니다. 나머지는 피치 분석과 보정을 하지 않는 일반 오디오 트랙으로 처리합니다.",
+    melodyne_processing_order: "처리 순서",
+    melodyne_note_first: "보정·늘이기 후 연결",
+    melodyne_note_first_hint: "UTAU 방식: 각 발음을 먼저 처리한 뒤 트랙을 조립합니다.",
+    melodyne_track_first: "연결·늘이기 후 보정",
+    melodyne_track_first_hint: "DAW 방식: 트랙을 먼저 조립한 뒤 전체 피치 처리를 적용합니다.",
+    melodyne_import_continue: "프로젝트 가져오기",
+
 } as const;

@@ -82,6 +82,13 @@ export interface TimelineClip {
         sourceStartSec: number;
         sourceEndSec: number;
         connectedToNext: boolean;
+        amplitudeFactor: number;
+        fadeInSec: number;
+        fadeOutSec: number;
+        fadeInShapePow: number;
+        fadeOutShapePow: number;
+        amplitudeTransitionSec: number;
+        connectedAmplitudeToNext: boolean;
     }>;
 }
 

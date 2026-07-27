@@ -153,7 +153,23 @@ pub struct MelodyneWarpSegment {
     /// are never smoothed implicitly.
     #[serde(default)]
     pub connected_to_next: bool,
+    #[serde(default = "default_one_f32")]
+    pub amplitude_factor: f32,
+    #[serde(default)]
+    pub fade_in_sec: f64,
+    #[serde(default)]
+    pub fade_out_sec: f64,
+    #[serde(default = "default_one_f32")]
+    pub fade_in_shape_pow: f32,
+    #[serde(default = "default_one_f32")]
+    pub fade_out_shape_pow: f32,
+    #[serde(default)]
+    pub amplitude_transition_sec: f64,
+    #[serde(default)]
+    pub connected_amplitude_to_next: bool,
 }
+
+fn default_one_f32() -> f32 { 1.0 }
 
 impl Default for ClipFormantMorph {
     fn default() -> Self {

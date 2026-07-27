@@ -973,4 +973,15 @@ export const jaJP = {
     melodyne_attack: "アタック長",
     melodyne_project_model: "Melodyneプロジェクト",
     melodyne_connection_hint: "プロジェクト読込時は平滑化を追加せず、接続は選択境界だけに作用します。ソース編集の外ではノート端をドラッグすると、その発音とピッチ線が一緒に伸縮します。",
+
+    // Melodyne トラック処理の選択。
+    melodyne_compose_select_title: "Compose トラックを選択",
+    melodyne_compose_select_description: "Compose トラックは Melodyne のノートオブジェクトと MLD5 処理を復元します。それ以外はピッチ解析・補正を行わない通常のオーディオトラックとして扱います。",
+    melodyne_processing_order: "処理順序",
+    melodyne_note_first: "補正・伸縮してから接続",
+    melodyne_note_first_hint: "UTAU 方式：各発音を先に処理してからトラックを組み立てます。",
+    melodyne_track_first: "接続・伸縮してから補正",
+    melodyne_track_first_hint: "DAW 方式：トラックを先に組み立ててから全体へピッチ処理を適用します。",
+    melodyne_import_continue: "プロジェクトを読み込む",
+
 } as const;

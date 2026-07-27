@@ -49,6 +49,7 @@ import type { ProcessorParamDescriptor } from "../../types/api";
 import { paramsApi } from "../../services/api/params";
 import { coreApi } from "../../services/api/core";
 import { webApi } from "../../services/webviewApi";
+import { audioPreview } from "../../features/fileBrowser/audioPreview";
 import type {
     ClipSampleAnnotationsResult,
     SampleRegionAnnotation,
@@ -459,6 +460,84 @@ export const PianoRollPanel: React.FC = () => {
         midiNote: number;
     } | null>(null);
     const [showMelodyneWrench, setShowMelodyneWrench] = useState(false);
+
+    useEffect(() => {
+        document.body.toggleAttribute("data-hachi-melodyne-source-edit", showMelodyneWrench);
+        window.dispatchEvent(
+            new CustomEvent("hachi:melodyne-source-mode", {
+                detail: { active: showMelodyneWrench },
+            }),
+        );
+        if (!showMelodyneWrench) {
+            audioPreview.stop();
+            document.body.removeAttribute("data-hachi-melodyne-source-playing");
+            window.dispatchEvent(
+                new CustomEvent("hachi:melodyne-source-playback-state", {
+                    detail: { playing: false },
+                }),
+            );
+        }
+        return () => {
+            document.body.removeAttribute("data-hachi-melodyne-source-edit");
+            audioPreview.stop();
+            document.body.removeAttribute("data-hachi-melodyne-source-playing");
+        };
+    }, [showMelodyneWrench]);
+
+    useEffect(() => {
+        const playSource = () => {
+            if (!showMelodyneWrench || !sampleAnalysis?.audio_path) return;
+            if (audioPreview.isPlaying()) {
+                audioPreview.stop();
+                document.body.removeAttribute("data-hachi-melodyne-source-playing");
+                window.dispatchEvent(
+                    new CustomEvent("hachi:melodyne-source-playback-state", {
+                        detail: { playing: false },
+                    }),
+                );
+                return;
+            }
+            const sourceSec = Math.max(0, s.playheadSec - (selectedAudioClip?.startSec ?? 0));
+            document.body.setAttribute("data-hachi-melodyne-source-playing", "");
+            window.dispatchEvent(
+                new CustomEvent("hachi:melodyne-source-playback-state", {
+                    detail: { playing: true },
+                }),
+            );
+            void audioPreview
+                .play(sampleAnalysis.audio_path, () => {
+                    document.body.removeAttribute("data-hachi-melodyne-source-playing");
+                    window.dispatchEvent(
+                        new CustomEvent("hachi:melodyne-source-playback-state", {
+                            detail: { playing: false },
+                        }),
+                    );
+                }, sourceSec)
+                .catch(() => {
+                    document.body.removeAttribute("data-hachi-melodyne-source-playing");
+                    window.dispatchEvent(
+                        new CustomEvent("hachi:melodyne-source-playback-state", {
+                            detail: { playing: false },
+                        }),
+                    );
+                });
+        };
+        const stopSource = () => {
+            audioPreview.stop();
+            document.body.removeAttribute("data-hachi-melodyne-source-playing");
+            window.dispatchEvent(
+                new CustomEvent("hachi:melodyne-source-playback-state", {
+                    detail: { playing: false },
+                }),
+            );
+        };
+        window.addEventListener("hachi:play-melodyne-source", playSource);
+        window.addEventListener("hachi:stop-melodyne-source", stopSource);
+        return () => {
+            window.removeEventListener("hachi:play-melodyne-source", playSource);
+            window.removeEventListener("hachi:stop-melodyne-source", stopSource);
+        };
+    }, [sampleAnalysis?.audio_path, s.playheadSec, selectedAudioClip?.startSec, showMelodyneWrench]);
     const [activeSampleNoteIndex, setActiveSampleNoteIndex] = useState<number | null>(null);
     const [sampleToolBusy, setSampleToolBusy] = useState(false);
 
@@ -1773,7 +1852,7 @@ export const PianoRollPanel: React.FC = () => {
     } => {
         const clip = selectedAudioClip;
         const analysis = sampleAnalysis;
-        if (!clip || clip.reversed || editParam !== "pitch") {
+        if (!clip || clip.reversed || editParam !== "pitch" || !rootTrack?.composeEnabled) {
             return { notes: [], timing: null };
         }
         const sourceStart = Math.max(0, clip.sourceStartSec);
@@ -1982,7 +2061,7 @@ export const PianoRollPanel: React.FC = () => {
               }
             : null;
         return { notes, timing };
-    }, [editParam, noteDragPreview, paramView, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
+    }, [editParam, noteDragPreview, paramView, rootTrack?.composeEnabled, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
 
     const [showPitchMacro, setShowPitchMacro] = useState(true);
     const applyMelodyneMacro = useCallback(
