@@ -835,21 +835,56 @@ fn source_pitch_at(graph: &Graph, element: &ImportedElement, local_time: f64) ->
     if points.is_empty() {
         return None;
     }
-    let values_per_second = graph
-        .f64(element.source_description_id, "parameterValuesPerSecond")
-        .unwrap_or(200.0)
-        .max(1.0);
-    let source_local = element
+    let source_id = graph.reference(element.source_description_id, "audioSource")?;
+    let sample_rate = graph.f64(source_id, "sampleRate")?.max(1.0);
+    let sample_count = graph.i64(source_id, "sampleCount")?.max(1) as f64;
+    let source_duration = sample_count / sample_rate;
+    let item_start = graph
+        .i64(element.source_item_id, "startSampleIndex")
+        .unwrap_or(0)
+        .max(0) as f64
+        / sample_rate;
+    let mapped_time = element
         .source_function_id
         .map(|function| graph.eval_function(function, local_time))
         .unwrap_or(local_time)
         .max(0.0);
-    let point_position = source_local * values_per_second;
-    let left_index = point_position.floor().max(0.0) as usize;
-    let right_index = (left_index + 1).min(points.len() - 1);
-    let fraction = (point_position - left_index as f64).clamp(0.0, 1.0) as f32;
+    // `timeSliceIndex` is global to the audio-source description, not local to
+    // an item's property-point list.  Derive its position from the full source
+    // duration; `parameterValuesPerSecond` is not a reliable hop-rate field in
+    // Melodyne 5 archives (the observed value is commonly 441).
+    let time_slice_count = graph
+        .i32(element.source_description_id, "timeSliceCount")
+        .unwrap_or(points.len() as i32)
+        .max(1) as f64;
+    let slice_position = ((item_start + mapped_time) / source_duration)
+        .clamp(0.0, 1.0)
+        * (time_slice_count - 1.0).max(0.0);
+    let mut left_index = 0usize;
+    let mut right_index = points.len() - 1;
+    for (index, point_id) in points.iter().enumerate() {
+        let point_slice = graph.i32(*point_id, "timeSliceIndex").unwrap_or(index as i32) as f64;
+        if point_slice <= slice_position {
+            left_index = index;
+        }
+        if point_slice >= slice_position {
+            right_index = index;
+            break;
+        }
+    }
+    let left_slice = graph
+        .i32(points[left_index], "timeSliceIndex")
+        .unwrap_or(left_index as i32) as f64;
+    let right_slice = graph
+        .i32(points[right_index], "timeSliceIndex")
+        .unwrap_or(right_index as i32) as f64;
+    let fraction = if right_slice > left_slice {
+        ((slice_position - left_slice) / (right_slice - left_slice)).clamp(0.0, 1.0) as f32
+    } else {
+        0.0
+    };
     let read = |point_id: u32, name: &str| graph.f32(point_id, name);
-    let left = *points.get(left_index.min(points.len() - 1))?;
+    let left = points[left_index];
     let right = points[right_index];
     if graph.bool(left, "isConsideredSilent") && graph.bool(right, "isConsideredSilent") {
         return None;
