@@ -570,6 +570,34 @@ fn interpolate_function_points(points: &[(f64, f64)], x: f64) -> Option<f64> {
         points.last().map(|point| point.1)
 }
 
+/// Invert Melodyne's monotonic source-time mapping.  Fade handles are stored
+/// in source-time coordinates, while the renderer consumes destination-time
+/// durations, so using the raw source delta makes fades wrong whenever a note
+/// has been stretched.
+fn inverse_interpolate_function_points(points: &[(f64, f64)], y: f64) -> Option<f64> {
+    if points.is_empty() || !y.is_finite() {
+        return None;
+    }
+    if points.len() == 1 || y <= points[0].1 {
+        return Some(points[0].0);
+    }
+    for pair in points.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        let lo = y0.min(y1);
+        let hi = y0.max(y1);
+        if y >= lo && y <= hi {
+            let span = y1 - y0;
+            if span.abs() <= 1e-9 {
+                return Some(x0);
+            }
+            let fraction = ((y - y0) / span).clamp(0.0, 1.0);
+            return Some(x0 + (x1 - x0) * fraction);
+        }
+    }
+    points.last().map(|point| point.0)
+}
+
 fn has_audio_extension(value: &str) -> bool {
     let lower = value.trim().to_ascii_lowercase();
     [".wav", ".wave", ".aif", ".aiff", ".flac", ".mp3", ".ogg", ".m4a"]
@@ -874,22 +902,9 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 let following_join = graph.reference(element_id, "followingJoin");
                 let source_function_id =
                     graph.reference(element_id, "sourceTimeForElementTimeFunction");
-                let source_start = source_time_for_ids(
-                    graph,
-                    source_item_id,
-                    source_description_id,
-                    source_function_id,
-                    0.0,
-                    duration,
-                );
-                let source_end = source_time_for_ids(
-                    graph,
-                    source_item_id,
-                    source_description_id,
-                    source_function_id,
-                    duration,
-                    duration,
-                );
+                let source_time_points = source_function_id
+                    .map(|function| graph.function_points(function))
+                    .unwrap_or_default();
                 // Melodyne 5 keeps fadeInTime/fadeOutTime at zero for most
                 // edited notes and persists the actual fade handles in source
                 // time. A plain Option fallback therefore discarded nearly
@@ -897,21 +912,28 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 // derive it from the warped source-time endpoints.
                 let fade_in_sec = graph
                     .f64(element_id, "fadeInTime")
-                    .filter(|value| *value > 1e-9)
+                    .filter(|value| value.is_finite() && *value > 1e-9)
                     .unwrap_or_else(|| {
                         graph
                             .f64(element_id, "amplitudeFadeInEndSourceTime")
-                            .map(|value| value - source_start)
+                            .filter(|value| value.is_finite())
+                            .and_then(|value| {
+                                inverse_interpolate_function_points(&source_time_points, value)
+                            })
                             .unwrap_or(0.0)
                     })
                     .clamp(0.0, duration);
                 let fade_out_sec = graph
                     .f64(element_id, "fadeOutTime")
-                    .filter(|value| *value > 1e-9)
+                    .filter(|value| value.is_finite() && *value > 1e-9)
                     .unwrap_or_else(|| {
                         graph
                             .f64(element_id, "amplitudeFadeOutStartSourceTime")
-                            .map(|value| source_end - value)
+                            .filter(|value| value.is_finite())
+                            .and_then(|value| {
+                                inverse_interpolate_function_points(&source_time_points, value)
+                            })
+                            .map(|start| duration - start)
                             .unwrap_or(0.0)
                     })
                     .clamp(0.0, duration);
@@ -971,23 +993,6 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
         return Err("Melodyne project contains no playable track elements".to_string());
     }
     Ok((tracks, sources))
-}
-
-fn source_time_for_ids(
-    graph: &Graph,
-    source_item_id: u32,
-    source_description_id: u32,
-    source_function_id: Option<u32>,
-    local: f64,
-    duration: f64,
-) -> f64 {
-    let start = graph.i64(source_item_id, "startSampleIndex").unwrap_or(0).max(0) as f64;
-    let rate = graph.reference(source_description_id, "audioSource")
-        .and_then(|source| graph.f64(source, "sampleRate")).unwrap_or(44_100.0).max(1.0);
-    let mapped = source_function_id
-        .map(|function| graph.eval_function(function, local.clamp(0.0, duration)))
-        .unwrap_or(local);
-    start / rate + mapped.max(0.0)
 }
 
 fn source_time(graph: &Graph, element: &ImportedElement, local_time: f64) -> f64 {
