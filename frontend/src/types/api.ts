@@ -91,6 +91,8 @@ export interface TimelineClip {
         attackDurationSec: number;
         attackSourceSec: number;
         attackTimeSlope: number;
+        leadingSibilantEndSec?: number;
+        trailingSibilantStartSec?: number;
         connectedPhaseToNext: boolean;
         amplitudeFactor: number;
         fadeInSec: number;

@@ -76,6 +76,10 @@ pub struct ClipPitchDataPayload {
     pub curve_start_sec: f64,
     /// MIDI 音高曲线（每帧一个 MIDI 值，0 表示无声）
     pub midi_curve: Vec<f32>,
+    /// MPD clip-local edited contour. Root-track curves are ambiguous when
+    /// independently edited source elements overlap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edited_midi_curve: Option<Vec<f32>>,
     /// 帧周期（毫秒），用于前端将帧索引转换为时间
     pub frame_period_ms: f64,
 }
@@ -1554,6 +1558,7 @@ fn emit_clip_pitch_data_for_clip(
             clip_id: clip.id.clone(),
             curve_start_sec,
             midi_curve,
+            edited_midi_curve: None,
             frame_period_ms,
         };
         let _ = app.emit("clip_pitch_data", payload);
@@ -1578,10 +1583,45 @@ fn emit_clip_pitch_data_for_clip(
                     .extra_curves
                     .get(&format!("mld5_source_pitch::{}", clip.id))
                 {
+                    let edited_midi_curve = params
+                        .extra_curves
+                        .get(&format!("mld5_target_pitch::{}", clip.id))
+                        .map(|target| {
+                            let baseline = params
+                                .extra_curves
+                                .get("mld5_pitch_connection_base")
+                                .or_else(|| params.extra_curves.get("mld5_pitch_unjoined"));
+                            let fp = params.frame_period_ms.max(0.1);
+                            let start_idx =
+                                ((clip.start_sec.max(0.0) * 1000.0) / fp).round() as usize;
+                            target
+                                .iter()
+                                .copied()
+                                .enumerate()
+                                .map(|(local_idx, imported_target)| {
+                                    if imported_target <= 0.0 {
+                                        return 0.0;
+                                    }
+                                    let abs_idx = start_idx + local_idx;
+                                    let base = baseline
+                                        .and_then(|curve| curve.get(abs_idx))
+                                        .copied()
+                                        .unwrap_or(0.0);
+                                    let edited = params.pitch_edit.get(abs_idx).copied().unwrap_or(base);
+                                    let delta = if base > 0.0 && edited > 0.0 {
+                                        edited - base
+                                    } else {
+                                        0.0
+                                    };
+                                    (imported_target + delta).clamp(0.0, 127.0)
+                                })
+                                .collect::<Vec<_>>()
+                        });
                     let payload = ClipPitchDataPayload {
                         clip_id: clip.id.clone(),
                         curve_start_sec: clip.start_sec.max(0.0),
                         midi_curve: midi_curve.clone(),
+                        edited_midi_curve,
                         frame_period_ms: params.frame_period_ms.max(0.1),
                     };
                     let _ = app.emit("clip_pitch_data", payload);
@@ -1630,6 +1670,7 @@ fn emit_clip_pitch_data_for_clip(
         clip_id: clip.id.clone(),
         curve_start_sec,
         midi_curve,
+        edited_midi_curve: None,
         frame_period_ms,
     };
     let _ = app.emit("clip_pitch_data", payload);

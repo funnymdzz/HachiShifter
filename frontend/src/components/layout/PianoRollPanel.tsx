@@ -1849,6 +1849,7 @@ export const PianoRollPanel: React.FC = () => {
             .map(([, c]) => ({
                 curveStartSec: c.curveStartSec,
                 midiCurve: c.midiCurve,
+                editedMidiCurve: c.editedMidiCurve,
                 framePeriodMs: c.framePeriodMs,
             }));
     }, [editParam, rootTrack, s.clipPitchCurves, s.clips, groupTrackIds]);
@@ -2044,6 +2045,13 @@ export const PianoRollPanel: React.FC = () => {
                             ? note.midi_note + relativePitchCents / 100
                             : curveMidi ?? Math.round(note.midi_note)),
                     confidence: note.confidence,
+                    consonantEndSec: analysis?.annotations[noteIndex]
+                        ? mapSourceToEditor(
+                              analysis.annotations[noteIndex].region_start_sec +
+                                  analysis.annotations[noteIndex].fixed_duration_sec,
+                          )
+                        : startSec,
+                    pitchVisible: note.confidence >= 0.35,
                 };
             })
             .filter((note): note is Exclude<typeof note, null> => note !== null);
@@ -2072,7 +2080,33 @@ export const PianoRollPanel: React.FC = () => {
                   const finalStartSec = segment.timelineStartSec;
                   const finalEndSec = segment.timelineEndSec;
                   const curveMidi = curveMidiForRange(finalStartSec, finalEndSec);
-                  const originalMidi = matched?.midi_note ?? curveMidi ?? 60;
+                  const ownerPitchCurve = s.clipPitchCurves[ownerClip.id];
+                  const localPitchValues =
+                      ownerPitchCurve?.editedMidiCurve ?? ownerPitchCurve?.midiCurve ?? [];
+                  const localFp = Math.max(0.1, ownerPitchCurve?.framePeriodMs ?? 5);
+                  const curveStart = ownerPitchCurve?.curveStartSec ?? ownerClip.startSec;
+                  const pitchFirst = Math.max(
+                      0,
+                      Math.floor(((finalStartSec - curveStart) * 1000) / localFp),
+                  );
+                  const pitchLast = Math.min(
+                      localPitchValues.length,
+                      Math.ceil(((finalEndSec - curveStart) * 1000) / localFp),
+                  );
+                  let voicedPitchFrames = 0;
+                  let localPitchSum = 0;
+                  for (let frame = pitchFirst; frame < pitchLast; frame += 1) {
+                      const value = Number(localPitchValues[frame] ?? 0);
+                      if (Number.isFinite(value) && value > 0) {
+                          voicedPitchFrames += 1;
+                          localPitchSum += value;
+                      }
+                  }
+                  const pitchVisible = voicedPitchFrames >= 2;
+                  const localCurveMidi = pitchVisible
+                      ? localPitchSum / voicedPitchFrames
+                      : null;
+                  const originalMidi = matched?.midi_note ?? localCurveMidi ?? curveMidi ?? 60;
                   const annotationIndex = matchedIndex >= 0 ? matchedIndex : displayIndex;
                   const noteIndex = displayIndex;
                   const relativePitchCents =
@@ -2102,8 +2136,24 @@ export const PianoRollPanel: React.FC = () => {
                           preview ??
                           (showMelodyneWrench
                               ? originalMidi + relativePitchCents / 100
-                              : curveMidi ?? originalMidi),
+                              : localCurveMidi ?? curveMidi ?? originalMidi),
                       confidence: matched?.confidence ?? 1,
+                      consonantEndSec: showMelodyneWrench
+                          ? finalStartSec
+                          : Math.min(
+                                finalEndSec,
+                                Math.max(
+                                    finalStartSec + Math.max(0, segment.attackDurationSec ?? 0),
+                                    segment.leadingSibilantEndSec ?? finalStartSec,
+                                ),
+                            ),
+                      sibilantBoundarySecs: showMelodyneWrench
+                          ? []
+                          : [
+                                segment.leadingSibilantEndSec,
+                                segment.trailingSibilantStartSec,
+                            ].filter((value): value is number => Number.isFinite(value)),
+                      pitchVisible,
                   };
               })
             : notesFromAnalysis;
@@ -2118,7 +2168,7 @@ export const PianoRollPanel: React.FC = () => {
               }
             : null;
         return { notes, timing };
-    }, [editParam, melodyneTrackClips, noteDragPreview, paramView, rootTrack?.composeEnabled, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
+    }, [editParam, melodyneTrackClips, noteDragPreview, paramView, rootTrack?.composeEnabled, s.clipPitchCurves, sampleAnalysis, selectedAudioClip, showMelodyneWrench]);
 
     const [showPitchMacro, setShowPitchMacro] = useState(true);
     const applyMelodyneMacro = useCallback(
@@ -2351,6 +2401,8 @@ export const PianoRollPanel: React.FC = () => {
             referencePitchOverlays: showMelodyneWrench ? [] : referencePitchOverlays,
             detectedPitchCurves: showMelodyneWrench ? [] : detectedPitchCurves,
             detectedPitchNotes: sampleNoteDisplay.notes,
+            hidePrimaryPitchCurve:
+                !showMelodyneWrench && editParam === "pitch" && melodyneTrackClips.length > 0,
             sampleTimingOverlay: sampleNoteDisplay.timing,
             isDark: themeMode === "dark",
             fontFamily,

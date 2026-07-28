@@ -259,6 +259,7 @@ export interface SessionState {
             /** MIDI 曲线第 0 帧对应的 timeline 绝对时间（秒） */
             curveStartSec: number;
             midiCurve: number[];
+            editedMidiCurve?: number[];
             framePeriodMs: number;
         }
     >;
@@ -772,6 +773,8 @@ function applyTimelineState(
                 attackDurationSec: Number(segment.attackDurationSec ?? 0),
                 attackSourceSec: Number(segment.attackSourceSec ?? 0),
                 attackTimeSlope: Number(segment.attackTimeSlope ?? 1),
+                leadingSibilantEndSec: segment.leadingSibilantEndSec == null ? undefined : Number(segment.leadingSibilantEndSec),
+                trailingSibilantStartSec: segment.trailingSibilantStartSec == null ? undefined : Number(segment.trailingSibilantStartSec),
                 connectedPhaseToNext: Boolean(segment.connectedPhaseToNext),
                 amplitudeFactor: Number(segment.amplitudeFactor ?? 1),
                 fadeInSec: Number(segment.fadeInSec ?? 0),
@@ -1714,13 +1717,15 @@ const sessionSlice = createSlice({
                 clipId: string;
                 curveStartSec: number;
                 midiCurve: number[];
+                editedMidiCurve?: number[];
                 framePeriodMs: number;
             }>,
         ) {
-            const { clipId, curveStartSec, midiCurve, framePeriodMs } = action.payload;
+            const { clipId, curveStartSec, midiCurve, editedMidiCurve, framePeriodMs } = action.payload;
             state.clipPitchCurves[clipId] = {
                 curveStartSec,
                 midiCurve,
+                editedMidiCurve,
                 framePeriodMs,
             };
             // 同步触发轨道总体音高线刷新

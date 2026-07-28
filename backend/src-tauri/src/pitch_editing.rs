@@ -1100,6 +1100,51 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     }
 
     let mut effective_pitch_edit: Vec<f32> = pitch_edit.to_vec();
+    let strict_mpd_target = entry
+        .extra_params
+        .get("mld5_pitch_source")
+        .copied()
+        .unwrap_or(0.0)
+        < 0.5;
+    if strict_mpd_target {
+        if let Some(clip_target) = entry
+            .extra_curves
+            .get(&format!("mld5_target_pitch::{}", clip.id))
+        {
+            // A root-track curve cannot represent two overlapping Melodyne
+            // elements. The previous last-writer-wins curve made one sample
+            // follow another sample's attack/tail F0. Reconstruct the target
+            // for this clip from its own MPD element, then apply only the
+            // user's later global delta (including explicit note joins).
+            let imported_global = entry
+                .extra_curves
+                .get("mld5_pitch_connection_base")
+                .or_else(|| entry.extra_curves.get("mld5_pitch_unjoined"));
+            let fp = frame_period_ms.max(0.1);
+            let start_idx = ((clip_start_sec.max(0.0) * 1000.0) / fp).round() as usize;
+            let required = start_idx.saturating_add(clip_target.len());
+            effective_pitch_edit.resize(required.max(effective_pitch_edit.len()), 0.0);
+            for (local_idx, imported_target) in clip_target.iter().copied().enumerate() {
+                let abs_idx = start_idx + local_idx;
+                if !(imported_target.is_finite() && imported_target > 0.0) {
+                    effective_pitch_edit[abs_idx] = 0.0;
+                    continue;
+                }
+                let baseline = imported_global
+                    .and_then(|curve| curve.get(abs_idx))
+                    .copied()
+                    .unwrap_or(0.0);
+                let edited_global = pitch_edit.get(abs_idx).copied().unwrap_or(baseline);
+                let user_delta = if baseline > 0.0 && edited_global > 0.0 {
+                    edited_global - baseline
+                } else {
+                    0.0
+                };
+                effective_pitch_edit[abs_idx] =
+                    (imported_target + user_delta).clamp(0.0, 127.0);
+            }
+        }
+    }
     if let Some(ref cfg) = child_offset_cfg {
         for (frame_idx, value) in effective_pitch_edit.iter_mut().enumerate() {
             if *value > 0.0 {

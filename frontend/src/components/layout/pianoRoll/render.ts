@@ -156,8 +156,15 @@ function drawCurveTimed(args: {
         }
         lastPoint = { frame, tSec, x };
 
-        // pitch 曲线：MIDI �?N 应绘制在 N 键中心（N �?N+1 区间的中点），加 0.5 偏移
         const rawValue = values[i] ?? 0;
+        // Zero/invalid pitch is an explicit unpitched component boundary.
+        // Starting a new subpath prevents a long invented line across an
+        // attack, sibilant or silence interval.
+        if (param === "pitch" && (!Number.isFinite(rawValue) || rawValue <= 0)) {
+            started = false;
+            continue;
+        }
+        // pitch 曲线：MIDI N 绘制在 N 键中心。
         const mappedValue = param === "pitch" ? rawValue + 0.5 : rawValue;
         const y = valueToY(param, mappedValue, h);
         if (!started) {
@@ -274,6 +281,8 @@ export interface DetectedPitchCurve {
     curveStartSec: number;
     /** MIDI 音高曲线，每帧一个值，0 表示无声 */
     midiCurve: number[];
+    /** MPD clip-local edited curve; required when source elements overlap. */
+    editedMidiCurve?: number[];
     /** WORLD 帧周期（毫秒） */
     framePeriodMs: number;
 }
@@ -284,6 +293,9 @@ export interface DetectedPitchNote {
     endSec: number;
     midiNote: number;
     confidence: number;
+    consonantEndSec?: number;
+    sibilantBoundarySecs?: number[];
+    pitchVisible?: boolean;
 }
 
 export interface SampleTimingOverlay {
@@ -328,6 +340,8 @@ export function drawPianoRoll(args: {
     detectedPitchCurves?: DetectedPitchCurve[];
     /** Melodyne-style note blocks generated from the selected audio sample. */
     detectedPitchNotes?: DetectedPitchNote[];
+    /** MPD uses per-element curves; a single root curve is ambiguous in overlaps. */
+    hidePrimaryPitchCurve?: boolean;
     sampleTimingOverlay?: SampleTimingOverlay | null;
     /** 是否为深色主题（默认 true） */
     isDark?: boolean;
@@ -375,6 +389,7 @@ export function drawPianoRoll(args: {
         referencePitchOverlays,
         detectedPitchCurves,
         detectedPitchNotes,
+        hidePrimaryPitchCurve = false,
         sampleTimingOverlay,
         isDark = true,
         clipboardPreview,
@@ -924,8 +939,12 @@ export function drawPianoRoll(args: {
                 Math.abs(selectionEndSec - note.endSec) < 0.002;
             ctx.save();
             const confidence = clamp(note.confidence || 0.7, 0.25, 1);
+            const unpitched = note.pitchVisible === false;
             const gradient = ctx.createLinearGradient(0, top, 0, top + noteHeight);
-            if (selectedNote) {
+            if (unpitched) {
+                gradient.addColorStop(0, isDark ? "rgba(255, 205, 130, 0.52)" : "rgba(255, 226, 169, 0.72)");
+                gradient.addColorStop(1, isDark ? "rgba(202, 125, 67, 0.40)" : "rgba(229, 166, 112, 0.62)");
+            } else if (selectedNote) {
                 gradient.addColorStop(0, isDark ? "rgba(255, 190, 76, 0.98)" : "rgba(255, 177, 55, 0.96)");
                 gradient.addColorStop(1, isDark ? "rgba(224, 103, 28, 0.96)" : "rgba(224, 98, 25, 0.93)");
             } else {
@@ -945,6 +964,42 @@ export function drawPianoRoll(args: {
             ctx.roundRect(x0 + 0.5, top, Math.max(3, drawX1 - x0 - 1), noteHeight, 3);
             ctx.fill();
             ctx.stroke();
+
+            // Melodyne renders the consonant/attack portion as a lighter
+            // section of the same blob, rather than as another note object.
+            const consonantEnd = Math.min(
+                note.endSec,
+                Math.max(note.startSec, note.consonantEndSec ?? note.startSec),
+            );
+            const consonantX = consonantEnd * pxPerSec - scrollLeft;
+            if (consonantX > x0 + 0.5) {
+                ctx.fillStyle = isDark
+                    ? "rgba(255, 222, 166, 0.46)"
+                    : "rgba(255, 246, 207, 0.66)";
+                ctx.beginPath();
+                ctx.roundRect(
+                    x0 + 1,
+                    top + 1,
+                    Math.max(1, Math.min(drawX1, consonantX) - x0 - 2),
+                    Math.max(2, noteHeight - 2),
+                    2,
+                );
+                ctx.fill();
+            }
+
+            // Persisted leading/trailing sibilant component handles.
+            for (const boundarySec of note.sibilantBoundarySecs ?? []) {
+                if (boundarySec <= note.startSec || boundarySec >= note.endSec) continue;
+                const boundaryX = boundarySec * pxPerSec - scrollLeft;
+                ctx.strokeStyle = isDark
+                    ? "rgba(255, 236, 205, 0.92)"
+                    : "rgba(122, 66, 36, 0.86)";
+                ctx.lineWidth = 1.25;
+                ctx.beginPath();
+                ctx.moveTo(boundaryX + 0.5, top - 2);
+                ctx.lineTo(boundaryX + 0.5, top + noteHeight + 2);
+                ctx.stroke();
+            }
 
             // Melodyne-style pitch-center guide and edge separators.
             const centerY = top + noteHeight * 0.5;
@@ -1031,45 +1086,62 @@ export function drawPianoRoll(args: {
             // 曲线起始时间（秒）：直接来自后端，无需帧→秒转换
             const curveStartSec = curve.curveStartSec;
 
-            ctx.save();
-            ctx.strokeStyle = DETECTED_COLORS[ci % DETECTED_COLORS.length];
-            ctx.lineWidth = 2;
-            ctx.setLineDash([]);
-            ctx.globalAlpha = 1;
+            const drawDetectedCurve = (
+                values: number[],
+                strokeStyle: string,
+                lineWidth: number,
+                dash: number[],
+            ) => {
+                ctx.save();
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.setLineDash(dash);
+                ctx.globalAlpha = 1;
+                ctx.beginPath();
+                let hasStarted = false;
+                for (let i = 0; i < values.length; i++) {
+                    const midi = values[i];
+                    if (midi == null || !isFinite(midi) || midi <= 0) {
+                        hasStarted = false;
+                        continue;
+                    }
 
-            ctx.beginPath();
-            let hasStarted = false;
+                    const frameSec = curveStartSec + (i * fp) / 1000;
+                    const x = frameSec * pxPerSec - scrollLeft;
 
-            for (let i = 0; i < curve.midiCurve.length; i++) {
-                const midi = curve.midiCurve[i];
-                if (midi == null || !isFinite(midi)) continue;
+                    if (x > w + 10) break;
 
-                // 计算当前帧的时间（秒），统一用 sec 坐标系
-                const frameSec = curveStartSec + (i * fp) / 1000;
-                const x = frameSec * pxPerSec - scrollLeft;
+                    if (x < -10) {
+                        hasStarted = false;
+                        continue;
+                    }
 
-                if (x > w + 10) break;
+                    const y = valueToY("pitch", midi + 0.5, h);
 
-                // 裁剪左侧不可见区域
-                if (x < -10) continue;
-
-                // 无声帧（midi <= 0）：跳过，但保持连续性
-                if (midi <= 0) {
-                    continue;
+                    if (!hasStarted) {
+                        ctx.moveTo(x, y);
+                        hasStarted = true;
+                    } else {
+                        ctx.lineTo(x, y);
+                    }
                 }
-
-                // pitch 曲线加 0.5 偏移，使点落在键中心
-                const y = valueToY("pitch", midi + 0.5, h);
-
-                if (!hasStarted) {
-                    ctx.moveTo(x, y);
-                    hasStarted = true;
-                } else {
-                    ctx.lineTo(x, y);
-                }
+                ctx.stroke();
+                ctx.restore();
+            };
+            drawDetectedCurve(
+                curve.midiCurve,
+                DETECTED_COLORS[ci % DETECTED_COLORS.length],
+                1.8,
+                [5, 4],
+            );
+            if (curve.editedMidiCurve && curve.editedMidiCurve.length >= 2) {
+                drawDetectedCurve(
+                    curve.editedMidiCurve,
+                    isDark ? "rgba(245, 245, 245, 0.92)" : "rgba(174, 42, 29, 0.90)",
+                    2.4,
+                    [],
+                );
             }
-            ctx.stroke();
-            ctx.restore();
         }
     }
 
@@ -1119,7 +1191,7 @@ export function drawPianoRoll(args: {
         });
     }
 
-    if (paramView) {
+    if (paramView && !(hidePrimaryPitchCurve && editParam === "pitch")) {
         const editValues =
             liveEditOverride && liveEditOverride.key === paramView.key
                 ? liveEditOverride.edit

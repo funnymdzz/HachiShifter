@@ -1148,6 +1148,46 @@ fn source_sibilant_strength(
     leading.max(trailing) as f32
 }
 
+fn element_sibilant_handles(
+    graph: &Graph,
+    element: &ImportedElement,
+    shift: f64,
+) -> (Option<f64>, Option<f64>) {
+    let Some(source_id) = graph.reference(element.source_description_id, "audioSource") else {
+        return (None, None);
+    };
+    let sample_rate = graph.f64(source_id, "sampleRate").unwrap_or(44_100.0).max(1.0);
+    let item_samples = integer_field(graph, element.source_item_id, "sampleCount")
+        .unwrap_or(0)
+        .max(0) as f64;
+    if item_samples <= 1.0 {
+        return (None, None);
+    }
+    let to_element_time = |source_offset_samples: f64| {
+        let source_local = source_offset_samples / sample_rate;
+        element
+            .source_function_id
+            .and_then(|function| graph.inverse_eval_function(function, source_local))
+            .unwrap_or(source_local)
+            .clamp(0.0, element.duration)
+    };
+    let leading = integer_field(
+        graph,
+        element.source_item_id,
+        "startSibilantEndSampleOffset",
+    )
+    .filter(|offset| *offset > 0)
+    .map(|offset| element.start + shift + to_element_time(offset as f64));
+    let trailing = integer_field(
+        graph,
+        element.source_item_id,
+        "endSibilantStartSampleOffset",
+    )
+    .filter(|offset| *offset >= 0 && (*offset as f64) < item_samples)
+    .map(|offset| element.start + shift + to_element_time(offset as f64));
+    (leading, trailing)
+}
+
 fn element_time_map_points(
     graph: &Graph,
     element: &ImportedElement,
@@ -1452,7 +1492,12 @@ fn source_pitch_at(
     } else {
         0.0
     };
-    if left.silent && right.silent {
+    // `isConsideredSilent` is a voicing/property validity flag, not merely an
+    // amplitude hint. Interpolating from a silent attack/tail point to a
+    // pitched vowel fabricated the large falling/rising curves visible in
+    // HachiShifter but absent in Melodyne. A validity boundary must split the
+    // contour; it must never be bridged by linear or cubic interpolation.
+    if left.silent || right.silent {
         return None;
     }
     // Melodyne's stored analysis points run on a 1024-sample clock, while its
@@ -1463,7 +1508,7 @@ fn source_pitch_at(
     // and reconstructs the dense display/playback cache without overshooting
     // neighbouring extrema or interpolating across silent regions.
     let interpolate = |value: fn(CachedPitchPoint) -> f32| {
-        if right_index == left_index || left.silent || right.silent {
+        if right_index == left_index {
             return value(left) + (value(right) - value(left)) * fraction;
         }
         let p0 = cache.points[left_index.saturating_sub(1)];
@@ -1548,6 +1593,14 @@ fn build_track_params(
             .unwrap_or(element.pitch_center);
         for frame in first..last.min(frame_count) {
             let local_time = frame as f64 * frame_period_sec - start;
+            let sibilant_strength = source_sibilant_strength(graph, element, local_time);
+            sibilant_mask[frame] = sibilant_mask[frame].max(sibilant_strength);
+            if sibilant_strength >= 0.55 {
+                // Sibilants are an independent aperiodic component. Giving
+                // them an interpolated pitch target creates the long false F0
+                // tails seen around attack and sample boundaries.
+                continue;
+            }
             let (raw, without_vibrato) = pitch_cache
                 .and_then(|cache| {
                     source_pitch_at(graph, cache, element.source_function_id, local_time)
@@ -1565,8 +1618,6 @@ fn build_track_params(
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
             }
-            sibilant_mask[frame] = sibilant_mask[frame]
-                .max(source_sibilant_strength(graph, element, local_time));
         }
     }
 
@@ -1657,17 +1708,19 @@ fn build_track_params(
     }
 }
 
-fn build_group_source_pitch_curve(
+fn build_group_pitch_curves(
     graph: &Graph,
     track: &ImportedTrack,
     group: &ClipGroup,
     shift: f64,
     frame_period_ms: f64,
-) -> Vec<f32> {
+) -> (Vec<f32>, Vec<f32>) {
     let frame_sec = frame_period_ms.max(0.1) / 1000.0;
     let clip_start = group.timeline_start + shift;
     let clip_length = (group.timeline_end - group.timeline_start).max(0.001);
-    let mut curve = vec![0.0f32; (clip_length / frame_sec).ceil() as usize + 2];
+    let curve_len = (clip_length / frame_sec).ceil() as usize + 2;
+    let mut source_curve = vec![0.0f32; curve_len];
+    let mut target_curve = vec![0.0f32; curve_len];
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
     for element_index in &group.element_indices {
         let Some(element) = track.elements.get(*element_index) else {
@@ -1684,19 +1737,29 @@ fn build_group_source_pitch_curve(
         let last = ((destination_start + element.duration - clip_start) / frame_sec)
             .ceil()
             .max(0.0) as usize;
-        for local_frame in first..last.min(curve.len()) {
+        let source_center = graph
+            .f32(element.source_item_id, "pitchCenter")
+            .unwrap_or(element.pitch_center);
+        for local_frame in first..last.min(source_curve.len()) {
             let destination_time = clip_start + local_frame as f64 * frame_sec;
             let element_time = destination_time - destination_start;
-            if let Some((raw, _)) =
+            if source_sibilant_strength(graph, element, element_time) >= 0.55 {
+                continue;
+            }
+            if let Some((raw, without_vibrato)) =
                 pitch_cache.and_then(|cache| {
                     source_pitch_at(graph, cache, element.source_function_id, element_time)
                 })
             {
-                curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
+                let edited = element.pitch_center
+                    + element.pitch_drift * (without_vibrato - source_center)
+                    + element.pitch_modulation * (raw - without_vibrato);
+                source_curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
+                target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
             }
         }
     }
-    curve
+    (source_curve, target_curve)
 }
 
 fn parse_project_graph(data: &[u8]) -> Result<Graph, String> {
@@ -1869,7 +1932,7 @@ fn import_graph(
             state_track.compose_enabled = compose;
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
-        let mut clip_source_pitch_curves = Vec::<(String, Vec<f32>)>::new();
+        let mut clip_pitch_curves = Vec::<(String, Vec<f32>, Vec<f32>)>::new();
         for group in clip_groups {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
@@ -1901,6 +1964,8 @@ fn import_graph(
                 clip.fade_out_sec = 0.0;
                 clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
                     let element = track.elements.get(*index)?;
+                    let (leading_sibilant_end_sec, trailing_sibilant_start_sec) =
+                        element_sibilant_handles(&graph, element, shift);
                     Some(crate::state::MelodyneWarpSegment {
                         melodyne_element_id: Some(element.element_id),
                         melodyne_following_element_id: element.following_element_id,
@@ -1913,6 +1978,8 @@ fn import_graph(
                         attack_duration_sec: element.attack_duration.max(0.0),
                         attack_source_sec: source_time(&graph, element, element.attack_duration),
                         attack_time_slope: element.attack_time_slope.max(1e-6),
+                        leading_sibilant_end_sec,
+                        trailing_sibilant_start_sec,
                         connected_to_next: element.join_next,
                         connected_to_clip_id: None,
                         connected_to_element_id: element.following_element_id,
@@ -1928,16 +1995,14 @@ fn import_graph(
                     })
                 }).collect();
                 if compose {
-                    clip_source_pitch_curves.push((
-                        clip.id.clone(),
-                        build_group_source_pitch_curve(
-                            &graph,
-                            track,
-                            group,
-                            shift,
-                            frame_period_ms,
-                        ),
-                    ));
+                    let (source_curve, target_curve) = build_group_pitch_curves(
+                        &graph,
+                        track,
+                        group,
+                        shift,
+                        frame_period_ms,
+                    );
+                    clip_pitch_curves.push((clip.id.clone(), source_curve, target_curve));
                 }
             }
         }
@@ -1974,10 +2039,13 @@ fn import_graph(
             if reanalyze_pitch_with_game_fcpe {
                 params.pitch_edit_user_modified = false;
             }
-            for (clip_id, curve) in clip_source_pitch_curves {
+            for (clip_id, source_curve, target_curve) in clip_pitch_curves {
                 params
                     .extra_curves
-                    .insert(format!("mld5_source_pitch::{clip_id}"), curve);
+                    .insert(format!("mld5_source_pitch::{clip_id}"), source_curve);
+                params
+                    .extra_curves
+                    .insert(format!("mld5_target_pitch::{clip_id}"), target_curve);
             }
             timeline.params_by_root_track.insert(track_id.clone(), params);
         }

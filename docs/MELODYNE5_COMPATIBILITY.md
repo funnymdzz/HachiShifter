@@ -156,6 +156,20 @@ The model-free `mld5` path now performs:
     the waveform still correlates with the preceding period. This prevents the
     dry, pre-transposition F0 from leaking into voiced tails, while actual
     breaths and fricatives remain unvoiced.
+13. MPD source and edited F0 are retained per element/clip. A single root-track
+    array cannot represent two overlapping source elements; its former
+    last-writer-wins behaviour made one sample follow another sample's attack
+    contour. Rendering and the piano-roll display now select the clip-local
+    target and apply later user edits only as a delta.
+14. `isConsideredSilent` and the persisted leading/trailing sibilant component
+    boundaries split the pitch path. Invalid attack/tail points are not
+    interpolated and zero-valued gaps begin a new canvas subpath. The note body
+    remains visible in a lighter colour and stored sibilant handles are drawn
+    as vertical separators.
+15. Moving an attack handle applies the identical two-sided destination-time
+    remap to audio, source F0, edited F0 and sibilant handles. This prevents the
+    audio and pitch line from acquiring different time coordinates after an
+    attack edit.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

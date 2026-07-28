@@ -10,6 +10,7 @@ interface ClipPitchDataPayload {
     clip_id: string;
     curve_start_sec: number;
     midi_curve: number[];
+    edited_midi_curve?: number[];
     frame_period_ms: number;
 }
 
@@ -37,6 +38,9 @@ export function useClipPitchDataListener(): void {
                             clipId: p.clip_id,
                             curveStartSec: Number(p.curve_start_sec ?? 0),
                             midiCurve: p.midi_curve as number[],
+                            editedMidiCurve: Array.isArray(p.edited_midi_curve)
+                                ? (p.edited_midi_curve as number[])
+                                : undefined,
                             framePeriodMs: Number(p.frame_period_ms ?? 5),
                         }),
                     );

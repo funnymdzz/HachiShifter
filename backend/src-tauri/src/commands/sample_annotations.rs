@@ -8,6 +8,59 @@ use tauri::State;
 
 const ACTIVE_ANNOTATION_PARAM: &str = "hachi_active_annotation";
 
+fn remap_curve_around_attack(
+    curve: &mut [f32],
+    curve_start_sec: f64,
+    frame_sec: f64,
+    segment_start: f64,
+    segment_end: f64,
+    old_attack: f64,
+    new_attack: f64,
+) {
+    if curve.is_empty()
+        || frame_sec <= 0.0
+        || segment_end <= segment_start
+        || (old_attack - new_attack).abs() <= 1e-9
+    {
+        return;
+    }
+    let original = curve.to_vec();
+    let first = (((segment_start - curve_start_sec) / frame_sec).floor().max(0.0) as usize)
+        .min(curve.len());
+    let last = (((segment_end - curve_start_sec) / frame_sec).ceil().max(0.0) as usize)
+        .saturating_add(1)
+        .min(curve.len());
+    let sample = |absolute_sec: f64| {
+        let position = ((absolute_sec - curve_start_sec) / frame_sec)
+            .clamp(0.0, original.len().saturating_sub(1) as f64);
+        let left = position.floor() as usize;
+        let right = left.saturating_add(1).min(original.len().saturating_sub(1));
+        let fraction = (position - left as f64) as f32;
+        let a = original[left];
+        let b = original[right];
+        if a > 0.0 && b > 0.0 {
+            a + (b - a) * fraction
+        } else if fraction < 0.5 {
+            a
+        } else {
+            b
+        }
+    };
+    for index in first..last {
+        let destination = curve_start_sec + index as f64 * frame_sec;
+        let source = if destination <= new_attack {
+            let new_span = (new_attack - segment_start).max(frame_sec);
+            let unit = ((destination - segment_start) / new_span).clamp(0.0, 1.0);
+            segment_start + unit * (old_attack - segment_start).max(frame_sec)
+        } else {
+            let new_span = (segment_end - new_attack).max(frame_sec);
+            let unit = ((destination - new_attack) / new_span).clamp(0.0, 1.0);
+            old_attack + unit * (segment_end - old_attack).max(frame_sec)
+        };
+        curve[index] = sample(source);
+    }
+}
+
 fn uses_game_fcpe_mpd_source(state: &AppState, clip: &crate::state::Clip) -> bool {
     let timeline = state.timeline.lock().unwrap_or_else(|error| error.into_inner());
     timeline
@@ -222,6 +275,7 @@ pub(super) fn save_clip_sample_annotations(
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         state.checkpoint_timeline(&timeline);
+        let mut attack_remaps = Vec::<(f64, f64, f64, f64)>::new();
         if let Some(target) = timeline
             .clips
             .iter_mut()
@@ -249,8 +303,36 @@ pub(super) fn save_clip_sample_annotations(
                     .max(0.0);
                 let attack = row.melodyne_attack_duration_sec.clamp(0.0, maximum);
                 let previous_attack = segment.attack_duration_sec.clamp(0.0, maximum);
+                let previous_attack_timeline = segment.timeline_start_sec + previous_attack;
                 segment.attack_duration_sec = attack;
                 let attack_timeline = segment.timeline_start_sec + attack;
+                if (attack - previous_attack).abs() > 1e-9 {
+                    let segment_start = segment.timeline_start_sec;
+                    let segment_end = segment.timeline_end_sec;
+                    attack_remaps.push((
+                        segment_start,
+                        segment_end,
+                        previous_attack_timeline,
+                        attack_timeline,
+                    ));
+                    let remap_handle = |handle: f64| {
+                        if handle <= previous_attack_timeline {
+                            let span = (previous_attack_timeline - segment_start).max(1e-9);
+                            segment_start
+                                + (handle - segment_start) / span
+                                    * (attack_timeline - segment_start)
+                        } else {
+                            let span = (segment_end - previous_attack_timeline).max(1e-9);
+                            attack_timeline
+                                + (handle - previous_attack_timeline) / span
+                                    * (segment_end - attack_timeline)
+                        }
+                    };
+                    segment.leading_sibilant_end_sec =
+                        segment.leading_sibilant_end_sec.map(remap_handle);
+                    segment.trailing_sibilant_start_sec =
+                        segment.trailing_sibilant_start_sec.map(remap_handle);
+                }
                 let attack_source_sec = segment.attack_source_sec;
                 if attack_source_sec.is_finite() && attack_source_sec > 0.0 {
                     // Move the complete sampled Bezier map around the attack
@@ -290,6 +372,31 @@ pub(super) fn save_clip_sample_annotations(
                     segment.time_map_points.sort_by(|left, right| {
                         left.timeline_sec.total_cmp(&right.timeline_sec)
                     });
+                }
+            }
+        }
+        if !attack_remaps.is_empty() {
+            if let Some(root) = timeline.resolve_root_track_id(&clip.track_id) {
+                if let Some(params) = timeline.params_by_root_track.get_mut(&root) {
+                    let frame_sec = params.frame_period_ms.max(0.1) / 1000.0;
+                    for (segment_start, segment_end, old_attack, new_attack) in attack_remaps {
+                        for key in [
+                            format!("mld5_source_pitch::{clip_id}"),
+                            format!("mld5_target_pitch::{clip_id}"),
+                        ] {
+                            if let Some(curve) = params.extra_curves.get_mut(&key) {
+                                remap_curve_around_attack(
+                                    curve,
+                                    clip.start_sec,
+                                    frame_sec,
+                                    segment_start,
+                                    segment_end,
+                                    old_attack,
+                                    new_attack,
+                                );
+                            }
+                        }
+                    }
                 }
             }
         }

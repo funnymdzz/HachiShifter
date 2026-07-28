@@ -177,6 +177,13 @@ pub struct MelodyneWarpSegment {
     pub attack_source_sec: f64,
     #[serde(default = "default_one_f64")]
     pub attack_time_slope: f64,
+    /// Destination-time component handles used by Melodyne's note display.
+    /// The pitch line is suppressed inside the corresponding independent
+    /// sibilant component while the note body remains visible.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leading_sibilant_end_sec: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trailing_sibilant_start_sec: Option<f64>,
     /// Melodyne's persisted note-connection state. This controls only the
     /// short phase-continuity splice at the boundary; imported pitch curves
     /// are never smoothed implicitly.
