@@ -232,7 +232,7 @@ pub fn render(
             } else {
                 let source_bin = output_bin as f32 / ratio;
                 let peak = peaks
-                    .partition_point(|candidate| *candidate as f32 < source_bin)
+                    .partition_point(|candidate| (*candidate as f32) < source_bin)
                     .min(peaks.len());
                 let owner = match (peak.checked_sub(1), peaks.get(peak).copied()) {
                     (Some(left), Some(right)) => {
