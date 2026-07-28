@@ -897,36 +897,14 @@ fn vocode_one_streaming(
         }
     }
 
-    // 流式合成：将帧推入 WorldSynthesizer，取出合成 PCM
-    // 若合成器被锁定（环形缓冲区满），先取出已合成样本再推入
-    // 注意：push_frames 会取走数据所有权，防止 Synthesis2 访问悬空指针
-    if synth.is_locked() {
-        let _ = synth.pull_samples();
-    }
-
-    let pushed = synth.push_frames(
-        shifted_f0.clone(),
-        spectrogram.clone(),
-        aperiodicity.clone(),
-    );
-    if !pushed {
-        // 推入失败（缓冲区满），先取出再重试
-        let _ = synth.pull_samples();
-        synth.push_frames(
-            shifted_f0.clone(),
-            spectrogram.clone(),
-            aperiodicity.clone(),
-        );
-    }
-
-    let y_f64_raw = synth.pull_samples();
-
-    // 若流式合成输出长度不足（合成器需要更多帧才能输出），
-    // 回退到批量 Synthesis 保证输出长度正确
-    let y_f64 = if y_f64_raw.len() >= x_f64.len() {
-        y_f64_raw[..x_f64.len()].to_vec()
-    } else {
-        // 流式输出不足，用批量合成补全
+    // MLD5 export must be sample-repeatable. WORLD's realtime synthesizer
+    // retains pulse/noise state across chunk submissions; for the many short,
+    // overlapping MPD note objects that made otherwise identical imports
+    // produce different tails on each render. The batch entry point reseeds
+    // its synthesis state for every complete analysis unit, so use it for the
+    // component path. Regular WORLD playback keeps the lower-latency realtime
+    // implementation below.
+    let y_f64 = if protect_high_pitch_periodicity {
         let y_length: i32 = x_f64
             .len()
             .try_into()
@@ -946,6 +924,54 @@ fn vocode_one_streaming(
             );
         }
         y
+    } else {
+        // 流式合成：将帧推入 WorldSynthesizer，取出合成 PCM
+        // 若合成器被锁定（环形缓冲区满），先取出已合成样本再推入
+        // 注意：push_frames 会取走数据所有权，防止 Synthesis2 访问悬空指针
+        if synth.is_locked() {
+            let _ = synth.pull_samples();
+        }
+
+        let pushed = synth.push_frames(
+            shifted_f0.clone(),
+            spectrogram.clone(),
+            aperiodicity.clone(),
+        );
+        if !pushed {
+            // 推入失败（环形缓冲区满），先取出再重试
+            let _ = synth.pull_samples();
+            synth.push_frames(
+                shifted_f0.clone(),
+                spectrogram.clone(),
+                aperiodicity.clone(),
+            );
+        }
+
+        let y_f64_raw = synth.pull_samples();
+        if y_f64_raw.len() >= x_f64.len() {
+            y_f64_raw[..x_f64.len()].to_vec()
+        } else {
+            // 流式输出不足，用批量合成补全
+            let y_length: i32 = x_f64
+                .len()
+                .try_into()
+                .map_err(|_| "WORLD: output too long".to_string())?;
+            let mut y = vec![0.0f64; x_f64.len()];
+            unsafe {
+                Synthesis(
+                    shifted_f0.as_ptr(),
+                    f0_len_i32,
+                    sp_ptrs.as_ptr() as *const *const f64,
+                    ap_ptrs.as_ptr() as *const *const f64,
+                    fft_size,
+                    fp,
+                    fs,
+                    y_length,
+                    y.as_mut_ptr(),
+                );
+            }
+            y
+        }
     };
 
     // voiced/unvoiced 混合（与 vocode_one 相同逻辑）
