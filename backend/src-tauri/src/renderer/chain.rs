@@ -270,7 +270,7 @@ impl ProcessingStage for Mld5VocoderStage {
             clip_midi: cc.clip_midi,
             clip_id: cc.clip_id,
         };
-        let padded_output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
+        let padded_output = crate::renderer::world::render_mld5(&render_ctx)?;
         let wanted = input_pcm.len();
         let crop_end = crop_start.saturating_add(wanted).min(padded_output.len());
         let mut output = padded_output
@@ -290,7 +290,7 @@ impl ProcessingStage for Mld5VocoderStage {
             // At large upward intervals, a full source-envelope replacement
             // over-emphasises unresolved WORLD harmonics. Melodyne keeps the
             // envelope independent but gradually reduces that correction.
-            (0.92 - (upward_shift - 5.0).max(0.0) * 0.035).clamp(0.58, 0.92),
+            (0.92 - (upward_shift - 5.0).max(0.0) * 0.045).clamp(0.50, 0.92),
         );
         if let Some(curve) = cc.extra_curves.get("formant_shift_cents") {
             crate::time_stretch::apply_mld5_formant_curve(

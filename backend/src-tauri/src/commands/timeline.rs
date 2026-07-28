@@ -677,6 +677,183 @@ fn remap_curve_across_note_boundary(
     }
 }
 
+#[derive(Clone, Copy)]
+struct MelodynePitchJoin {
+    left_start: f64,
+    left_end: f64,
+    right_start: f64,
+    right_end: f64,
+    duration: f64,
+}
+
+fn voiced_median(curve: &[f32], frame_sec: f64, start: f64, end: f64) -> Option<f32> {
+    if curve.is_empty() || end <= start || frame_sec <= 0.0 {
+        return None;
+    }
+    let first = ((start.max(0.0) / frame_sec).floor() as usize).min(curve.len());
+    let last = ((end.max(0.0) / frame_sec).ceil() as usize).min(curve.len());
+    let mut voiced = curve[first..last]
+        .iter()
+        .copied()
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .collect::<Vec<_>>();
+    if voiced.is_empty() {
+        return None;
+    }
+    voiced.sort_by(|left, right| left.total_cmp(right));
+    Some(voiced[voiced.len() / 2])
+}
+
+/// Rebuild every connected-note transition from an unjoined authoritative
+/// contour.  Only the note-centre motion is interpolated; vibrato, drift and
+/// the fine source-F0 residual stay attached to their own pronunciation.
+/// This also makes Disconnect bit-for-bit reversible instead of attempting a
+/// second smoothing operation in the UI.
+fn rebuild_melodyne_pitch_joins(
+    timeline: &mut crate::state::TimelineState,
+    root_track_id: &str,
+) {
+    let mut notes = Vec::<(usize, usize, f64, f64, Option<u32>)>::new();
+    for (clip_index, clip) in timeline.clips.iter().enumerate() {
+        if timeline.resolve_root_track_id(&clip.track_id).as_deref() != Some(root_track_id) {
+            continue;
+        }
+        for (segment_index, segment) in clip.melodyne_warp_segments.iter().enumerate() {
+            notes.push((
+                clip_index,
+                segment_index,
+                segment.timeline_start_sec,
+                segment.timeline_end_sec,
+                segment.melodyne_element_id,
+            ));
+        }
+    }
+    notes.sort_by(|left, right| left.2.total_cmp(&right.2));
+
+    let mut joins = Vec::<MelodynePitchJoin>::new();
+    for &(clip_index, segment_index, left_start, left_end, _) in &notes {
+        let left = &timeline.clips[clip_index].melodyne_warp_segments[segment_index];
+        if !left.connected_to_next {
+            continue;
+        }
+        let explicit_clip = left.connected_to_clip_id.as_deref();
+        let explicit_element = left
+            .connected_to_element_id
+            .or(left.melodyne_following_element_id);
+        let target = notes
+            .iter()
+            .filter(|&&(candidate_clip, candidate_segment, start, _, element_id)| {
+                !(candidate_clip == clip_index && candidate_segment == segment_index)
+                    && start > left_start + 1e-7
+                    && explicit_clip.is_none_or(|id| timeline.clips[candidate_clip].id == id)
+                    && explicit_element.is_none_or(|id| element_id == Some(id))
+            })
+            .min_by(|left, right| {
+                let left_distance = (left.2 - left_end).abs();
+                let right_distance = (right.2 - left_end).abs();
+                left_distance.total_cmp(&right_distance)
+            })
+            .or_else(|| {
+                // Old HachiShifter projects have neither graph IDs nor an
+                // explicit target.  Timeline order is their stable fallback.
+                if explicit_clip.is_none() && explicit_element.is_none() {
+                    notes.iter().find(|&&(candidate_clip, candidate_segment, start, _, _)| {
+                        !(candidate_clip == clip_index && candidate_segment == segment_index)
+                            && start > left_start + 1e-7
+                    })
+                } else {
+                    None
+                }
+            });
+        let Some(&(_, _, right_start, right_end, _)) = target else {
+            continue;
+        };
+        joins.push(MelodynePitchJoin {
+            left_start,
+            left_end,
+            right_start,
+            right_end,
+            duration: if left.pitch_transition_sec > 1e-6 {
+                left.pitch_transition_sec
+            } else {
+                0.09
+            },
+        });
+    }
+
+    let Some(params) = timeline.params_by_root_track.get_mut(root_track_id) else {
+        return;
+    };
+    const BASE_KEY: &str = "mld5_pitch_connection_base";
+    let base = params
+        .extra_curves
+        .get(BASE_KEY)
+        .cloned()
+        .or_else(|| params.extra_curves.get("mld5_pitch_unjoined").cloned())
+        .unwrap_or_else(|| params.pitch_edit.clone());
+    params.pitch_edit.clone_from(&base);
+    if joins.is_empty() {
+        params.extra_curves.remove(BASE_KEY);
+        return;
+    }
+    params
+        .extra_curves
+        .entry(BASE_KEY.to_string())
+        .or_insert_with(|| base.clone());
+
+    let frame_sec = params.frame_period_ms.max(0.1) / 1000.0;
+    for join in joins {
+        let boundary = (join.left_end + join.right_start) * 0.5;
+        let maximum = (join.left_end - join.left_start)
+            .max(0.0)
+            .min((join.right_end - join.right_start).max(0.0))
+            .min(0.30);
+        let duration = join.duration.clamp(frame_sec * 2.0, maximum.max(frame_sec * 2.0));
+        let transition_start = (boundary - duration * 0.5)
+            .max(join.left_start)
+            .max(0.0);
+        let transition_end = (boundary + duration * 0.5)
+            .min(join.right_end)
+            .max(transition_start + frame_sec);
+        let probe = (duration * 0.45).clamp(0.018, 0.065);
+        let left_center = voiced_median(
+            &base,
+            frame_sec,
+            (join.left_end - probe).max(join.left_start),
+            (join.left_end - frame_sec).max(join.left_start + frame_sec),
+        );
+        let right_center = voiced_median(
+            &base,
+            frame_sec,
+            (join.right_start + frame_sec).min(join.right_end - frame_sec),
+            (join.right_start + probe).min(join.right_end),
+        );
+        let (Some(left_center), Some(right_center)) = (left_center, right_center) else {
+            continue;
+        };
+        let first = (transition_start / frame_sec).floor().max(0.0) as usize;
+        let last = (transition_end / frame_sec).ceil().max(0.0) as usize;
+        for frame in first..last.min(params.pitch_edit.len()).min(base.len()) {
+            let original = base[frame];
+            if original <= 0.0 {
+                continue;
+            }
+            let time = frame as f64 * frame_sec;
+            let x = ((time - transition_start) / (transition_end - transition_start))
+                .clamp(0.0, 1.0) as f32;
+            // Quintic smoothstep gives zero velocity and acceleration at both
+            // handles, which avoids a pitch-speed cusp at pronunciation tails.
+            let smooth = x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+            let local_center = if time < boundary { left_center } else { right_center };
+            let residual = original - local_center;
+            params.pitch_edit[frame] =
+                left_center + (right_center - left_center) * smooth + residual;
+        }
+    }
+    params.pitch_edit_user_modified = true;
+    params.pitch_orig_key = None;
+}
+
 /// Move one shared Melodyne timing handle. The two adjacent pronunciations
 /// are warped independently while every frame curve follows the same
 /// piecewise source-time mapping, so edited pitch remains attached to audio.
@@ -807,6 +984,10 @@ pub(super) fn set_melodyne_note_connection(
     source_start_sec: f64,
     source_end_sec: f64,
     connected: bool,
+    target_clip_id: Option<String>,
+    target_source_start_sec: Option<f64>,
+    target_source_end_sec: Option<f64>,
+    transition_sec: Option<f64>,
     checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
@@ -830,13 +1011,73 @@ pub(super) fn set_melodyne_note_connection(
     let Some(target) = target else {
         return tl.to_payload();
     };
-    if tl.clips[clip_index].melodyne_warp_segments[target].connected_to_next == connected {
+    let root_track_id = tl.resolve_root_track_id(&tl.clips[clip_index].track_id);
+    let had_connected_notes = root_track_id.as_deref().is_some_and(|root| {
+        tl.clips.iter().any(|clip| {
+            tl.resolve_root_track_id(&clip.track_id).as_deref() == Some(root)
+                && clip
+                    .melodyne_warp_segments
+                    .iter()
+                    .any(|segment| segment.connected_to_next)
+        })
+    });
+    let target_identity = target_clip_id.as_deref().and_then(|target_clip_id| {
+        let target_clip = tl.clips.iter().find(|clip| clip.id == target_clip_id)?;
+        let target_start = target_source_start_sec?;
+        let target_end = target_source_end_sec?;
+        target_clip
+            .melodyne_warp_segments
+            .iter()
+            .max_by(|left, right| {
+                let left_overlap = (left.source_end_sec.min(target_end)
+                    - left.source_start_sec.max(target_start)).max(0.0);
+                let right_overlap = (right.source_end_sec.min(target_end)
+                    - right.source_start_sec.max(target_start)).max(0.0);
+                left_overlap.total_cmp(&right_overlap)
+            })
+            .and_then(|segment| segment.melodyne_element_id)
+    });
+    let segment = &tl.clips[clip_index].melodyne_warp_segments[target];
+    let unchanged = segment.connected_to_next == connected
+        && (!connected
+            || (segment.connected_to_clip_id == target_clip_id
+                && segment.connected_to_element_id == target_identity
+                && transition_sec.is_none_or(|duration| {
+                    (segment.pitch_transition_sec - duration).abs() < 1e-7
+                })));
+    if unchanged {
         return tl.to_payload();
     }
     if checkpoint.unwrap_or(true) {
         state.checkpoint_timeline(&tl);
     }
-    tl.clips[clip_index].melodyne_warp_segments[target].connected_to_next = connected;
+    if connected && !had_connected_notes {
+        if let Some(params) = root_track_id
+            .as_deref()
+            .and_then(|root| tl.params_by_root_track.get_mut(root))
+        {
+            let current = params.pitch_edit.clone();
+            params
+                .extra_curves
+                .entry("mld5_pitch_connection_base".to_string())
+                .or_insert(current);
+        }
+    }
+    let segment = &mut tl.clips[clip_index].melodyne_warp_segments[target];
+    segment.connected_to_next = connected;
+    if connected {
+        segment.connected_to_clip_id = target_clip_id;
+        segment.connected_to_element_id = target_identity.or(segment.melodyne_following_element_id);
+        segment.pitch_transition_sec = transition_sec.unwrap_or_else(|| {
+            if segment.pitch_transition_sec > 1e-6 { segment.pitch_transition_sec } else { 0.09 }
+        }).clamp(0.01, 0.30);
+    } else {
+        segment.connected_to_clip_id = None;
+        segment.connected_to_element_id = None;
+    }
+    if let Some(root_track_id) = root_track_id.as_deref() {
+        rebuild_melodyne_pitch_joins(&mut tl, root_track_id);
+    }
     state.audio_engine.update_timeline(tl.clone());
     let mut payload = tl.to_payload();
     payload.project = Some(state.project_meta_payload());

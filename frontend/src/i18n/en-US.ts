@@ -966,7 +966,7 @@ export const enUS = {
     melodyne_sibilant: "Sibilant balance",
     melodyne_attack: "Attack length",
     melodyne_project_model: "Melodyne project",
-    melodyne_connection_hint: "Project import adds no smoothing; Connect affects only the selected boundary. Outside source edit, drag a note edge to warp that pronunciation together with its pitch line.",
+    melodyne_connection_hint: "No smoothing by default. Connect calculates a centre-only portamento at the selected boundary while retaining the detailed contour, including across different audio sources. Disconnect restores the pre-join curve.",
 
     // Melodyne track processing selection.
     melodyne_compose_select_title: "Choose Compose tracks",

@@ -990,7 +990,7 @@ export const koKR = {
     melodyne_sibilant: "치찰음 밸런스",
     melodyne_attack: "어택 길이",
     melodyne_project_model: "Melodyne 프로젝트",
-    melodyne_connection_hint: "프로젝트를 불러올 때 스무딩을 추가하지 않으며 연결은 선택한 경계에만 적용됩니다. 소스 편집 밖에서 음표 가장자리를 끌면 해당 발음과 피치선이 함께 늘어납니다.",
+    melodyne_connection_hint: "기본 상태에서는 스무딩하지 않습니다. 연결할 때만 선택한 경계의 음표 중심으로 포르타멘토를 계산하고 세밀한 피치선을 유지합니다. 서로 다른 오디오 소스도 연결할 수 있으며 끊으면 연결 전 곡선으로 복원됩니다.",
 
     // Melodyne 트랙 처리 선택.
     melodyne_compose_select_title: "Compose 트랙 선택",

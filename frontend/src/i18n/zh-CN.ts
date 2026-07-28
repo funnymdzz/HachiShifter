@@ -953,7 +953,7 @@ export const zhCN = {
     melodyne_sibilant: "齿音平衡",
     melodyne_attack: "起音时长",
     melodyne_project_model: "Melodyne 工程",
-    melodyne_connection_hint: "工程导入默认不新增平滑，连接仅作用于所选边界；退出原始编辑后拖动音符边缘，可将该发音及其音高线一起拉伸。",
+    melodyne_connection_hint: "默认不平滑。连接后仅按音符中心计算所选边界的滑音，并保留细节音高线；支持连接不同音频素材。断开会恢复连接前的曲线。",
 
     // Melodyne 轨道处理选择。
     melodyne_compose_select_title: "选择 Compose 轨道",

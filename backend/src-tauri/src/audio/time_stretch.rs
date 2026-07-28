@@ -396,7 +396,13 @@ pub(crate) fn anchor_mld5_attack_residuals(
     // Keep periodic harmonics out of the residual path. The former 1.6-kHz
     // split leaked many upper harmonics from the unshifted source; after a
     // large upward edit they beat against WORLD and sound hoarse/gurgling.
-    let cutoff_hz = if upward_shift_semitones > 7.0 { 4_200.0 } else { 3_400.0 };
+    let cutoff_hz = if upward_shift_semitones > 12.0 {
+        5_600.0
+    } else if upward_shift_semitones > 7.0 {
+        4_800.0
+    } else {
+        3_400.0
+    };
     let alpha = (-2.0f32 * std::f32::consts::PI * cutoff_hz
         / sample_rate.max(1) as f32)
         .exp();
@@ -551,7 +557,13 @@ pub(crate) fn anchor_mld5_attack_residuals(
                 break;
             }
             let phase = offset as f32 / attack_frames.max(1) as f32;
-            let base_weight = if upward_shift_semitones > 7.0 { 0.28 } else { 0.62 };
+            let base_weight = if upward_shift_semitones > 12.0 {
+                0.12
+            } else if upward_shift_semitones > 7.0 {
+                0.22
+            } else {
+                0.62
+            };
             let weight = (1.0 - phase).powi(2) * base_weight;
             for channel in 0..channels {
                 let source_index = source_frame * channels + channel;

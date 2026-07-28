@@ -315,6 +315,10 @@ export const timelineApi = {
         sourceStartSec: number;
         sourceEndSec: number;
         connected: boolean;
+        targetClipId?: string;
+        targetSourceStartSec?: number;
+        targetSourceEndSec?: number;
+        transitionSec?: number;
         checkpoint?: boolean;
     }) =>
         invoke<TimelineResult>(
@@ -323,6 +327,10 @@ export const timelineApi = {
             payload.sourceStartSec,
             payload.sourceEndSec,
             payload.connected,
+            payload.targetClipId,
+            payload.targetSourceStartSec,
+            payload.targetSourceEndSec,
+            payload.transitionSec,
             payload.checkpoint,
         ),
 

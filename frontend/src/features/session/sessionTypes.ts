@@ -82,12 +82,21 @@ export interface ClipInfo {
     midiNoteData?: MidiNoteEvent[];
     midiFillGaps?: boolean;
     melodyneWarpSegments?: Array<{
+        melodyneElementId?: number;
+        melodyneFollowingElementId?: number;
         timelineStartSec: number;
         timelineEndSec: number;
         sourceStartSec: number;
         sourceEndSec: number;
         timeMapPoints: Array<{ timelineSec: number; sourceSec: number }>;
         connectedToNext: boolean;
+        connectedToClipId?: string;
+        connectedToElementId?: number;
+        pitchTransitionSec: number;
+        attackDurationSec: number;
+        attackSourceSec: number;
+        attackTimeSlope: number;
+        connectedPhaseToNext: boolean;
         amplitudeFactor: number;
         fadeInSec: number;
         fadeOutSec: number;

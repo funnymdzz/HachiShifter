@@ -1560,6 +1560,37 @@ fn emit_clip_pitch_data_for_clip(
         return;
     }
 
+    // Strict MPD clips already own a dense destination-time source contour.
+    // Publish that exact 5-ms curve to the piano roll instead of waiting for
+    // an FCPE cache job which is intentionally skipped for project imports.
+    // This fixes the coarse/missing display line without replacing the MPD
+    // playback contour with a second detector pass.
+    if !clip.melodyne_warp_segments.is_empty() {
+        if let Some(params) = tl.params_by_root_track.get(&root) {
+            if params
+                .extra_params
+                .get("mld5_pitch_source")
+                .copied()
+                .unwrap_or(0.0)
+                < 0.5
+            {
+                if let Some(midi_curve) = params
+                    .extra_curves
+                    .get(&format!("mld5_source_pitch::{}", clip.id))
+                {
+                    let payload = ClipPitchDataPayload {
+                        clip_id: clip.id.clone(),
+                        curve_start_sec: clip.start_sec.max(0.0),
+                        midi_curve: midi_curve.clone(),
+                        frame_period_ms: params.frame_period_ms.max(0.1),
+                    };
+                    let _ = app.emit("clip_pitch_data", payload);
+                    return;
+                }
+            }
+        }
+    }
+
     // ── 音频 clip 路径：从 FCPE 缓存获取音高曲线 ──
     let Some(cached) = get_or_compute_clip_pitch_midi_global(tl, clip, &root, frame_period_ms)
     else {

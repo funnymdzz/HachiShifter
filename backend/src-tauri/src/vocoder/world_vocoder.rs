@@ -340,6 +340,69 @@ fn cleanup_f0_inplace(f0: &mut [f64], frame_period_ms: f64, f0_floor: f64, f0_ce
     }
 }
 
+/// WORLD occasionally drops the final two-to-six voiced frames of a syllable.
+/// The old unvoiced fallback then copied the dry, pre-transposition period at
+/// precisely the pronunciation tail. Extend only tails that still correlate
+/// with the preceding period; real breaths/fricatives fail this periodicity
+/// test and remain in the independent aperiodic path.
+fn extend_periodic_f0_tails(
+    f0: &mut [f64],
+    signal: &[f64],
+    fs: i32,
+    frame_period_ms: f64,
+) {
+    if f0.len() < 2 || signal.is_empty() || fs <= 0 {
+        return;
+    }
+    let frame_samples = ((frame_period_ms.max(0.1) * fs as f64 / 1000.0).round() as usize)
+        .max(1);
+    let maximum_frames = ((30.0 / frame_period_ms.max(0.1)).round() as usize).max(1);
+    let correlation_window = ((fs as usize * 12) / 1000).max(32);
+    let mut index = 1usize;
+    while index < f0.len() {
+        if f0[index] > 0.0 || f0[index - 1] <= 0.0 {
+            index += 1;
+            continue;
+        }
+        let source_f0 = f0[index - 1];
+        let period = (fs as f64 / source_f0.max(1.0)).round() as usize;
+        if period < 2 || period >= correlation_window {
+            index += 1;
+            continue;
+        }
+        let run_start = index;
+        while index < f0.len() && f0[index] <= 0.0 {
+            index += 1;
+        }
+        let run_end = index.min(run_start + maximum_frames);
+        for frame in run_start..run_end {
+            let centre = frame.saturating_mul(frame_samples).min(signal.len());
+            let end = (centre + correlation_window / 2).min(signal.len());
+            let start = end.saturating_sub(correlation_window).max(period);
+            if end <= start + 16 {
+                break;
+            }
+            let mut dot = 0.0f64;
+            let mut current_energy = 0.0f64;
+            let mut previous_energy = 0.0f64;
+            for sample in start..end {
+                let current = signal[sample];
+                let previous = signal[sample - period];
+                dot += current * previous;
+                current_energy += current * current;
+                previous_energy += previous * previous;
+            }
+            let count = (end - start).max(1) as f64;
+            let rms = (current_energy / count).sqrt();
+            let correlation = dot / (current_energy * previous_energy).sqrt().max(1e-12);
+            if rms < 0.0015 || correlation < 0.34 {
+                break;
+            }
+            f0[frame] = source_f0;
+        }
+    }
+}
+
 fn compute_f0_with_positions_dio_stonemask(
     x: &[f64],
     fs: i32,
@@ -677,6 +740,7 @@ fn vocode_one_streaming(
     abs_time_start_sec: f64,
     target_f0_at_time: &impl Fn(f64, f64) -> f64,
     synth: &mut crate::streaming_world::StreamingWorldSynthesizer,
+    protect_high_pitch_periodicity: bool,
 ) -> Result<Vec<f64>, String> {
     if x_f64.is_empty() {
         return Ok(vec![]);
@@ -701,6 +765,9 @@ fn vocode_one_streaming(
     };
 
     cleanup_f0_inplace(&mut f0, fp, f0_floor, f0_ceil);
+    if protect_high_pitch_periodicity {
+        extend_periodic_f0_tails(&mut f0, x_f64, fs, fp);
+    }
 
     let f0_len_i32: i32 = f0
         .len()
@@ -796,6 +863,40 @@ fn vocode_one_streaming(
         );
     }
 
+    if protect_high_pitch_periodicity {
+        // Large upward edits expose WORLD's mid-band aperiodic estimate as a
+        // rough/hoarse second texture. Melodyne's component renderer keeps
+        // the periodic principal separate and retains noise mainly in the
+        // sibilant band. Reduce D4C noise below 6.5 kHz progressively above
+        // +5 semitones; the later mld5 residual path restores stored attacks
+        // and sibilants independently, so articulation is not discarded.
+        for frame in 0..f0.len() {
+            let source = f0[frame];
+            let target = shifted_f0[frame];
+            if source <= 0.0 || target <= source {
+                continue;
+            }
+            let semitones = 12.0 * (target / source).log2();
+            let strength = ((semitones - 5.0) / 10.0).clamp(0.0, 0.72);
+            if strength <= 0.0 {
+                continue;
+            }
+            for bin in 0..spec_bins {
+                let hz = bin as f64 * fs.max(1) as f64 / fft_size.max(1) as f64;
+                let band = if hz <= 4_500.0 {
+                    1.0
+                } else if hz < 6_500.0 {
+                    (6_500.0 - hz) / 2_000.0
+                } else {
+                    0.0
+                };
+                let index = frame * spec_bins + bin;
+                aperiodicity[index] =
+                    (aperiodicity[index] * (1.0 - strength * band)).clamp(0.0, 1.0);
+            }
+        }
+    }
+
     // 流式合成：将帧推入 WorldSynthesizer，取出合成 PCM
     // 若合成器被锁定（环形缓冲区满），先取出已合成样本再推入
     // 注意：push_frames 会取走数据所有权，防止 Synthesis2 访问悬空指针
@@ -868,6 +969,58 @@ pub fn vocode_pitch_shift_chunked<F>(
     f0_floor: f64,
     f0_ceil: f64,
     target_f0_at_time: F,
+) -> Result<Vec<f32>, String>
+where
+    F: Fn(f64, f64) -> f64,
+{
+    vocode_pitch_shift_chunked_impl(
+        mono_pcm,
+        sample_rate,
+        start_sec,
+        frame_period_ms,
+        f0_floor,
+        f0_ceil,
+        target_f0_at_time,
+        false,
+    )
+}
+
+/// Melodyne-style WORLD path: retain a cleaner periodic principal for large
+/// upward edits while the caller restores attacks/sibilants as components.
+pub fn vocode_pitch_shift_chunked_mld5<F>(
+    mono_pcm: &[f32],
+    sample_rate: u32,
+    start_sec: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    target_f0_at_time: F,
+) -> Result<Vec<f32>, String>
+where
+    F: Fn(f64, f64) -> f64,
+{
+    vocode_pitch_shift_chunked_impl(
+        mono_pcm,
+        sample_rate,
+        start_sec,
+        frame_period_ms,
+        f0_floor,
+        f0_ceil,
+        target_f0_at_time,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn vocode_pitch_shift_chunked_impl<F>(
+    mono_pcm: &[f32],
+    sample_rate: u32,
+    start_sec: f64,
+    frame_period_ms: f64,
+    f0_floor: f64,
+    f0_ceil: f64,
+    target_f0_at_time: F,
+    protect_high_pitch_periodicity: bool,
 ) -> Result<Vec<f32>, String>
 where
     F: Fn(f64, f64) -> f64,
@@ -963,6 +1116,7 @@ where
             abs_time_start_sec,
             &target_f0_at_time,
             &mut streaming_synth,
+            protect_high_pitch_periodicity,
         )?;
 
         if y_f64.len() != x_f64.len() {

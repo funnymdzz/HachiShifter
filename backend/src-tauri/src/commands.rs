@@ -614,6 +614,10 @@ pub fn set_melodyne_note_connection(
     source_start_sec: f64,
     source_end_sec: f64,
     connected: bool,
+    target_clip_id: Option<String>,
+    target_source_start_sec: Option<f64>,
+    target_source_end_sec: Option<f64>,
+    transition_sec: Option<f64>,
     checkpoint: Option<bool>,
 ) -> crate::models::TimelineStatePayload {
     timeline::set_melodyne_note_connection(
@@ -622,6 +626,10 @@ pub fn set_melodyne_note_connection(
         source_start_sec,
         source_end_sec,
         connected,
+        target_clip_id,
+        target_source_start_sec,
+        target_source_end_sec,
+        transition_sec,
         checkpoint,
     )
 }

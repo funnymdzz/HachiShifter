@@ -151,6 +151,13 @@ pub struct MelodyneTimeMapPoint {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MelodyneWarpSegment {
+    /// Stable MPD element identity.  Keeping the graph identity lets a pitch
+    /// join point at an element in another audio item/clip without guessing
+    /// from floating-point source ranges.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub melodyne_element_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub melodyne_following_element_id: Option<u32>,
     pub timeline_start_sec: f64,
     pub timeline_end_sec: f64,
     pub source_start_sec: f64,
@@ -175,6 +182,15 @@ pub struct MelodyneWarpSegment {
     /// are never smoothed implicitly.
     #[serde(default)]
     pub connected_to_next: bool,
+    /// Manual joins may cross clip/source boundaries (UTAU-style).  MPD joins
+    /// normally resolve through `melodyne_following_element_id`; this explicit
+    /// target is populated by the Connect tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_to_clip_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected_to_element_id: Option<u32>,
+    #[serde(default)]
+    pub pitch_transition_sec: f64,
     /// Phase joins are persisted independently from pitch joins in MPD.
     #[serde(default)]
     pub connected_phase_to_next: bool,

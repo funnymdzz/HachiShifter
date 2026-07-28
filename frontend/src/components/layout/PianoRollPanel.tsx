@@ -3575,20 +3575,21 @@ export const PianoRollPanel: React.FC = () => {
             };
             selectionRef.current = selection;
             setSelectionUi(selection);
-            if (connect) {
-                await handleEditOp("smooth", { strength: 88 });
-            } else {
-                // Restoring the narrow transition removes the generated
-                // smoothing bridge while leaving both note contours intact.
-                await handleEditOp("initialize");
-            }
-            if (selectedAudioClip?.melodyneWarpSegments?.length) {
+            // Connection is a backend note-object operation.  Generic Smooth
+            // flattened vibrato and Initialize could erase unrelated edits.
+            // The backend now interpolates only the centre trajectory and can
+            // resolve the following note in another clip/audio source.
+            if (current.clipId) {
                 await webApi.setMelodyneNoteConnection({
-                    clipId: selectedAudioClip.id,
+                    clipId: current.clipId,
                     sourceStartSec: current.sourceStartSec,
                     sourceEndSec: current.sourceEndSec,
                     connected: connect,
-                    checkpoint: false,
+                    targetClipId: next?.clipId,
+                    targetSourceStartSec: next?.sourceStartSec,
+                    targetSourceEndSec: next?.sourceEndSec,
+                    transitionSec: connect ? 0.09 : undefined,
+                    checkpoint: true,
                 });
                 await dispatch(fetchTimeline());
             }
@@ -3597,11 +3598,9 @@ export const PianoRollPanel: React.FC = () => {
         [
             activeSampleNoteIndex,
             dispatch,
-            handleEditOp,
             invalidate,
             sampleNoteDisplay.notes,
             secPerBeat,
-            selectedAudioClip,
         ],
     );
 

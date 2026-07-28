@@ -97,6 +97,23 @@ left/right signal peak and splitting/reseparating elements at attacks. These
 observations support treating the note body, transient and sibilant residual as
 independent components rather than applying one resampler to the whole signal.
 
+The MPD note graph persists `followingElement`, `joinsPitches`,
+`pitchTransitionDuration`, `attackDuration`, and
+`sourceTimeForElementTimeFunctionAttackSlope` independently. HachiShifter keeps
+those element identities across clip boundaries. Connect can therefore point
+to a note in another media item on the same root track: only the note-centre
+trajectory receives a zero-velocity/zero-acceleration transition, while the
+dense drift/modulation residual remains attached to each pronunciation. An
+unconnected boundary remains untouched, and Disconnect restores the
+authoritative pre-join curve.
+
+Moving the attack handle keeps its source coordinate fixed and
+re-parameterizes both the pre-attack and post-attack halves of the sampled time
+function. Moving only the consonant-side chunk would leave a time-slope step at
+the vowel boundary and produce a click or tail detuning. Imported projects read
+both the destination attack duration and source-side slope/anchor before their
+first render.
+
 ## HachiShifter mapping
 
 The model-free `mld5` path now performs:
@@ -126,6 +143,19 @@ The model-free `mld5` path now performs:
 9. Persisted `joinsPitches` transitions follow their actual `followingElement`
    reference and `pitchTransitionDuration`. Only the pitch-centre offset is
    interpolated; modulation/drift residuals on both samples remain intact.
+10. Above roughly +5 semitones, the mld5-only periodicity guard progressively
+    reduces WORLD's low/mid-band D4C aperiodicity. The separately restored
+    sibilant/attack component remains intact, avoiding the doubled hoarse
+    texture on high notes without blurring the requested F0.
+11. The MPD's exact 1024-sample analysis clock is evaluated through a bounded
+    cubic Hermite display/playback cache at the 5-ms edit period. Stored points
+    remain exact, silent spans stay separated, and the piano roll receives the
+    same destination-time per-clip contour instead of waiting for a second
+    detector pass.
+12. Short WORLD unvoiced runs at pronunciation endings are extended only when
+    the waveform still correlates with the preceding period. This prevents the
+    dry, pre-transposition F0 from leaking into voiced tails, while actual
+    breaths and fricatives remain unvoiced.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

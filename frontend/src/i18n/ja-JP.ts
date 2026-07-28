@@ -974,7 +974,7 @@ export const jaJP = {
     melodyne_sibilant: "歯擦音バランス",
     melodyne_attack: "アタック長",
     melodyne_project_model: "Melodyneプロジェクト",
-    melodyne_connection_hint: "プロジェクト読込時は平滑化を追加せず、接続は選択境界だけに作用します。ソース編集の外ではノート端をドラッグすると、その発音とピッチ線が一緒に伸縮します。",
+    melodyne_connection_hint: "初期状態では平滑化しません。接続時だけ選択境界のノート中心からポルタメントを計算し、細かなピッチ線を保持します。異なる音声素材間も接続でき、切断すると接続前の線に戻ります。",
 
     // Melodyne トラック処理の選択。
     melodyne_compose_select_title: "Compose トラックを選択",

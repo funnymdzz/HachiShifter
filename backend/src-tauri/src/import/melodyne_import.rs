@@ -1455,10 +1455,40 @@ fn source_pitch_at(
     if left.silent && right.silent {
         return None;
     }
+    // Melodyne's stored analysis points run on a 1024-sample clock, while its
+    // display/playback functions are evaluated continuously.  A straight
+    // line between the 43-Hz property points visibly polygonises vibrato and
+    // also gives the vocoder a staircase derivative.  Evaluate a bounded
+    // cubic Hermite segment instead: it retains every persisted point exactly
+    // and reconstructs the dense display/playback cache without overshooting
+    // neighbouring extrema or interpolating across silent regions.
+    let interpolate = |value: fn(CachedPitchPoint) -> f32| {
+        if right_index == left_index || left.silent || right.silent {
+            return value(left) + (value(right) - value(left)) * fraction;
+        }
+        let p0 = cache.points[left_index.saturating_sub(1)];
+        let p3 = cache.points[(right_index + 1).min(cache.points.len() - 1)];
+        if p0.silent || p3.silent {
+            return value(left) + (value(right) - value(left)) * fraction;
+        }
+        let y0 = value(p0);
+        let y1 = value(left);
+        let y2 = value(right);
+        let y3 = value(p3);
+        let x = fraction;
+        let x2 = x * x;
+        let x3 = x2 * x;
+        let m1 = 0.5 * (y2 - y0);
+        let m2 = 0.5 * (y3 - y1);
+        let cubic = (2.0 * x3 - 3.0 * x2 + 1.0) * y1
+            + (x3 - 2.0 * x2 + x) * m1
+            + (-2.0 * x3 + 3.0 * x2) * y2
+            + (x3 - x2) * m2;
+        cubic.clamp(y0.min(y1).min(y2).min(y3), y0.max(y1).max(y2).max(y3))
+    };
     Some((
-        left.pitch + (right.pitch - left.pitch) * fraction,
-        left.without_vibrato
-            + (right.without_vibrato - left.without_vibrato) * fraction,
+        interpolate(|point| point.pitch),
+        interpolate(|point| point.without_vibrato),
     ))
 }
 
@@ -1546,6 +1576,9 @@ fn build_track_params(
     // Blend only the note-centre offset and retain each side's local residual
     // contour, matching Melodyne's "move the line, do not flatten it" model.
     let unjoined_pitch = pitch_edit.clone();
+    // This is the authoritative contour used by Disconnect and by manual
+    // cross-sample joins.  A join is a reversible centre transition, never a
+    // destructive low-pass pass over the detailed F0 line.
     let index_by_id = track
         .elements
         .iter()
@@ -1605,6 +1638,7 @@ fn build_track_params(
     }
 
     let mut extra_curves = HashMap::new();
+    extra_curves.insert("mld5_pitch_unjoined".to_string(), unjoined_pitch);
     extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);
     extra_curves.insert("mld5_sibilant_mask".to_string(), sibilant_mask);
     if let Some(curve) = formant {
@@ -1686,8 +1720,10 @@ fn choose_frame_period_ms(tracks: &[ImportedTrack], project_sec: f64) -> f64 {
                 .elements
                 .iter()
                 .any(|element| element.formant_offset.abs() > 1e-6);
-            // pitch_orig + pitch_edit + without-vibrato + sibilant mask
-            16 + usize::from(has_formant) * 4
+            // pitch_orig + pitch_edit + unjoined edit + without-vibrato +
+            // sibilant mask. Keep the reversible connection base inside the
+            // same aggregate large-project budget.
+            20 + usize::from(has_formant) * 4
                 + usize::from(track.elements.iter().any(|element| element.sibilant_balance.abs() > 1e-6)) * 4
         })
         .sum();
@@ -1866,6 +1902,8 @@ fn import_graph(
                 clip.melodyne_warp_segments = group.element_indices.iter().filter_map(|index| {
                     let element = track.elements.get(*index)?;
                     Some(crate::state::MelodyneWarpSegment {
+                        melodyne_element_id: Some(element.element_id),
+                        melodyne_following_element_id: element.following_element_id,
                         timeline_start_sec: element.start + shift,
                         timeline_end_sec: element.start + element.duration + shift,
                         source_start_sec: source_time(&graph, element, 0.0).max(0.0),
@@ -1876,6 +1914,9 @@ fn import_graph(
                         attack_source_sec: source_time(&graph, element, element.attack_duration),
                         attack_time_slope: element.attack_time_slope.max(1e-6),
                         connected_to_next: element.join_next,
+                        connected_to_clip_id: None,
+                        connected_to_element_id: element.following_element_id,
+                        pitch_transition_sec: element.join_duration.max(0.0),
                         connected_phase_to_next: element.join_phase_next,
                         amplitude_factor: element.amplitude_factor.max(0.0),
                         fade_in_sec: element.fade_in_sec,

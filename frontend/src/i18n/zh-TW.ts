@@ -953,7 +953,7 @@ export const zhTW = {
     melodyne_sibilant: "齒音平衡",
     melodyne_attack: "起音時長",
     melodyne_project_model: "Melodyne 工程",
-    melodyne_connection_hint: "工程匯入預設不新增平滑，連接僅作用於所選邊界；離開原始編輯後拖曳音符邊緣，可將該發音及其音高線一起拉伸。",
+    melodyne_connection_hint: "預設不平滑。連接後僅依音符中心計算所選邊界的滑音並保留細節音高線；支援連接不同音訊素材。中斷會還原連接前的曲線。",
 
     // Melodyne 軌道處理選擇。
     melodyne_compose_select_title: "選擇 Compose 軌道",
