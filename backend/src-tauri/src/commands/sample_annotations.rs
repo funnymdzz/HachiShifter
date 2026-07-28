@@ -107,9 +107,13 @@ fn apply_melodyne_note_controls(
         let original_center = if row.melodyne_original_pitch_center_cents > 0.0 {
             row.melodyne_original_pitch_center_cents as f32
         } else { raw };
-        let edited = row.melodyne_pitch_center_cents as f32
-            + row.melodyne_pitch_drift_factor as f32 * (without - original_center)
-            + row.melodyne_pitch_modulation_factor as f32 * (raw - without);
+        let edited = if row.melodyne_pitch_modulation_factor.abs() <= 1e-6 {
+            row.melodyne_pitch_center_cents as f32
+        } else {
+            row.melodyne_pitch_center_cents as f32
+                + row.melodyne_pitch_drift_factor as f32 * (without - original_center)
+                + row.melodyne_pitch_modulation_factor as f32 * (raw - without)
+        };
         updates.push((
             frame,
             (edited / 100.0).clamp(0.0, 127.0),

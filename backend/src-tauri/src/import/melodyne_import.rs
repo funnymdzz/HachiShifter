@@ -1681,6 +1681,25 @@ fn element_source_pitch_center(
     }
 }
 
+fn restored_element_pitch(
+    element: &ImportedElement,
+    source_center: f32,
+    raw: f32,
+    without_vibrato: f32,
+) -> f32 {
+    if element.pitch_modulation.abs() <= 1e-6 {
+        // Melodyne persists an explicit zero for notes whose modulation tool
+        // was pulled fully flat. Treat it as an authored flat trajectory;
+        // retaining the analysed drift here was the visible white slope in
+        // HachiShifter although the MPD note was flat.
+        element.pitch_center
+    } else {
+        element.pitch_center
+            + element.pitch_drift * (without_vibrato - source_center)
+            + element.pitch_modulation * (raw - without_vibrato)
+    }
+}
+
 fn build_track_params(
     graph: &Graph,
     track: &ImportedTrack,
@@ -1760,9 +1779,12 @@ fn build_track_params(
                 // silent attack, breath, sibilant or unanalysed tail.
                 continue;
             };
-            let edited = element.pitch_center
-                + element.pitch_drift * (without_vibrato - source_center)
-                + element.pitch_modulation * (raw - without_vibrato);
+            let edited = restored_element_pitch(
+                element,
+                source_center,
+                raw,
+                without_vibrato,
+            );
             pitch_orig[frame] = (raw / 100.0).clamp(0.0, 127.0);
             pitch_without_vibrato[frame] = (without_vibrato / 100.0).clamp(0.0, 127.0);
             pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
@@ -1988,9 +2010,12 @@ fn build_group_pitch_curves(
                     source_pitch_at(graph, cache, element.source_function_id, element_time)
                 })
             {
-                let edited_unjoined = element.pitch_center
-                    + element.pitch_drift * (without_vibrato - source_center)
-                    + element.pitch_modulation * (raw - without_vibrato);
+                let edited_unjoined = restored_element_pitch(
+                    element,
+                    source_center,
+                    raw,
+                    without_vibrato,
+                );
                 // Melodyne's connection moves only the note centre. Keep the
                 // exact drift/modulation residual belonging to this sample.
                 let edited = joined_center + (edited_unjoined - element.pitch_center);
@@ -2057,9 +2082,6 @@ fn import_flat_paths(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, S
     let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let media_index = build_media_index(project_dir);
     let mut timeline = TimelineState::default();
-    if let Some(bpm) = project_bpm(&graph) {
-        timeline.bpm = bpm.clamp(10.0, 400.0);
-    }
     timeline.clips.clear();
     let mut missing_files = Vec::new();
     for (index, stored) in referenced_files.iter().enumerate() {
@@ -2159,6 +2181,9 @@ fn import_graph(
     let compose_tracks = compose_track_indices.map(|indices| indices.iter().copied().collect::<HashSet<_>>());
 
     let mut timeline = TimelineState::default();
+    if let Some(bpm) = project_bpm(&graph) {
+        timeline.bpm = bpm.clamp(10.0, 400.0);
+    }
     timeline.clips.clear();
     timeline.params_by_root_track.clear();
     timeline.tracks.clear();
