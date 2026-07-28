@@ -564,6 +564,7 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
         let frame_count = reference_f0.len().min(rendered_f0.len());
         let mut errors = Vec::new();
         let mut signed = Vec::new();
+        let mut indexed_errors = Vec::<(usize, f64)>::new();
         let mut reference_voiced = 0usize;
         let mut rendered_voiced = 0usize;
         for index in 0..frame_count {
@@ -575,18 +576,61 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
                 let cents = 1200.0 * (right / left).log2();
                 signed.push(cents);
                 errors.push(cents.abs());
+                indexed_errors.push((index, cents));
             }
         }
+        #[derive(Clone, Copy)]
+        struct BadRun {
+            first: usize,
+            last: usize,
+            count: usize,
+            sum_abs: f64,
+            max_abs: f64,
+        }
+        let mut bad_runs = Vec::<BadRun>::new();
+        for (frame, cents) in indexed_errors.iter().copied().filter(|(_, value)| value.abs() >= 200.0) {
+            if let Some(run) = bad_runs.last_mut().filter(|run| frame <= run.last + 1) {
+                run.last = frame;
+                run.count += 1;
+                run.sum_abs += cents.abs();
+                run.max_abs = run.max_abs.max(cents.abs());
+            } else {
+                bad_runs.push(BadRun {
+                    first: frame,
+                    last: frame,
+                    count: 1,
+                    sum_abs: cents.abs(),
+                    max_abs: cents.abs(),
+                });
+            }
+        }
+        bad_runs.sort_by(|left, right| {
+            right.count.cmp(&left.count)
+                .then_with(|| right.max_abs.total_cmp(&left.max_abs))
+        });
+        bad_runs.truncate(12);
+        let bad_runs_json = bad_runs.iter().map(|run| {
+            let reference_sec = run.first as f64 * 0.005;
+            let project_sec = offset_samples as f64 / target_rate as f64 + reference_sec;
+            format!(
+                "{{\"project_sec\":{project_sec:.3},\"duration_ms\":{:.1},\"frames\":{},\"mean_abs_cents\":{:.1},\"max_abs_cents\":{:.1}}}",
+                (run.last - run.first + 1) as f64 * 5.0,
+                run.count,
+                run.sum_abs / run.count.max(1) as f64,
+                run.max_abs,
+            )
+        }).collect::<Vec<_>>().join(",");
         errors.sort_by(f64::total_cmp);
         signed.sort_by(f64::total_cmp);
         let percentile = |values: &[f64], fraction: f64| -> f64 {
             if values.is_empty() { return 0.0; }
             values[((values.len() - 1) as f64 * fraction).round() as usize]
         };
-        println!("{{\"detector\":\"fcpe\",\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3}}}",
+        println!("{{\"detector\":\"fcpe\",\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3},\"bad_runs_over_200_cents\":[{}]}}",
             reference.display(), rendered.display(), offset_samples as f64 / target_rate as f64,
             best.0, frame_count, reference_voiced, rendered_voiced, errors.len(),
-            percentile(&errors, 0.5), percentile(&errors, 0.9), percentile(&signed, 0.5));
+            percentile(&errors, 0.5), percentile(&errors, 0.9), percentile(&signed, 0.5),
+            bad_runs_json);
         Ok(())
     })())
 }
