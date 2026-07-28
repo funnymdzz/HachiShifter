@@ -1589,7 +1589,8 @@ fn emit_clip_pitch_data_for_clip(
                         .map(|target| {
                             let baseline = params
                                 .extra_curves
-                                .get("mld5_pitch_connection_base")
+                                .get("mld5_pitch_imported_joined")
+                                .or_else(|| params.extra_curves.get("mld5_pitch_connection_base"))
                                 .or_else(|| params.extra_curves.get("mld5_pitch_unjoined"));
                             let fp = params.frame_period_ms.max(0.1);
                             let start_idx =

@@ -1815,6 +1815,19 @@ fn build_group_pitch_curves(
     let mut render_target_curve = vec![0.0f32; curve_len];
     let mut render_pitch_delta = vec![0.0f32; curve_len];
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
+    let index_by_id = track
+        .elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| (element.element_id, index))
+        .collect::<HashMap<_, _>>();
+    let previous_join_by_id = track
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, element)| element.join_next)
+        .filter_map(|(index, element)| element.following_element_id.map(|id| (id, index)))
+        .collect::<HashMap<_, _>>();
     for element_index in &group.element_indices {
         let Some(element) = track.elements.get(*element_index) else {
             continue;
@@ -1860,16 +1873,65 @@ fn build_group_pitch_curves(
             // Melodyne's note-centre displacement.  This keeps audio and F0
             // aligned through a stretched tail without drawing a fabricated
             // line in the piano roll.
+            let mut joined_center = element.pitch_center;
+            // A middle note can own the right half of one persisted glide and
+            // the left half of the next. Evaluate both graph relationships,
+            // and only alter the centre inside their stored transition span.
+            let mut join_candidates = Vec::<(&ImportedElement, &ImportedElement)>::new();
+            if element.join_next {
+                if let Some(right) = element
+                    .following_element_id
+                    .and_then(|id| index_by_id.get(&id).copied())
+                    .and_then(|index| track.elements.get(index))
+                {
+                    join_candidates.push((element, right));
+                }
+            }
+            if let Some(left) = previous_join_by_id
+                .get(&element.element_id)
+                .and_then(|index| track.elements.get(*index))
+            {
+                join_candidates.push((left, element));
+            }
+            for (left, right) in join_candidates {
+                let boundary = ((left.start + left.duration) + right.start) * 0.5 + shift;
+                let stored_duration = if left.join_duration > 1e-6 {
+                    left.join_duration
+                } else {
+                    0.09
+                };
+                let duration = stored_duration
+                .min(left.duration + right.duration)
+                .max(frame_sec);
+                let transition_start = (boundary - duration * 0.5)
+                    .max(left.start + shift)
+                    .max(0.0);
+                let transition_end = (boundary + duration * 0.5)
+                    .min(right.start + right.duration + shift)
+                    .max(transition_start + frame_sec);
+                if destination_time < transition_start || destination_time > transition_end {
+                    continue;
+                }
+                let x = ((destination_time - transition_start)
+                    / (transition_end - transition_start).max(frame_sec))
+                    .clamp(0.0, 1.0) as f32;
+                let smooth = x * x * (3.0 - 2.0 * x);
+                joined_center = left.pitch_center
+                    + (right.pitch_center - left.pitch_center) * smooth;
+            }
             render_pitch_delta[local_frame] =
-                ((element.pitch_center - source_center) / 100.0).clamp(-24.0, 24.0);
+                ((joined_center - source_center) / 100.0).clamp(-24.0, 24.0);
             if let Some((raw, without_vibrato)) =
                 pitch_cache.and_then(|cache| {
                     source_pitch_at(graph, cache, element.source_function_id, element_time)
                 })
             {
-                let edited = element.pitch_center
+                let edited_unjoined = element.pitch_center
                     + element.pitch_drift * (without_vibrato - source_center)
                     + element.pitch_modulation * (raw - without_vibrato);
+                // Melodyne's connection moves only the note centre. Keep the
+                // exact drift/modulation residual belonging to this sample.
+                let edited = joined_center + (edited_unjoined - element.pitch_center);
                 source_curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
                 target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
                 render_target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
@@ -2159,6 +2221,10 @@ fn import_graph(
                     if *edited > 0.0 && *original > 0.0 { edited - original } else { 0.0 }
                 })
                 .collect::<Vec<_>>();
+            params.extra_curves.insert(
+                "mld5_pitch_imported_joined".to_string(),
+                params.pitch_edit.clone(),
+            );
             params.extra_curves.insert(
                 "mld5_project_pitch_offset".to_string(),
                 project_pitch_offset,

@@ -1123,7 +1123,8 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
             // user's later global delta (including explicit note joins).
             let imported_global = entry
                 .extra_curves
-                .get("mld5_pitch_connection_base")
+                .get("mld5_pitch_imported_joined")
+                .or_else(|| entry.extra_curves.get("mld5_pitch_connection_base"))
                 .or_else(|| entry.extra_curves.get("mld5_pitch_unjoined"));
             let fp = frame_period_ms.max(0.1);
             let start_idx = ((clip_start_sec.max(0.0) * 1000.0) / fp).round() as usize;
