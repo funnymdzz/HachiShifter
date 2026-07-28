@@ -118,6 +118,14 @@ The model-free `mld5` path now performs:
    periodic synthesis and are cropped back sample-exactly. This avoids resetting
    F0 analysis on an isolated 30--200 ms fragment while keeping project timing
    and source boundaries unchanged.
+8. Variable-ratio Signalsmith rendering preloads `inputLatency` with `seek`,
+   feeds every source-time chunk from the required look-ahead position, removes
+   `outputLatency` once, and flushes only the remaining output tail. This keeps
+   warped PCM sample-aligned with the MPD/FCPE F0 curve instead of shifting the
+   waveform by the stretcher's analysis window.
+9. Persisted `joinsPitches` transitions follow their actual `followingElement`
+   reference and `pitchTransitionDuration`. Only the pitch-centre offset is
+   interpolated; modulation/drift residuals on both samples remain intact.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

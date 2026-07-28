@@ -129,6 +129,23 @@ int sstretch_output_latency(SStretchState state) {
     return s->stretch.outputLatency();
 }
 
+int sstretch_seek_interleaved(
+    SStretchState state,
+    const float* input_interleaved,
+    unsigned int in_frames,
+    double playback_rate
+) {
+    if (!state || !input_interleaved || in_frames == 0) return -1;
+    auto* s = (SStretchInternal*)state;
+    s->deinterleave(input_interleaved, (int)in_frames);
+    s->stretch.seek(
+        s->in_ptrs_const.data(),
+        (int)in_frames,
+        std::max(playback_rate, 1.0e-6)
+    );
+    return 0;
+}
+
 int sstretch_process_interleaved(
     SStretchState state,
     const float* input_interleaved,

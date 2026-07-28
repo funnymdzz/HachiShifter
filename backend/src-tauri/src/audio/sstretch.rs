@@ -24,6 +24,12 @@ extern "C" {
     fn sstretch_set_transpose_factor(state: SStretchState, factor: f64);
     fn sstretch_input_latency(state: SStretchState) -> c_int;
     fn sstretch_output_latency(state: SStretchState) -> c_int;
+    fn sstretch_seek_interleaved(
+        state: SStretchState,
+        input_interleaved: *const f32,
+        in_frames: u32,
+        playback_rate: f64,
+    ) -> c_int;
 
     fn sstretch_process_interleaved(
         state: SStretchState,
@@ -336,18 +342,62 @@ pub fn try_time_stretch_interleaved_variable_offline(
         let mut failed = false;
         let mut block = Vec::<f32>::new();
 
+        // Signalsmith's input is intentionally inputLatency samples ahead of
+        // its processing clock. Flatten the exact MPD source path, seek with
+        // its initial look-ahead, then feed an equally sized stream shifted by
+        // that latency. Merely dropping outputLatency displaced the waveform
+        // relative to the already-warped F0 curve by tens of milliseconds.
+        let mut mapped_input = Vec::<f32>::new();
+        let mut mapped_chunks = Vec::<(usize, usize)>::new();
         for &(source_start, source_end, destination_frames) in chunks {
             let source_start = source_start.min(input_frames);
             let source_end = source_end.clamp(source_start, input_frames);
             if source_end <= source_start || destination_frames == 0 {
                 continue;
             }
+            let source_frames = source_end - source_start;
+            mapped_input.extend_from_slice(
+                &input_interleaved[source_start * channels..source_end * channels],
+            );
+            mapped_chunks.push((source_frames, destination_frames));
+        }
+        if mapped_chunks.is_empty() {
+            sstretch_delete(state);
+            return Ok(vec![0.0; out_frames_hint * channels]);
+        }
+
+        if input_latency > 0 {
+            let mut seek_input = vec![0.0f32; input_latency * channels];
+            let copied = seek_input.len().min(mapped_input.len());
+            seek_input[..copied].copy_from_slice(&mapped_input[..copied]);
+            let (first_source, first_destination) = mapped_chunks[0];
+            let playback_rate = first_source as f64 / first_destination.max(1) as f64;
+            if sstretch_seek_interleaved(
+                state,
+                seek_input.as_ptr(),
+                input_latency as u32,
+                playback_rate,
+            ) < 0
+            {
+                sstretch_delete(state);
+                return Err("sstretch variable seek failed".to_string());
+            }
+        }
+        mapped_input.resize(
+            mapped_input
+                .len()
+                .saturating_add(input_latency.saturating_mul(channels)),
+            0.0,
+        );
+        let mut ahead_frame = input_latency;
+        for &(source_frames, destination_frames) in &mapped_chunks {
             block.resize(destination_frames * channels, 0.0);
             block.fill(0.0);
+            let ahead_end = ahead_frame.saturating_add(source_frames);
             let ret = sstretch_process_interleaved(
                 state,
-                input_interleaved[source_start * channels..source_end * channels].as_ptr(),
-                (source_end - source_start) as u32,
+                mapped_input[ahead_frame * channels..ahead_end * channels].as_ptr(),
+                source_frames as u32,
                 block.as_mut_ptr(),
                 destination_frames as u32,
             );
@@ -356,31 +406,13 @@ pub fn try_time_stretch_interleaved_variable_offline(
                 break;
             }
             produced.extend_from_slice(&block);
+            ahead_frame = ahead_end;
         }
 
         if !failed {
-            // Feed the algorithmic input tail once, while requesting enough
-            // output to move the delayed real signal beyond its pre-roll.
-            // This is deliberately outside the mapped chunks so it cannot
-            // introduce another ratio/state reset at the attack boundary.
-            if input_latency > 0 || output_latency > 0 {
-                let tail_in_frames = input_latency.max(1);
-                let tail_out_frames = output_latency.max(1);
-                let tail_in = vec![0.0f32; tail_in_frames * channels];
-                let mut tail_out = vec![0.0f32; tail_out_frames * channels];
-                let ret = sstretch_process_interleaved(
-                    state,
-                    tail_in.as_ptr(),
-                    tail_in_frames as u32,
-                    tail_out.as_mut_ptr(),
-                    tail_out_frames as u32,
-                );
-                if ret < 0 {
-                    failed = true;
-                } else {
-                    produced.extend_from_slice(&tail_out);
-                }
-            }
+            // The shifted stream already ends with inputLatency samples of
+            // silence, so processing time is exactly at the map end here.
+            // Only the output-side tail remains.
             if !failed && output_latency > 0 {
                 let mut flushed = vec![0.0f32; output_latency * channels];
                 let ret = sstretch_flush(state, flushed.as_mut_ptr(), output_latency as u32);

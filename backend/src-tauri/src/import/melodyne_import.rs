@@ -809,6 +809,8 @@ struct SourceInfo {
 
 #[derive(Clone, Debug)]
 struct ImportedElement {
+    element_id: u32,
+    following_element_id: Option<u32>,
     start: f64,
     duration: f64,
     source_id: u32,
@@ -998,6 +1000,9 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     })
                     .clamp(0.0, duration);
                 elements.push(ImportedElement {
+                    element_id,
+                    following_element_id: following_join
+                        .and_then(|join| graph.reference(join, "followingElement")),
                     start,
                     duration,
                     source_id,
@@ -1536,8 +1541,68 @@ fn build_track_params(
     }
 
     // Import the exact stored contours. Connections are intentionally left
-    // untouched on open; the wrench's Connect action can later smooth only a
-    // narrow interval centred on the selected note boundary.
+    // untouched unless MPD explicitly persists joinsPitches. In that case the
+    // stored pitchTransitionDuration belongs to the render, not merely the UI.
+    // Blend only the note-centre offset and retain each side's local residual
+    // contour, matching Melodyne's "move the line, do not flatten it" model.
+    let unjoined_pitch = pitch_edit.clone();
+    let index_by_id = track
+        .elements
+        .iter()
+        .enumerate()
+        .map(|(index, element)| (element.element_id, index))
+        .collect::<HashMap<_, _>>();
+    for left in &track.elements {
+        if !left.join_next || left.join_duration <= 1e-6 {
+            continue;
+        }
+        let Some(right) = left
+            .following_element_id
+            .and_then(|id| index_by_id.get(&id).copied())
+            .and_then(|index| track.elements.get(index))
+        else {
+            continue;
+        };
+        let left_end = left.start + left.duration + shift;
+        let right_start = right.start + shift;
+        let boundary = (left_end + right_start) * 0.5;
+        let duration = left.join_duration
+            .min(left.duration + right.duration)
+            .max(frame_period_sec);
+        let transition_start = (boundary - duration * 0.5)
+            .max(left.start + shift)
+            .max(0.0);
+        let transition_end = (boundary + duration * 0.5)
+            .min(right.start + right.duration + shift)
+            .max(transition_start + frame_period_sec);
+        let first = (transition_start / frame_period_sec).floor().max(0.0) as usize;
+        let last = (transition_end / frame_period_sec).ceil().max(0.0) as usize;
+        let left_probe = ((boundary - frame_period_sec) / frame_period_sec)
+            .round().max(0.0) as usize;
+        let right_probe = ((boundary + frame_period_sec) / frame_period_sec)
+            .round().max(0.0) as usize;
+        let left_center = unjoined_pitch.get(left_probe).copied().unwrap_or(0.0);
+        let right_center = unjoined_pitch.get(right_probe).copied().unwrap_or(0.0);
+        if left_center <= 0.0 || right_center <= 0.0 {
+            continue;
+        }
+        for frame in first..last.min(pitch_edit.len()) {
+            let time = frame as f64 * frame_period_sec;
+            let x = ((time - transition_start)
+                / (transition_end - transition_start).max(frame_period_sec))
+                .clamp(0.0, 1.0) as f32;
+            let smooth = x * x * (3.0 - 2.0 * x);
+            let original = unjoined_pitch[frame];
+            if original <= 0.0 {
+                continue;
+            }
+            let local_center = if time < boundary { left_center } else { right_center };
+            let residual = original - local_center;
+            pitch_edit[frame] = left_center
+                + (right_center - left_center) * smooth
+                + residual;
+        }
+    }
 
     let mut extra_curves = HashMap::new();
     extra_curves.insert("mld5_pitch_without_vibrato".to_string(), pitch_without_vibrato);

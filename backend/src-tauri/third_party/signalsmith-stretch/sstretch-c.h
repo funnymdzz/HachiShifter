@@ -56,6 +56,18 @@ int sstretch_input_latency(SStretchState state);
 int sstretch_output_latency(SStretchState state);
 
 /**
+ * Preload the input look-ahead so processing time starts at the first mapped
+ * source sample. Without this seek, audio is displaced by inputLatency frames
+ * even if outputLatency is removed afterwards.
+ */
+int sstretch_seek_interleaved(
+    SStretchState state,
+    const float* input_interleaved,
+    unsigned int in_frames,
+    double playback_rate
+);
+
+/**
  * 流式实时处理：输入交错 PCM，输出交错 PCM。
  *
  * 时间拉伸比通过 in_frames 与 out_frames 的比值隐式控制：
