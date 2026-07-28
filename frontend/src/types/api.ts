@@ -77,12 +77,21 @@ export interface TimelineClip {
     }>;
     midi_fill_gaps?: boolean;
     melodyne_warp_segments?: Array<{
+        melodyneElementId?: number;
+        melodyneFollowingElementId?: number;
         timelineStartSec: number;
         timelineEndSec: number;
         sourceStartSec: number;
         sourceEndSec: number;
         timeMapPoints?: Array<{ timelineSec: number; sourceSec: number }>;
         connectedToNext: boolean;
+        connectedToClipId?: string;
+        connectedToElementId?: number;
+        pitchTransitionSec: number;
+        attackDurationSec: number;
+        attackSourceSec: number;
+        attackTimeSlope: number;
+        connectedPhaseToNext: boolean;
         amplitudeFactor: number;
         fadeInSec: number;
         fadeOutSec: number;
