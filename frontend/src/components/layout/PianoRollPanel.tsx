@@ -1979,8 +1979,13 @@ export const PianoRollPanel: React.FC = () => {
                 ? clip.startSec + Math.max(0, Math.min(sourceDuration, sourceSec))
                 : mapSourceToFinalTimeline(sourceSec);
 
-        const curveMidiForRange = (startSec: number, endSec: number): number | null => {
-            if (!paramView || paramView.edit.length === 0) return null;
+        const curveStatsForRange = (
+            startSec: number,
+            endSec: number,
+        ): { midi: number | null; voicedFrames: number; totalFrames: number } => {
+            if (!paramView || paramView.edit.length === 0) {
+                return { midi: null, voicedFrames: 0, totalFrames: 0 };
+            }
             const fp = Math.max(1e-6, paramView.framePeriodMs);
             const stride = Math.max(1, paramView.stride);
             const startFrame = Math.floor((startSec * 1000) / fp);
@@ -1995,6 +2000,7 @@ export const PianoRollPanel: React.FC = () => {
             );
             let sum = 0;
             let count = 0;
+            const totalFrames = Math.max(0, lastIndex - firstIndex + 1);
             for (let index = firstIndex; index <= lastIndex; index += 1) {
                 const value = Number(paramView.edit[index] ?? 0);
                 if (value > 0 && Number.isFinite(value)) {
@@ -2002,8 +2008,14 @@ export const PianoRollPanel: React.FC = () => {
                     count += 1;
                 }
             }
-            return count > 0 ? sum / count : null;
+            return {
+                midi: count > 0 ? sum / count : null,
+                voicedFrames: count,
+                totalFrames,
+            };
         };
+        const curveMidiForRange = (startSec: number, endSec: number): number | null =>
+            curveStatsForRange(startSec, endSec).midi;
 
         const detectedNotes = analysis?.pitch_notes ?? [];
         const notesFromAnalysis = detectedNotes
@@ -2021,7 +2033,8 @@ export const PianoRollPanel: React.FC = () => {
                 const finalSourceEnd = Math.min(sourceEnd, note.end_sec);
                 const finalStartSec = mapSourceToFinalTimeline(finalSourceStart);
                 const finalEndSec = mapSourceToFinalTimeline(finalSourceEnd);
-                const curveMidi = curveMidiForRange(finalStartSec, finalEndSec);
+                const curveStats = curveStatsForRange(finalStartSec, finalEndSec);
+                const curveMidi = curveStats.midi;
                 const preview =
                     noteDragPreview?.noteIndex === noteIndex
                         ? noteDragPreview.midiNote
@@ -2051,7 +2064,10 @@ export const PianoRollPanel: React.FC = () => {
                                   analysis.annotations[noteIndex].fixed_duration_sec,
                           )
                         : startSec,
-                    pitchVisible: note.confidence >= 0.35,
+                    pitchVisible:
+                        curveStats.totalFrames > 0
+                            ? curveStats.voicedFrames >= 2
+                            : note.confidence >= 0.35,
                 };
             })
             .filter((note): note is Exclude<typeof note, null> => note !== null);

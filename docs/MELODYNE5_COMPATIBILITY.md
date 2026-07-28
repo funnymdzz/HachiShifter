@@ -170,6 +170,17 @@ The model-free `mld5` path now performs:
     remap to audio, source F0, edited F0 and sibilant handles. This prevents the
     audio and pitch line from acquiring different time coordinates after an
     attack edit.
+16. `amplitudeFadeInEndSourceTime` and
+    `amplitudeFadeOutStartSourceTime` use the audio-description clock, not the
+    source item's local clock. The item `startSampleIndex` is removed before
+    inverting the element time function, restoring short overlap fades on
+    reused/trimmed samples instead of turning them into full-note fades or
+    zero-length tails.
+17. Pitch property points are valid only inside their 1024-sample analysis
+    cells. The importer no longer extrapolates the nearest point beyond half a
+    cell or replaces a missing value with the note centre. Unvoiced and
+    uncertain attack/tail spans therefore remain zero-valued gaps, are omitted
+    from the pitch line, and retain the lighter note-body display.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

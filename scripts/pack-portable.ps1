@@ -159,14 +159,9 @@ if (-not (Test-Path $ExePath)) {
     throw "Cannot find exe: $ExePath`nPlease run 'cargo tauri build' first or remove the -SkipBuild parameter"
 }
 
-# Define resource files to collect (source path -> target relative path)
-$Resources = @(
-    @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\pc_nsf_hifigan.onnx"; Dst = "models\nsf_hifigan\pc_nsf_hifigan.onnx" },
-    @{ Src = Join-Path $TauriDir "resources\models\nsf_hifigan\config.json";          Dst = "models\nsf_hifigan\config.json" },
-    @{ Src = Join-Path $TauriDir "resources\models\hnsep\hnsep.onnx";                 Dst = "models\hnsep\hnsep.onnx" },
-    @{ Src = Join-Path $TauriDir "resources\models\hnsep\config.yaml";                Dst = "models\hnsep\config.yaml" },
-    @{ Src = Join-Path $TauriDir "resources\models\fcpe\fcpe.onnx";                   Dst = "models\fcpe\fcpe.onnx" }
-)
+# Define runtime files for the overwrite archive. Models are deliberately
+# absent: an existing installation keeps its model directory untouched.
+$Resources = @()
 
 if ($ArchShort -eq "x64") {
     $Resources += @{ Src = Join-Path $TauriDir "third_party\vslib\vslib_x64.dll"; Dst = "vslib_x64.dll" }
@@ -207,11 +202,6 @@ Write-Host "  [OK] $ProductName.exe" -ForegroundColor DarkGreen
 
 # Copy resource files
 foreach ($res in $Resources) {
-    # Models already present beside an installed copy remain untouched when
-    # this overwrite package is extracted.
-    if ($res.Dst -like "models\*") {
-        continue
-    }
     $DstFull = Join-Path $TempDir $res.Dst
     $DstDir = Split-Path $DstFull -Parent
     if (-not (Test-Path $DstDir)) {

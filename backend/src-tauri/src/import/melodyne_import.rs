@@ -967,6 +967,31 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                 let following_join = graph.reference(element_id, "followingJoin");
                 let source_function_id =
                     graph.reference(element_id, "sourceTimeForElementTimeFunction");
+                let source_sample_rate = graph
+                    .reference(source_description_id, "audioSource")
+                    .and_then(|source| graph.f64(source, "sampleRate"))
+                    .unwrap_or(44_100.0)
+                    .max(1.0);
+                let source_item_origin_sec = graph
+                    .i64(source_item_id, "startSampleIndex")
+                    .or_else(|| graph.i32(source_item_id, "startSampleIndex").map(i64::from))
+                    .unwrap_or(0)
+                    .max(0) as f64
+                    / source_sample_rate;
+                let source_handle_to_element_time = |absolute_source_time: f64| {
+                    // MPD persists these handles in the audio-description
+                    // clock. The element time function, however, is local to
+                    // its MUAudioSourcePrincipalItem. Passing the absolute
+                    // value directly made every non-zero startSampleIndex
+                    // produce an overlong fade-in or a missing fade-out.
+                    let item_local_source_time =
+                        (absolute_source_time - source_item_origin_sec).max(0.0);
+                    source_function_id
+                        .and_then(|function| {
+                            graph.inverse_eval_function(function, item_local_source_time)
+                        })
+                        .unwrap_or(item_local_source_time)
+                };
                 // Melodyne 5 keeps fadeInTime/fadeOutTime at zero for most
                 // edited notes and persists the actual fade handles in source
                 // time. A plain Option fallback therefore discarded nearly
@@ -979,9 +1004,7 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         graph
                             .f64(element_id, "amplitudeFadeInEndSourceTime")
                             .filter(|value| value.is_finite())
-                            .and_then(|value| source_function_id
-                                .and_then(|function| graph.inverse_eval_function(function, value))
-                                .or(Some(value)))
+                            .map(source_handle_to_element_time)
                             .unwrap_or(0.0)
                     })
                     .clamp(0.0, duration);
@@ -992,9 +1015,7 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                         graph
                             .f64(element_id, "amplitudeFadeOutStartSourceTime")
                             .filter(|value| value.is_finite())
-                            .and_then(|value| source_function_id
-                                .and_then(|function| graph.inverse_eval_function(function, value))
-                                .or(Some(value)))
+                            .map(source_handle_to_element_time)
                             .map(|start| duration - start)
                             .unwrap_or(0.0)
                     })
@@ -1474,7 +1495,21 @@ fn source_pitch_at(
         .map(|function| graph.eval_function(function, local_time))
         .unwrap_or(local_time)
         .max(0.0);
-    let slice_position = ((cache.item_start + mapped_time) * cache.slices_per_second)
+    let slice_position = (cache.item_start + mapped_time) * cache.slices_per_second;
+    let first_slice = cache.points.first()?.slice;
+    let last_slice = cache.points.last()?.slice;
+    // Each stored property point represents the analysis cell centred on its
+    // 1024-sample slice. Melodyne stops drawing/using that contour at the
+    // midpoint to the absent neighbouring cell. Extending the nearest point
+    // through the remainder of a stretched attack/tail created the long,
+    // flat or sharply falling F0 ends visible in HachiShifter.
+    const PROPERTY_POINT_HALF_CELL: f64 = 0.5 + 1e-7;
+    if slice_position < first_slice - PROPERTY_POINT_HALF_CELL
+        || slice_position > last_slice + PROPERTY_POINT_HALF_CELL
+    {
+        return None;
+    }
+    let slice_position = slice_position
         .clamp(0.0, (cache.time_slice_count - 1.0).max(0.0));
     // The former linear scan made long, densely analysed sources quadratic:
     // every 5 ms output frame walked the complete source point list.  Melodyne
@@ -1595,29 +1630,35 @@ fn build_track_params(
             let local_time = frame as f64 * frame_period_sec - start;
             let sibilant_strength = source_sibilant_strength(graph, element, local_time);
             sibilant_mask[frame] = sibilant_mask[frame].max(sibilant_strength);
-            if sibilant_strength >= 0.55 {
-                // Sibilants are an independent aperiodic component. Giving
-                // them an interpolated pitch target creates the long false F0
-                // tails seen around attack and sample boundaries.
-                continue;
-            }
-            let (raw, without_vibrato) = pitch_cache
-                .and_then(|cache| {
-                    source_pitch_at(graph, cache, element.source_function_id, local_time)
-                })
-                .unwrap_or((source_center, source_center));
-            let edited = element.pitch_center
-                + element.pitch_drift * (without_vibrato - source_center)
-                + element.pitch_modulation * (raw - without_vibrato);
-            pitch_orig[frame] = (raw / 100.0).clamp(0.0, 127.0);
-            pitch_without_vibrato[frame] = (without_vibrato / 100.0).clamp(0.0, 127.0);
-            pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
+            // Formant and sibilant edits belong to independent components and
+            // remain meaningful even where Melodyne has no reliable periodic
+            // F0 line.
             if let Some(curve) = formant.as_mut() {
                 curve[frame] = element.formant_offset;
             }
             if let Some(curve) = sibilant.as_mut() {
                 curve[frame] = element.sibilant_balance;
             }
+            if sibilant_strength >= 0.55 {
+                // Sibilants are an independent aperiodic component. Giving
+                // them an interpolated pitch target creates the long false F0
+                // tails seen around attack and sample boundaries.
+                continue;
+            }
+            let Some((raw, without_vibrato)) = pitch_cache.and_then(|cache| {
+                source_pitch_at(graph, cache, element.source_function_id, local_time)
+            }) else {
+                // Zero is an explicit "no reliable periodic contour" marker.
+                // Do not manufacture a flat source-center line through a
+                // silent attack, breath, sibilant or unanalysed tail.
+                continue;
+            };
+            let edited = element.pitch_center
+                + element.pitch_drift * (without_vibrato - source_center)
+                + element.pitch_modulation * (raw - without_vibrato);
+            pitch_orig[frame] = (raw / 100.0).clamp(0.0, 127.0);
+            pitch_without_vibrato[frame] = (without_vibrato / 100.0).clamp(0.0, 127.0);
+            pitch_edit[frame] = (edited / 100.0).clamp(0.0, 127.0);
         }
     }
 
@@ -1726,6 +1767,9 @@ fn build_group_pitch_curves(
         let Some(element) = track.elements.get(*element_index) else {
             continue;
         };
+        if element.muted {
+            continue;
+        }
         pitch_cache_by_item
             .entry(element.source_item_id)
             .or_insert_with(|| build_source_pitch_cache(graph, element));
