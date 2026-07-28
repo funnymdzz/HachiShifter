@@ -965,6 +965,7 @@ export const jaJP = {
     melodyne_import_stage_edits: 'Melodyne編集を復元中',
     melodyne_import_stage_legacy: '旧形式プロジェクトをスキャン中',
     melodyne_import_stage_finalize: 'プロジェクトを仕上げています',
+    melodyne_import_stage_prerender: 'すぐ再生できるよう Melodyne オーディオをレンダリング中',
     melodyne_sample_note_lane: "サンプル区間とノート領域",
     melodyne_source_file: "元のオーディオ",
     melodyne_source_original_mode: "オリジナル状態を編集 · 伸縮無効",

@@ -246,57 +246,25 @@ impl ProcessingStage for Mld5VocoderStage {
     }
 
     fn process(&self, input_pcm: Vec<f32>, ctx: &StageContext<'_>) -> Result<Vec<f32>, String> {
-        if !crate::world_vocoder::is_available() {
-            return Ok(input_pcm);
-        }
         let cc = ctx.clip_ctx;
-        // Melodyne analyses a source component with neighbouring signal, not
-        // as an isolated 30-ms note object. MPD vocal tracks often contain
-        // hundreds of such tiny clips; running WORLD on each bare edge loses
-        // periodicity and makes both F0 and timbre jump. Reflection context is
-        // temporary analysis support only and is cropped sample-exactly.
-        let analysis_pad = ((cc.sample_rate as usize * 80) / 1000).max(32);
-        let (analysis_input, crop_start) = reflected_analysis_context(&input_pcm, analysis_pad);
-        let analysis_duration = analysis_input.len() as f64 / cc.sample_rate.max(1) as f64;
-        let analysis_start = cc.seg_start_sec
-            - crop_start as f64 / cc.sample_rate.max(1) as f64;
-        let render_ctx = RenderContext {
-            mono_pcm: &analysis_input,
-            sample_rate: cc.sample_rate,
-            seg_start_sec: analysis_start,
-            seg_end_sec: analysis_start + analysis_duration,
-            clip_start_sec: cc.clip_start_sec,
-            frame_period_ms: cc.frame_period_ms,
-            pitch_edit: cc.pitch_edit,
-            clip_midi: cc.clip_midi,
-            clip_id: cc.clip_id,
-            fallback_pitch_delta: cc
-                .extra_curves
+        // Reconstructed component renderer: consume MPD's destination-time F0
+        // function directly. No WORLD detector/spectral envelope is involved,
+        // so stretched portamento and pitch modulation remain sample-aligned.
+        let mut output = crate::mld5_component_renderer::render(
+            &input_pcm,
+            cc.sample_rate,
+            cc.seg_start_sec,
+            cc.clip_start_sec,
+            cc.frame_period_ms,
+            cc.clip_midi,
+            cc.pitch_edit,
+            cc.extra_curves
                 .get(&format!("mld5_render_pitch_delta::{}", cc.clip_id))
                 .map(Vec::as_slice),
-        };
-        let padded_output = crate::renderer::world::render_mld5(&render_ctx)?;
-        let wanted = input_pcm.len();
-        let crop_end = crop_start.saturating_add(wanted).min(padded_output.len());
-        let mut output = padded_output
-            .get(crop_start..crop_end)
-            .unwrap_or_default()
-            .to_vec();
-        output.resize(wanted, 0.0);
-        let upward_shift = estimate_max_upward_shift(cc);
-        // Reconstructed Melodyne-style order: synthesize the edited periodic
-        // principal, restore the independent source formant envelope, then
-        // re-anchor only attack/sibilant residuals (not the source F0).
-        crate::time_stretch::preserve_mld5_cepstral_formants(
-            &input_pcm,
-            &mut output,
-            1,
-            cc.sample_rate,
-            // At large upward intervals, a full source-envelope replacement
-            // over-emphasises unresolved WORLD harmonics. Melodyne keeps the
-            // envelope independent but gradually reduces that correction.
-            (0.92 - (upward_shift - 5.0).max(0.0) * 0.045).clamp(0.50, 0.92),
         );
+        let upward_shift = estimate_max_upward_shift(cc);
+        // The renderer shifts harmonic fine structure underneath the retained
+        // source spectral envelope, so no second envelope-repair pass is used.
         if let Some(curve) = cc.extra_curves.get("formant_shift_cents") {
             crate::time_stretch::apply_mld5_formant_curve(
                 &mut output,
@@ -347,26 +315,6 @@ impl ProcessingStage for Mld5VocoderStage {
         }
         Ok(output)
     }
-}
-
-fn reflected_analysis_context(input: &[f32], pad: usize) -> (Vec<f32>, usize) {
-    if input.len() < 2 || pad == 0 {
-        return (input.to_vec(), 0);
-    }
-    let reflected_index = |position: usize| -> usize {
-        let period = input.len().saturating_mul(2).saturating_sub(2).max(1);
-        let phase = position % period;
-        if phase < input.len() { phase } else { period - phase }
-    };
-    let mut output = Vec::with_capacity(input.len().saturating_add(pad.saturating_mul(2)));
-    for offset in 0..pad {
-        output.push(input[reflected_index(pad - offset)]);
-    }
-    output.extend_from_slice(input);
-    for offset in 0..pad {
-        output.push(input[reflected_index(input.len().saturating_sub(2) + offset)]);
-    }
-    (output, pad)
 }
 
 fn estimate_max_upward_shift(ctx: &ClipProcessContext<'_>) -> f32 {

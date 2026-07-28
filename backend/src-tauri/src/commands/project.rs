@@ -908,6 +908,7 @@ pub(super) fn open_project(
             "[open_project] Imported Melodyne project with {} media reference(s)",
             imported.referenced_files.len()
         );
+        let imported_clip_count = imported.timeline.clips.len();
         for clip in &imported.timeline.clips {
             synth_clip_cache::invalidate_clip_all_caches(&clip.id);
         }
@@ -933,7 +934,11 @@ pub(super) fn open_project(
             // the renderer wait for a manual "load original pitch" action,
             // which then replaced Melodyne's stored contour with a detector.
             let mut engine_timeline = timeline.clone();
-            engine_timeline.defer_initial_processing = true;
+            // MPD import deliberately completes decode/warp/component render
+            // while its progress dialog is still active. This trades a longer
+            // import for sample-ready playback on the first click, matching
+            // Melodyne's open-project behaviour.
+            engine_timeline.defer_initial_processing = false;
             for clip in &mut engine_timeline.clips {
                 clip.waveform_preview = None;
             }
@@ -971,6 +976,32 @@ pub(super) fn open_project(
         }
         sync_runtime_stretch_settings(state.inner());
         save_recent_projects(state.inner());
+        emit_progress(0.97, "prerender_audio", 0, imported_clip_count);
+        let app = window.app_handle().clone();
+        let _ = crate::commands::playback::start_background_render(app);
+        let wait_started = std::time::Instant::now();
+        while crate::commands::playback::BG_RENDER_ACTIVE
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            // The precise per-clip render progress is also emitted by the
+            // background renderer. Keep the import bar alive here rather than
+            // declaring completion while audio is still being generated.
+            let pulse = ((wait_started.elapsed().as_millis() / 250) % 20) as f64 / 20.0;
+            emit_progress(
+                0.97 + pulse * 0.025,
+                "prerender_audio",
+                0,
+                imported_clip_count,
+            );
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        // Rebuild the snapshot once, now that every rendered clip is cached.
+        let ready_timeline = state
+            .timeline
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        state.audio_engine.update_timeline(ready_timeline);
         let _ = window.emit(
             "melodyne_import_progress",
             ImportProgressEvent {

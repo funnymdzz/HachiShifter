@@ -981,6 +981,7 @@ export const koKR = {
     melodyne_import_stage_edits: 'Melodyne 편집 복원 중',
     melodyne_import_stage_legacy: '레거시 프로젝트 검색 중',
     melodyne_import_stage_finalize: '프로젝트 마무리 중',
+    melodyne_import_stage_prerender: '즉시 재생할 수 있도록 Melodyne 오디오 렌더링 중',
     melodyne_sample_note_lane: "샘플 구간 및 음표 영역",
     melodyne_source_file: "원본 오디오",
     melodyne_source_original_mode: "원본 상태 편집 · 늘이기 비활성",

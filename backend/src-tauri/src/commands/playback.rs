@@ -1486,6 +1486,7 @@ pub(crate) fn start_background_render(app: tauri::AppHandle) -> serde_json::Valu
 
     // 后台渲染线程
     std::thread::spawn(move || {
+        use rayon::prelude::*;
         let cache_log = std::env::var("HACHISHIFTER_RENDER_CACHE_LOG")
             .ok()
             .as_deref()
@@ -1503,6 +1504,64 @@ pub(crate) fn start_background_render(app: tauri::AppHandle) -> serde_json::Valu
         let mut cancelled = false;
         let mut pending_clip_ids_written: std::collections::HashSet<String> =
             std::collections::HashSet::new();
+
+        // MPD component clips are independent render units. Warm their base
+        // PCM cache in parallel before the ordered publication pass below.
+        // `render_single_clip` owns all per-call DSP state, while the shared
+        // LRU is locked only for short lookup/insert operations, so the worker
+        // pool scales across every available CPU core without serialising the
+        // expensive decode/warp/component-render stage.
+        if clips_to_render.len() > 1 {
+            let render_timeline = {
+                let state = app.state::<AppState>();
+                let timeline = state
+                    .timeline
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .clone();
+                timeline
+            };
+            let worker_count = std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(1);
+            eprintln!(
+                "[bg_render] parallel component warmup: workers={} clips={}",
+                worker_count,
+                clips_to_render.len()
+            );
+            clips_to_render.par_iter().for_each(|clip_render_info| {
+                if BG_RENDER_CANCEL.load(Ordering::Relaxed) {
+                    return;
+                }
+                let cached = {
+                    let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    cache.get(&clip_render_info.cache_key).is_some()
+                };
+                if cached {
+                    return;
+                }
+                if let Ok(rendered) = render_single_clip(
+                    &render_timeline,
+                    &clip_render_info.clip,
+                    clip_render_info.sr,
+                ) {
+                    let stereo_pcm = rendered.rendered_stereo;
+                    let frames = (stereo_pcm.len() / 2) as u64;
+                    let entry = crate::synth_clip_cache::RenderedClipCacheEntry {
+                        pcm_stereo: std::sync::Arc::new(stereo_pcm),
+                        breath_noise_stereo: rendered.breath_noise_stereo.map(std::sync::Arc::new),
+                        frames,
+                        sample_rate: clip_render_info.sr,
+                    };
+                    let mut cache = crate::synth_clip_cache::global_rendered_clip_cache()
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    cache.insert(clip_render_info.cache_key.clone(), entry);
+                }
+            });
+        }
 
         for clip_render_info in &clips_to_render {
             // 检查取消标志（用户在渲染中重新编辑参数时会设置）

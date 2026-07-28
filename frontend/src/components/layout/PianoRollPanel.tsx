@@ -4114,7 +4114,16 @@ export const PianoRollPanel: React.FC = () => {
                 const pointerSec =
                     (scrollLeftRef.current + localX) / Math.max(1e-9, pxPerSecRef.current);
                 const hit = [...sampleNoteDisplay.notes].reverse().find((note) => {
-                    if (pointerSec < note.startSec || pointerSec > note.endSec) return false;
+                    // Very short Melodyne elements are drawn with a minimum
+                    // four-pixel blob, but the old hit region stayed at their
+                    // sub-pixel time span. Match the visible geometry so every
+                    // imported slider remains selectable and draggable.
+                    const timeHitPadding = 4 / Math.max(1e-9, pxPerSecRef.current);
+                    if (
+                        pointerSec < note.startSec - timeHitPadding ||
+                        pointerSec > note.endSec + timeHitPadding
+                    )
+                        return false;
                     const y0 = valueToY("pitch", note.midiNote, rect.height);
                     const y1 = valueToY("pitch", note.midiNote + 1, rect.height);
                     const top = Math.min(y0, y1);

@@ -944,6 +944,7 @@ export const zhTW = {
     melodyne_import_stage_edits: '正在還原 Melodyne 編輯',
     melodyne_import_stage_legacy: '正在掃描舊版工程',
     melodyne_import_stage_finalize: '正在完成工程載入',
+    melodyne_import_stage_prerender: '正在渲染 Melodyne 音訊以便立即播放',
     melodyne_sample_note_lane: "採樣分段與音符選區",
     melodyne_source_file: "原始音訊",
     melodyne_source_original_mode: "原始狀態編輯 · 禁止拉伸",

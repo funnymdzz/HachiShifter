@@ -944,6 +944,7 @@ export const zhCN = {
     melodyne_import_stage_edits: '正在还原 Melodyne 编辑',
     melodyne_import_stage_legacy: '正在扫描旧版工程',
     melodyne_import_stage_finalize: '正在完成工程加载',
+    melodyne_import_stage_prerender: '正在渲染 Melodyne 音频以便立即播放',
     melodyne_sample_note_lane: "采样分段与音符选区",
     melodyne_source_file: "原始音频",
     melodyne_source_original_mode: "原始状态编辑 · 禁止拉伸",

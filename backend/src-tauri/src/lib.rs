@@ -10,6 +10,8 @@ mod commands;
 mod hifigan_tension;
 #[path = "audio/formant_morph.rs"]
 mod formant_morph;
+#[path = "audio/mld5_component_renderer.rs"]
+mod mld5_component_renderer;
 mod formant_cache;
 mod launch_args;
 #[path = "audio/mixdown.rs"]

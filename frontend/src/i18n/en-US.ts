@@ -957,6 +957,7 @@ export const enUS = {
     melodyne_import_stage_edits: 'Restoring Melodyne edits',
     melodyne_import_stage_legacy: 'Scanning legacy project',
     melodyne_import_stage_finalize: 'Finalizing project',
+    melodyne_import_stage_prerender: 'Rendering Melodyne audio for instant playback',
     melodyne_sample_note_lane: "Samples and note regions",
     melodyne_source_file: "Source file",
     melodyne_source_original_mode: "Original source · stretch disabled",

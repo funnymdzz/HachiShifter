@@ -451,6 +451,20 @@ impl Graph {
         }
     }
 
+    fn number(&self, object_id: u32, field: &str) -> Option<f64> {
+        match self.value(object_id, field)? {
+            Value::F32(value) => value.is_finite().then_some(value as f64),
+            Value::F64(value) => value.is_finite().then_some(value),
+            Value::I32(value) => Some(value as f64),
+            Value::I64(value) => Some(value as f64),
+            _ => None,
+        }
+    }
+
+    fn number_alias(&self, object_id: u32, fields: &[&str]) -> Option<f64> {
+        fields.iter().find_map(|field| self.number(object_id, field))
+    }
+
     fn i32(&self, object_id: u32, field: &str) -> Option<i32> {
         match self.value(object_id, field)? {
             Value::I32(value) => Some(value),
@@ -889,6 +903,39 @@ fn track_volume(graph: &Graph, track_id: u32) -> f32 {
     direct.or(effect_fader).unwrap_or(1.0).clamp(0.0, 4.0)
 }
 
+/// Read the initial performance tempo. Melodyne persists tempo in several
+/// graph revisions (`beatsPerMinute`, `bpm`, or a seconds-per-beat value), so
+/// inspect the typed schema rather than assuming one container class.
+fn project_bpm(graph: &Graph) -> Option<f64> {
+    let mut candidates = Vec::<(u8, f64)>::new();
+    for object_id in 0..graph.object_classes.len() as u32 {
+        let Some(class) = graph.class(object_id) else { continue; };
+        let class_lower = class.name.to_ascii_lowercase();
+        for field in &class.fields {
+            let lower = field.name.to_ascii_lowercase();
+            let Some(value) = graph.number(object_id, &field.name) else { continue; };
+            if !value.is_finite() || value <= 0.0 {
+                continue;
+            }
+            if lower == "beatsperminute" || lower == "bpm" {
+                if (10.0..=400.0).contains(&value) {
+                    candidates.push((0, value));
+                }
+            } else if lower.contains("tempo") && (10.0..=400.0).contains(&value) {
+                candidates.push((u8::from(!class_lower.contains("tempo")) + 1, value));
+            } else if (lower.contains("secondsperbeat")
+                || lower.contains("quarterduration")
+                || lower.contains("beatduration"))
+                && (0.15..=6.0).contains(&value)
+            {
+                candidates.push((3, 60.0 / value));
+            }
+        }
+    }
+    candidates.sort_by(|left, right| left.0.cmp(&right.0));
+    candidates.into_iter().map(|(_, bpm)| bpm).find(|bpm| (10.0..=400.0).contains(bpm))
+}
+
 fn collect_track_ids(graph: &Graph, track_id: u32, output: &mut Vec<u32>, seen: &mut HashSet<u32>) {
     if !seen.insert(track_id) {
         return;
@@ -1034,11 +1081,26 @@ fn collect_project(graph: &Graph) -> Result<(Vec<ImportedTrack>, BTreeMap<u32, S
                     source_item_id,
                     source_description_id,
                     source_function_id,
-                    pitch_center: graph.f32(element_id, "pitchCenter").unwrap_or(0.0),
-                    pitch_drift: graph.f32(element_id, "pitchDriftFactor").unwrap_or(1.0),
+                    pitch_center: graph
+                        .number_alias(element_id, &["pitchCenter", "targetPitchCenter"])
+                        .unwrap_or(0.0) as f32,
+                    pitch_drift: graph
+                        .number_alias(
+                            element_id,
+                            &["pitchDriftFactor", "pitchDrift", "driftFactor"],
+                        )
+                        .unwrap_or(1.0) as f32,
                     pitch_modulation: graph
-                        .f32(element_id, "pitchModulationFactor")
-                        .unwrap_or(1.0),
+                        .number_alias(
+                            element_id,
+                            &[
+                                "pitchModulationFactor",
+                                "pitchModulationAmplitudeFactor",
+                                "pitchModulation",
+                                "modulationFactor",
+                            ],
+                        )
+                        .unwrap_or(1.0) as f32,
                     formant_offset: graph.f32(element_id, "formantOffset").unwrap_or(0.0),
                     amplitude_factor: graph.f32(element_id, "amplitudeFactor").unwrap_or(1.0),
                     sibilant_balance: graph.f32(element_id, "sibilantBalance").unwrap_or(0.0),
@@ -1995,6 +2057,9 @@ fn import_flat_paths(path: &Path, data: &[u8]) -> Result<MelodyneImportResult, S
     let project_dir = path.parent().unwrap_or_else(|| Path::new("."));
     let media_index = build_media_index(project_dir);
     let mut timeline = TimelineState::default();
+    if let Some(bpm) = project_bpm(&graph) {
+        timeline.bpm = bpm.clamp(10.0, 400.0);
+    }
     timeline.clips.clear();
     let mut missing_files = Vec::new();
     for (index, stored) in referenced_files.iter().enumerate() {

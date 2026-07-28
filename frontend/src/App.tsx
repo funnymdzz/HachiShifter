@@ -110,6 +110,7 @@ const melodyneImportStageKey: Record<string, MessageKey> = {
     restore_edits: "melodyne_import_stage_edits",
     legacy_scan: "melodyne_import_stage_legacy",
     finalize: "melodyne_import_stage_finalize",
+    prerender_audio: "melodyne_import_stage_prerender",
 };
 
 const DEFAULT_AUTO_BACKUP_SETTINGS: AutoBackupSettings = {
