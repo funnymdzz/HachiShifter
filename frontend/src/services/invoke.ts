@@ -355,6 +355,7 @@ function buildTauriArgs(method: string, args: unknown[]): BuildArgsResult {
                 projectPath: args[0],
                 composeTrackIndices: args[1],
                 melodyneProcessingOrder: args[2],
+                melodynePitchSource: args[3],
             };
 
         case "inspect_melodyne_project_tracks":

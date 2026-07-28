@@ -247,6 +247,7 @@ enum Value {
     I64(i64),
     F32(f32),
     F64(f64),
+    Rational(f64),
 }
 
 struct Graph {
@@ -418,6 +419,13 @@ impl Graph {
                     0x466 => Some(Value::F32(f32::from_le_bytes(bytes.try_into().ok()?))),
                     0x864 => Some(Value::F64(f64::from_le_bytes(bytes.try_into().ok()?))),
                     0x86c => Some(Value::I64(i64::from_le_bytes(bytes.try_into().ok()?))),
+                    0x871 => {
+                        let numerator = i32::from_le_bytes(bytes.get(..4)?.try_into().ok()?);
+                        let denominator = i32::from_le_bytes(bytes.get(4..8)?.try_into().ok()?);
+                        (denominator != 0).then_some(Value::Rational(
+                            numerator as f64 / denominator as f64,
+                        ))
+                    }
                     _ => None,
                 };
             }
@@ -457,6 +465,7 @@ impl Graph {
             Value::F64(value) => value.is_finite().then_some(value),
             Value::I32(value) => Some(value as f64),
             Value::I64(value) => Some(value as f64),
+            Value::Rational(value) => value.is_finite().then_some(value),
             _ => None,
         }
     }
@@ -933,7 +942,36 @@ fn project_bpm(graph: &Graph) -> Option<f64> {
         }
     }
     candidates.sort_by(|left, right| left.0.cmp(&right.0));
-    candidates.into_iter().map(|(_, bpm)| bpm).find(|bpm| (10.0..=400.0).contains(bpm))
+    if let Some(bpm) = candidates
+        .into_iter()
+        .map(|(_, bpm)| bpm)
+        .find(|bpm| (10.0..=400.0).contains(bpm))
+    {
+        return Some(bpm);
+    }
+
+    // Melodyne 5.4 sessions normally do not persist a scalar BPM. The
+    // performance clock is an MUQuarterTimeline whose anchors map musical
+    // quarter positions (GN rational 0x871) to seconds. The first timeline is
+    // the project/performance clock; later instances belong to individual
+    // analysed audio descriptions and must not replace the project tempo.
+    let quarter_timeline = graph.find_first_class("MUQuarterTimeline")?;
+    let anchors = graph.list(graph.reference(quarter_timeline, "quarterAnchors")?);
+    for pair in anchors.windows(2) {
+        let left_time = graph.f64(pair[0], "timePosition")?;
+        let right_time = graph.f64(pair[1], "timePosition")?;
+        let left_quarter = graph.number(pair[0], "quarterPosition")?;
+        let right_quarter = graph.number(pair[1], "quarterPosition")?;
+        let seconds = right_time - left_time;
+        let quarters = right_quarter - left_quarter;
+        if seconds > 1e-9 && quarters > 1e-9 {
+            let bpm = 60.0 * quarters / seconds;
+            if (10.0..=400.0).contains(&bpm) {
+                return Some(bpm);
+            }
+        }
+    }
+    None
 }
 
 fn collect_track_ids(graph: &Graph, track_id: u32, output: &mut Vec<u32>, seen: &mut HashSet<u32>) {

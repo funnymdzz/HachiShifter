@@ -109,6 +109,8 @@ pub fn render(
     let mut magnitude = vec![0.0f32; half + 1];
     let mut phase = vec![0.0f32; half + 1];
     let mut log_envelope = vec![0.0f32; half + 1];
+    let mut mapped_magnitude = vec![0.0f32; half + 1];
+    let mut mapped_source_phase = vec![0.0f32; half + 1];
     let mut output = vec![0.0f32; input.len() + fft_size];
     let mut normalisation = vec![0.0f32; output.len()];
     let expected_scale = std::f32::consts::TAU * hop as f32 / fft_size as f32;
@@ -149,9 +151,18 @@ pub fn render(
         let global_position = (abs_sec.max(0.0) * 1000.0) / fp;
         let source = curve_linear(source_midi, clip_position);
         let target = curve_linear(target_midi_global, global_position);
+        // An MPD contour gap is an aperiodic/unanalysed component, not an
+        // invitation to transpose every FFT bin.  The old fallback shifted
+        // breath and consonant noise without confirming an F0, which was the
+        // dominant source of the harsh/raspy mld5 output.  A signed fallback
+        // is used only when it is effectively neutral; detected-F0 fallback
+        // paths populate source_midi before entering this renderer.
         let semitones = match (source, target) {
             (Some(source), Some(target)) => (target - source).clamp(-24.0, 24.0),
-            _ => signed_curve_linear(fallback_pitch_delta, clip_position).clamp(-24.0, 24.0),
+            _ => {
+                let fallback = signed_curve_linear(fallback_pitch_delta, clip_position);
+                if fallback.abs() <= 1e-4 { fallback } else { 0.0 }
+            }
         };
         let ratio = 2.0f32.powf(semitones / 12.0).clamp(0.25, 4.0);
 
@@ -164,6 +175,8 @@ pub fn render(
         let transient = frame == 0 || positive_flux > 0.34;
         shifted.fill(Complex32::new(0.0, 0.0));
 
+        mapped_magnitude.fill(0.0);
+        mapped_source_phase.fill(0.0);
         for output_bin in 0..=half {
             let source_bin_f = output_bin as f32 / ratio;
             if source_bin_f > half as f32 {
@@ -179,7 +192,7 @@ pub fn render(
             let target_envelope = log_envelope[output_bin];
             // Shift harmonic fine structure while leaving the vocal-tract
             // envelope at its original frequency.
-            let mapped_magnitude = source_magnitude
+            let mapped_mag = source_magnitude
                 * (target_envelope - source_envelope).exp().clamp(0.18, 5.5);
 
             let source_phase = phase[source_left]
@@ -196,7 +209,50 @@ pub fn render(
                 synthesis_phase[output_bin] =
                     wrap_phase(synthesis_phase[output_bin] + instantaneous);
             }
-            shifted[output_bin] = Complex32::from_polar(mapped_magnitude, synthesis_phase[output_bin]);
+            mapped_magnitude[output_bin] = mapped_mag;
+            mapped_source_phase[output_bin] = source_phase;
+        }
+
+        // Identity phase locking: advance only spectral-peak phases and keep
+        // neighbouring partial/noise bins at their instantaneous phase offset
+        // from the owning peak.  Independent per-bin phase propagation made
+        // vowels diffuse and metallic after even a small correction.
+        let mut peaks = Vec::<usize>::new();
+        for bin in 2..half.saturating_sub(1) {
+            if magnitude[bin] >= magnitude[bin - 1]
+                && magnitude[bin] > magnitude[bin + 1]
+                && magnitude[bin] > energy * 1e-5
+            {
+                peaks.push(bin);
+            }
+        }
+        for output_bin in 0..=half {
+            let locked_phase = if transient || peaks.is_empty() {
+                synthesis_phase[output_bin]
+            } else {
+                let source_bin = output_bin as f32 / ratio;
+                let peak = peaks
+                    .partition_point(|candidate| *candidate as f32 < source_bin)
+                    .min(peaks.len());
+                let owner = match (peak.checked_sub(1), peaks.get(peak).copied()) {
+                    (Some(left), Some(right)) => {
+                        let left = peaks[left];
+                        if (source_bin - left as f32).abs() <= (right as f32 - source_bin).abs() {
+                            left
+                        } else {
+                            right
+                        }
+                    }
+                    (Some(left), None) => peaks[left],
+                    (None, Some(right)) => right,
+                    (None, None) => output_bin,
+                };
+                let owner_output = ((owner as f32 * ratio).round() as usize).min(half);
+                synthesis_phase[owner_output]
+                    + wrap_phase(mapped_source_phase[output_bin] - phase[owner])
+            };
+            shifted[output_bin] =
+                Complex32::from_polar(mapped_magnitude[output_bin], locked_phase);
         }
         for bin in 1..half {
             shifted[fft_size - bin] = shifted[bin].conj();
@@ -219,12 +275,27 @@ pub fn render(
     for index in 0..cropped.len() {
         let source_index = index + pad;
         let norm = normalisation.get(source_index).copied().unwrap_or(0.0);
-        cropped[index] = if norm > 1e-6 {
+        let wet = if norm > 1e-6 {
             output[source_index] / norm
         } else {
             input[index]
         };
+        let abs_sec = seg_start_sec + index as f64 / sample_rate as f64;
+        let clip_position = ((abs_sec - clip_start_sec).max(0.0) * 1000.0) / fp;
+        let global_position = (abs_sec.max(0.0) * 1000.0) / fp;
+        let shift = match (
+            curve_linear(source_midi, clip_position),
+            curve_linear(target_midi_global, global_position),
+        ) {
+            (Some(source), Some(target)) => (target - source).abs(),
+            _ => 0.0,
+        };
+        // Preserve the original waveform at neutral/invalid points and use a
+        // short proportional handoff into the component render. This prevents
+        // phase-vocoder colour from accumulating across untouched portions of
+        // imported projects and removes clicks at MPD contour gaps.
+        let blend = (shift / 0.20).clamp(0.0, 1.0);
+        cropped[index] = input[index] + (wet - input[index]) * blend;
     }
     cropped
 }
-

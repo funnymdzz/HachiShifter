@@ -85,6 +85,21 @@ pub fn set_ui_locale(state: State<'_, AppState>, locale: String) -> serde_json::
 }
 
 #[tauri::command(rename_all = "camelCase")]
+pub fn get_mcp_status() -> crate::mcp_server::McpServerInfo {
+    crate::mcp_server::server_info()
+}
+
+#[tauri::command(rename_all = "camelCase")]
+pub fn mcp_complete_request(
+    request_id: String,
+    value: Option<serde_json::Value>,
+    error: Option<String>,
+) -> serde_json::Value {
+    crate::mcp_server::complete_ui_request(request_id, value, error);
+    serde_json::json!({"ok": true})
+}
+
+#[tauri::command(rename_all = "camelCase")]
 pub fn get_timeline_state(state: State<'_, AppState>) -> crate::models::TimelineStatePayload {
     core::get_timeline_state(state)
 }

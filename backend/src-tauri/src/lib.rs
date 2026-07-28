@@ -12,6 +12,7 @@ mod hifigan_tension;
 mod formant_morph;
 #[path = "audio/mld5_component_renderer.rs"]
 mod mld5_component_renderer;
+mod mcp_server;
 mod formant_cache;
 mod launch_args;
 #[path = "audio/mixdown.rs"]
@@ -221,6 +222,10 @@ pub fn run() {
             // Expose app handle for background workers.
             let _ = state.app_handle.set(app.handle().clone());
 
+            // Start the loopback MCP bridge after AppState and the main
+            // webview are registered. The descriptor is written below once
+            // the platform config directory becomes available.
+
             // 将 app_handle 传递给 audio engine worker，使其能向前端推送事件。
             state.audio_engine.set_app_handle(app.handle().clone());
 
@@ -249,6 +254,12 @@ pub fn run() {
                     p.recent = recent;
                 }
                 let _ = state.config_dir.set(cfg_dir);
+            }
+
+            let mcp_config_dir = state.config_dir.get().cloned();
+            match crate::mcp_server::start(app.handle().clone(), mcp_config_dir) {
+                Ok(info) => eprintln!("[mcp] listening at {}", info.endpoint),
+                Err(error) => eprintln!("[mcp] startup error: {error}"),
             }
 
             // 尝试恢复上次运行时保存的窗口状态（非强制性）
@@ -326,6 +337,8 @@ pub fn run() {
             commands::get_runtime_info,
             commands::consume_startup_project_path,
             commands::set_ui_locale,
+            commands::get_mcp_status,
+            commands::mcp_complete_request,
             commands::get_timeline_state,
             commands::get_timeline_state_lite,
             commands::set_transport,
@@ -543,6 +556,20 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
         let aligned = &rendered_pcm[offset_samples..(offset_samples + reference_pcm.len())
             .min(rendered_pcm.len())];
         let length = aligned.len().min(reference_pcm.len());
+        let discontinuities = |samples: &[f64]| -> (f64, usize, usize) {
+            let mut maximum = 0.0f64;
+            let mut over_010 = 0usize;
+            let mut over_020 = 0usize;
+            for pair in samples.windows(2) {
+                let step = (pair[1] - pair[0]).abs();
+                maximum = maximum.max(step);
+                over_010 += usize::from(step >= 0.10);
+                over_020 += usize::from(step >= 0.20);
+            }
+            (maximum, over_010, over_020)
+        };
+        let reference_clicks = discontinuities(&reference_pcm[..length]);
+        let rendered_clicks = discontinuities(&aligned[..length]);
         if !crate::fcpe_onnx::is_available() {
             return Err(
                 "FCPE model is required for vocal F0 comparison; set HACHISHIFTER_FCPE_ONNX"
@@ -628,10 +655,13 @@ fn try_compare_vocal_f0_from_args() -> Option<Result<(), String>> {
             if values.is_empty() { return 0.0; }
             values[((values.len() - 1) as f64 * fraction).round() as usize]
         };
-        println!("{{\"detector\":\"fcpe\",\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3},\"bad_runs_over_200_cents\":[{}]}}",
+        println!("{{\"detector\":\"fcpe\",\"reference\":\"{}\",\"rendered\":\"{}\",\"alignment_sec\":{:.6},\"envelope_correlation\":{:.6},\"frames\":{},\"reference_voiced_frames\":{},\"rendered_voiced_frames\":{},\"paired_voiced_frames\":{},\"median_abs_cents\":{:.3},\"p90_abs_cents\":{:.3},\"median_signed_cents\":{:.3},\"reference_max_sample_step\":{:.6},\"rendered_max_sample_step\":{:.6},\"reference_steps_over_0_10\":{},\"rendered_steps_over_0_10\":{},\"reference_steps_over_0_20\":{},\"rendered_steps_over_0_20\":{},\"bad_runs_over_200_cents\":[{}]}}",
             reference.display(), rendered.display(), offset_samples as f64 / target_rate as f64,
             best.0, frame_count, reference_voiced, rendered_voiced, errors.len(),
             percentile(&errors, 0.5), percentile(&errors, 0.9), percentile(&signed, 0.5),
+            reference_clicks.0, rendered_clicks.0,
+            reference_clicks.1, rendered_clicks.1,
+            reference_clicks.2, rendered_clicks.2,
             bad_runs_json);
         Ok(())
     })())
@@ -647,6 +677,11 @@ fn try_render_mpd_vocal_from_args() -> Option<Result<(), String>> {
         .position(|arg| arg.as_os_str() == std::ffi::OsStr::new("--render-mpd-vocal"))?;
     let input = args.get(flag_index + 1).map(std::path::PathBuf::from);
     let output = args.get(flag_index + 2).map(std::path::PathBuf::from);
+    let algorithm = args
+        .get(flag_index + 3)
+        .and_then(|value| value.to_str())
+        .unwrap_or("mld5")
+        .to_ascii_lowercase();
     Some((|| {
         let input = input.ok_or_else(|| "missing MPD input path".to_string())?;
         let output = output.ok_or_else(|| "missing WAV output path".to_string())?;
@@ -676,6 +711,14 @@ fn try_render_mpd_vocal_from_args() -> Option<Result<(), String>> {
         for track in &mut imported.timeline.tracks {
             track.muted = track.id != vocal_track_id;
             track.solo = false;
+            if track.id == vocal_track_id {
+                track.pitch_analysis_algo = match algorithm.as_str() {
+                    "nsf-hifigan" | "nsf_hifigan" | "hifigan" => {
+                        crate::state::PitchAnalysisAlgo::NsfHifiganOnnx
+                    }
+                    _ => crate::state::PitchAnalysisAlgo::Mld5,
+                };
+            }
         }
         crate::mixdown::render_mixdown_wav(
             &imported.timeline,

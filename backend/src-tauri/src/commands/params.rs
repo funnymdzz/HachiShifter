@@ -166,7 +166,15 @@ pub(super) fn get_param_frames(
             track_id, param, start_frame, frame_count, stride
         );
     }
-    let (root, fp, entry, compose_enabled, pitch_algo, param_reference_value) = {
+    let (
+        root,
+        fp,
+        entry,
+        compose_enabled,
+        pitch_algo,
+        param_reference_value,
+        selected_mld5_pitch,
+    ) = {
         let mut tl = state.timeline.lock().unwrap_or_else(|e| e.into_inner());
 
         let root = match tl.resolve_root_track_id(&track_id) {
@@ -206,6 +214,33 @@ pub(super) fn get_param_frames(
             .unwrap_or_default();
 
         let param_reference_value = resolve_param_reference_value_with_timeline(&tl, kind, &param);
+        let selected_mld5_pitch = if param == "pitch"
+            && matches!(kind, crate::state::SynthPipelineKind::Mld5)
+        {
+            tl.selected_clip_id
+                .as_deref()
+                .and_then(|selected_id| {
+                    tl.clips
+                        .iter()
+                        .find(|clip| clip.id == selected_id)
+                })
+                .filter(|clip| {
+                    tl.resolve_root_track_id(&clip.track_id).as_deref() == Some(root.as_str())
+                })
+                .and_then(|clip| {
+                    let source = entry
+                        .extra_curves
+                        .get(&format!("mld5_source_pitch::{}", clip.id))?
+                        .clone();
+                    let target = entry
+                        .extra_curves
+                        .get(&format!("mld5_target_pitch::{}", clip.id))?
+                        .clone();
+                    Some((clip.start_sec, source, target))
+                })
+        } else {
+            None
+        };
 
         (
             root,
@@ -214,6 +249,7 @@ pub(super) fn get_param_frames(
             compose_enabled,
             pitch_algo,
             param_reference_value,
+            selected_mld5_pitch,
         )
     };
 
@@ -226,7 +262,9 @@ pub(super) fn get_param_frames(
                 crate::world_vocoder::is_available()
             }
             crate::pitch_editing::PitchEditAlgorithm::Mld5 => {
-                crate::world_vocoder::is_available()
+                // mld5 is the built-in model-free component renderer.  Its
+                // availability must not be coupled to the optional WORLD DLL.
+                true
             }
             crate::pitch_editing::PitchEditAlgorithm::NsfHifiganOnnx => {
                 crate::nsf_hifigan_onnx::is_available()
@@ -275,8 +313,27 @@ pub(super) fn get_param_frames(
 
     match param.as_str() {
         "pitch" => {
+            let selected_start_frame = selected_mld5_pitch.as_ref().map(|(start_sec, _, _)| {
+                ((*start_sec).max(0.0) * 1000.0 / fp.max(0.1)).round() as usize
+            });
             for i in 0..count {
                 let idx = start.saturating_add(i.saturating_mul(step));
+                if let (Some((_, source, target)), Some(clip_start_frame)) =
+                    (selected_mld5_pitch.as_ref(), selected_start_frame)
+                {
+                    if let Some(local_idx) = idx.checked_sub(clip_start_frame) {
+                        if local_idx < source.len().max(target.len()) {
+                            // A track-wide curve is inherently ambiguous when
+                            // MPD samples overlap.  For the selected Melodyne
+                            // blob return its own persisted contour, including
+                            // explicit zero gaps, rather than another sample's
+                            // last-writer-wins curve.
+                            orig.push(source.get(local_idx).copied().unwrap_or(0.0));
+                            edit.push(target.get(local_idx).copied().unwrap_or(0.0));
+                            continue;
+                        }
+                    }
+                }
                 let o = entry.pitch_orig.get(idx).copied().unwrap_or(0.0);
                 let e_raw = entry.pitch_edit.get(idx).copied().unwrap_or(0.0);
                 // Treat 0 as "unset" and fall back to orig.
