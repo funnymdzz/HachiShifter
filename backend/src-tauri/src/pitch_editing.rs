@@ -1109,7 +1109,12 @@ pub fn maybe_apply_pitch_edit_to_clip_segment(
     if strict_mpd_target {
         if let Some(clip_target) = entry
             .extra_curves
-            .get(&format!("mld5_target_pitch::{}", clip.id))
+            .get(&format!("mld5_render_target_pitch::{}", clip.id))
+            .or_else(|| {
+                entry
+                    .extra_curves
+                    .get(&format!("mld5_target_pitch::{}", clip.id))
+            })
         {
             // A root-track curve cannot represent two overlapping Melodyne
             // elements. The previous last-writer-wins curve made one sample

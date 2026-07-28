@@ -181,6 +181,12 @@ The model-free `mld5` path now performs:
     cell or replaces a missing value with the note centre. Unvoiced and
     uncertain attack/tail spans therefore remain zero-valued gaps, are omitted
     from the pitch line, and retain the lighter note-body display.
+18. Display validity and synthesis targets are stored separately. An invalid
+    property-point span remains absent from the piano-roll contour, while the
+    model-free renderer retains the edited element centre as a hidden fallback
+    only when WORLD still detects a periodic frame. This prevents attack/tail
+    frames from jumping back to the source pitch without inventing a visible
+    F0 line through breaths or sibilants.
 
 GAME remains authoritative for identity: one GAME note is exactly one syllable,
 and its start is exactly the beat-alignment point. A separate backward pass from

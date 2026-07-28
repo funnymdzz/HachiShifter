@@ -383,6 +383,7 @@ pub(super) fn save_clip_sample_annotations(
                         for key in [
                             format!("mld5_source_pitch::{clip_id}"),
                             format!("mld5_target_pitch::{clip_id}"),
+                            format!("mld5_render_target_pitch::{clip_id}"),
                         ] {
                             if let Some(curve) = params.extra_curves.get_mut(&key) {
                                 remap_curve_around_attack(

@@ -1755,13 +1755,14 @@ fn build_group_pitch_curves(
     group: &ClipGroup,
     shift: f64,
     frame_period_ms: f64,
-) -> (Vec<f32>, Vec<f32>) {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let frame_sec = frame_period_ms.max(0.1) / 1000.0;
     let clip_start = group.timeline_start + shift;
     let clip_length = (group.timeline_end - group.timeline_start).max(0.001);
     let curve_len = (clip_length / frame_sec).ceil() as usize + 2;
     let mut source_curve = vec![0.0f32; curve_len];
     let mut target_curve = vec![0.0f32; curve_len];
+    let mut render_target_curve = vec![0.0f32; curve_len];
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
     for element_index in &group.element_indices {
         let Some(element) = track.elements.get(*element_index) else {
@@ -1800,10 +1801,19 @@ fn build_group_pitch_curves(
                     + element.pitch_modulation * (raw - without_vibrato);
                 source_curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
                 target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
+                render_target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
+            } else {
+                // Keep the display contour absent, but retain an element-
+                // centre target for the renderer. WORLD applies this only
+                // when its periodic detector still considers the frame
+                // voiced, preventing a hidden attack/tail frame from jumping
+                // back to the unedited source pitch.
+                render_target_curve[local_frame] =
+                    (element.pitch_center / 100.0).clamp(0.0, 127.0);
             }
         }
     }
-    (source_curve, target_curve)
+    (source_curve, target_curve, render_target_curve)
 }
 
 fn parse_project_graph(data: &[u8]) -> Result<Graph, String> {
@@ -1976,7 +1986,8 @@ fn import_graph(
             state_track.compose_enabled = compose;
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
-        let mut clip_pitch_curves = Vec::<(String, Vec<f32>, Vec<f32>)>::new();
+        let mut clip_pitch_curves =
+            Vec::<(String, Vec<f32>, Vec<f32>, Vec<f32>)>::new();
         for group in clip_groups {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
@@ -2039,28 +2050,34 @@ fn import_graph(
                     })
                 }).collect();
                 if compose {
-                    let (source_curve, target_curve) = build_group_pitch_curves(
-                        &graph,
-                        track,
-                        group,
-                        shift,
-                        frame_period_ms,
-                    );
-                    clip_pitch_curves.push((clip.id.clone(), source_curve, target_curve));
+                    let (source_curve, target_curve, render_target_curve) =
+                        build_group_pitch_curves(
+                            &graph,
+                            track,
+                            group,
+                            shift,
+                            frame_period_ms,
+                        );
+                    clip_pitch_curves.push((
+                        clip.id.clone(),
+                        source_curve,
+                        target_curve,
+                        render_target_curve,
+                    ));
                 }
             }
         }
         if compose {
             let mut params = build_track_params(
-                    &graph,
-                    track,
-                    shift,
-                    project_sec,
-                    frame_period_ms,
-                    track_index,
-                    tracks.len(),
-                    progress,
-                );
+                &graph,
+                track,
+                shift,
+                project_sec,
+                frame_period_ms,
+                track_index,
+                tracks.len(),
+                progress,
+            );
             let project_pitch_offset = params
                 .pitch_edit
                 .iter()
@@ -2083,13 +2100,19 @@ fn import_graph(
             if reanalyze_pitch_with_game_fcpe {
                 params.pitch_edit_user_modified = false;
             }
-            for (clip_id, source_curve, target_curve) in clip_pitch_curves {
+            for (clip_id, source_curve, target_curve, render_target_curve) in
+                clip_pitch_curves
+            {
                 params
                     .extra_curves
                     .insert(format!("mld5_source_pitch::{clip_id}"), source_curve);
                 params
                     .extra_curves
                     .insert(format!("mld5_target_pitch::{clip_id}"), target_curve);
+                params.extra_curves.insert(
+                    format!("mld5_render_target_pitch::{clip_id}"),
+                    render_target_curve,
+                );
             }
             timeline.params_by_root_track.insert(track_id.clone(), params);
         }
