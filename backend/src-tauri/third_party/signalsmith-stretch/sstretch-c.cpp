@@ -28,7 +28,15 @@ struct SStretchInternal {
     std::vector<const float*> in_ptrs_const;
 
     SStretchInternal(unsigned int sr, int ch)
-        : channels(ch)
+        // Signalsmith's default constructor seeds its phase randomiser from
+        // std::random_device.  That made two renders of the same MPD differ
+        // as soon as the first stretched element was reached.  Melodyne
+        // project playback/export must be repeatable, so give every fresh
+        // stretcher the same seed.  The randomised phase path (used for very
+        // large ratios) remains decorrelated inside a render, just stable
+        // between renders.
+        : stretch(0x48414348L)
+        , channels(ch)
         , sample_rate(sr)
         , in_ch(ch)
         , out_ch(ch)

@@ -31,6 +31,11 @@ pub struct RenderContext<'a> {
     pub clip_midi: &'a [f32],
     /// 所属 Clip 的唯一标识，用于 per-segment 推理缓存。
     pub clip_id: &'a str,
+    /// Optional clip-local semitone offset used only where an imported MPD
+    /// has no stored periodic property point but WORLD still detects a voiced
+    /// frame.  This preserves the detector's detailed tail contour instead
+    /// of substituting a flat note centre.
+    pub fallback_pitch_delta: Option<&'a [f32]>,
 }
 
 // ─── 能力描述 ──────────────────────────────────────────────────────────────────

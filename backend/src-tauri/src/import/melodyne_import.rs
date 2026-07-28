@@ -753,7 +753,9 @@ fn build_media_index(project_dir: &Path) -> HashMap<String, PathBuf> {
     let Ok(entries) = fs::read_dir(project_dir) else {
         return index;
     };
-    for entry in entries.flatten() {
+    let mut entries = entries.flatten().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
         let path = entry.path();
         if path.is_file() {
             if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
@@ -763,7 +765,9 @@ fn build_media_index(project_dir: &Path) -> HashMap<String, PathBuf> {
             }
         } else if path.is_dir() {
             if let Ok(children) = fs::read_dir(&path) {
-                for child in children.flatten() {
+                let mut children = children.flatten().collect::<Vec<_>>();
+                children.sort_by_key(|entry| entry.path());
+                for child in children {
                     let child_path = child.path();
                     if child_path.is_file() {
                         if let Some(name) = child_path.file_name().and_then(|name| name.to_str()) {
@@ -1572,6 +1576,49 @@ fn source_pitch_at(
     ))
 }
 
+/// Return the analysed centre which Melodyne used as the origin for drift and
+/// modulation edits.  Older MPD graphs occasionally persist an empty/zero
+/// `pitchCenter` on the principal item.  Falling back to the *edited* element
+/// centre in that case applies the entire source-note interval as residual and
+/// produces the multi-semitone bends seen at stretched attacks and tails.
+fn element_source_pitch_center(
+    graph: &Graph,
+    element: &ImportedElement,
+    cache: Option<&SourcePitchCache>,
+) -> f32 {
+    let persisted = graph
+        .f32(element.source_item_id, "pitchCenter")
+        .filter(|value| value.is_finite() && *value > 100.0 && *value < 12_700.0);
+
+    let mut analysed = Vec::<f32>::new();
+    if let Some(cache) = cache {
+        let probes = ((element.duration / 0.01).ceil() as usize).clamp(8, 512);
+        for index in 0..=probes {
+            let local = element.duration * index as f64 / probes as f64;
+            if source_sibilant_strength(graph, element, local) >= 0.55 {
+                continue;
+            }
+            if let Some((_, without_vibrato)) =
+                source_pitch_at(graph, cache, element.source_function_id, local)
+            {
+                if without_vibrato.is_finite() && without_vibrato > 100.0 {
+                    analysed.push(without_vibrato);
+                }
+            }
+        }
+    }
+    analysed.sort_by(|left, right| left.total_cmp(right));
+    let median = analysed.get(analysed.len() / 2).copied();
+    match (persisted, median) {
+        // A disagreement this large indicates a stale/clip-wide principal
+        // centre rather than the current note object's analysed centre.
+        (Some(stored), Some(derived)) if (stored - derived).abs() > 400.0 => derived,
+        (Some(stored), _) => stored,
+        (None, Some(derived)) => derived,
+        (None, None) => element.pitch_center,
+    }
+}
+
 fn build_track_params(
     graph: &Graph,
     track: &ImportedTrack,
@@ -1623,9 +1670,7 @@ fn build_track_params(
         let last = ((start + element.duration) / frame_period_sec)
             .ceil()
             .max(0.0) as usize;
-        let source_center = graph
-            .f32(element.source_item_id, "pitchCenter")
-            .unwrap_or(element.pitch_center);
+        let source_center = element_source_pitch_center(graph, element, pitch_cache);
         for frame in first..last.min(frame_count) {
             let local_time = frame as f64 * frame_period_sec - start;
             let sibilant_strength = source_sibilant_strength(graph, element, local_time);
@@ -1678,7 +1723,7 @@ fn build_track_params(
         .map(|(index, element)| (element.element_id, index))
         .collect::<HashMap<_, _>>();
     for left in &track.elements {
-        if !left.join_next || left.join_duration <= 1e-6 {
+        if !left.join_next {
             continue;
         }
         let Some(right) = left
@@ -1691,7 +1736,12 @@ fn build_track_params(
         let left_end = left.start + left.duration + shift;
         let right_start = right.start + shift;
         let boundary = (left_end + right_start) * 0.5;
-        let duration = left.join_duration
+        let stored_duration = if left.join_duration > 1e-6 {
+            left.join_duration
+        } else {
+            0.09
+        };
+        let duration = stored_duration
             .min(left.duration + right.duration)
             .max(frame_period_sec);
         let transition_start = (boundary - duration * 0.5)
@@ -1702,12 +1752,12 @@ fn build_track_params(
             .max(transition_start + frame_period_sec);
         let first = (transition_start / frame_period_sec).floor().max(0.0) as usize;
         let last = (transition_end / frame_period_sec).ceil().max(0.0) as usize;
-        let left_probe = ((boundary - frame_period_sec) / frame_period_sec)
-            .round().max(0.0) as usize;
-        let right_probe = ((boundary + frame_period_sec) / frame_period_sec)
-            .round().max(0.0) as usize;
-        let left_center = unjoined_pitch.get(left_probe).copied().unwrap_or(0.0);
-        let right_center = unjoined_pitch.get(right_probe).copied().unwrap_or(0.0);
+        // The transition operates between persisted note centres. Probing a
+        // single global curve frame selected another overlapping sample (or a
+        // silent attack) in multi-sample tracks and generated the large loops
+        // shown in the report.
+        let left_center = (left.pitch_center / 100.0).clamp(0.0, 127.0);
+        let right_center = (right.pitch_center / 100.0).clamp(0.0, 127.0);
         if left_center <= 0.0 || right_center <= 0.0 {
             continue;
         }
@@ -1755,7 +1805,7 @@ fn build_group_pitch_curves(
     group: &ClipGroup,
     shift: f64,
     frame_period_ms: f64,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     let frame_sec = frame_period_ms.max(0.1) / 1000.0;
     let clip_start = group.timeline_start + shift;
     let clip_length = (group.timeline_end - group.timeline_start).max(0.001);
@@ -1763,6 +1813,7 @@ fn build_group_pitch_curves(
     let mut source_curve = vec![0.0f32; curve_len];
     let mut target_curve = vec![0.0f32; curve_len];
     let mut render_target_curve = vec![0.0f32; curve_len];
+    let mut render_pitch_delta = vec![0.0f32; curve_len];
     let mut pitch_cache_by_item: HashMap<u32, Option<SourcePitchCache>> = HashMap::new();
     for element_index in &group.element_indices {
         let Some(element) = track.elements.get(*element_index) else {
@@ -1782,15 +1833,35 @@ fn build_group_pitch_curves(
         let last = ((destination_start + element.duration - clip_start) / frame_sec)
             .ceil()
             .max(0.0) as usize;
-        let source_center = graph
-            .f32(element.source_item_id, "pitchCenter")
-            .unwrap_or(element.pitch_center);
+        let source_center = element_source_pitch_center(graph, element, pitch_cache);
+        if std::env::var("HACHISHIFTER_DEBUG_COMMANDS").ok().as_deref() == Some("1") {
+            eprintln!(
+                "[mpd:pitch] element={} start={:.6} duration={:.6} source_item={} source_center={:.3} target_center={:.3} drift={:.6} modulation={:.6} join={} join_duration={:.6}",
+                element.element_id,
+                element.start + shift,
+                element.duration,
+                element.source_item_id,
+                source_center,
+                element.pitch_center,
+                element.pitch_drift,
+                element.pitch_modulation,
+                element.join_next,
+                element.join_duration,
+            );
+        }
         for local_frame in first..last.min(source_curve.len()) {
             let destination_time = clip_start + local_frame as f64 * frame_sec;
             let element_time = destination_time - destination_start;
             if source_sibilant_strength(graph, element, element_time) >= 0.55 {
                 continue;
             }
+            // If the sparse MPD contour has a hole but WORLD still finds a
+            // periodic tail, preserve that detected contour and apply only
+            // Melodyne's note-centre displacement.  This keeps audio and F0
+            // aligned through a stretched tail without drawing a fabricated
+            // line in the piano roll.
+            render_pitch_delta[local_frame] =
+                ((element.pitch_center - source_center) / 100.0).clamp(-24.0, 24.0);
             if let Some((raw, without_vibrato)) =
                 pitch_cache.and_then(|cache| {
                     source_pitch_at(graph, cache, element.source_function_id, element_time)
@@ -1803,17 +1874,13 @@ fn build_group_pitch_curves(
                 target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
                 render_target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
             } else {
-                // Keep the display contour absent, but retain an element-
-                // centre target for the renderer. WORLD applies this only
-                // when its periodic detector still considers the frame
-                // voiced, preventing a hidden attack/tail frame from jumping
-                // back to the unedited source pitch.
-                render_target_curve[local_frame] =
-                    (element.pitch_center / 100.0).clamp(0.0, 127.0);
+                // Keep both absolute display/render contours absent. The
+                // renderer consumes `render_pitch_delta` only if its own F0
+                // detector confirms this is a periodic frame.
             }
         }
     }
-    (source_curve, target_curve, render_target_curve)
+    (source_curve, target_curve, render_target_curve, render_pitch_delta)
 }
 
 fn parse_project_graph(data: &[u8]) -> Result<Graph, String> {
@@ -1987,7 +2054,7 @@ fn import_graph(
             state_track.pitch_analysis_algo = if compose { PitchAnalysisAlgo::Mld5 } else { PitchAnalysisAlgo::None };
         }
         let mut clip_pitch_curves =
-            Vec::<(String, Vec<f32>, Vec<f32>, Vec<f32>)>::new();
+            Vec::<(String, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>)>::new();
         for group in clip_groups {
             let Some(source) = sources.get(&group.source_id) else {
                 continue;
@@ -2050,7 +2117,12 @@ fn import_graph(
                     })
                 }).collect();
                 if compose {
-                    let (source_curve, target_curve, render_target_curve) =
+                    let (
+                        source_curve,
+                        target_curve,
+                        render_target_curve,
+                        render_pitch_delta,
+                    ) =
                         build_group_pitch_curves(
                             &graph,
                             track,
@@ -2063,6 +2135,7 @@ fn import_graph(
                         source_curve,
                         target_curve,
                         render_target_curve,
+                        render_pitch_delta,
                     ));
                 }
             }
@@ -2100,7 +2173,13 @@ fn import_graph(
             if reanalyze_pitch_with_game_fcpe {
                 params.pitch_edit_user_modified = false;
             }
-            for (clip_id, source_curve, target_curve, render_target_curve) in
+            for (
+                clip_id,
+                source_curve,
+                target_curve,
+                render_target_curve,
+                render_pitch_delta,
+            ) in
                 clip_pitch_curves
             {
                 params
@@ -2112,6 +2191,10 @@ fn import_graph(
                 params.extra_curves.insert(
                     format!("mld5_render_target_pitch::{clip_id}"),
                     render_target_curve,
+                );
+                params.extra_curves.insert(
+                    format!("mld5_render_pitch_delta::{clip_id}"),
+                    render_pitch_delta,
                 );
             }
             timeline.params_by_root_track.insert(track_id.clone(), params);

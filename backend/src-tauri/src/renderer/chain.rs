@@ -214,6 +214,7 @@ impl ProcessingStage for WorldVocoderStage {
             pitch_edit: cc.pitch_edit,
             clip_midi: cc.clip_midi,
             clip_id: cc.clip_id,
+            fallback_pitch_delta: None,
         };
         let mut output = crate::renderer::world::WorldRenderer.render(&render_ctx)?;
         crate::time_stretch::stabilize_vocal_timbre(
@@ -269,6 +270,10 @@ impl ProcessingStage for Mld5VocoderStage {
             pitch_edit: cc.pitch_edit,
             clip_midi: cc.clip_midi,
             clip_id: cc.clip_id,
+            fallback_pitch_delta: cc
+                .extra_curves
+                .get(&format!("mld5_render_pitch_delta::{}", cc.clip_id))
+                .map(Vec::as_slice),
         };
         let padded_output = crate::renderer::world::render_mld5(&render_ctx)?;
         let wanted = input_pcm.len();
@@ -454,6 +459,7 @@ impl ProcessingStage for HiFiGanStage {
                 pitch_edit: cc.pitch_edit,
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
+                fallback_pitch_delta: None,
             };
             let renderer = crate::renderer::hifigan::HiFiGanRenderer;
             return if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
@@ -516,6 +522,7 @@ impl ProcessingStage for HiFiGanStage {
                 pitch_edit: cc.pitch_edit,
                 clip_midi: cc.clip_midi,
                 clip_id: cc.clip_id,
+                fallback_pitch_delta: None,
             };
             let renderer = crate::renderer::hifigan::HiFiGanRenderer;
             if (cc.playback_rate - 1.0).abs() > 1.0e-6 {
