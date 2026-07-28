@@ -24,5 +24,7 @@ for algorithm in mld5 nsf-hifigan; do
   "$binary" --compare-vocal-f0 "$reference" "$rendered" >"$report"
   printf '%s\t' "$algorithm"
   cat "$report"
+  if [ "$algorithm" = "nsf-hifigan" ]; then
+    node "$(dirname "$0")/assert_nsf_hifigan_reference.js" "$report"
+  fi
 done
-
