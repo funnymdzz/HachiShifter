@@ -41,6 +41,7 @@ private:
     void refreshTexts();
     void refreshProjectControls();
     void setToolButton(juce::Button& selected);
+    void togglePlayback();
     void openProject();
     void saveProject();
     void importAudio();
@@ -99,6 +100,7 @@ private:
     juce::ProgressBar progressBar;
     bool importInProgress = false;
     bool showingRenderProgress = false;
+    bool playWhenRenderReady = false;
 
     TrackListComponent trackList;
     TimelineComponent timeline;

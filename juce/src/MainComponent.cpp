@@ -214,9 +214,10 @@ MainComponent::MainComponent()
     saveButton.onClick = [this] { saveProject(); };
     audioButton.onClick = [this] { importAudio(); };
     melodyneButton.onClick = [this] { importMelodyne(); };
-    playButton.onClick = [this] { audio.isPlaying() ? audio.stop() : audio.play(); };
+    playButton.onClick = [this] { togglePlayback(); };
     stopButton.onClick = [this]
     {
+        playWhenRenderReady = false;
         audio.stop();
         audio.setPosition(0.0);
     };
@@ -322,6 +323,23 @@ void MainComponent::setToolButton(juce::Button& selected)
             button->setToggleState(button == &selected, juce::dontSendNotification);
 }
 
+void MainComponent::togglePlayback()
+{
+    if (audio.isPlaying())
+    {
+        playWhenRenderReady = false;
+        audio.stop();
+        return;
+    }
+    if (!sourceEditActive && audio.renderProgress())
+    {
+        playWhenRenderReady = true;
+        return;
+    }
+    playWhenRenderReady = false;
+    audio.play();
+}
+
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Palette::background);
@@ -343,7 +361,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::spaceKey)
     {
-        audio.isPlaying() ? audio.stop() : audio.play();
+        togglePlayback();
         return true;
     }
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'O')
@@ -554,6 +572,11 @@ void MainComponent::timerCallback()
                                                     : strings.text("status.ready"))
                                     + "  " + juce::String(audio.position(), 2) + " s",
                                 juce::dontSendNotification);
+            if (playWhenRenderReady)
+            {
+                playWhenRenderReady = false;
+                audio.play();
+            }
         }
     }
 
@@ -600,6 +623,7 @@ void MainComponent::timerCallback()
 
 void MainComponent::setSourceEditMode(bool enabled)
 {
+    playWhenRenderReady = false;
     sourceEditActive = enabled;
     if (enabled && selectedClipId.isEmpty())
     {

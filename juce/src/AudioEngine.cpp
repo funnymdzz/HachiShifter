@@ -12,8 +12,8 @@ std::optional<std::pair<float, float>> contourAt(const NoteData& note, double lo
     if (note.contour.empty()) return std::pair { 0.0f, 0.0f };
     const auto right = std::lower_bound(note.contour.begin(), note.contour.end(), localSeconds,
         [](const PitchPoint& point, double time) { return point.timeSeconds < time; });
-    const auto rightIndex = static_cast<std::size_t>(right == note.contour.end()
-        ? note.contour.size() - 1 : right - note.contour.begin());
+    const auto rightIndex = right == note.contour.end()
+        ? note.contour.size() - 1 : static_cast<std::size_t>(std::distance(note.contour.begin(), right));
     const auto leftIndex = rightIndex > 0 && note.contour[rightIndex].timeSeconds > localSeconds
         ? rightIndex - 1 : rightIndex;
     const auto& left = note.contour[leftIndex];
@@ -86,7 +86,7 @@ std::string renderKey(const ClipData& clip)
             stream.writeByte(static_cast<char>(point.voiced ? 1 : 0));
         }
     }
-    return juce::MD5(stream.getData(), stream.getDataSize()).toHexString().toStdString();
+    return std::string(static_cast<const char*>(stream.getData()), stream.getDataSize());
 }
 }
 
@@ -171,13 +171,13 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         for (const auto& clip : track.clips)
         {
             if (clip.muted || !clip.sourceFile.existsAsFile()) continue;
-            const auto key = clip.sourceFile.getFullPathName().toStdString();
-            auto reader = readers[key];
+            const auto sourceKey = clip.sourceFile.getFullPathName().toStdString();
+            auto reader = readers[sourceKey];
             if (reader == nullptr)
             {
                 reader.reset(formatManager.createReaderFor(clip.sourceFile));
                 if (reader == nullptr) continue;
-                readers[key] = reader;
+                readers[sourceKey] = reader;
             }
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
@@ -187,8 +187,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             loaded->reader = reader;
             if (track.compose && track.pitchAlgorithm == PitchAlgorithm::mld5 && !clip.notes.empty())
             {
-                const auto key = renderKey(clip);
-                auto& state = renderCache[key];
+                const auto cacheKey = renderKey(clip);
+                auto& state = renderCache[cacheKey];
                 if (state == nullptr) state = std::make_shared<RenderedClip>();
                 loaded->rendered = state;
                 if (!state->scheduled.exchange(true))
