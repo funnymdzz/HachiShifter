@@ -1,0 +1,89 @@
+name: Compile HachiShifter Next (JUCE)
+
+on:
+  push:
+    branches: [next]
+    paths:
+      - "juce/**"
+      - ".github/workflows/compile-next-juce.yml"
+      - "LICENSE"
+  pull_request:
+    branches: [next]
+    paths:
+      - "juce/**"
+      - ".github/workflows/compile-next-juce.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compile-next-juce-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux x86_64 model-free
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install JUCE build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build git \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev \
+            libxinerama-dev libxrandr-dev libxrender-dev libgl1-mesa-dev
+      - name: Configure
+        run: cmake -S juce -B build-next -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-next --config Release --target HachiShifterNext -j 2
+      - name: Package model-free archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="HachiShifterNext-linux-x86_64"
+          mkdir -p "$root/models"
+          binary=$(find build-next -type f -name HachiShifterNext -perm -111 | head -n 1)
+          test -n "$binary"
+          cp "$binary" "$root/HachiShifterNext"
+          cp LICENSE "$root/LICENSE"
+          tar -czf HachiShifterNext-linux-x86_64-no-model.tar.gz "$root"
+          test "$(find "$root/models" -type f | wc -l)" -eq 0
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HachiShifterNext-linux-x86_64-no-model
+          path: HachiShifterNext-linux-x86_64-no-model.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows 11 x64 model-free
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure
+        shell: pwsh
+        run: cmake -S juce -B build-next -A x64
+      - name: Build
+        shell: pwsh
+        run: cmake --build build-next --config Release --target HachiShifterNext --parallel 2
+      - name: Package model-free archive
+        shell: pwsh
+        run: |
+          $root = "HachiShifterNext-windows-x64"
+          New-Item -ItemType Directory -Force -Path "$root/models" | Out-Null
+          $binary = Get-ChildItem -Path build-next -Recurse -Filter HachiShifterNext.exe | Select-Object -First 1
+          if (-not $binary) { throw "HachiShifterNext.exe not found" }
+          Copy-Item $binary.FullName "$root/HachiShifterNext.exe"
+          Copy-Item LICENSE "$root/LICENSE"
+          if ((Get-ChildItem "$root/models" -File -Recurse).Count -ne 0) { throw "model-free package contains models" }
+          Compress-Archive -Path $root -DestinationPath HachiShifterNext-windows-x64-no-model.zip -Force
+      - uses: actions/upload-artifact@v7
+        with:
+          name: HachiShifterNext-windows-x64-no-model
+          path: HachiShifterNext-windows-x64-no-model.zip
+          if-no-files-found: error
+

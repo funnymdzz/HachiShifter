@@ -1,0 +1,115 @@
+#pragma once
+
+#include <juce_data_structures/juce_data_structures.h>
+#include <juce_audio_formats/juce_audio_formats.h>
+#include <vector>
+
+namespace hachi
+{
+enum class PitchAlgorithm
+{
+    mld5,
+    nsfHifigan,
+    world,
+    vocalShifter
+};
+
+enum class StretchAlgorithm
+{
+    melodyneHybrid,
+    variableMelHop,
+    loop,
+    soundTouch
+};
+
+struct PitchPoint
+{
+    double timeSeconds = 0.0;
+    float relativeCents = 0.0f;
+    bool voiced = true;
+};
+
+struct NoteData
+{
+    juce::String id;
+    double startSeconds = 0.0;
+    double durationSeconds = 0.25;
+    double consonantSeconds = 0.04;
+    float midiNote = 60.0f;
+    float modulation = 1.0f;
+    float drift = 1.0f;
+    float attackSpeed = 1.0f;
+    bool connectedToPrevious = false;
+    bool connectedToNext = false;
+    std::vector<PitchPoint> contour;
+    std::vector<double> sibilantMarkers;
+};
+
+struct ClipData
+{
+    juce::String id;
+    juce::File sourceFile;
+    double startSeconds = 0.0;
+    double sourceOffsetSeconds = 0.0;
+    double durationSeconds = 1.0;
+    double fadeInSeconds = 0.0;
+    double fadeOutSeconds = 0.0;
+    float gain = 1.0f;
+    bool muted = false;
+    std::vector<NoteData> notes;
+};
+
+struct TrackData
+{
+    juce::String id;
+    juce::String name;
+    bool compose = true;
+    bool muted = false;
+    bool solo = false;
+    float volume = 1.0f;
+    float pan = 0.0f;
+    PitchAlgorithm pitchAlgorithm = PitchAlgorithm::mld5;
+    StretchAlgorithm stretchAlgorithm = StretchAlgorithm::melodyneHybrid;
+    std::vector<ClipData> clips;
+};
+
+struct ProjectData
+{
+    juce::String name = "Untitled";
+    double bpm = 120.0;
+    double beatOriginSeconds = 0.0;
+    int numerator = 4;
+    int denominator = 4;
+    std::vector<TrackData> tracks;
+
+    [[nodiscard]] double durationSeconds() const;
+};
+
+class ProjectModel final : public juce::ChangeBroadcaster
+{
+public:
+    ProjectModel();
+
+    [[nodiscard]] ProjectData snapshot() const;
+    void replace(ProjectData replacement);
+    void clear();
+
+    void addAudioFile(const juce::File& file, double durationSeconds);
+    void setTrackCompose(const juce::String& trackId, bool enabled);
+    void setTrackMuted(const juce::String& trackId, bool muted);
+    void transposeNote(const juce::String& noteId, float semitones);
+    void resizeNote(const juce::String& noteId, double newStart, double newDuration);
+
+    bool save(const juce::File& file, juce::String& error) const;
+    bool load(const juce::File& file, juce::String& error);
+
+private:
+    juce::ValueTree toValueTree() const;
+    static ProjectData fromValueTree(const juce::ValueTree& tree);
+    static juce::String makeId(const char* prefix);
+
+    mutable juce::CriticalSection lock;
+    ProjectData project;
+};
+}
+
