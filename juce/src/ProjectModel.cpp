@@ -1,5 +1,6 @@
 #include "ProjectModel.h"
 #include <algorithm>
+#include <optional>
 
 namespace hachi
 {
@@ -106,6 +107,90 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, 
             project.name = file.getFileNameWithoutExtension();
     }
     sendChangeMessage();
+}
+
+bool ProjectModel::addMidiFile(const juce::File& file, juce::String& error)
+{
+    auto input = file.createInputStream();
+    if (input == nullptr)
+    {
+        error = "Could not open MIDI file: " + file.getFullPathName();
+        return false;
+    }
+    juce::MidiFile midi;
+    if (!midi.readFrom(*input))
+    {
+        error = "Invalid MIDI file: " + file.getFullPathName();
+        return false;
+    }
+    std::optional<double> importedBpm;
+    for (int trackIndex = 0; trackIndex < midi.getNumTracks() && !importedBpm; ++trackIndex)
+        if (const auto* sequence = midi.getTrack(trackIndex))
+            for (int eventIndex = 0; eventIndex < sequence->getNumEvents(); ++eventIndex)
+                if (const auto* event = sequence->getEventPointer(eventIndex);
+                    event != nullptr && event->message.isTempoMetaEvent())
+                {
+                    const auto secondsPerQuarter = event->message.getTempoSecondsPerQuarterNote();
+                    if (secondsPerQuarter > 1.0e-9)
+                        importedBpm = 60.0 / secondsPerQuarter;
+                    break;
+                }
+    midi.convertTimestampTicksToSeconds();
+    std::vector<TrackData> importedTracks;
+    for (int trackIndex = 0; trackIndex < midi.getNumTracks(); ++trackIndex)
+    {
+        const auto* sequence = midi.getTrack(trackIndex);
+        if (sequence == nullptr) continue;
+        juce::MidiMessageSequence matched(*sequence);
+        matched.updateMatchedPairs();
+        TrackData track;
+        track.id = makeId("track");
+        track.name = file.getFileNameWithoutExtension()
+            + (midi.getNumTracks() > 1 ? " " + juce::String(trackIndex + 1) : juce::String());
+        track.compose = true;
+        ClipData clip;
+        clip.id = makeId("clip");
+        clip.sourceFile = file;
+        clip.startSeconds = 0.0;
+        for (int eventIndex = 0; eventIndex < matched.getNumEvents(); ++eventIndex)
+        {
+            const auto* event = matched.getEventPointer(eventIndex);
+            if (event == nullptr || !event->message.isNoteOn()) continue;
+            const auto offIndex = matched.getIndexOfMatchingKeyUp(eventIndex);
+            const auto start = std::max(0.0, event->message.getTimeStamp());
+            const auto end = offIndex >= 0
+                ? std::max(start + 0.01, matched.getEventTime(offIndex)) : start + 0.25;
+            NoteData note;
+            note.id = makeId("note");
+            note.startSeconds = start;
+            note.durationSeconds = end - start;
+            note.consonantSeconds = 0.0;
+            note.midiNote = static_cast<float>(event->message.getNoteNumber());
+            note.sourceMidiCenter = note.midiNote;
+            note.contour.push_back({ 0.0, 0.0f, 0.0f, true });
+            note.contour.push_back({ note.durationSeconds, 0.0f, 0.0f, true });
+            clip.durationSeconds = std::max(clip.durationSeconds, end);
+            clip.notes.push_back(std::move(note));
+        }
+        if (clip.notes.empty()) continue;
+        clip.sourceDurationSeconds = clip.durationSeconds;
+        track.clips.push_back(std::move(clip));
+        importedTracks.push_back(std::move(track));
+    }
+    if (importedTracks.empty())
+    {
+        error = "MIDI file contains no notes: " + file.getFullPathName();
+        return false;
+    }
+    {
+        const juce::ScopedLock guard(lock);
+        if (project.tracks.empty() && importedBpm)
+            project.bpm = juce::jlimit(20.0, 400.0, *importedBpm);
+        for (auto& track : importedTracks) project.tracks.push_back(std::move(track));
+        if (project.name == "Untitled") project.name = file.getFileNameWithoutExtension();
+    }
+    sendChangeMessage();
+    return true;
 }
 
 void ProjectModel::setTempo(double bpm, int numerator, int denominator)

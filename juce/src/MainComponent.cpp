@@ -228,10 +228,7 @@ MainComponent::MainComponent()
     for (auto* button : { &pitchParamButton, &breathParamButton, &tensionParamButton,
                           &formantParamButton, &volumeParamButton })
         button->onClick = [this, button] { setToolButton(*button); };
-    midiButton.onClick = [this]
-    {
-        statusLabel.setText(strings.text("status.midiPending"), juce::dontSendNotification);
-    };
+    midiButton.onClick = [this] { importMidi(); };
     noteEditButton.setClickingTogglesState(false);
     wrenchButton.setClickingTogglesState(false);
 
@@ -371,7 +368,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
 {
     for (const auto& path : files)
-        if (juce::File(path).hasFileExtension("wav;flac;aif;aiff;mp3;ogg;hspx;mpd"))
+        if (juce::File(path).hasFileExtension("wav;flac;aif;aiff;mp3;ogg;hspx;mpd;mid;midi"))
             return true;
     return false;
 }
@@ -384,6 +381,12 @@ void MainComponent::openExternalFile(const juce::File& file)
     {
         juce::String error;
         if (!project.load(file, error)) showError(error);
+    }
+    else if (file.hasFileExtension("mid;midi"))
+    {
+        juce::String error;
+        if (!project.addMidiFile(file, error))
+            showError(strings.text("error.midi") + "\n" + error);
     }
     else if (const auto duration = audio.probeDuration(file))
         project.addAudioFile(file, *duration);
@@ -687,6 +690,7 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 3) saveProject();
     else if (id == 4 || id == 30) importAudio();
     else if (id == 5) importMelodyne();
+    else if (id == 6) importMidi();
     else if (id == 7) juce::JUCEApplication::getInstance()->systemRequestedQuit();
     else if (id == 40) zoomSlider.setValue(zoomSlider.getValue() * 1.25);
     else if (id == 41) zoomSlider.setValue(zoomSlider.getValue() / 1.25);
@@ -758,6 +762,20 @@ void MainComponent::importMelodyne()
             const auto file = selected.getResult();
             if (file == juce::File{}) return;
             loadMelodyneFile(file);
+        });
+}
+
+void MainComponent::importMidi()
+{
+    chooser = std::make_unique<juce::FileChooser>(strings.text("file.midi"), juce::File{}, "*.mid;*.midi");
+    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this](const juce::FileChooser& selected)
+        {
+            const auto file = selected.getResult();
+            if (file == juce::File{}) return;
+            juce::String error;
+            if (!project.addMidiFile(file, error))
+                showError(strings.text("error.midi") + "\n" + error);
         });
 }
 

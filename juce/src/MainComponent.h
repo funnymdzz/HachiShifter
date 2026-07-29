@@ -44,6 +44,7 @@ private:
     void openProject();
     void saveProject();
     void importAudio();
+    void importMidi();
     void importMelodyne();
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);

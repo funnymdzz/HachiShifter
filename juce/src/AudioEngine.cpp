@@ -68,6 +68,7 @@ void AudioEngine::syncProject(const ProjectData& project)
 {
     const juce::ScopedWriteLock guard(renderLock);
     rebuildLoadedClips(project);
+    projectDurationSeconds.store(project.durationSeconds());
 }
 
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
@@ -243,12 +244,22 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         }
     }
 
-    timelineSample.fetch_add(info.numSamples);
+    const auto nextSample = timelineSample.fetch_add(info.numSamples) + info.numSamples;
+    if (static_cast<double>(nextSample) / sampleRate >= projectDurationSeconds.load())
+        playing.store(false);
     sendChangeMessage();
 }
 
 void AudioEngine::play()
 {
+    auto duration = projectDurationSeconds.load();
+    {
+        const juce::ScopedReadLock guard(renderLock);
+        if (auditionMode.load() && auditionReader != nullptr)
+            duration = static_cast<double>(auditionReader->lengthInSamples) / auditionReader->sampleRate;
+    }
+    if (duration > 0.0 && position() >= duration)
+        setPosition(0.0);
     playing.store(true);
     sendChangeMessage();
 }
@@ -256,6 +267,11 @@ void AudioEngine::play()
 void AudioEngine::stop()
 {
     playing.store(false);
+    {
+        const juce::ScopedReadLock guard(renderLock);
+        for (const auto& [_, meter] : trackMeters)
+            meter->store(0.0f, std::memory_order_relaxed);
+    }
     sendChangeMessage();
 }
 

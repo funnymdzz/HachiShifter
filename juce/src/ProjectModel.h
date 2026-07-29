@@ -100,6 +100,7 @@ public:
     void clear();
 
     void addAudioFile(const juce::File& file, double durationSeconds, double startSeconds = 0.0);
+    bool addMidiFile(const juce::File& file, juce::String& error);
     void setTempo(double bpm, int numerator, int denominator = 4);
     void setGridDivision(const juce::String& division);
     void setBaseScale(const juce::String& scale);

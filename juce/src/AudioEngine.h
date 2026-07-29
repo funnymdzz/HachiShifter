@@ -58,5 +58,6 @@ private:
     std::atomic<bool> playing { false };
     std::atomic<juce::int64> timelineSample { 0 };
     std::atomic<double> outputSampleRate { 48'000.0 };
+    std::atomic<double> projectDurationSeconds { 0.0 };
 };
 }
