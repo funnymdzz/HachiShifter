@@ -189,6 +189,7 @@ export function useTimelineState(): TimelineStateResult {
             autoScrollEnabled: state.session.autoScrollEnabled,
             beats: state.session.beats,
             bpm: state.session.bpm,
+            beatOriginSec: state.session.beatOriginSec,
             clips: state.session.clips,
             clipFormantStatus: state.session.clipFormantStatus,
             clipFormantToolWindow: state.session.clipFormantToolWindow,
