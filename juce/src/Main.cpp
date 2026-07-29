@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <cmath>
 #include <iostream>
 
 namespace hachi
@@ -14,6 +15,58 @@ public:
     void initialise(const juce::String& commandLine) override
     {
         auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        if (arguments.size() >= 4 && arguments[0] == "--smoke-mld5")
+        {
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            auto reader = std::unique_ptr<juce::AudioFormatReader>(
+                formats.createReaderFor(juce::File(arguments[1])));
+            if (reader == nullptr)
+            {
+                std::cerr << "error=audio_read" << std::endl;
+                setApplicationReturnValue(2);
+                juce::MessageManager::callAsync([this] { quit(); });
+                return;
+            }
+            const auto sourceDuration = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+            const auto shift = arguments[2].getFloatValue();
+            const auto stretch = juce::jlimit(0.25, 4.0, arguments[3].getDoubleValue());
+            backend::Mld5FileRenderRequest request;
+            request.sourceFile = juce::File(arguments[1]);
+            request.sourceDurationSeconds = sourceDuration;
+            request.targetDurationSeconds = sourceDuration * stretch;
+            const auto frames = std::max(2, static_cast<int>(std::ceil(
+                request.targetDurationSeconds / 0.005)) + 1);
+            request.sourceMidi.assign(static_cast<std::size_t>(frames), 60.0f);
+            request.targetMidi.assign(static_cast<std::size_t>(frames), 60.0f + shift);
+            cliRenderService = std::make_unique<backend::RenderService>();
+            cliRenderService->renderMld5File(std::move(request), [this](backend::RenderedAudio result)
+            {
+                if (result.buffer.getNumSamples() <= 0)
+                {
+                    std::cerr << "error=render_empty" << std::endl;
+                    setApplicationReturnValue(3);
+                }
+                else
+                {
+                    double squareSum = 0.0;
+                    for (int channel = 0; channel < result.buffer.getNumChannels(); ++channel)
+                        for (int sample = 0; sample < result.buffer.getNumSamples(); ++sample)
+                        {
+                            const auto value = result.buffer.getSample(channel, sample);
+                            squareSum += static_cast<double>(value) * value;
+                        }
+                    const auto count = std::max(1, result.buffer.getNumChannels()
+                                                  * result.buffer.getNumSamples());
+                    std::cout << "sample_rate=" << result.sampleRate << '\n'
+                              << "channels=" << result.buffer.getNumChannels() << '\n'
+                              << "samples=" << result.buffer.getNumSamples() << '\n'
+                              << "rms=" << std::sqrt(squareSum / static_cast<double>(count)) << std::endl;
+                }
+                quit();
+            });
+            return;
+        }
         if (arguments.size() >= 2 && arguments[0] == "--inspect-midi")
         {
             ProjectModel model;
@@ -74,6 +127,7 @@ public:
     void shutdown() override
     {
         mainWindow.reset();
+        cliRenderService.reset();
     }
 
     void systemRequestedQuit() override { quit(); }
@@ -106,6 +160,7 @@ private:
     };
 
     std::unique_ptr<MainWindow> mainWindow;
+    std::unique_ptr<backend::RenderService> cliRenderService;
 };
 }
 
