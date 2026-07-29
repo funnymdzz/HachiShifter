@@ -314,20 +314,25 @@ bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
     return false;
 }
 
+void MainComponent::openExternalFile(const juce::File& file)
+{
+    if (file.hasFileExtension("mpd"))
+        loadMelodyneFile(file);
+    else if (file.hasFileExtension("hspx"))
+    {
+        juce::String error;
+        if (!project.load(file, error)) showError(error);
+    }
+    else if (const auto duration = audio.probeDuration(file))
+        project.addAudioFile(file, *duration);
+}
+
 void MainComponent::filesDropped(const juce::StringArray& files, int, int)
 {
     for (const auto& path : files)
     {
         const juce::File file(path);
-        if (file.hasFileExtension("hspx"))
-        {
-            juce::String error;
-            if (!project.load(file, error)) showError(error);
-        }
-        else if (file.hasFileExtension("mpd"))
-            loadMelodyneFile(file);
-        else if (const auto duration = audio.probeDuration(file))
-            project.addAudioFile(file, *duration);
+        openExternalFile(file);
     }
 }
 

@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <iostream>
 
 namespace hachi
 {
@@ -10,9 +11,41 @@ public:
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
     bool moreThanOneInstanceAllowed() override { return true; }
 
-    void initialise(const juce::String&) override
+    void initialise(const juce::String& commandLine) override
     {
+        auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        if (arguments.size() >= 2 && arguments[0] == "--inspect-mpd")
+        {
+            juce::String error;
+            const auto imported = backend::MelodyneImporter::importProject(juce::File(arguments[1]), error);
+            if (!imported)
+            {
+                std::cerr << "error=" << error << std::endl;
+                setApplicationReturnValue(2);
+            }
+            else
+            {
+                std::size_t clips = 0;
+                std::size_t notes = 0;
+                for (const auto& track : imported->project.tracks)
+                {
+                    clips += track.clips.size();
+                    for (const auto& clip : track.clips) notes += clip.notes.size();
+                }
+                std::cout << "project=" << imported->project.name << '\n'
+                          << "bpm=" << imported->project.bpm << '\n'
+                          << "beat_origin=" << imported->project.beatOriginSeconds << '\n'
+                          << "tracks=" << imported->project.tracks.size() << '\n'
+                          << "clips=" << clips << '\n'
+                          << "notes=" << notes << '\n'
+                          << "missing=" << imported->missingFiles.size() << std::endl;
+            }
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         mainWindow = std::make_unique<MainWindow>(getApplicationName());
+        if (!arguments.isEmpty())
+            mainWindow->openFile(juce::File(arguments[0]));
     }
 
     void shutdown() override
@@ -40,6 +73,12 @@ private:
         {
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
         }
+
+        void openFile(const juce::File& file)
+        {
+            if (auto* component = dynamic_cast<MainComponent*>(getContentComponent()))
+                component->openExternalFile(file);
+        }
     };
 
     std::unique_ptr<MainWindow> mainWindow;
@@ -47,4 +86,3 @@ private:
 }
 
 START_JUCE_APPLICATION(hachi::HachiShifterApplication)
-
