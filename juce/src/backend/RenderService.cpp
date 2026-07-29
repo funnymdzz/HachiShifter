@@ -111,7 +111,7 @@ juce::AudioBuffer<float> stretchPreservingPitch(const juce::AudioBuffer<float>& 
                 if (destination >= static_cast<int>(output.size())) break;
                 const auto weight = window[static_cast<std::size_t>(index)];
                 output[static_cast<std::size_t>(destination)] += inverse[static_cast<std::size_t>(index)].real()
-                    / static_cast<float>(fftSize) * weight;
+                    * weight;
                 normalisation[static_cast<std::size_t>(destination)] += weight * weight;
             }
         }

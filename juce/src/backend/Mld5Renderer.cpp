@@ -102,7 +102,6 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
     std::vector<float> normalisation(output.size());
     const auto expectedScale = juce::MathConstants<float>::twoPi
         * static_cast<float>(hop) / static_cast<float>(fftSize);
-    const auto inverseScale = 1.0f / static_cast<float>(fftSize);
     auto smoothedFrameGain = 1.0f;
 
     for (int frame = 0; frame < frameCount; ++frame)
@@ -230,7 +229,7 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             if (destination >= static_cast<int>(output.size())) break;
             const auto weight = window[static_cast<std::size_t>(index)];
             output[static_cast<std::size_t>(destination)] += inverse[static_cast<std::size_t>(index)].real()
-                * inverseScale * weight;
+                * weight;
             normalisation[static_cast<std::size_t>(destination)] += weight * weight;
         }
         previousPhase = phase;
