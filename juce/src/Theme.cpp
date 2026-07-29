@@ -27,6 +27,8 @@ HachiLookAndFeel::HachiLookAndFeel()
     setColour(juce::ComboBox::outlineColourId, Palette::grid);
     setColour(juce::PopupMenu::backgroundColourId, Palette::panelRaised);
     setColour(juce::PopupMenu::textColourId, Palette::text);
+    setColour(juce::PopupMenu::highlightedBackgroundColourId, Palette::accent);
+    setColour(juce::PopupMenu::highlightedTextColourId, Palette::panel);
     setColour(juce::ScrollBar::thumbColourId, Palette::accent.withAlpha(0.75f));
 }
 

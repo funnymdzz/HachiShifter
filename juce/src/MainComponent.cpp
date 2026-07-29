@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <array>
 #include <cmath>
 
 namespace hachi
@@ -42,10 +43,6 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&timelineViewport),
                              static_cast<juce::Component*>(&pianoViewport) })
         addAndMakeVisible(*component);
-
-    menuBar.setColour(juce::MenuBarComponent::backgroundColourId, Palette::panel);
-    menuBar.setColour(juce::MenuBarComponent::textColourId, Palette::text);
-    menuBar.setColour(juce::MenuBarComponent::highlightColourId, Palette::accent);
 
     openButton.setComponentID("icon.open");
     saveButton.setComponentID("icon.save");
@@ -250,7 +247,7 @@ void MainComponent::refreshTexts()
 void MainComponent::refreshProjectControls()
 {
     const auto data = project.snapshot();
-    bpmEditor.setText(juce::String(data.bpm, data.bpm == std::floor(data.bpm) ? 0 : 2),
+    bpmEditor.setText(juce::String(data.bpm, std::abs(data.bpm - std::floor(data.bpm)) < 1.0e-9 ? 0 : 2),
                       juce::dontSendNotification);
     beatsEditor.setText(juce::String(data.numerator), juce::dontSendNotification);
     gridSelector.setText(data.gridDivision, juce::dontSendNotification);
@@ -259,11 +256,15 @@ void MainComponent::refreshProjectControls()
 
 void MainComponent::setToolButton(juce::Button& selected)
 {
-    for (auto* button : { static_cast<juce::Button*>(&noteEditButton), &wrenchButton, &drawButton,
-                          &lineButton, &connectButton })
+    const std::array<juce::Button*, 5> editTools {
+        &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton
+    };
+    for (auto* button : editTools)
         button->setToggleState(button == &selected, juce::dontSendNotification);
-    for (auto* button : { static_cast<juce::Button*>(&pitchParamButton), &breathParamButton,
-                          &tensionParamButton, &formantParamButton, &volumeParamButton })
+    const std::array<juce::Button*, 5> parameterTools {
+        &pitchParamButton, &breathParamButton, &tensionParamButton, &formantParamButton, &volumeParamButton
+    };
+    for (auto* button : parameterTools)
         if (&selected == button || &selected == &pitchParamButton || &selected == &breathParamButton
             || &selected == &tensionParamButton || &selected == &formantParamButton
             || &selected == &volumeParamButton)
