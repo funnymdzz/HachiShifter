@@ -107,12 +107,16 @@ pub fn render(
     let mut synthesis_phase = vec![0.0f32; half + 1];
     let mut previous_magnitude = vec![0.0f32; half + 1];
     let mut magnitude = vec![0.0f32; half + 1];
+    let mut harmonic_magnitude = vec![0.0f32; half + 1];
+    let mut residual_magnitude = vec![0.0f32; half + 1];
+    let mut mapped_magnitude = vec![0.0f32; half + 1];
     let mut phase = vec![0.0f32; half + 1];
     let mut log_envelope = vec![0.0f32; half + 1];
     let mut output = vec![0.0f32; input.len() + fft_size];
     let mut normalisation = vec![0.0f32; output.len()];
     let expected_scale = std::f32::consts::TAU * hop as f32 / fft_size as f32;
     let inverse_scale = 1.0 / fft_size as f32;
+    let mut smoothed_frame_gain = 1.0f32;
 
     for frame in 0..frame_count {
         let centre = frame * hop;
@@ -144,6 +148,26 @@ pub fn render(
             log_envelope[bin] = (prefix[end] - prefix[begin]) / (end - begin).max(1) as f32;
         }
 
+        // MULSS does not mix a complete unshifted FFT with a shifted FFT.
+        // Its component renderer accumulates a periodic component and an
+        // aperiodic/noise component independently, then applies an envelope
+        // ratio and a block normalisation.  Estimate that split in the power
+        // domain: spectral peaks are almost entirely periodic while valleys
+        // and the upper vocal band remain available to the residual channel.
+        // Keeping only this residual unshifted avoids the two simultaneous F0s
+        // (the dominant rough/chorused artefact in the previous implementation).
+        for bin in 0..=half {
+            let frequency = bin as f32 * sample_rate as f32 / fft_size as f32;
+            let high_band = ((frequency - 3_200.0) / 4_800.0).clamp(0.0, 1.0);
+            let residual_floor_ratio = 0.20 + 0.42 * high_band * high_band;
+            let envelope = log_envelope[bin].exp().max(1e-9);
+            let total_power = magnitude[bin] * magnitude[bin];
+            let residual_power = total_power
+                .min((envelope * residual_floor_ratio).powi(2));
+            residual_magnitude[bin] = residual_power.sqrt();
+            harmonic_magnitude[bin] = (total_power - residual_power).max(0.0).sqrt();
+        }
+
         let abs_sec = seg_start_sec + centre.min(input.len()) as f64 / sample_rate as f64;
         let clip_position = ((abs_sec - clip_start_sec).max(0.0) * 1000.0) / fp;
         let global_position = (abs_sec.max(0.0) * 1000.0) / fp;
@@ -172,6 +196,7 @@ pub fn render(
             .sum::<f32>() / energy;
         let transient = frame == 0 || positive_flux > 0.34;
         shifted.fill(Complex32::new(0.0, 0.0));
+        mapped_magnitude.fill(0.0);
 
         for output_bin in 0..=half {
             let source_bin_f = output_bin as f32 / ratio;
@@ -181,14 +206,15 @@ pub fn render(
             let source_left = source_bin_f.floor() as usize;
             let source_right = (source_left + 1).min(half);
             let fraction = source_bin_f - source_left as f32;
-            let source_magnitude = magnitude[source_left]
-                + (magnitude[source_right] - magnitude[source_left]) * fraction;
+            let source_harmonic = harmonic_magnitude[source_left]
+                + (harmonic_magnitude[source_right] - harmonic_magnitude[source_left])
+                    * fraction;
             let source_envelope = log_envelope[source_left]
                 + (log_envelope[source_right] - log_envelope[source_left]) * fraction;
             let target_envelope = log_envelope[output_bin];
             // Shift harmonic fine structure while leaving the vocal-tract
             // envelope at its original frequency.
-            let mapped_mag = source_magnitude
+            let mapped_mag = source_harmonic
                 * (target_envelope - source_envelope).exp().clamp(0.18, 5.5);
 
             let source_phase = phase[source_left]
@@ -205,24 +231,45 @@ pub fn render(
                 synthesis_phase[output_bin] =
                     wrap_phase(synthesis_phase[output_bin] + instantaneous);
             }
-            // Melodyne's tonal renderer keeps a separate aperiodic component.
-            // Reconstruct the same split from local spectral prominence: only
-            // harmonic fine structure is transposed, while valleys/noise keep
-            // their original instantaneous phase and frequency. This removes
-            // the metallic/raspy high-note artefact caused by shifting every
-            // FFT bin or locking a whole region to one peak.
-            let source_envelope_linear = source_envelope.exp().max(1e-9);
-            let prominence = source_magnitude / source_envelope_linear;
-            let harmonic_weight = ((prominence - 0.72) / 1.65).clamp(0.0, 1.0);
-            let harmonic_weight = if transient {
-                harmonic_weight * 0.35
+            mapped_magnitude[output_bin] = mapped_mag;
+        }
+
+        if transient {
+            // Attacks are rendered from the original aperiodic event while the
+            // component phases are reset above.  Pitching the broadband attack
+            // is both unnecessary and the main source of pre-echo/metallic
+            // consonants in a conventional phase vocoder.
+            shifted[..=half].copy_from_slice(&spectrum[..=half]);
+            smoothed_frame_gain = 1.0;
+        } else {
+            for output_bin in 0..=half {
+                let tonal = Complex32::from_polar(
+                    mapped_magnitude[output_bin],
+                    synthesis_phase[output_bin],
+                );
+                let residual_scale = residual_magnitude[output_bin]
+                    / magnitude[output_bin].max(1e-9);
+                let aperiodic = spectrum[output_bin] * residual_scale;
+                shifted[output_bin] = tonal + aperiodic;
+            }
+
+            // The reversed MULSS reconstruction finishes with a target/source
+            // envelope ratio followed by a block gain.  Match that behaviour
+            // so formant compensation cannot inflate a vowel by several dB.
+            let source_power = magnitude.iter().map(|value| value * value).sum::<f32>();
+            let rendered_power = shifted[..=half]
+                .iter()
+                .map(|value| value.norm_sqr())
+                .sum::<f32>();
+            let frame_gain = if source_power > 1e-12 && rendered_power > 1e-12 {
+                (source_power / rendered_power).sqrt().clamp(0.55, 1.8)
             } else {
-                harmonic_weight
+                1.0
             };
-            let harmonic = Complex32::from_polar(mapped_mag, synthesis_phase[output_bin]);
-            let aperiodic = spectrum[output_bin];
-            shifted[output_bin] =
-                harmonic * harmonic_weight + aperiodic * (1.0 - harmonic_weight);
+            smoothed_frame_gain = smoothed_frame_gain * 0.72 + frame_gain * 0.28;
+            for value in &mut shifted[..=half] {
+                *value *= smoothed_frame_gain;
+            }
         }
         for bin in 1..half {
             shifted[fft_size - bin] = shifted[bin].conj();
