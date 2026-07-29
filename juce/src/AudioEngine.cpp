@@ -35,6 +35,35 @@ std::optional<double> AudioEngine::probeDuration(const juce::File& file)
     return std::nullopt;
 }
 
+bool AudioEngine::setAuditionFile(const juce::File& file)
+{
+    auto reader = std::shared_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(file));
+    if (reader == nullptr) return false;
+    stop();
+    {
+        const juce::ScopedWriteLock guard(renderLock);
+        auditionReader = std::move(reader);
+        auditionScratch.setSize(juce::jlimit(1, 2, static_cast<int>(auditionReader->numChannels)), 2);
+        auditionMode.store(true);
+    }
+    timelineSample.store(0);
+    sendChangeMessage();
+    return true;
+}
+
+void AudioEngine::clearAuditionFile()
+{
+    stop();
+    {
+        const juce::ScopedWriteLock guard(renderLock);
+        auditionReader.reset();
+        auditionScratch.setSize(0, 0);
+        auditionMode.store(false);
+    }
+    timelineSample.store(0);
+    sendChangeMessage();
+}
+
 void AudioEngine::syncProject(const ProjectData& project)
 {
     const juce::ScopedWriteLock guard(renderLock);
@@ -92,6 +121,52 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     const auto blockStart = static_cast<double>(blockStartSample) / sampleRate;
     const auto blockEnd = static_cast<double>(blockStartSample + info.numSamples) / sampleRate;
     const juce::ScopedReadLock guard(renderLock);
+
+    if (auditionMode.load() && auditionReader != nullptr)
+    {
+        const auto readerRate = auditionReader->sampleRate;
+        const auto firstSourcePosition = blockStart * readerRate;
+        if (firstSourcePosition >= static_cast<double>(auditionReader->lengthInSamples))
+        {
+            playing.store(false);
+            return;
+        }
+        const auto availableSeconds = (static_cast<double>(auditionReader->lengthInSamples)
+                                       - firstSourcePosition) / readerRate;
+        const auto outputCount = juce::jlimit(0, info.numSamples,
+            static_cast<int>(std::ceil(availableSeconds * sampleRate)));
+        const auto lastSourcePosition = firstSourcePosition
+            + static_cast<double>(std::max(0, outputCount - 1)) * readerRate / sampleRate;
+        const auto sourceBase = static_cast<juce::int64>(std::floor(firstSourcePosition));
+        const auto sourceCount = std::max(2, static_cast<int>(std::ceil(lastSourcePosition))
+                                            - static_cast<int>(sourceBase) + 2);
+        const auto sourceChannels = juce::jlimit(1, 2, static_cast<int>(auditionReader->numChannels));
+        auditionScratch.setSize(sourceChannels, sourceCount, false, false, true);
+        auditionScratch.clear();
+        auditionReader->read(&auditionScratch, 0, sourceCount, sourceBase, true, sourceChannels > 1);
+        for (int outputOffset = 0; outputOffset < outputCount; ++outputOffset)
+        {
+            const auto sourcePosition = firstSourcePosition
+                + static_cast<double>(outputOffset) * readerRate / sampleRate - static_cast<double>(sourceBase);
+            const auto leftIndex = juce::jlimit(0, sourceCount - 1, static_cast<int>(std::floor(sourcePosition)));
+            const auto rightIndex = juce::jmin(sourceCount - 1, leftIndex + 1);
+            const auto fraction = static_cast<float>(sourcePosition - std::floor(sourcePosition));
+            const auto interpolate = [&, leftIndex, rightIndex, fraction](int channel)
+            {
+                const auto* samples = auditionScratch.getReadPointer(channel);
+                return samples[leftIndex] + (samples[rightIndex] - samples[leftIndex]) * fraction;
+            };
+            const auto left = interpolate(0);
+            const auto right = sourceChannels > 1 ? interpolate(1) : left;
+            info.buffer->setSample(0, info.startSample + outputOffset, left);
+            if (info.buffer->getNumChannels() > 1)
+                info.buffer->setSample(1, info.startSample + outputOffset, right);
+        }
+        timelineSample.fetch_add(outputCount);
+        if (outputCount < info.numSamples) playing.store(false);
+        sendChangeMessage();
+        return;
+    }
 
     for (auto& loaded : loadedClips)
     {

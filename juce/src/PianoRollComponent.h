@@ -2,6 +2,7 @@
 
 #include "ProjectModel.h"
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
@@ -16,11 +17,14 @@ public:
 
     void setPixelsPerSecond(float value);
     void setSourceEditMode(bool enabled);
+    void setFocusedClip(const juce::String& clipId);
     void setPlayheadSeconds(double seconds);
+    [[nodiscard]] int pixelForSeconds(double seconds) const;
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
+    std::function<void(double)> onSeek;
 
 private:
     struct NoteHit
@@ -34,6 +38,7 @@ private:
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void rebuildLayout();
+    void updateCanvasSize();
     void drawClipWaveforms(juce::Graphics& g);
     [[nodiscard]] float timeToX(double seconds) const;
     [[nodiscard]] float midiToY(float midi) const;
@@ -50,6 +55,7 @@ private:
     int highestMidi = 96;
     int lowestMidi = 24;
     bool sourceEditMode = false;
+    juce::String focusedClip;
     double playheadSeconds = 0.0;
     juce::String selectedNote;
     juce::String draggedNote;

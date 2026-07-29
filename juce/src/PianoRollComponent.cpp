@@ -27,6 +27,21 @@ void PianoRollComponent::setPixelsPerSecond(float value)
 void PianoRollComponent::setSourceEditMode(bool enabled)
 {
     sourceEditMode = enabled;
+    if (sourceEditMode && focusedClip.isEmpty())
+        for (const auto& track : snapshot.tracks)
+            if (!track.clips.empty())
+            {
+                focusedClip = track.clips.front().id;
+                break;
+            }
+    updateCanvasSize();
+    repaint();
+}
+
+void PianoRollComponent::setFocusedClip(const juce::String& clipId)
+{
+    focusedClip = clipId;
+    updateCanvasSize();
     repaint();
 }
 
@@ -34,6 +49,11 @@ void PianoRollComponent::setPlayheadSeconds(double seconds)
 {
     playheadSeconds = seconds;
     repaint();
+}
+
+int PianoRollComponent::pixelForSeconds(double seconds) const
+{
+    return static_cast<int>(std::round(timeToX(seconds)));
 }
 
 float PianoRollComponent::timeToX(double seconds) const
@@ -71,18 +91,41 @@ void PianoRollComponent::rebuildLayout()
             next.emplace(key, std::move(thumbnail));
         }
     thumbnails = std::move(next);
-    setSize(static_cast<int>(timeToX(snapshot.durationSeconds()) + 400.0f),
-            (highestMidi - lowestMidi + 1) * static_cast<int>(rowHeight));
+    updateCanvasSize();
     repaint();
+}
+
+void PianoRollComponent::updateCanvasSize()
+{
+    auto duration = snapshot.durationSeconds();
+    if (sourceEditMode)
+        for (const auto& track : snapshot.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == focusedClip)
+                    if (const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString());
+                        found != thumbnails.end())
+                        duration = std::max(duration, found->second->getTotalLength());
+    setSize(static_cast<int>(timeToX(duration) + 400.0f),
+            (highestMidi - lowestMidi + 1) * static_cast<int>(rowHeight));
 }
 
 void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
 {
+    juce::String focusedSource;
+    if (sourceEditMode)
+        for (const auto& track : snapshot.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == focusedClip)
+                    focusedSource = clip.sourceFile.getFullPathName();
+    bool sourceWaveformDrawn = false;
     for (const auto& track : snapshot.tracks)
     {
         if (!track.compose && !sourceEditMode) continue;
         for (const auto& clip : track.clips)
         {
+            if (sourceEditMode && (focusedSource.isEmpty()
+                                   || clip.sourceFile.getFullPathName() != focusedSource))
+                continue;
             const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString());
             if (found == thumbnails.end()) continue;
             float centreMidi = 60.0f;
@@ -98,16 +141,22 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
                 }
                 centreMidi = static_cast<float>(weighted / std::max(0.01, duration));
             }
+            if (sourceEditMode && sourceWaveformDrawn) continue;
             const auto start = sourceEditMode ? 0.0 : clip.startSeconds;
+            const auto sourceLength = sourceEditMode ? found->second->getTotalLength()
+                                                      : (clip.sourceDurationSeconds > 1.0e-9
+                                                          ? clip.sourceDurationSeconds : clip.durationSeconds);
             const auto waveformHeight = rowHeight * 10.0f;
             const juce::Rectangle<float> bounds(timeToX(start),
                 midiToY(centreMidi) + rowHeight * 0.5f - waveformHeight * 0.5f,
-                std::max(4.0f, static_cast<float>(clip.durationSeconds) * pixelsPerSecond), waveformHeight);
+                std::max(4.0f, static_cast<float>(sourceEditMode ? sourceLength : clip.durationSeconds)
+                                      * pixelsPerSecond), waveformHeight);
             g.setColour(Palette::textMuted.withAlpha(track.muted ? 0.12f : 0.34f));
-            found->second->drawChannels(g, bounds.toNearestInt(), clip.sourceOffsetSeconds,
-                                        clip.sourceOffsetSeconds
-                                            + (clip.sourceDurationSeconds > 1.0e-9
-                                                ? clip.sourceDurationSeconds : clip.durationSeconds), 1.0f);
+            found->second->drawChannels(g, bounds.toNearestInt(),
+                                        sourceEditMode ? 0.0 : clip.sourceOffsetSeconds,
+                                        sourceEditMode ? sourceLength : clip.sourceOffsetSeconds + sourceLength,
+                                        1.0f);
+            if (sourceEditMode) sourceWaveformDrawn = true;
         }
     }
 }
@@ -181,6 +230,12 @@ void PianoRollComponent::paint(juce::Graphics& g)
         Palette::accentLight, Palette::accent, Palette::noteFill,
         juce::Colour(0xff45b8aa), juce::Colour(0xffad7ad6)
     };
+    juce::String focusedSource;
+    if (sourceEditMode)
+        for (const auto& track : snapshot.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == focusedClip)
+                    focusedSource = clip.sourceFile.getFullPathName();
     std::size_t trackIndex = 0;
     for (const auto& track : snapshot.tracks)
     {
@@ -188,20 +243,28 @@ void PianoRollComponent::paint(juce::Graphics& g)
         const auto originalColour = contourColours[trackIndex % contourColours.size()];
         for (const auto& clip : track.clips)
         {
+            if (sourceEditMode && (focusedSource.isEmpty()
+                                   || clip.sourceFile.getFullPathName() != focusedSource))
+                continue;
+            const auto sourceScale = sourceEditMode && clip.durationSeconds > 1.0e-9
+                ? (clip.sourceDurationSeconds > 1.0e-9 ? clip.sourceDurationSeconds : clip.durationSeconds)
+                    / clip.durationSeconds
+                : 1.0;
             for (const auto& note : clip.notes)
             {
-                const auto absoluteStart = sourceEditMode ? note.startSeconds
+                const auto absoluteStart = sourceEditMode ? clip.sourceOffsetSeconds + note.startSeconds * sourceScale
                                                          : clip.startSeconds + note.startSeconds;
                 const auto x = timeToX(absoluteStart);
                 const auto y = midiToY(note.midiNote);
-                const auto width = std::max(5.0f, static_cast<float>(note.durationSeconds) * pixelsPerSecond);
+                const auto width = std::max(5.0f, static_cast<float>(note.durationSeconds * sourceScale)
+                                                     * pixelsPerSecond);
                 const auto bounds = juce::Rectangle<float>(x, y + 2.0f, width, rowHeight - 4.0f);
                 noteHits.push_back({ note.id, bounds, note.midiNote, note.startSeconds, note.durationSeconds });
 
                 g.setColour(Palette::noteFill.darker(0.18f));
                 g.fillRoundedRectangle(bounds, 4.0f);
                 const auto consonantWidth = juce::jlimit(0.0f, width,
-                    static_cast<float>(note.consonantSeconds) * pixelsPerSecond);
+                    static_cast<float>(note.consonantSeconds * sourceScale) * pixelsPerSecond);
                 g.setColour(Palette::noteLight.withAlpha(0.58f));
                 g.fillRoundedRectangle(bounds.withWidth(consonantWidth), 4.0f);
                 g.setColour(Palette::noteEdge);
@@ -224,7 +287,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 for (const auto marker : note.sibilantMarkers)
                 {
                     g.setColour(Palette::noteLight);
-                    const auto markerX = x + static_cast<float>(marker) * pixelsPerSecond;
+                    const auto markerX = x + static_cast<float>(marker * sourceScale) * pixelsPerSecond;
                     g.drawVerticalLine(static_cast<int>(markerX), bounds.getY(), bounds.getBottom());
                 }
 
@@ -240,7 +303,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
                         originalOpen = false;
                         continue;
                     }
-                    const auto px = x + static_cast<float>(point.timeSeconds) * pixelsPerSecond;
+                    const auto px = x + static_cast<float>(point.timeSeconds * sourceScale) * pixelsPerSecond;
                     const auto sourceCenter = note.sourceMidiCenter >= 0.0f
                         ? note.sourceMidiCenter : note.midiNote;
                     const auto originalPitch = sourceCenter + point.relativeCents / 100.0f;
@@ -313,6 +376,8 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         }
     selectedNote.clear();
     repaint();
+    if (onSeek)
+        onSeek(std::max(0.0, static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond));
 }
 
 void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)

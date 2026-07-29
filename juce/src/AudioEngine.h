@@ -20,6 +20,8 @@ public:
 
     void syncProject(const ProjectData& project);
     [[nodiscard]] std::optional<double> probeDuration(const juce::File& file);
+    bool setAuditionFile(const juce::File& file);
+    void clearAuditionFile();
 
     void play();
     void stop();
@@ -46,6 +48,9 @@ private:
     juce::AudioSourcePlayer sourcePlayer;
     juce::ReadWriteLock renderLock;
     std::vector<std::unique_ptr<LoadedClip>> loadedClips;
+    std::shared_ptr<juce::AudioFormatReader> auditionReader;
+    juce::AudioBuffer<float> auditionScratch;
+    std::atomic<bool> auditionMode { false };
     std::atomic<bool> playing { false };
     std::atomic<juce::int64> timelineSample { 0 };
     std::atomic<double> outputSampleRate { 48'000.0 };

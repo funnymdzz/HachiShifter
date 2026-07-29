@@ -22,7 +22,9 @@ public:
     void mouseUp(const juce::MouseEvent& event) override;
     void setPixelsPerSecond(float value);
     void setPlayheadSeconds(double seconds);
+    [[nodiscard]] int pixelForSeconds(double seconds) const;
     std::function<void(double)> onSeek;
+    std::function<void(const juce::String&)> onClipSelected;
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -44,6 +46,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> thumbnails;
     std::vector<ClipHit> clipHits;
     float pixelsPerSecond = 140.0f;
+    static constexpr int rulerHeight = 24;
     int rowHeight = 96;
     double playheadSeconds = 0.0;
     juce::String selectedClip;

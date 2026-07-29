@@ -206,6 +206,8 @@ MainComponent::MainComponent()
         pianoRoll.setPixelsPerSecond(zoom);
     };
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
+    timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
+    pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
 
     openButton.onClick = [this] { openProject(); };
     saveButton.onClick = [this] { saveProject(); };
@@ -522,12 +524,30 @@ void MainComponent::timerCallback()
 
     if (!syncingScroll)
     {
+        if (audio.isPlaying() && !sourceEditActive)
+        {
+            const auto playheadX = timeline.pixelForSeconds(audio.position());
+            const auto viewLeft = timelineViewport.getViewPositionX();
+            const auto viewWidth = timelineViewport.getViewWidth();
+            if (playheadX < viewLeft + 20 || playheadX > viewLeft + viewWidth - 56)
+                timelineViewport.setViewPosition(std::max(0, playheadX - viewWidth / 4),
+                                                 timelineViewport.getViewPositionY());
+        }
+        if (audio.isPlaying() && sourceEditActive)
+        {
+            const auto playheadX = pianoRoll.pixelForSeconds(audio.position());
+            const auto viewLeft = pianoViewport.getViewPositionX();
+            const auto viewWidth = pianoViewport.getViewWidth();
+            if (playheadX < viewLeft + 58 || playheadX > viewLeft + viewWidth - 56)
+                pianoViewport.setViewPosition(std::max(0, playheadX - viewWidth / 4),
+                                              pianoViewport.getViewPositionY());
+        }
         const auto timelineX = timelineViewport.getViewPositionX();
         const auto pianoX = pianoViewport.getViewPositionX();
         syncingScroll = true;
-        if (timelineX != lastTimelineX)
+        if (!sourceEditActive && timelineX != lastTimelineX)
             pianoViewport.setViewPosition(timelineX, pianoViewport.getViewPositionY());
-        else if (pianoX != lastPianoX)
+        else if (!sourceEditActive && pianoX != lastPianoX)
             timelineViewport.setViewPosition(pianoX, timelineViewport.getViewPositionY());
         lastTimelineX = timelineViewport.getViewPositionX();
         lastPianoX = pianoViewport.getViewPositionX();
@@ -545,10 +565,63 @@ void MainComponent::timerCallback()
 
 void MainComponent::setSourceEditMode(bool enabled)
 {
+    sourceEditActive = enabled;
+    if (enabled && selectedClipId.isEmpty())
+    {
+        const auto data = project.snapshot();
+        for (const auto& track : data.tracks)
+            if (!track.clips.empty())
+            {
+                selectedClipId = track.clips.front().id;
+                break;
+            }
+    }
     pianoRoll.setSourceEditMode(enabled);
+    pianoRoll.setFocusedClip(selectedClipId);
+    if (enabled)
+    {
+        const auto data = project.snapshot();
+        for (const auto& track : data.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == selectedClipId)
+                {
+                    audio.setAuditionFile(clip.sourceFile);
+                    pianoViewport.setViewPosition(std::max(0, pianoRoll.pixelForSeconds(clip.sourceOffsetSeconds)
+                                                              - pianoViewport.getViewWidth() / 4),
+                                                  pianoViewport.getViewPositionY());
+                }
+    }
+    else
+    {
+        audio.clearAuditionFile();
+        pianoViewport.setViewPosition(timelineViewport.getViewPositionX(), pianoViewport.getViewPositionY());
+    }
     noteEditButton.setToggleState(!enabled, juce::dontSendNotification);
     wrenchButton.setToggleState(enabled, juce::dontSendNotification);
     sourceEditHint.setVisible(enabled);
+}
+
+void MainComponent::focusClip(const juce::String& clipId)
+{
+    selectedClipId = clipId;
+    pianoRoll.setFocusedClip(clipId);
+    if (!sourceEditActive) return;
+    if (clipId.isEmpty())
+    {
+        audio.clearAuditionFile();
+        return;
+    }
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.id == clipId)
+            {
+                audio.setAuditionFile(clip.sourceFile);
+                pianoViewport.setViewPosition(std::max(0, pianoRoll.pixelForSeconds(clip.sourceOffsetSeconds)
+                                                          - pianoViewport.getViewWidth() / 4),
+                                              pianoViewport.getViewPositionY());
+                return;
+            }
 }
 
 juce::StringArray MainComponent::getMenuBarNames()

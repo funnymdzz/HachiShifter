@@ -33,6 +33,11 @@ float TimelineComponent::timeToX(double seconds) const
     return static_cast<float>(seconds) * pixelsPerSecond;
 }
 
+int TimelineComponent::pixelForSeconds(double seconds) const
+{
+    return static_cast<int>(std::round(timeToX(seconds)));
+}
+
 void TimelineComponent::setPixelsPerSecond(float value)
 {
     pixelsPerSecond = juce::jlimit(40.0f, 600.0f, value);
@@ -84,7 +89,7 @@ void TimelineComponent::rebuild()
         }
     thumbnails = std::move(next);
     setSize(static_cast<int>(timeToX(snapshot.durationSeconds()) + 400.0f),
-            std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+            rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
     repaint();
 }
 
@@ -92,6 +97,10 @@ void TimelineComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Palette::base);
     clipHits.clear();
+    g.setColour(Palette::background);
+    g.fillRect(0, 0, getWidth(), rulerHeight);
+    g.setColour(Palette::border);
+    g.drawHorizontalLine(rulerHeight - 1, 0.0f, static_cast<float>(getWidth()));
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
     const auto firstBeat = static_cast<int>(std::floor(-snapshot.beatOriginSeconds / secondsPerBeat)) - 1;
     for (int beat = firstBeat;; ++beat)
@@ -109,14 +118,14 @@ void TimelineComponent::paint(juce::Graphics& g)
             g.setColour(Palette::textMuted);
             g.setFont(10.0f);
             g.drawText(juce::String(beat / std::max(1, snapshot.numerator) + 1) + ".1",
-                       static_cast<int>(x) + 4, 2, 42, 14, juce::Justification::left);
+                       static_cast<int>(x) + 4, 3, 42, 16, juce::Justification::left);
         }
     }
 
     for (std::size_t trackIndex = 0; trackIndex < snapshot.tracks.size(); ++trackIndex)
     {
         const auto& track = snapshot.tracks[trackIndex];
-        const auto row = juce::Rectangle<int>(0, static_cast<int>(trackIndex) * rowHeight,
+        const auto row = juce::Rectangle<int>(0, rulerHeight + static_cast<int>(trackIndex) * rowHeight,
                                                getWidth(), rowHeight);
         g.setColour(Palette::grid);
         g.drawHorizontalLine(row.getBottom() - 1, 0.0f, static_cast<float>(getWidth()));
@@ -198,6 +207,7 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
         if (it->bounds.contains(event.position))
         {
             selectedClip = it->id;
+            if (onClipSelected) onClipSelected(selectedClip);
             draggedClip = it->id;
             draggedClipStart = it->startSeconds;
             dragAnchorX = event.position.x;
@@ -205,6 +215,7 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
             return;
         }
     selectedClip.clear();
+    if (onClipSelected) onClipSelected({});
     repaint();
     if (onSeek) onSeek(std::max(0.0, static_cast<double>(event.position.x) / pixelsPerSecond));
 }

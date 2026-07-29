@@ -9,7 +9,7 @@ TrackListComponent::TrackListComponent(ProjectModel& modelToUse, I18n& stringsTo
     : model(modelToUse), strings(stringsToUse), snapshot(model.snapshot())
 {
     model.addChangeListener(this);
-    setSize(226, std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+    setSize(226, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
 }
 
 TrackListComponent::~TrackListComponent()
@@ -20,13 +20,17 @@ TrackListComponent::~TrackListComponent()
 void TrackListComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     snapshot = model.snapshot();
-    setSize(226, std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+    setSize(226, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
     repaint();
 }
 
 void TrackListComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Palette::panel);
+    g.setColour(Palette::background);
+    g.fillRect(0, 0, getWidth(), rulerHeight);
+    g.setColour(Palette::border);
+    g.drawHorizontalLine(rulerHeight - 1, 0.0f, static_cast<float>(getWidth()));
     if (snapshot.tracks.empty())
     {
         g.setColour(Palette::textMuted);
@@ -42,7 +46,8 @@ void TrackListComponent::paint(juce::Graphics& g)
     for (std::size_t index = 0; index < snapshot.tracks.size(); ++index)
     {
         const auto& track = snapshot.tracks[index];
-        auto row = juce::Rectangle<int>(0, static_cast<int>(index) * rowHeight, getWidth(), rowHeight);
+        auto row = juce::Rectangle<int>(0, rulerHeight + static_cast<int>(index) * rowHeight,
+                                        getWidth(), rowHeight);
         g.setColour(index % 2 == 0 ? Palette::panel : Palette::panelRaised.darker(0.1f));
         g.fillRect(row);
         g.setColour(Palette::grid);
@@ -94,10 +99,11 @@ void TrackListComponent::paint(juce::Graphics& g)
 
 void TrackListComponent::mouseDown(const juce::MouseEvent& event)
 {
-    const auto index = event.y / rowHeight;
+    if (event.y < rulerHeight) return;
+    const auto index = (event.y - rulerHeight) / rowHeight;
     if (index < 0 || index >= static_cast<int>(snapshot.tracks.size())) return;
     const auto& track = snapshot.tracks[static_cast<std::size_t>(index)];
-    const auto localY = event.y - index * rowHeight;
+    const auto localY = event.y - rulerHeight - index * rowHeight;
     if (localY >= 34 && localY < 56 && event.x >= 10 && event.x < 38)
         model.setTrackCompose(track.id, !track.compose);
     else if (localY >= 34 && localY < 56 && event.x >= 43 && event.x < 71)

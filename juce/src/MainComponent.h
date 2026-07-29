@@ -47,6 +47,7 @@ private:
     void importMelodyne();
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);
+    void focusClip(const juce::String& clipId);
     void setSourceEditMode(bool enabled);
     void showError(const juce::String& message);
 
@@ -110,6 +111,8 @@ private:
     int lastTrackY = 0;
     bool syncingScroll = false;
     bool pianoInitialScrollSet = false;
+    bool sourceEditActive = false;
+    juce::String selectedClipId;
     bool draggingPanelSplitter = false;
     int panelSplitterDragScreenY = 0;
     float panelSplitterDragRatio = 0.60f;

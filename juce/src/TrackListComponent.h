@@ -24,6 +24,7 @@ private:
     ProjectModel& model;
     I18n& strings;
     ProjectData snapshot;
+    static constexpr int rulerHeight = 24;
     int rowHeight = 96;
     juce::String volumeDragTrack;
     int volumeDragRow = -1;
