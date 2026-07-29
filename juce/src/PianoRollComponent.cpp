@@ -119,7 +119,7 @@ void PianoRollComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 
 void PianoRollComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(Palette::background);
+    g.fillAll(Palette::graphBackground);
     noteHits.clear();
 
     for (int midi = lowestMidi; midi <= highestMidi; ++midi)

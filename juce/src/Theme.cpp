@@ -3,8 +3,14 @@
 namespace hachi
 {
 const juce::Colour Palette::background  { 0xff353535 };
+const juce::Colour Palette::base        { 0xff2d2d2d };
 const juce::Colour Palette::panel       { 0xff2a2a2a };
 const juce::Colour Palette::panelRaised { 0xff404040 };
+const juce::Colour Palette::button      { 0xff3d3d3d };
+const juce::Colour Palette::buttonHover { 0xff484848 };
+const juce::Colour Palette::border      { 0xff505050 };
+const juce::Colour Palette::graphBackground { 0xff232323 };
+const juce::Colour Palette::clipBackground  { 0xff343434 };
 const juce::Colour Palette::grid        { 0xff373737 };
 const juce::Colour Palette::beatGrid    { 0xff4a4a4a };
 const juce::Colour Palette::accent      { 0xff7f69ca };
@@ -16,27 +22,31 @@ const juce::Colour Palette::pitchLine   { 0xfff4f4f4 };
 const juce::Colour Palette::playhead    { 0xfff05a5a };
 const juce::Colour Palette::text        { 0xffd0d0d0 };
 const juce::Colour Palette::textMuted   { 0xff909090 };
+const juce::Colour Palette::scrollThumb { 0xff555555 };
 
 HachiLookAndFeel::HachiLookAndFeel()
 {
     setColour(juce::ResizableWindow::backgroundColourId, Palette::background);
     setColour(juce::Label::textColourId, Palette::text);
     setColour(juce::TextButton::textColourOffId, Palette::text);
-    setColour(juce::ComboBox::backgroundColourId, Palette::panelRaised);
+    setColour(juce::ComboBox::backgroundColourId, Palette::base);
     setColour(juce::ComboBox::textColourId, Palette::text);
-    setColour(juce::ComboBox::outlineColourId, Palette::grid);
+    setColour(juce::ComboBox::outlineColourId, Palette::border);
     setColour(juce::PopupMenu::backgroundColourId, Palette::panelRaised);
     setColour(juce::PopupMenu::textColourId, Palette::text);
     setColour(juce::PopupMenu::highlightedBackgroundColourId, Palette::accent);
     setColour(juce::PopupMenu::highlightedTextColourId, Palette::panel);
-    setColour(juce::ScrollBar::thumbColourId, Palette::accent.withAlpha(0.75f));
+    setColour(juce::ScrollBar::backgroundColourId, Palette::base);
+    setColour(juce::ScrollBar::trackColourId, Palette::base);
+    setColour(juce::ScrollBar::thumbColourId, Palette::scrollThumb);
 }
 
 void HachiLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& button,
                                             const juce::Colour&, bool highlighted, bool down)
 {
-    auto colour = button.getToggleState() ? Palette::accent : Palette::panelRaised;
-    if (highlighted) colour = colour.brighter(0.12f);
+    auto colour = button.getToggleState() ? Palette::accent : Palette::button;
+    if (highlighted) colour = button.getToggleState() ? Palette::accent.brighter(0.12f)
+                                                       : Palette::buttonHover;
     if (down) colour = colour.darker(0.15f);
     g.setColour(colour);
     g.fillRoundedRectangle(button.getLocalBounds().toFloat().reduced(1.0f), 4.0f);
@@ -117,8 +127,10 @@ void HachiLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, bo
                                     int, int, int, int, juce::ComboBox&)
 {
     auto bounds = juce::Rectangle<float>(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height));
-    g.setColour(Palette::panelRaised);
+    g.setColour(Palette::base);
     g.fillRoundedRectangle(bounds.reduced(1.0f), 4.0f);
+    g.setColour(Palette::border);
+    g.drawRoundedRectangle(bounds.reduced(1.0f), 4.0f, 1.0f);
     g.setColour(Palette::accentLight);
     const auto x = static_cast<float>(width - 14);
     const auto y = static_cast<float>(height) * 0.5f;

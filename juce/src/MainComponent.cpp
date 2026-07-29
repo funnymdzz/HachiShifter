@@ -322,7 +322,7 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillAll(Palette::background);
     g.setColour(Palette::panel);
     g.fillRect(0, 0, getWidth(), 61);
-    g.setColour(Palette::grid);
+    g.setColour(Palette::border);
     g.drawHorizontalLine(60, 0.0f, static_cast<float>(getWidth()));
 }
 
@@ -416,9 +416,11 @@ void MainComponent::resized()
 
     auto footer = area.removeFromBottom(24);
     statusLabel.setBounds(footer.reduced(8, 0));
-    auto upper = area.removeFromTop(juce::jmax(190, static_cast<int>(area.getHeight() * 0.46f)));
+    auto upper = area.removeFromTop(juce::jmax(190, static_cast<int>(area.getHeight() * 0.60f)));
     trackViewport.setBounds(upper.removeFromLeft(226));
     timelineViewport.setBounds(upper);
+
+    area.removeFromTop(8);
 
     auto parameterHeader = area.removeFromTop(36).reduced(4, 3);
     auto takeParameter = [&parameterHeader](juce::Component& component, int width)
@@ -665,8 +667,10 @@ void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResul
                                           strings.text("mpd.compose.description"),
                                           juce::MessageBoxIconType::QuestionIcon);
     dialog->addCustomComponent(selector);
-    dialog->addButton(strings.text("dialog.import"), 1, juce::KeyPress::returnKey);
-    dialog->addButton(strings.text("dialog.cancel"), 0, juce::KeyPress::escapeKey);
+    dialog->addButton(strings.text("dialog.import"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
     juce::Component::SafePointer<MainComponent> safe(this);
     dialog->enterModalState(true,
         juce::ModalCallbackFunction::create([safe, dialog, selector, state](int result)

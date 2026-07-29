@@ -82,7 +82,7 @@ void TimelineComponent::rebuild()
 
 void TimelineComponent::paint(juce::Graphics& g)
 {
-    g.fillAll(Palette::background.darker(0.08f));
+    g.fillAll(Palette::base);
     clipHits.clear();
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
     const auto firstBeat = static_cast<int>(std::floor(-snapshot.beatOriginSeconds / secondsPerBeat)) - 1;
@@ -120,7 +120,8 @@ void TimelineComponent::paint(juce::Graphics& g)
                                                   std::max(4.0f, timeToX(clip.durationSeconds)),
                                                   static_cast<float>(rowHeight - 25));
             clipHits.push_back({ clip.id, bounds, clip.startSeconds });
-            g.setColour((track.muted || clip.muted ? Palette::textMuted : colour).withAlpha(0.36f));
+            g.setColour(track.muted || clip.muted ? Palette::clipBackground.withAlpha(0.55f)
+                                                  : Palette::clipBackground);
             g.fillRect(bounds);
             g.setColour(colour.withAlpha(0.82f));
             g.drawRect(bounds, 1.0f);

@@ -7,8 +7,14 @@ namespace hachi
 struct Palette
 {
     static const juce::Colour background;
+    static const juce::Colour base;
     static const juce::Colour panel;
     static const juce::Colour panelRaised;
+    static const juce::Colour button;
+    static const juce::Colour buttonHover;
+    static const juce::Colour border;
+    static const juce::Colour graphBackground;
+    static const juce::Colour clipBackground;
     static const juce::Colour grid;
     static const juce::Colour beatGrid;
     static const juce::Colour accent;
@@ -20,6 +26,7 @@ struct Palette
     static const juce::Colour playhead;
     static const juce::Colour text;
     static const juce::Colour textMuted;
+    static const juce::Colour scrollThumb;
 };
 
 class HachiLookAndFeel final : public juce::LookAndFeel_V4
