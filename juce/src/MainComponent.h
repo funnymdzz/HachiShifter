@@ -43,6 +43,7 @@ private:
     void importAudio();
     void importMelodyne();
     void loadMelodyneFile(const juce::File& file);
+    void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);
     void setSourceEditMode(bool enabled);
     void showError(const juce::String& message);
 

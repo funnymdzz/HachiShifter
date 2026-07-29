@@ -62,7 +62,8 @@ void TimelineComponent::rebuild()
     for (const auto& track : snapshot.tracks)
         for (const auto& clip : track.clips)
         {
-            const auto key = clip.id.toStdString();
+            const auto key = clip.sourceFile.getFullPathName().toStdString();
+            if (next.contains(key)) continue;
             if (const auto found = thumbnails.find(key); found != thumbnails.end())
             {
                 next.emplace(key, std::move(found->second));
@@ -124,7 +125,7 @@ void TimelineComponent::paint(juce::Graphics& g)
             g.setColour(colour.withAlpha(0.82f));
             g.drawRect(bounds, 1.0f);
 
-            if (const auto found = thumbnails.find(clip.id.toStdString()); found != thumbnails.end())
+            if (const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString()); found != thumbnails.end())
             {
                 g.setColour(colour.brighter(0.65f).withAlpha(track.muted ? 0.25f : 0.78f));
                 found->second->drawChannels(g, bounds.withTrimmedTop(17.0f).reduced(1.0f).toNearestInt(),

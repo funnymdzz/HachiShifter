@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 
 namespace hachi
 {
@@ -43,6 +44,7 @@ void AudioEngine::syncProject(const ProjectData& project)
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
 {
     loadedClips.clear();
+    std::unordered_map<std::string, std::shared_ptr<juce::AudioFormatReader>> readers;
     const auto anySolo = std::any_of(project.tracks.begin(), project.tracks.end(),
                                      [](const auto& track) { return track.solo; });
     for (const auto& track : project.tracks)
@@ -51,13 +53,19 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         for (const auto& clip : track.clips)
         {
             if (clip.muted || !clip.sourceFile.existsAsFile()) continue;
-            auto reader = std::unique_ptr<juce::AudioFormatReader>(formatManager.createReaderFor(clip.sourceFile));
-            if (reader == nullptr) continue;
+            const auto key = clip.sourceFile.getFullPathName().toStdString();
+            auto reader = readers[key];
+            if (reader == nullptr)
+            {
+                reader.reset(formatManager.createReaderFor(clip.sourceFile));
+                if (reader == nullptr) continue;
+                readers[key] = reader;
+            }
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
             loaded->trackGain = track.volume;
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
-            loaded->reader = std::move(reader);
+            loaded->reader = reader;
             loadedClips.push_back(std::move(loaded));
         }
     }

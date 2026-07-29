@@ -58,7 +58,8 @@ void PianoRollComponent::rebuildLayout()
     for (const auto& track : snapshot.tracks)
         for (const auto& clip : track.clips)
         {
-            const auto key = clip.id.toStdString();
+            const auto key = clip.sourceFile.getFullPathName().toStdString();
+            if (next.contains(key)) continue;
             if (const auto found = thumbnails.find(key); found != thumbnails.end())
             {
                 next.emplace(key, std::move(found->second));
@@ -82,7 +83,7 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
         if (!track.compose && !sourceEditMode) continue;
         for (const auto& clip : track.clips)
         {
-            const auto found = thumbnails.find(clip.id.toStdString());
+            const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString());
             if (found == thumbnails.end()) continue;
             float centreMidi = 60.0f;
             if (!clip.notes.empty())

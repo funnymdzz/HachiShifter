@@ -4,6 +4,52 @@
 
 namespace hachi
 {
+namespace
+{
+class ComposeTrackSelector final : public juce::Component
+{
+public:
+    ComposeTrackSelector(const std::vector<TrackData>& tracks, const I18n& strings)
+    {
+        viewport.setViewedComponent(&content, false);
+        viewport.setScrollBarsShown(true, false);
+        viewport.setScrollBarThickness(9);
+        addAndMakeVisible(viewport);
+        for (const auto& track : tracks)
+        {
+            auto toggle = std::make_unique<juce::ToggleButton>();
+            toggle->setButtonText(track.name + "  ·  "
+                                  + strings.text(track.compose ? "track.compose" : "track.audio"));
+            toggle->setToggleState(track.compose, juce::dontSendNotification);
+            content.addAndMakeVisible(*toggle);
+            toggles.push_back(std::move(toggle));
+        }
+        setSize(430, juce::jlimit(56, 320, static_cast<int>(toggles.size()) * rowHeight + 4));
+    }
+
+    bool isCompose(std::size_t index) const
+    {
+        return index < toggles.size() && toggles[index]->getToggleState();
+    }
+
+    void resized() override
+    {
+        viewport.setBounds(getLocalBounds());
+        const auto contentHeight = std::max(getHeight(), static_cast<int>(toggles.size()) * rowHeight + 4);
+        content.setSize(std::max(1, getWidth() - viewport.getScrollBarThickness()), contentHeight);
+        for (std::size_t index = 0; index < toggles.size(); ++index)
+            toggles[index]->setBounds(6, 2 + static_cast<int>(index) * rowHeight,
+                                      content.getWidth() - 12, rowHeight);
+    }
+
+private:
+    static constexpr int rowHeight = 28;
+    juce::Viewport viewport;
+    juce::Component content;
+    std::vector<std::unique_ptr<juce::ToggleButton>> toggles;
+};
+}
+
 MainComponent::MainComponent()
     : menuBar(this), progressBar(progress), trackList(project, strings), timeline(project), pianoRoll(project)
 {
@@ -606,12 +652,38 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                 safe->showError(safe->strings.text("error.mpd") + "\n" + error);
                 return;
             }
-            safe->project.replace(std::move(imported->project));
-            if (!imported->missingFiles.isEmpty())
-                safe->showError(safe->strings.text("warning.missingMedia") + "\n"
-                                + imported->missingFiles.joinIntoString("\n"));
+            safe->presentMelodyneComposeSelection(std::move(*imported));
         });
     });
+}
+
+void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResult imported)
+{
+    auto state = std::make_shared<backend::MelodyneImportResult>(std::move(imported));
+    auto* selector = new ComposeTrackSelector(state->project.tracks, strings);
+    auto* dialog = new juce::AlertWindow(strings.text("mpd.compose.title"),
+                                          strings.text("mpd.compose.description"),
+                                          juce::MessageBoxIconType::QuestionIcon);
+    dialog->addCustomComponent(selector);
+    dialog->addButton(strings.text("dialog.import"), 1, juce::KeyPress::returnKey);
+    dialog->addButton(strings.text("dialog.cancel"), 0, juce::KeyPress::escapeKey);
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create([safe, dialog, selector, state](int result)
+        {
+            if (safe != nullptr && result == 1)
+            {
+                for (std::size_t index = 0; index < state->project.tracks.size(); ++index)
+                    state->project.tracks[index].compose = selector->isCompose(index);
+                safe->project.replace(std::move(state->project));
+                if (!state->missingFiles.isEmpty())
+                    safe->showError(safe->strings.text("warning.missingMedia") + "\n"
+                                    + state->missingFiles.joinIntoString("\n"));
+            }
+            dialog->removeCustomComponent(0);
+            delete selector;
+            delete dialog;
+        }), false);
 }
 
 void MainComponent::showError(const juce::String& message)

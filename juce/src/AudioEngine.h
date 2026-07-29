@@ -34,7 +34,7 @@ private:
         ClipData clip;
         float trackGain = 1.0f;
         float trackPan = 0.0f;
-        std::unique_ptr<juce::AudioFormatReader> reader;
+        std::shared_ptr<juce::AudioFormatReader> reader;
         juce::AudioBuffer<float> scratch;
     };
 

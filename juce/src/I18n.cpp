@@ -65,7 +65,11 @@ const std::unordered_map<std::string, Row> strings {
     { "mpd.stage.decompress_graph", { "解压工程数据", "解壓工程資料", "データを展開", "프로젝트 데이터 압축 해제", "Decompressing graph" } },
     { "mpd.stage.read_tracks", { "读取轨道和 BPM", "讀取軌道與 BPM", "トラックとBPMを読込", "트랙 및 BPM 읽기", "Reading tracks and BPM" } },
     { "mpd.stage.create_tracks", { "恢复音符和编辑", "還原音符與編輯", "ノートと編集を復元", "노트 및 편집 복원", "Restoring notes and edits" } },
-    { "mpd.stage.complete", { "完成", "完成", "完了", "완료", "Complete" } }
+    { "mpd.stage.complete", { "完成", "完成", "完了", "완료", "Complete" } },
+    { "mpd.compose.title", { "选择 Compose 轨道", "選擇 Compose 軌道", "Composeトラックを選択", "Compose 트랙 선택", "Choose Compose Tracks" } },
+    { "mpd.compose.description", { "勾选需要恢复 Melodyne 音符和修音的旋律轨道；其余轨道按普通音频播放。", "勾選需要還原 Melodyne 音符與修音的旋律軌道；其餘軌道作為一般音訊播放。", "Melodyneのノート編集を復元する旋律トラックを選択します。その他は通常の音声トラックとして扱います。", "Melodyne 노트 편집을 복원할 멜로디 트랙을 선택하세요. 나머지는 일반 오디오 트랙으로 처리됩니다.", "Select melodic tracks whose Melodyne note edits should be restored. Other tracks remain regular audio tracks." } },
+    { "dialog.import", { "导入", "匯入", "読み込む", "가져오기", "Import" } },
+    { "dialog.cancel", { "取消", "取消", "キャンセル", "취소", "Cancel" } }
 };
 }
 

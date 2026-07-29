@@ -20,6 +20,8 @@ juce_add_gui_app(HachiShifterNext
     COMPANY_NAME "funnymdzz"
     BUNDLE_ID "io.github.funnymdzz.hachishifter.next"
     VERSION "${PROJECT_VERSION}"
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon-small.png"
     NEEDS_CURL FALSE
     NEEDS_WEB_BROWSER FALSE
 )
