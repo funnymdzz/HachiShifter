@@ -26,6 +26,7 @@ struct PitchPoint
 {
     double timeSeconds = 0.0;
     float relativeCents = 0.0f;
+    float withoutVibratoCents = 0.0f;
     bool voiced = true;
 };
 
@@ -36,6 +37,7 @@ struct NoteData
     double durationSeconds = 0.25;
     double consonantSeconds = 0.04;
     float midiNote = 60.0f;
+    float sourceMidiCenter = -1.0f;
     float modulation = 1.0f;
     float drift = 1.0f;
     float attackSpeed = 1.0f;
@@ -51,6 +53,7 @@ struct ClipData
     juce::File sourceFile;
     double startSeconds = 0.0;
     double sourceOffsetSeconds = 0.0;
+    double sourceDurationSeconds = 0.0;
     double durationSeconds = 1.0;
     double fadeInSeconds = 0.0;
     double fadeOutSeconds = 0.0;

@@ -325,7 +325,7 @@ void MainComponent::filesDropped(const juce::StringArray& files, int, int)
             if (!project.load(file, error)) showError(error);
         }
         else if (file.hasFileExtension("mpd"))
-            showError(strings.text("error.mpd"));
+            loadMelodyneFile(file);
         else if (const auto duration = audio.probeDuration(file))
             project.addAudioFile(file, *duration);
     }
@@ -566,9 +566,47 @@ void MainComponent::importMelodyne()
     chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
         [this](const juce::FileChooser& selected)
         {
-            if (selected.getResult() != juce::File{})
-                showError(strings.text("error.mpd"));
+            const auto file = selected.getResult();
+            if (file == juce::File{}) return;
+            loadMelodyneFile(file);
         });
+}
+
+void MainComponent::loadMelodyneFile(const juce::File& file)
+{
+    progress = 0.01;
+    statusLabel.setText(strings.text("status.loading"), juce::dontSendNotification);
+    juce::Component::SafePointer<MainComponent> safe(this);
+    juce::Thread::launch([safe, file]
+    {
+        juce::String error;
+        auto imported = backend::MelodyneImporter::importProject(file, error,
+            [safe](double value, const juce::String& stage)
+            {
+                juce::MessageManager::callAsync([safe, value, stage]
+                {
+                    if (safe == nullptr) return;
+                    safe->progress = value;
+                    safe->statusLabel.setText(safe->strings.text("status.loading") + "  "
+                                                + safe->strings.text(juce::String("mpd.stage.") + stage),
+                                              juce::dontSendNotification);
+                });
+            });
+        juce::MessageManager::callAsync([safe, imported = std::move(imported), error]() mutable
+        {
+            if (safe == nullptr) return;
+            safe->progress = 0.0;
+            if (!imported)
+            {
+                safe->showError(safe->strings.text("error.mpd") + "\n" + error);
+                return;
+            }
+            safe->project.replace(std::move(imported->project));
+            if (!imported->missingFiles.isEmpty())
+                safe->showError(safe->strings.text("warning.missingMedia") + "\n"
+                                + imported->missingFiles.joinIntoString("\n"));
+        });
+    });
 }
 
 void MainComponent::showError(const juce::String& message)

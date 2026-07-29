@@ -6,6 +6,7 @@
 #include "Theme.h"
 #include "TimelineComponent.h"
 #include "TrackListComponent.h"
+#include "backend/MelodyneImporter.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace hachi
@@ -40,6 +41,7 @@ private:
     void saveProject();
     void importAudio();
     void importMelodyne();
+    void loadMelodyneFile(const juce::File& file);
     void setSourceEditMode(bool enabled);
     void showError(const juce::String& message);
 

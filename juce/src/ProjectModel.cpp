@@ -95,6 +95,7 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds)
     clip.id = makeId("clip");
     clip.sourceFile = file;
     clip.durationSeconds = std::max(0.01, durationSeconds);
+    clip.sourceDurationSeconds = clip.durationSeconds;
     track.clips.push_back(std::move(clip));
 
     {
@@ -247,7 +248,7 @@ juce::ValueTree ProjectModel::toValueTree() const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 1, nullptr);
+    root.setProperty("version", 2, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -276,6 +277,7 @@ juce::ValueTree ProjectModel::toValueTree() const
             clipTree.setProperty("sourceFile", clip.sourceFile.getFullPathName(), nullptr);
             clipTree.setProperty("startSeconds", clip.startSeconds, nullptr);
             clipTree.setProperty("sourceOffsetSeconds", clip.sourceOffsetSeconds, nullptr);
+            clipTree.setProperty("sourceDurationSeconds", clip.sourceDurationSeconds, nullptr);
             clipTree.setProperty("durationSeconds", clip.durationSeconds, nullptr);
             clipTree.setProperty("fadeInSeconds", clip.fadeInSeconds, nullptr);
             clipTree.setProperty("fadeOutSeconds", clip.fadeOutSeconds, nullptr);
@@ -290,6 +292,7 @@ juce::ValueTree ProjectModel::toValueTree() const
                 noteTree.setProperty("durationSeconds", note.durationSeconds, nullptr);
                 noteTree.setProperty("consonantSeconds", note.consonantSeconds, nullptr);
                 noteTree.setProperty("midiNote", note.midiNote, nullptr);
+                noteTree.setProperty("sourceMidiCenter", note.sourceMidiCenter, nullptr);
                 noteTree.setProperty("modulation", note.modulation, nullptr);
                 noteTree.setProperty("drift", note.drift, nullptr);
                 noteTree.setProperty("attackSpeed", note.attackSpeed, nullptr);
@@ -300,6 +303,7 @@ juce::ValueTree ProjectModel::toValueTree() const
                     juce::ValueTree pointTree("PitchPoint");
                     pointTree.setProperty("timeSeconds", point.timeSeconds, nullptr);
                     pointTree.setProperty("relativeCents", point.relativeCents, nullptr);
+                    pointTree.setProperty("withoutVibratoCents", point.withoutVibratoCents, nullptr);
                     pointTree.setProperty("voiced", point.voiced, nullptr);
                     noteTree.addChild(pointTree, -1, nullptr);
                 }
@@ -351,6 +355,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
             clip.sourceFile = juce::File(clipTree.getProperty("sourceFile").toString());
             clip.startSeconds = static_cast<double>(clipTree.getProperty("startSeconds", 0.0));
             clip.sourceOffsetSeconds = static_cast<double>(clipTree.getProperty("sourceOffsetSeconds", 0.0));
+            clip.sourceDurationSeconds = static_cast<double>(clipTree.getProperty("sourceDurationSeconds", 0.0));
             clip.durationSeconds = static_cast<double>(clipTree.getProperty("durationSeconds", 1.0));
             clip.fadeInSeconds = static_cast<double>(clipTree.getProperty("fadeInSeconds", 0.0));
             clip.fadeOutSeconds = static_cast<double>(clipTree.getProperty("fadeOutSeconds", 0.0));
@@ -366,6 +371,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
                 note.durationSeconds = static_cast<double>(noteTree.getProperty("durationSeconds", 0.25));
                 note.consonantSeconds = static_cast<double>(noteTree.getProperty("consonantSeconds", 0.04));
                 note.midiNote = static_cast<float>(noteTree.getProperty("midiNote", 60.0));
+                note.sourceMidiCenter = static_cast<float>(noteTree.getProperty("sourceMidiCenter", -1.0));
                 note.modulation = static_cast<float>(noteTree.getProperty("modulation", 1.0));
                 note.drift = static_cast<float>(noteTree.getProperty("drift", 1.0));
                 note.attackSpeed = static_cast<float>(noteTree.getProperty("attackSpeed", 1.0));
@@ -374,9 +380,13 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
                 for (const auto child : noteTree)
                 {
                     if (child.hasType("PitchPoint"))
+                    {
+                        const auto relative = static_cast<float>(child.getProperty("relativeCents", 0.0));
                         note.contour.push_back({ static_cast<double>(child.getProperty("timeSeconds", 0.0)),
-                                                 static_cast<float>(child.getProperty("relativeCents", 0.0)),
+                                                 relative,
+                                                 static_cast<float>(child.getProperty("withoutVibratoCents", relative)),
                                                  static_cast<bool>(child.getProperty("voiced", true)) });
+                    }
                     else if (child.hasType("Sibilant"))
                         note.sibilantMarkers.push_back(static_cast<double>(child.getProperty("timeSeconds", 0.0)));
                 }

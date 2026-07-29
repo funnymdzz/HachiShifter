@@ -104,7 +104,9 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
                 std::max(4.0f, static_cast<float>(clip.durationSeconds) * pixelsPerSecond), waveformHeight);
             g.setColour(Palette::textMuted.withAlpha(track.muted ? 0.12f : 0.34f));
             found->second->drawChannels(g, bounds.toNearestInt(), clip.sourceOffsetSeconds,
-                                        clip.sourceOffsetSeconds + clip.durationSeconds, 1.0f);
+                                        clip.sourceOffsetSeconds
+                                            + (clip.sourceDurationSeconds > 1.0e-9
+                                                ? clip.sourceDurationSeconds : clip.durationSeconds), 1.0f);
         }
     }
 }
@@ -233,9 +235,12 @@ void PianoRollComponent::paint(juce::Graphics& g)
                         continue;
                     }
                     const auto px = x + static_cast<float>(point.timeSeconds) * pixelsPerSecond;
-                    const auto originalPitch = note.midiNote + point.relativeCents / 100.0f;
+                    const auto sourceCenter = note.sourceMidiCenter >= 0.0f
+                        ? note.sourceMidiCenter : note.midiNote;
+                    const auto originalPitch = sourceCenter + point.relativeCents / 100.0f;
                     const auto pitch = note.midiNote
-                        + point.relativeCents * note.modulation / 100.0f;
+                        + note.drift * point.withoutVibratoCents / 100.0f
+                        + note.modulation * (point.relativeCents - point.withoutVibratoCents) / 100.0f;
                     const auto py = midiToY(pitch) + rowHeight * 0.5f;
                     const auto originalY = midiToY(originalPitch) + rowHeight * 0.5f;
                     if (!originalOpen) originalContour.startNewSubPath(px, originalY);

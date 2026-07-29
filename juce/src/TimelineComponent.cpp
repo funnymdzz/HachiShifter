@@ -129,7 +129,9 @@ void TimelineComponent::paint(juce::Graphics& g)
                 g.setColour(colour.brighter(0.65f).withAlpha(track.muted ? 0.25f : 0.78f));
                 found->second->drawChannels(g, bounds.withTrimmedTop(17.0f).reduced(1.0f).toNearestInt(),
                                             clip.sourceOffsetSeconds,
-                                            clip.sourceOffsetSeconds + clip.durationSeconds, 1.0f);
+                                            clip.sourceOffsetSeconds
+                                                + (clip.sourceDurationSeconds > 1.0e-9
+                                                    ? clip.sourceDurationSeconds : clip.durationSeconds), 1.0f);
             }
             if (clip.fadeInSeconds > 0.0)
             {

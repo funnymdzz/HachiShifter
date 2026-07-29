@@ -101,10 +101,14 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         if (outputCount <= 0) continue;
 
         const auto readerRate = loaded->reader->sampleRate;
+        const auto sourceDuration = clip.sourceDurationSeconds > 1.0e-9
+            ? clip.sourceDurationSeconds : clip.durationSeconds;
+        const auto playbackRate = sourceDuration / std::max(0.001, clip.durationSeconds);
         const auto firstSourcePosition = clip.sourceOffsetSeconds * readerRate
-            + (blockStart + static_cast<double>(outputBegin) / sampleRate - clip.startSeconds) * readerRate;
+            + (blockStart + static_cast<double>(outputBegin) / sampleRate - clip.startSeconds)
+                * playbackRate * readerRate;
         const auto lastSourcePosition = firstSourcePosition
-            + static_cast<double>(outputCount - 1) * readerRate / sampleRate;
+            + static_cast<double>(outputCount - 1) * playbackRate * readerRate / sampleRate;
         const auto sourceBase = static_cast<juce::int64>(std::floor(firstSourcePosition));
         const auto sourceCount = static_cast<int>(std::ceil(lastSourcePosition))
             - static_cast<int>(sourceBase) + 2;
@@ -120,7 +124,8 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         for (int outputOffset = 0; outputOffset < outputCount; ++outputOffset)
         {
             const auto sourcePosition = firstSourcePosition
-                + static_cast<double>(outputOffset) * readerRate / sampleRate - static_cast<double>(sourceBase);
+                + static_cast<double>(outputOffset) * playbackRate * readerRate / sampleRate
+                - static_cast<double>(sourceBase);
             const auto leftIndex = juce::jlimit(0, sourceCount - 1, static_cast<int>(std::floor(sourcePosition)));
             const auto rightIndex = juce::jmin(sourceCount - 1, leftIndex + 1);
             const auto fraction = static_cast<float>(sourcePosition - std::floor(sourcePosition));
@@ -167,4 +172,3 @@ double AudioEngine::position() const
     return static_cast<double>(timelineSample.load()) / outputSampleRate.load();
 }
 }
-
