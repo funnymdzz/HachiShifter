@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "backend/McpServer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <cmath>
 #include <iostream>
@@ -15,6 +16,13 @@ public:
     void initialise(const juce::String& commandLine) override
     {
         auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        if (!arguments.isEmpty() && arguments[0] == "--mcp")
+        {
+            backend::McpServer server;
+            setApplicationReturnValue(server.run());
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         if (arguments.size() >= 4 && arguments[0] == "--smoke-mld5")
         {
             juce::AudioFormatManager formats;
@@ -39,8 +47,9 @@ public:
                 request.targetDurationSeconds / 0.005)) + 1);
             request.sourceMidi.assign(static_cast<std::size_t>(frames), 60.0f);
             request.targetMidi.assign(static_cast<std::size_t>(frames), 60.0f + shift);
+            const auto outputFile = arguments.size() >= 5 ? juce::File(arguments[4]) : juce::File();
             cliRenderService = std::make_unique<backend::RenderService>();
-            cliRenderService->renderMld5File(std::move(request), [this](backend::RenderedAudio result)
+            cliRenderService->renderMld5File(std::move(request), [this, outputFile](backend::RenderedAudio result)
             {
                 if (result.buffer.getNumSamples() <= 0)
                 {
@@ -62,6 +71,23 @@ public:
                               << "channels=" << result.buffer.getNumChannels() << '\n'
                               << "samples=" << result.buffer.getNumSamples() << '\n'
                               << "rms=" << std::sqrt(squareSum / static_cast<double>(count)) << std::endl;
+                    if (outputFile != juce::File())
+                    {
+                        outputFile.deleteFile();
+                        auto stream = outputFile.createOutputStream();
+                        juce::WavAudioFormat wav;
+                        auto writer = std::unique_ptr<juce::AudioFormatWriter>(wav.createWriterFor(
+                            stream.release(), result.sampleRate,
+                            static_cast<unsigned int>(result.buffer.getNumChannels()), 24, {}, 0));
+                        if (writer == nullptr
+                            || !writer->writeFromAudioSampleBuffer(result.buffer, 0,
+                                                                   result.buffer.getNumSamples()))
+                        {
+                            std::cerr << "error=audio_write" << std::endl;
+                            setApplicationReturnValue(4);
+                        }
+                        else std::cout << "output=" << outputFile.getFullPathName() << std::endl;
+                    }
                 }
                 quit();
             });

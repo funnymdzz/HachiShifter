@@ -5,6 +5,8 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <optional>
+#include <utility>
 
 namespace hachi::backend
 {

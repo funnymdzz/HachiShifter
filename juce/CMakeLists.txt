@@ -48,6 +48,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/Mld5Renderer.h
     src/backend/MelodyneImporter.cpp
     src/backend/MelodyneImporter.h
+    src/backend/McpServer.cpp
+    src/backend/McpServer.h
     src/backend/RenderService.cpp
     src/backend/RenderService.h
 )
