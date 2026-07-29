@@ -132,24 +132,31 @@ void PianoRollComponent::paint(juce::Graphics& g)
         g.drawHorizontalLine(static_cast<int>(y), 0.0f, static_cast<float>(getWidth()));
     }
 
-    g.setColour(Palette::panelRaised);
-    g.fillRect(0, 0, 58, getHeight());
-    for (int midi = lowestMidi; midi <= highestMidi; ++midi)
+    auto keyboardX = 0;
+    if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        keyboardX = viewport->getViewPositionX();
+    const auto drawKeyboard = [&]
     {
-        const auto y = midiToY(static_cast<float>(midi));
-        if (juce::MidiMessage::isMidiNoteBlack(midi))
+        g.setColour(Palette::panelRaised);
+        g.fillRect(keyboardX, 0, 58, getHeight());
+        for (int midi = lowestMidi; midi <= highestMidi; ++midi)
         {
-            g.setColour(juce::Colours::black.withAlpha(0.55f));
-            g.fillRect(0.0f, y, 38.0f, rowHeight);
+            const auto y = midiToY(static_cast<float>(midi));
+            if (juce::MidiMessage::isMidiNoteBlack(midi))
+            {
+                g.setColour(juce::Colours::black.withAlpha(0.55f));
+                g.fillRect(static_cast<float>(keyboardX), y, 38.0f, rowHeight);
+            }
+            if (midi % 12 == 0)
+            {
+                g.setColour(Palette::textMuted);
+                g.setFont(10.0f);
+                g.drawText(juce::MidiMessage::getMidiNoteName(midi, true, true, 3),
+                           keyboardX + 39, static_cast<int>(y), 18, static_cast<int>(rowHeight),
+                           juce::Justification::centred);
+            }
         }
-        if (midi % 12 == 0)
-        {
-            g.setColour(Palette::textMuted);
-            g.setFont(10.0f);
-            g.drawText(juce::MidiMessage::getMidiNoteName(midi, true, true, 3),
-                       39, static_cast<int>(y), 18, static_cast<int>(rowHeight), juce::Justification::centred);
-        }
-    }
+    };
 
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
     const auto firstBeat = std::floor((0.0 - snapshot.beatOriginSeconds) / secondsPerBeat) - 1.0;
@@ -265,10 +272,14 @@ void PianoRollComponent::paint(juce::Graphics& g)
 
     g.setColour(juce::Colours::red.withAlpha(0.9f));
     g.drawVerticalLine(static_cast<int>(timeToX(playheadSeconds)), 0.0f, static_cast<float>(getHeight()));
+    drawKeyboard();
 }
 
 void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
 {
+    if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
+        if (event.x < viewport->getViewPositionX() + 58)
+            return;
     for (auto it = noteHits.rbegin(); it != noteHits.rend(); ++it)
         if (it->bounds.contains(event.position))
         {

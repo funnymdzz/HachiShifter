@@ -101,5 +101,6 @@ private:
     int lastTimelineY = 0;
     int lastTrackY = 0;
     bool syncingScroll = false;
+    bool pianoInitialScrollSet = false;
 };
 }

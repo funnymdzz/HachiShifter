@@ -395,6 +395,11 @@ void MainComponent::resized()
     pitchLabel.setBounds({});
     stretchLabel.setBounds({});
     pianoViewport.setBounds(area);
+    if (!pianoInitialScrollSet && pianoViewport.getHeight() > 0)
+    {
+        pianoViewport.setViewPosition(0, std::max(0, (pianoRoll.getHeight() - pianoViewport.getHeight()) / 2));
+        pianoInitialScrollSet = true;
+    }
 }
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
