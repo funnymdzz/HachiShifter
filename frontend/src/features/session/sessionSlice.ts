@@ -171,6 +171,8 @@ export interface SessionState {
     drawToolMode: DrawToolMode;
     editParam: EditParam;
     bpm: number;
+    /** Musical quarter position zero on the absolute audio timeline. */
+    beatOriginSec: number;
     beats: number;
     projectSec: number;
     grid: GridSize;
@@ -805,6 +807,9 @@ function applyTimelineState(
     state.selectedTrackId = timeline.selected_track_id;
     state.selectedClipId = timeline.selected_clip_id;
     state.bpm = clamp(Number(timeline.bpm ?? state.bpm), 10, 300);
+    state.beatOriginSec = Number.isFinite(Number(timeline.beat_origin_sec))
+        ? Number(timeline.beat_origin_sec)
+        : state.beatOriginSec;
     state.playheadSec = Math.max(0, Number(timeline.playhead_sec ?? 0));
     state.projectSec = Math.max(4, Number(timeline.project_sec ?? state.projectSec));
     state.disabledGroupIds = Array.isArray(timeline.disabled_group_ids)
@@ -994,6 +999,7 @@ const initialState: SessionState = {
     drawToolMode: "draw",
     editParam: "pitch",
     bpm: 120,
+    beatOriginSec: 0,
     beats: 4,
     projectSec: 30, // 默认 30 秒工程边界
     grid: "1/4",

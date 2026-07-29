@@ -136,6 +136,7 @@ export interface TimelineState {
     selected_track_id: string | null;
     selected_clip_id: string | null;
     bpm: number;
+    beat_origin_sec?: number;
     playhead_sec: number;
     project_sec?: number;
     project?: ProjectMeta;
@@ -151,6 +152,7 @@ export interface TimelineResult {
     selected_track_id: string | null;
     selected_clip_id: string | null;
     bpm: number;
+    beat_origin_sec?: number;
     playhead_sec: number;
     project_sec?: number;
     project?: ProjectMeta;

@@ -974,6 +974,24 @@ fn project_bpm(graph: &Graph) -> Option<f64> {
     None
 }
 
+/// Return the project second corresponding to musical quarter position zero.
+/// Melodyne's performance clock can start several seconds into the audio; its
+/// bar ruler therefore must not be reconstructed from BPM alone.
+fn project_beat_origin_sec(graph: &Graph, bpm: f64) -> Option<f64> {
+    if !(bpm.is_finite() && bpm > 0.0) {
+        return None;
+    }
+    let quarter_timeline = graph.find_first_class("MUQuarterTimeline")?;
+    let anchors = graph.list(graph.reference(quarter_timeline, "quarterAnchors")?);
+    let seconds_per_quarter = 60.0 / bpm;
+    anchors.into_iter().find_map(|anchor| {
+        let time = graph.f64(anchor, "timePosition")?;
+        let quarter = graph.number(anchor, "quarterPosition")?;
+        let origin = time - quarter * seconds_per_quarter;
+        origin.is_finite().then_some(origin)
+    })
+}
+
 fn collect_track_ids(graph: &Graph, track_id: u32, output: &mut Vec<u32>, seen: &mut HashSet<u32>) {
     if !seen.insert(track_id) {
         return;
@@ -1725,16 +1743,51 @@ fn restored_element_pitch(
     raw: f32,
     without_vibrato: f32,
 ) -> f32 {
-    if element.pitch_modulation.abs() <= 1e-6 {
-        // Melodyne persists an explicit zero for notes whose modulation tool
-        // was pulled fully flat. Treat it as an authored flat trajectory;
-        // retaining the analysed drift here was the visible white slope in
-        // HachiShifter although the MPD note was flat.
-        element.pitch_center
-    } else {
-        element.pitch_center
-            + element.pitch_drift * (without_vibrato - source_center)
-            + element.pitch_modulation * (raw - without_vibrato)
+    // Melodyne stores drift and modulation as two independent gains. Setting
+    // modulation to zero removes the fast excursion/vibrato, but it does not
+    // also zero the slow drift tool. The previous special case flattened both
+    // components and caused the clearly different curves around 14.25 s in
+    // sample11.mpd.
+    element.pitch_center
+        + element.pitch_drift * (without_vibrato - source_center)
+        + element.pitch_modulation * (raw - without_vibrato)
+}
+
+/// Fill only a genuinely missing contour gap between two connected elements.
+/// Persisted `pitchTransitionDuration` is a search/support window; it is not a
+/// command to replace valid per-element F0 with a synthetic centre smoothstep.
+fn bridge_connected_pitch_gap(
+    curve: &mut [f32],
+    left_first: usize,
+    boundary: usize,
+    right_last: usize,
+) {
+    if curve.is_empty() {
+        return;
+    }
+    let boundary = boundary.min(curve.len() - 1);
+    let left_first = left_first.min(boundary);
+    let right_last = right_last.min(curve.len() - 1).max(boundary);
+    let Some(left) = (left_first..=boundary).rev().find(|index| curve[*index] > 0.0) else {
+        return;
+    };
+    let Some(right) = (boundary..=right_last).find(|index| curve[*index] > 0.0) else {
+        return;
+    };
+    if right <= left + 1 {
+        return;
+    }
+    let left_value = curve[left];
+    let right_value = curve[right];
+    for index in left + 1..right {
+        // Preserve every authored/property-point frame. Only the absent run is
+        // reconstructed, so turns and modulation on either note remain exact.
+        if curve[index] > 0.0 {
+            continue;
+        }
+        let x = (index - left) as f32 / (right - left) as f32;
+        let smooth = x * x * (3.0 - 2.0 * x);
+        curve[index] = left_value + (right_value - left_value) * smooth;
     }
 }
 
@@ -1829,11 +1882,9 @@ fn build_track_params(
         }
     }
 
-    // Import the exact stored contours. Connections are intentionally left
-    // untouched unless MPD explicitly persists joinsPitches. In that case the
-    // stored pitchTransitionDuration belongs to the render, not merely the UI.
-    // Blend only the note-centre offset and retain each side's local residual
-    // contour, matching Melodyne's "move the line, do not flatten it" model.
+    // Import the exact stored contours. A persisted connection fills only a
+    // missing boundary run; it does not bend valid note data toward a second
+    // synthetic centre trajectory.
     let unjoined_pitch = pitch_edit.clone();
     // This is the authoritative contour used by Disconnect and by manual
     // cross-sample joins.  A join is a reversible centre transition, never a
@@ -1873,32 +1924,9 @@ fn build_track_params(
             .min(right.start + right.duration + shift)
             .max(transition_start + frame_period_sec);
         let first = (transition_start / frame_period_sec).floor().max(0.0) as usize;
+        let middle = (boundary / frame_period_sec).round().max(0.0) as usize;
         let last = (transition_end / frame_period_sec).ceil().max(0.0) as usize;
-        // The transition operates between persisted note centres. Probing a
-        // single global curve frame selected another overlapping sample (or a
-        // silent attack) in multi-sample tracks and generated the large loops
-        // shown in the report.
-        let left_center = (left.pitch_center / 100.0).clamp(0.0, 127.0);
-        let right_center = (right.pitch_center / 100.0).clamp(0.0, 127.0);
-        if left_center <= 0.0 || right_center <= 0.0 {
-            continue;
-        }
-        for frame in first..last.min(pitch_edit.len()) {
-            let time = frame as f64 * frame_period_sec;
-            let x = ((time - transition_start)
-                / (transition_end - transition_start).max(frame_period_sec))
-                .clamp(0.0, 1.0) as f32;
-            let smooth = x * x * (3.0 - 2.0 * x);
-            let original = unjoined_pitch[frame];
-            if original <= 0.0 {
-                continue;
-            }
-            let local_center = if time < boundary { left_center } else { right_center };
-            let residual = original - local_center;
-            pitch_edit[frame] = left_center
-                + (right_center - left_center) * smooth
-                + residual;
-        }
+        bridge_connected_pitch_gap(&mut pitch_edit, first, middle, last);
     }
 
     let mut extra_curves = HashMap::new();
@@ -1942,13 +1970,6 @@ fn build_group_pitch_curves(
         .iter()
         .enumerate()
         .map(|(index, element)| (element.element_id, index))
-        .collect::<HashMap<_, _>>();
-    let previous_join_by_id = track
-        .elements
-        .iter()
-        .enumerate()
-        .filter(|(_, element)| element.join_next)
-        .filter_map(|(index, element)| element.following_element_id.map(|id| (id, index)))
         .collect::<HashMap<_, _>>();
     for element_index in &group.element_indices {
         let Some(element) = track.elements.get(*element_index) else {
@@ -1995,54 +2016,8 @@ fn build_group_pitch_curves(
             // Melodyne's note-centre displacement.  This keeps audio and F0
             // aligned through a stretched tail without drawing a fabricated
             // line in the piano roll.
-            let mut joined_center = element.pitch_center;
-            // A middle note can own the right half of one persisted glide and
-            // the left half of the next. Evaluate both graph relationships,
-            // and only alter the centre inside their stored transition span.
-            let mut join_candidates = Vec::<(&ImportedElement, &ImportedElement)>::new();
-            if element.join_next {
-                if let Some(right) = element
-                    .following_element_id
-                    .and_then(|id| index_by_id.get(&id).copied())
-                    .and_then(|index| track.elements.get(index))
-                {
-                    join_candidates.push((element, right));
-                }
-            }
-            if let Some(left) = previous_join_by_id
-                .get(&element.element_id)
-                .and_then(|index| track.elements.get(*index))
-            {
-                join_candidates.push((left, element));
-            }
-            for (left, right) in join_candidates {
-                let boundary = ((left.start + left.duration) + right.start) * 0.5 + shift;
-                let stored_duration = if left.join_duration > 1e-6 {
-                    left.join_duration
-                } else {
-                    0.09
-                };
-                let duration = stored_duration
-                .min(left.duration + right.duration)
-                .max(frame_sec);
-                let transition_start = (boundary - duration * 0.5)
-                    .max(left.start + shift)
-                    .max(0.0);
-                let transition_end = (boundary + duration * 0.5)
-                    .min(right.start + right.duration + shift)
-                    .max(transition_start + frame_sec);
-                if destination_time < transition_start || destination_time > transition_end {
-                    continue;
-                }
-                let x = ((destination_time - transition_start)
-                    / (transition_end - transition_start).max(frame_sec))
-                    .clamp(0.0, 1.0) as f32;
-                let smooth = x * x * (3.0 - 2.0 * x);
-                joined_center = left.pitch_center
-                    + (right.pitch_center - left.pitch_center) * smooth;
-            }
             render_pitch_delta[local_frame] =
-                ((joined_center - source_center) / 100.0).clamp(-24.0, 24.0);
+                ((element.pitch_center - source_center) / 100.0).clamp(-24.0, 24.0);
             if let Some((raw, without_vibrato)) =
                 pitch_cache.and_then(|cache| {
                     source_pitch_at(graph, cache, element.source_function_id, element_time)
@@ -2054,9 +2029,7 @@ fn build_group_pitch_curves(
                     raw,
                     without_vibrato,
                 );
-                // Melodyne's connection moves only the note centre. Keep the
-                // exact drift/modulation residual belonging to this sample.
-                let edited = joined_center + (edited_unjoined - element.pitch_center);
+                let edited = edited_unjoined;
                 source_curve[local_frame] = (raw / 100.0).clamp(0.0, 127.0);
                 target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
                 render_target_curve[local_frame] = (edited / 100.0).clamp(0.0, 127.0);
@@ -2066,6 +2039,30 @@ fn build_group_pitch_curves(
                 // detector confirms this is a periodic frame.
             }
         }
+    }
+    let group_elements = group.element_indices.iter().copied().collect::<HashSet<_>>();
+    for left_index in &group.element_indices {
+        let Some(left) = track.elements.get(*left_index).filter(|element| element.join_next) else {
+            continue;
+        };
+        let Some(right_index) = left
+            .following_element_id
+            .and_then(|id| index_by_id.get(&id).copied())
+            .filter(|index| group_elements.contains(index))
+        else {
+            continue;
+        };
+        let Some(right) = track.elements.get(right_index) else { continue; };
+        let boundary_sec = ((left.start + left.duration) + right.start) * 0.5 + shift;
+        let support = left.join_duration.max(frame_sec).min(left.duration + right.duration);
+        let first_sec = (boundary_sec - support * 0.5).max(left.start + shift);
+        let last_sec = (boundary_sec + support * 0.5)
+            .min(right.start + right.duration + shift);
+        let first = ((first_sec - clip_start) / frame_sec).floor().max(0.0) as usize;
+        let middle = ((boundary_sec - clip_start) / frame_sec).round().max(0.0) as usize;
+        let last = ((last_sec - clip_start) / frame_sec).ceil().max(0.0) as usize;
+        bridge_connected_pitch_gap(&mut target_curve, first, middle, last);
+        bridge_connected_pitch_gap(&mut render_target_curve, first, middle, last);
     }
     (source_curve, target_curve, render_target_curve, render_pitch_delta)
 }
@@ -2222,6 +2219,9 @@ fn import_graph(
     if let Some(bpm) = project_bpm(&graph) {
         timeline.bpm = bpm.clamp(10.0, 400.0);
     }
+    timeline.beat_origin_sec = project_beat_origin_sec(&graph, timeline.bpm)
+        .map(|origin| origin + shift)
+        .unwrap_or(0.0);
     timeline.clips.clear();
     timeline.params_by_root_track.clear();
     timeline.tracks.clear();

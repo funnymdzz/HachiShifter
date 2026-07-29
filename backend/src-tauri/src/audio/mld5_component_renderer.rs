@@ -109,8 +109,6 @@ pub fn render(
     let mut magnitude = vec![0.0f32; half + 1];
     let mut phase = vec![0.0f32; half + 1];
     let mut log_envelope = vec![0.0f32; half + 1];
-    let mut mapped_magnitude = vec![0.0f32; half + 1];
-    let mut mapped_source_phase = vec![0.0f32; half + 1];
     let mut output = vec![0.0f32; input.len() + fft_size];
     let mut normalisation = vec![0.0f32; output.len()];
     let expected_scale = std::f32::consts::TAU * hop as f32 / fft_size as f32;
@@ -175,8 +173,6 @@ pub fn render(
         let transient = frame == 0 || positive_flux > 0.34;
         shifted.fill(Complex32::new(0.0, 0.0));
 
-        mapped_magnitude.fill(0.0);
-        mapped_source_phase.fill(0.0);
         for output_bin in 0..=half {
             let source_bin_f = output_bin as f32 / ratio;
             if source_bin_f > half as f32 {
@@ -209,50 +205,24 @@ pub fn render(
                 synthesis_phase[output_bin] =
                     wrap_phase(synthesis_phase[output_bin] + instantaneous);
             }
-            mapped_magnitude[output_bin] = mapped_mag;
-            mapped_source_phase[output_bin] = source_phase;
-        }
-
-        // Identity phase locking: advance only spectral-peak phases and keep
-        // neighbouring partial/noise bins at their instantaneous phase offset
-        // from the owning peak.  Independent per-bin phase propagation made
-        // vowels diffuse and metallic after even a small correction.
-        let mut peaks = Vec::<usize>::new();
-        for bin in 2..half.saturating_sub(1) {
-            if magnitude[bin] >= magnitude[bin - 1]
-                && magnitude[bin] > magnitude[bin + 1]
-                && magnitude[bin] > energy * 1e-5
-            {
-                peaks.push(bin);
-            }
-        }
-        for output_bin in 0..=half {
-            let locked_phase = if transient || peaks.is_empty() {
-                synthesis_phase[output_bin]
+            // Melodyne's tonal renderer keeps a separate aperiodic component.
+            // Reconstruct the same split from local spectral prominence: only
+            // harmonic fine structure is transposed, while valleys/noise keep
+            // their original instantaneous phase and frequency. This removes
+            // the metallic/raspy high-note artefact caused by shifting every
+            // FFT bin or locking a whole region to one peak.
+            let source_envelope_linear = source_envelope.exp().max(1e-9);
+            let prominence = source_magnitude / source_envelope_linear;
+            let harmonic_weight = ((prominence - 0.72) / 1.65).clamp(0.0, 1.0);
+            let harmonic_weight = if transient {
+                harmonic_weight * 0.35
             } else {
-                let source_bin = output_bin as f32 / ratio;
-                let peak = peaks
-                    .partition_point(|candidate| (*candidate as f32) < source_bin)
-                    .min(peaks.len());
-                let owner = match (peak.checked_sub(1), peaks.get(peak).copied()) {
-                    (Some(left), Some(right)) => {
-                        let left = peaks[left];
-                        if (source_bin - left as f32).abs() <= (right as f32 - source_bin).abs() {
-                            left
-                        } else {
-                            right
-                        }
-                    }
-                    (Some(left), None) => peaks[left],
-                    (None, Some(right)) => right,
-                    (None, None) => output_bin,
-                };
-                let owner_output = ((owner as f32 * ratio).round() as usize).min(half);
-                synthesis_phase[owner_output]
-                    + wrap_phase(mapped_source_phase[output_bin] - phase[owner])
+                harmonic_weight
             };
+            let harmonic = Complex32::from_polar(mapped_mag, synthesis_phase[output_bin]);
+            let aperiodic = spectrum[output_bin];
             shifted[output_bin] =
-                Complex32::from_polar(mapped_magnitude[output_bin], locked_phase);
+                harmonic * harmonic_weight + aperiodic * (1.0 - harmonic_weight);
         }
         for bin in 1..half {
             shifted[fft_size - bin] = shifted[bin].conj();

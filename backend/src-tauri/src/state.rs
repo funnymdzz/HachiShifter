@@ -443,6 +443,8 @@ pub struct TimelineState {
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,
+    #[serde(default)]
+    pub beat_origin_sec: f64,
     pub playhead_sec: f64,
     pub project_sec: f64,
 
@@ -530,6 +532,7 @@ impl Default for TimelineState {
             selected_track_id: Some(track_id),
             selected_clip_id: None,
             bpm: 120.0,
+            beat_origin_sec: 0.0,
             playhead_sec: 0.0,
             project_sec: 32.0, // 64 beats @ 120 BPM = 32 sec
 
@@ -2033,6 +2036,7 @@ impl TimelineState {
             selected_track_id: self.selected_track_id.clone(),
             selected_clip_id: self.selected_clip_id.clone(),
             bpm: self.bpm,
+            beat_origin_sec: self.beat_origin_sec,
             playhead_sec: self.playhead_sec,
             project_sec: Some(self.project_sec),
             project: None,
@@ -2124,6 +2128,7 @@ impl TimelineState {
             selected_track_id: self.selected_track_id.clone(),
             selected_clip_id: self.selected_clip_id.clone(),
             bpm: self.bpm,
+            beat_origin_sec: self.beat_origin_sec,
             playhead_sec: self.playhead_sec,
             project_sec: Some(self.project_sec),
             project: None,

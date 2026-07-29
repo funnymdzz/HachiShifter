@@ -21,6 +21,7 @@ fn error_payload(error: &str) -> crate::models::TimelineStatePayload {
         selected_track_id: None,
         selected_clip_id: None,
         bpm: 120.0,
+        beat_origin_sec: 0.0,
         playhead_sec: 0.0,
         project_sec: None,
         project: None,

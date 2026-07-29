@@ -143,6 +143,9 @@ pub struct TimelineStatePayload {
     pub selected_track_id: Option<String>,
     pub selected_clip_id: Option<String>,
     pub bpm: f64,
+    /// Timeline second at which the imported musical quarter position is 0.
+    /// This is not necessarily zero in Melodyne projects.
+    pub beat_origin_sec: f64,
     pub playhead_sec: f64,
     pub project_sec: Option<f64>,
 

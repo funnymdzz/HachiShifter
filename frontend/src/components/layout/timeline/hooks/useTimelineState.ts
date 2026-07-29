@@ -446,8 +446,9 @@ export function useTimelineState(): TimelineStateResult {
     const bars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
         const secPerBeatLocal = 60 / Math.max(1, s.bpm);
+        const originBeat = s.beatOriginSec / secPerBeatLocal;
         const totalBeats = Math.max(1, Math.ceil(dynamicProjectSec / secPerBeatLocal));
-        const totalBars = Math.max(1, Math.ceil(totalBeats / beatsPerBar));
+        const totalBars = Math.max(1, Math.ceil((totalBeats - originBeat) / beatsPerBar));
 
         let startBarIndex = 0;
         let endBarIndex = totalBars;
@@ -461,18 +462,24 @@ export function useTimelineState(): TimelineStateResult {
             const leftBeat = leftPx / beatPx;
             const rightBeat = rightPx / beatPx;
 
-            startBarIndex = Math.max(0, Math.floor(leftBeat / beatsPerBar) - 1);
-            endBarIndex = Math.min(totalBars, Math.ceil(rightBeat / beatsPerBar) + 1);
+            startBarIndex = Math.max(
+                0,
+                Math.floor((leftBeat - originBeat) / beatsPerBar) - 1,
+            );
+            endBarIndex = Math.min(
+                totalBars,
+                Math.ceil((rightBeat - originBeat) / beatsPerBar) + 1,
+            );
         }
 
         const result: Array<{ beat: number; label: string }> = [];
         for (let barIndex = startBarIndex; barIndex <= endBarIndex; barIndex += 1) {
-            const beat = barIndex * beatsPerBar;
+            const beat = originBeat + barIndex * beatsPerBar;
             if (beat > totalBeats) break;
-            result.push({ beat, label: `${barIndex + 1}.1` });
+            if (beat >= 0) result.push({ beat, label: `${barIndex + 1}.1` });
         }
         return result;
-    }, [s.beats, dynamicProjectSec, s.bpm, viewportWidth, pxPerSec, scrollLeft]);
+    }, [s.beatOriginSec, s.beats, dynamicProjectSec, s.bpm, viewportWidth, pxPerSec, scrollLeft]);
 
     // ── clipsByTrackId ───────────────────────────────────────
     const clipsByTrackId = useMemo(() => {

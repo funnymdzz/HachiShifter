@@ -3923,15 +3923,16 @@ export const PianoRollPanel: React.FC = () => {
 
     const timeRulerBars = useMemo(() => {
         const beatsPerBar = Math.max(1, Math.round(s.beats || 4));
+        const originBeat = s.beatOriginSec / secPerBeat;
         const totalBeats = Math.max(1, Math.ceil(s.projectSec / secPerBeat));
         const result: Array<{ beat: number; label: string }> = [];
-        let barIndex = 1;
-        for (let beat = 0; beat <= totalBeats; beat += beatsPerBar) {
-            result.push({ beat, label: `${barIndex}.1` });
-            barIndex += 1;
+        for (let barIndex = 0; ; barIndex += 1) {
+            const beat = originBeat + barIndex * beatsPerBar;
+            if (beat > totalBeats) break;
+            if (beat >= 0) result.push({ beat, label: `${barIndex + 1}.1` });
         }
         return result;
-    }, [s.beats, s.projectSec, secPerBeat]);
+    }, [s.beatOriginSec, s.beats, s.projectSec, secPerBeat]);
 
     const onPianoCanvasPointerDown = useCallback(
         (event: React.PointerEvent<HTMLCanvasElement>) => {
