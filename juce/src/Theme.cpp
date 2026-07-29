@@ -40,6 +40,77 @@ void HachiLookAndFeel::drawButtonBackground(juce::Graphics& g, juce::Button& but
     g.fillRoundedRectangle(button.getLocalBounds().toFloat().reduced(1.0f), 4.0f);
 }
 
+void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool)
+{
+    const auto id = button.getComponentID();
+    if (!id.startsWith("icon."))
+    {
+        LookAndFeel_V4::drawButtonText(g, button, false, false);
+        return;
+    }
+
+    auto bounds = button.getLocalBounds().toFloat().reduced(6.0f);
+    g.setColour(button.getToggleState() ? Palette::panel : Palette::text);
+    juce::Path path;
+    if (id == "icon.play")
+        path.addTriangle(bounds.getX() + 2.0f, bounds.getY(), bounds.getRight(), bounds.getCentreY(),
+                         bounds.getX() + 2.0f, bounds.getBottom());
+    else if (id == "icon.stop")
+        path.addRectangle(bounds.reduced(2.0f));
+    else if (id == "icon.open")
+    {
+        path.addRoundedRectangle(bounds.withTrimmedTop(4.0f), 2.0f);
+        path.addRectangle(bounds.getX() + 2.0f, bounds.getY() + 1.0f, bounds.getWidth() * 0.42f, 5.0f);
+    }
+    else if (id == "icon.save")
+    {
+        path.addRoundedRectangle(bounds, 1.5f);
+        path.addRectangle(bounds.reduced(3.0f).withHeight(5.0f));
+        path.addRectangle(bounds.reduced(4.0f).withTrimmedTop(9.0f));
+    }
+    else if (id == "icon.pointer")
+    {
+        path.startNewSubPath(bounds.getX() + 2.0f, bounds.getY());
+        path.lineTo(bounds.getX() + 3.0f, bounds.getBottom() - 2.0f);
+        path.lineTo(bounds.getCentreX(), bounds.getCentreY() + 2.0f);
+        path.lineTo(bounds.getRight() - 1.0f, bounds.getCentreY());
+        path.closeSubPath();
+    }
+    else if (id == "icon.draw")
+    {
+        path.addRectangle(bounds.getCentreX() - 1.5f, bounds.getY(), 3.0f, bounds.getHeight() - 3.0f);
+        path.applyTransform(juce::AffineTransform::rotation(-0.68f, bounds.getCentreX(), bounds.getCentreY()));
+    }
+    else if (id == "icon.line")
+    {
+        path.startNewSubPath(bounds.getX(), bounds.getBottom());
+        path.lineTo(bounds.getRight(), bounds.getY());
+    }
+    else if (id == "icon.wrench")
+    {
+        path.addEllipse(bounds.getX(), bounds.getY(), 7.0f, 7.0f);
+        path.addRectangle(bounds.getX() + 5.0f, bounds.getY() + 5.0f, bounds.getWidth() - 7.0f, 3.0f);
+    }
+    else if (id == "icon.connect")
+    {
+        path.addEllipse(bounds.getX(), bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        path.addEllipse(bounds.getRight() - 6.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        path.startNewSubPath(bounds.getX() + 5.0f, bounds.getCentreY());
+        path.lineTo(bounds.getRight() - 5.0f, bounds.getCentreY());
+    }
+    else
+    {
+        g.setFont(10.0f);
+        g.drawText(id == "icon.audio" ? "A+" : "M+", button.getLocalBounds(), juce::Justification::centred);
+        return;
+    }
+    if (id == "icon.line" || id == "icon.wrench" || id == "icon.connect")
+        g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved,
+                                                juce::PathStrokeType::rounded));
+    else
+        g.fillPath(path);
+}
+
 void HachiLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, bool,
                                     int, int, int, int, juce::ComboBox&)
 {

@@ -28,6 +28,7 @@ public:
     HachiLookAndFeel();
     void drawButtonBackground(juce::Graphics&, juce::Button&, const juce::Colour&,
                               bool highlighted, bool down) override;
+    void drawButtonText(juce::Graphics&, juce::TextButton&, bool highlighted, bool down) override;
     void drawComboBox(juce::Graphics&, int width, int height, bool down,
                       int, int, int, int, juce::ComboBox&) override;
 };

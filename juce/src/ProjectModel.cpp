@@ -106,6 +106,36 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds)
     sendChangeMessage();
 }
 
+void ProjectModel::setTempo(double bpm, int numerator, int denominator)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        project.bpm = juce::jlimit(20.0, 400.0, bpm);
+        project.numerator = juce::jlimit(1, 32, numerator);
+        project.denominator = denominator == 2 || denominator == 8 || denominator == 16
+            ? denominator : 4;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setGridDivision(const juce::String& division)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        project.gridDivision = division;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setBaseScale(const juce::String& scale)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        project.baseScale = scale;
+    }
+    sendChangeMessage();
+}
+
 void ProjectModel::setTrackCompose(const juce::String& trackId, bool enabled)
 {
     {
@@ -124,6 +154,62 @@ void ProjectModel::setTrackMuted(const juce::String& trackId, bool muted)
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.muted = muted;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setTrackSolo(const juce::String& trackId, bool solo)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId)
+                track.solo = solo;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setTrackVolume(const juce::String& trackId, float volume)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId)
+                track.volume = juce::jlimit(0.0f, 2.0f, volume);
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.compose)
+                track.pitchAlgorithm = algorithm;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::setStretchAlgorithm(StretchAlgorithm algorithm)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.compose)
+                track.stretchAlgorithm = algorithm;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                    clip.startSeconds = std::max(0.0, startSeconds);
     }
     sendChangeMessage();
 }
@@ -167,6 +253,8 @@ juce::ValueTree ProjectModel::toValueTree() const
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
     root.setProperty("numerator", data.numerator, nullptr);
     root.setProperty("denominator", data.denominator, nullptr);
+    root.setProperty("gridDivision", data.gridDivision, nullptr);
+    root.setProperty("baseScale", data.baseScale, nullptr);
 
     for (const auto& track : data.tracks)
     {
@@ -238,6 +326,8 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
     data.beatOriginSeconds = static_cast<double>(root.getProperty("beatOriginSeconds", 0.0));
     data.numerator = static_cast<int>(root.getProperty("numerator", 4));
     data.denominator = static_cast<int>(root.getProperty("denominator", 4));
+    data.gridDivision = root.getProperty("gridDivision", "1/16").toString();
+    data.baseScale = root.getProperty("baseScale", "C").toString();
 
     for (const auto trackTree : root)
     {
@@ -328,4 +418,3 @@ bool ProjectModel::load(const juce::File& file, juce::String& error)
     return false;
 }
 }
-

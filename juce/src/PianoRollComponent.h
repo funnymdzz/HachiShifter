@@ -1,7 +1,9 @@
 #pragma once
 
 #include "ProjectModel.h"
-#include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <memory>
+#include <unordered_map>
 
 namespace hachi
 {
@@ -26,16 +28,22 @@ private:
         juce::String id;
         juce::Rectangle<float> bounds;
         float midi = 60.0f;
+        double startSeconds = 0.0;
+        double durationSeconds = 0.0;
     };
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void rebuildLayout();
+    void drawClipWaveforms(juce::Graphics& g);
     [[nodiscard]] float timeToX(double seconds) const;
     [[nodiscard]] float midiToY(float midi) const;
     [[nodiscard]] float yToMidi(float y) const;
 
     ProjectModel& model;
     ProjectData snapshot;
+    juce::AudioFormatManager formats;
+    juce::AudioThumbnailCache thumbnailCache { 96 };
+    std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> thumbnails;
     std::vector<NoteHit> noteHits;
     float pixelsPerSecond = 140.0f;
     float rowHeight = 18.0f;
@@ -46,6 +54,10 @@ private:
     juce::String draggedNote;
     float dragStartMidi = 0.0f;
     float previewMidi = 0.0f;
+    enum class DragMode { none, pitch, resizeLeft, resizeRight } dragMode = DragMode::none;
+    double dragStartSeconds = 0.0;
+    double dragDurationSeconds = 0.0;
+    double previewStartSeconds = 0.0;
+    double previewDurationSeconds = 0.0;
 };
 }
-

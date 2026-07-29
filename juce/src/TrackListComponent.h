@@ -15,6 +15,8 @@ public:
 
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& event) override;
+    void mouseDrag(const juce::MouseEvent& event) override;
+    void mouseUp(const juce::MouseEvent& event) override;
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -23,5 +25,7 @@ private:
     I18n& strings;
     ProjectData snapshot;
     int rowHeight = 96;
+    juce::String volumeDragTrack;
+    int volumeDragRow = -1;
 };
 }

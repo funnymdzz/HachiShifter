@@ -80,6 +80,8 @@ struct ProjectData
     double beatOriginSeconds = 0.0;
     int numerator = 4;
     int denominator = 4;
+    juce::String gridDivision = "1/16";
+    juce::String baseScale = "C";
     std::vector<TrackData> tracks;
 
     [[nodiscard]] double durationSeconds() const;
@@ -95,8 +97,16 @@ public:
     void clear();
 
     void addAudioFile(const juce::File& file, double durationSeconds);
+    void setTempo(double bpm, int numerator, int denominator = 4);
+    void setGridDivision(const juce::String& division);
+    void setBaseScale(const juce::String& scale);
     void setTrackCompose(const juce::String& trackId, bool enabled);
     void setTrackMuted(const juce::String& trackId, bool muted);
+    void setTrackSolo(const juce::String& trackId, bool solo);
+    void setTrackVolume(const juce::String& trackId, float volume);
+    void setPitchAlgorithm(PitchAlgorithm algorithm);
+    void setStretchAlgorithm(StretchAlgorithm algorithm);
+    void moveClip(const juce::String& clipId, double startSeconds);
     void transposeNote(const juce::String& noteId, float semitones);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
 
@@ -112,4 +122,3 @@ private:
     ProjectData project;
 };
 }
-
