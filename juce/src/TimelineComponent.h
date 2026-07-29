@@ -1,0 +1,41 @@
+#pragma once
+
+#include "ProjectModel.h"
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <functional>
+#include <memory>
+#include <unordered_map>
+
+namespace hachi
+{
+class TimelineComponent final : public juce::Component,
+                                private juce::ChangeListener,
+                                private juce::Timer
+{
+public:
+    explicit TimelineComponent(ProjectModel& modelToUse);
+    ~TimelineComponent() override;
+
+    void paint(juce::Graphics& g) override;
+    void mouseDown(const juce::MouseEvent& event) override;
+    void setPixelsPerSecond(float value);
+    void setPlayheadSeconds(double seconds);
+    std::function<void(double)> onSeek;
+
+private:
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
+    void timerCallback() override;
+    void rebuild();
+    [[nodiscard]] float timeToX(double seconds) const;
+
+    ProjectModel& model;
+    ProjectData snapshot;
+    juce::AudioFormatManager formats;
+    juce::AudioThumbnailCache thumbnailCache { 96 };
+    std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> thumbnails;
+    float pixelsPerSecond = 140.0f;
+    int rowHeight = 96;
+    double playheadSeconds = 0.0;
+};
+}
+

@@ -13,8 +13,11 @@ struct Palette
     static const juce::Colour beatGrid;
     static const juce::Colour accent;
     static const juce::Colour accentLight;
+    static const juce::Colour noteFill;
+    static const juce::Colour noteLight;
     static const juce::Colour noteEdge;
     static const juce::Colour pitchLine;
+    static const juce::Colour playhead;
     static const juce::Colour text;
     static const juce::Colour textMuted;
 };
@@ -29,4 +32,3 @@ public:
                       int, int, int, int, juce::ComboBox&) override;
 };
 }
-

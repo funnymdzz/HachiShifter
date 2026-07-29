@@ -3,7 +3,7 @@
 namespace hachi
 {
 MainComponent::MainComponent()
-    : progressBar(progress), trackList(project, strings), pianoRoll(project)
+    : progressBar(progress), trackList(project, strings), timeline(project), pianoRoll(project)
 {
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
@@ -20,9 +20,13 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&zoomSlider),
                              static_cast<juce::Component*>(&progressBar),
                              static_cast<juce::Component*>(&trackList),
+                             static_cast<juce::Component*>(&timelineViewport),
                              static_cast<juce::Component*>(&pianoViewport) })
         addAndMakeVisible(*component);
 
+    timelineViewport.setViewedComponent(&timeline, false);
+    timelineViewport.setScrollBarsShown(true, true);
+    timelineViewport.setScrollBarThickness(10);
     pianoViewport.setViewedComponent(&pianoRoll, false);
     pianoViewport.setScrollBarsShown(true, true);
     pianoViewport.setScrollBarThickness(10);
@@ -42,7 +46,13 @@ MainComponent::MainComponent()
     zoomSlider.setValue(140.0);
     zoomSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     zoomSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-    zoomSlider.onValueChange = [this] { pianoRoll.setPixelsPerSecond(static_cast<float>(zoomSlider.getValue())); };
+    zoomSlider.onValueChange = [this]
+    {
+        const auto zoom = static_cast<float>(zoomSlider.getValue());
+        timeline.setPixelsPerSecond(zoom);
+        pianoRoll.setPixelsPerSecond(zoom);
+    };
+    timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
 
     openButton.onClick = [this] { openProject(); };
     saveButton.onClick = [this] { saveProject(); };
@@ -95,14 +105,20 @@ void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Palette::background);
     g.setColour(Palette::panel);
-    g.fillRect(0, 0, getWidth(), 86);
+    g.fillRect(0, 0, getWidth(), 80);
     g.setColour(Palette::grid);
-    g.drawHorizontalLine(85, 0.0f, static_cast<float>(getWidth()));
+    g.drawHorizontalLine(25, 0.0f, static_cast<float>(getWidth()));
+    g.drawHorizontalLine(79, 0.0f, static_cast<float>(getWidth()));
+    g.setColour(Palette::text);
+    g.setFont(12.0f);
+    g.drawText("文件     编辑     轨道     视图     帮助", 10, 0, 310, 25,
+               juce::Justification::centredLeft);
 }
 
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromTop(26);
     auto toolbar = area.removeFromTop(54).reduced(8, 7);
     auto take = [&toolbar](juce::Component& component, int width)
     {
@@ -120,20 +136,21 @@ void MainComponent::resized()
     take(noteEditButton, 90);
     take(wrenchButton, 90);
     zoomSlider.setBounds(toolbar.removeFromRight(130));
-
-    auto settings = area.removeFromTop(32).reduced(8, 2);
-    pitchLabel.setBounds(settings.removeFromLeft(86));
-    pitchAlgorithm.setBounds(settings.removeFromLeft(130));
-    settings.removeFromLeft(10);
-    stretchLabel.setBounds(settings.removeFromLeft(86));
-    stretchAlgorithm.setBounds(settings.removeFromLeft(150));
-    settings.removeFromLeft(12);
-    sourceEditHint.setBounds(settings.removeFromLeft(360));
-    progressBar.setBounds(settings.removeFromRight(180));
+    toolbar.removeFromRight(8);
+    progressBar.setBounds(toolbar.removeFromRight(150));
 
     auto footer = area.removeFromBottom(24);
     statusLabel.setBounds(footer.reduced(8, 0));
-    trackList.setBounds(area.removeFromLeft(210));
+    auto upper = area.removeFromTop(juce::jmax(190, area.getHeight() / 2));
+    trackList.setBounds(upper.removeFromLeft(226));
+    timelineViewport.setBounds(upper);
+
+    auto parameterHeader = area.removeFromTop(34);
+    pitchLabel.setBounds(parameterHeader.removeFromLeft(86).reduced(5, 3));
+    pitchAlgorithm.setBounds(parameterHeader.removeFromLeft(138).reduced(3, 3));
+    stretchLabel.setBounds(parameterHeader.removeFromLeft(86).reduced(5, 3));
+    stretchAlgorithm.setBounds(parameterHeader.removeFromLeft(160).reduced(3, 3));
+    sourceEditHint.setBounds(parameterHeader.removeFromLeft(370).reduced(6, 3));
     pianoViewport.setBounds(area);
 }
 
@@ -146,6 +163,7 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 void MainComponent::timerCallback()
 {
     pianoRoll.setPlayheadSeconds(audio.position());
+    timeline.setPlayheadSeconds(audio.position());
     statusLabel.setText((audio.isPlaying() ? strings.text("transport.play") : strings.text("status.ready"))
                             + "  " + juce::String(audio.position(), 2) + " s",
                         juce::dontSendNotification);
@@ -222,4 +240,3 @@ void MainComponent::showError(const juce::String& message)
                                             strings.text("app.title"), message);
 }
 }
-

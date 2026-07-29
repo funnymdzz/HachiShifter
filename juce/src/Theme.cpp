@@ -2,17 +2,20 @@
 
 namespace hachi
 {
-const juce::Colour Palette::background  { 0xff202124 };
-const juce::Colour Palette::panel       { 0xff292a2d };
-const juce::Colour Palette::panelRaised { 0xff343538 };
-const juce::Colour Palette::grid        { 0xff3b3c3f };
-const juce::Colour Palette::beatGrid    { 0xff66542b };
-const juce::Colour Palette::accent      { 0xffd98221 };
-const juce::Colour Palette::accentLight { 0xffffc36b };
+const juce::Colour Palette::background  { 0xff353535 };
+const juce::Colour Palette::panel       { 0xff2a2a2a };
+const juce::Colour Palette::panelRaised { 0xff404040 };
+const juce::Colour Palette::grid        { 0xff373737 };
+const juce::Colour Palette::beatGrid    { 0xff4a4a4a };
+const juce::Colour Palette::accent      { 0xff3b82f6 };
+const juce::Colour Palette::accentLight { 0xff79a7ff };
+const juce::Colour Palette::noteFill    { 0xffd98221 };
+const juce::Colour Palette::noteLight   { 0xffffc36b };
 const juce::Colour Palette::noteEdge    { 0xffffa63d };
 const juce::Colour Palette::pitchLine   { 0xfff4f4f4 };
-const juce::Colour Palette::text        { 0xffeeeeee };
-const juce::Colour Palette::textMuted   { 0xffa4a6aa };
+const juce::Colour Palette::playhead    { 0xfff05a5a };
+const juce::Colour Palette::text        { 0xffd0d0d0 };
+const juce::Colour Palette::textMuted   { 0xff909090 };
 
 HachiLookAndFeel::HachiLookAndFeel()
 {
@@ -53,4 +56,3 @@ void HachiLookAndFeel::drawComboBox(juce::Graphics& g, int width, int height, bo
     g.strokePath(arrow, juce::PathStrokeType(1.5f));
 }
 }
-

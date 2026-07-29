@@ -22,7 +22,6 @@ private:
     ProjectModel& model;
     I18n& strings;
     ProjectData snapshot;
-    int rowHeight = 64;
+    int rowHeight = 96;
 };
 }
-

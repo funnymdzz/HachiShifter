@@ -36,6 +36,8 @@ target_sources(HachiShifterNext PRIVATE
     src/PianoRollComponent.h
     src/TrackListComponent.cpp
     src/TrackListComponent.h
+    src/TimelineComponent.cpp
+    src/TimelineComponent.h
     src/Theme.cpp
     src/Theme.h
     src/I18n.cpp

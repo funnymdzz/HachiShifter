@@ -4,6 +4,7 @@
 #include "I18n.h"
 #include "PianoRollComponent.h"
 #include "Theme.h"
+#include "TimelineComponent.h"
 #include "TrackListComponent.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
@@ -55,9 +56,10 @@ private:
     double progress = 0.0;
 
     TrackListComponent trackList;
+    TimelineComponent timeline;
     PianoRollComponent pianoRoll;
+    juce::Viewport timelineViewport;
     juce::Viewport pianoViewport;
     std::unique_ptr<juce::FileChooser> chooser;
 };
 }
-

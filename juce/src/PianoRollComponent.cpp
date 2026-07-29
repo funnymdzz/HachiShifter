@@ -128,18 +128,18 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 const auto bounds = juce::Rectangle<float>(x, y + 2.0f, width, rowHeight - 4.0f);
                 noteHits.push_back({ note.id, bounds, note.midiNote });
 
-                g.setColour(Palette::accent.darker(0.18f));
+                g.setColour(Palette::noteFill.darker(0.18f));
                 g.fillRoundedRectangle(bounds, 4.0f);
                 const auto consonantWidth = juce::jlimit(0.0f, width,
                     static_cast<float>(note.consonantSeconds) * pixelsPerSecond);
-                g.setColour(Palette::accentLight.withAlpha(0.58f));
+                g.setColour(Palette::noteLight.withAlpha(0.58f));
                 g.fillRoundedRectangle(bounds.withWidth(consonantWidth), 4.0f);
                 g.setColour(Palette::noteEdge);
                 g.drawRoundedRectangle(bounds, 4.0f, 1.2f);
 
                 for (const auto marker : note.sibilantMarkers)
                 {
-                    g.setColour(Palette::accentLight);
+                    g.setColour(Palette::noteLight);
                     const auto markerX = x + static_cast<float>(marker) * pixelsPerSecond;
                     g.drawVerticalLine(static_cast<int>(markerX), bounds.getY(), bounds.getBottom());
                 }
@@ -166,7 +166,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
 
                 if (note.connectedToPrevious)
                 {
-                    g.setColour(Palette::accentLight);
+                    g.setColour(Palette::noteLight);
                     g.fillEllipse(bounds.getX() - 3.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
                 }
             }
@@ -175,7 +175,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
 
     if (draggedNote.isNotEmpty())
     {
-        g.setColour(Palette::accentLight.withAlpha(0.8f));
+        g.setColour(Palette::noteLight.withAlpha(0.8f));
         g.drawHorizontalLine(static_cast<int>(midiToY(previewMidi) + rowHeight * 0.5f),
                              58.0f, static_cast<float>(getWidth()));
     }
