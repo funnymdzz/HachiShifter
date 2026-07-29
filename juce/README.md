@@ -11,7 +11,8 @@ remains available on `main` for regression reference.
 - native multi-track project model with BPM and beat-origin persistence;
 - sample-accurate multi-track transport, clip gain/pan and overlap fades;
 - sample-rate-independent reader/resampling path;
-- Melodyne-style dark/orange piano roll and source-edit wrench mode;
+- legacy-compatible dark piano roll using `#7F69CA`, `#CBCBFA` and `#F4C000`,
+  plus the source-edit wrench mode;
 - pitch contours remain relative to the note centre when a note is dragged;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);

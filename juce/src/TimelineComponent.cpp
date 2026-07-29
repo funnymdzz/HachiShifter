@@ -9,8 +9,8 @@ namespace hachi
 namespace
 {
 const std::array<juce::Colour, 6> trackColours {
-    juce::Colour(0xff55cda6), juce::Colour(0xffe28b3c), juce::Colour(0xffef7380),
-    juce::Colour(0xffdf70b7), juce::Colour(0xff6ba8e7), juce::Colour(0xffa58ae6)
+    juce::Colour(0xff7f69ca), juce::Colour(0xffcbcbfa), juce::Colour(0xfff4c000),
+    juce::Colour(0xff9b8bdd), juce::Colour(0xffdedcff), juce::Colour(0xffffd94f)
 };
 }
 
@@ -157,4 +157,3 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
     if (onSeek) onSeek(std::max(0.0, static_cast<double>(event.position.x) / pixelsPerSecond));
 }
 }
-
