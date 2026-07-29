@@ -46,7 +46,7 @@ jobs:
           set -euo pipefail
           root="HachiShifterNext-linux-x86_64"
           mkdir -p "$root/models"
-          binary=$(find build-next -type f -name HachiShifterNext -perm -111 | head -n 1)
+          binary=$(find build-next -path '*_artefacts/Release/*' -type f -name 'HachiShifter*' -perm -111 | head -n 1)
           test -n "$binary"
           cp "$binary" "$root/HachiShifterNext"
           cp LICENSE "$root/LICENSE"
@@ -75,7 +75,9 @@ jobs:
         run: |
           $root = "HachiShifterNext-windows-x64"
           New-Item -ItemType Directory -Force -Path "$root/models" | Out-Null
-          $binary = Get-ChildItem -Path build-next -Recurse -Filter HachiShifterNext.exe | Select-Object -First 1
+          $binary = Get-ChildItem -Path build-next -Recurse -Filter "HachiShifter*.exe" |
+            Where-Object { $_.FullName -match "_artefacts[/\\]Release" } |
+            Select-Object -First 1
           if (-not $binary) { throw "HachiShifterNext.exe not found" }
           Copy-Item $binary.FullName "$root/HachiShifterNext.exe"
           Copy-Item LICENSE "$root/LICENSE"
@@ -86,4 +88,3 @@ jobs:
           name: HachiShifterNext-windows-x64-no-model
           path: HachiShifterNext-windows-x64-no-model.zip
           if-no-files-found: error
-

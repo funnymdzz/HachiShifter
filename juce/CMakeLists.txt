@@ -40,6 +40,10 @@ target_sources(HachiShifterNext PRIVATE
     src/Theme.h
     src/I18n.cpp
     src/I18n.h
+    src/backend/Mld5Renderer.cpp
+    src/backend/Mld5Renderer.h
+    src/backend/RenderService.cpp
+    src/backend/RenderService.h
 )
 
 target_compile_definitions(HachiShifterNext PRIVATE
@@ -68,4 +72,3 @@ if(MSVC)
 else()
     target_compile_options(HachiShifterNext PRIVATE -Wall -Wextra -Wpedantic)
 endif()
-

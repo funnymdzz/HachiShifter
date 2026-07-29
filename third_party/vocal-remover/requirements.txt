@@ -1,5 +1,0 @@
-librosa
-numpy
-PyYAML
-soundfile
-tqdm

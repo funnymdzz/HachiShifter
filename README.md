@@ -1,350 +1,56 @@
-# HachiShifter
+# HachiShifter Next
 
-[简体中文](README.md) | [繁體中文](docs/i18n/README_zh-TW.md) | [English](docs/i18n/README_en.md) | [日本語](docs/i18n/README_ja.md) | [한국어](docs/i18n/README_ko.md)
+HachiShifter Next 是面向人力 VOCALOID 制作流程的跨平台原生人声编辑器。
+`next` 分支正在以 JUCE、C++20 和 CMake 重建应用，不再使用网页前端、Tauri
+或 Rust 后端。
 
-HachiShifter 是一个图形化人声编辑与合成工具。它支持多轨道音频切片处理，并以轨道组为单位，使用多种声码器完成人声修音、人力调参功能，实现人力VOCALOID制作的拼调一体化。
+## 当前架构
 
-**当前项目仍在开发迭代中，未对全链路进行测试，可能存在诸多 BUG 或不稳定问题。**
-
-![预览图](docs/preview.png)
-
-## 安装
-
-请直接在仓库侧边选择适合自己系统的Release版本下载安装
-
-## 基本原理
-
-HachiShifter 使用类似 UTAU 的离线渲染方式，对时间线中的每个音频切片进行处理、渲染、缓存，最后再输入到播放系统中，因此其对短切片有着更快的处理效率。
-
-HachiShifter 提供了一个统一的渲染接口，以便未来增添更多的算法支持。
-
-## 工作流推荐
-
-我们推荐的工作流是：
-
-1. 通过其他 DAW 或切片软件准备好人力所需的短切片音源
-2. 在 HachiShifter 中完成音频的拼贴和调音
-
-当然，HachiShifter 也支持以下操作方便从其他软件的工程迁移：
-
-1. 直接打开 VocalShifter 工程
-2. 直接打开 Reaper 工程
-3. 解析 VocalShifter 剪贴板内容，支持将 VocalShifter 中的参数粘贴到 HachiShifter 参数区中。
-4. 解析 Reaper 剪贴板内容，支持直接将 Reaper 的 Items 粘贴到 HachiShifter 中
-
-## 功能介绍
-
-### 布局介绍
-
-HachiShifter 可以大致的分为两个功能区，分别是上部的轨道面板和下部的参数面板。轨道面板主要负责对音频的切片处理，参数面板则负责对音频进行调参处理。
-
-### 轨道面板
-
-HachiShifter 提供了一个基本完备的轨道面板与音频切片功能。该功能与大多数现代 DAW 类似。
-
-#### 音频导入
-
-HachiShifter 支持三种方式导入音频：
-
-1. 直接从系统文件管理器中拖拽音频到轨道上
-2. 点击工具栏的文件夹图标，打开内置文件管理器并拖拽音频到轨道上
-3. 按下 `Ctrl + F` 打开快捷搜索，选择音频导入到轨道上（快捷搜索的文件路径与内置文件管理器的当前路径一致）
-
-#### 音频编辑
-
-- **吸附网格**：剪辑移动/裁剪默认吸附网格；按住 `Shift` 可临时关闭吸附。
-- **裁剪/伸缩范围**：拖动剪辑左右边界进行裁剪或延长
-- **伸缩（Time Stretch）**：按住 `Alt` + 鼠标左键拖动剪辑左右边界，可伸缩音频。
-- **内部偏移（Slip-Edit）**：按住 `Alt` + 鼠标左键拖动剪辑主体，可左右滑移剪辑的内部内容。
-- **淡入淡出**：拖动剪辑左上角/右上角调整淡入/淡出时长。
-- **增益（dB）**：拖动剪辑左上角的旋钮（上下拖动）调整增益，剪辑右上角会显示当前 dB。
-- **剪辑静音（M）**：剪辑左上角 `M` 按钮可对该剪辑静音，静音后剪辑整体变灰。
-- **框选多选**：在时间线空白处按住鼠标右键拖拽可框选多个剪辑。
-- **复制拖动**：按住 `Ctrl` 后拖拽剪辑，会在目标位置创建副本并保持原剪辑不动（复制完成在松手时生效）。
-- **胶合**：右键剪辑打开菜单，选择"胶合"（要求同一轨道且至少 2 个剪辑）。
-- **切分**：选中剪辑后按 `S` 可在播放头位置切分。
-- **复制粘贴**：选中剪辑后按 `Ctrl + C` 将选中剪辑复制到应用内剪贴板。`Ctrl + V` 会把“所选剪辑中最靠左的起点”对齐到播放头位置，其余剪辑保持相对间距
-
-需要特别注意的，轨道支持嵌套，可以将轨道拖动到另一个轨道下成为该轨道的子轨道，形成一个轨道组。在接下来的调参过程中，轨道组将十分有用。
-
-### 参数面板
-
-HachiShifter 的参数面板提供了类似 VocalShifter 的操作支持以方便用户调整参数。
-
-需要注意的是，HachiShifter 的轨道上有一个特殊的 `C` 按钮，只有按下这个按钮，该轨道上的音频才能被后续调参处理。
-
-在调参中，HachiShifter 以轨道组为单位，通过根轨道开启 `C` 来决定，一个轨道组共用一个算法和一套参数线。参数线会按位置作用到每一个音频切片上。
-
-HachiShifter 中的每个算法都有不同的参数可供调整，其中通用参数为音高。
-
-在首次打开时，HachiShifter 需要一些时间对切片的音高进行分析。分析完成后，面板中的实线表示该轨道组的整体当前音高，虚线表示整体原始音高，彩线表示每个切片自己的原始音高。
-
-其他面板与音高面板类似，只是不会显示切片自己的原始音高。
-
-面板旁边的小眼睛可以开启该面板在未选中下的可见性。
-
-### 算法
-
-目前 HachiShifter 支持三种算法进行处理。
-
-#### World 算法
-
-老牌声码器  
-仅支持`音高`编辑
-
-#### PC-NSF-HIFIGAN
-
-OpenVPI 开源的为歌声特化的 hifigan 声码器  
-支持 `音高`、`气声`、`张力`、`共振峰`、`音量` 参数的编辑  
-需要注意的是，气声的编辑需要额外开启，将会使用 hnsep 的 UVR 模型对切片进行气声分离，首次需要较长的时间处理。如果需要编辑张力请务必开启气声。
-
-#### Vslib
-
-VocalShifter 提供的算法库。
-支持 `音高`、`声相`、`共振峰`、`音量`、`气声` 参数的编辑  
-由于官方提供的 dll 仅支持文件IO，因此相对 VocalShifter 本体需要更多的时间处理。
-
-## 常用快捷键速查
-
-| 操作                         | 快捷键 / 鼠标                   |
-| :--------------------------- | :------------------------------ |
-| 平移视图（时间轴）           | 鼠标中键拖动                    |
-| 横向缩放（时间轴）           | 鼠标滚轮（以光标为中心）        |
-| 纵向缩放（轨道高度，时间轴） | Ctrl + 鼠标滚轮                 |
-| 纵向缩放（参数轴，参数面板） | Ctrl + 鼠标滚轮（参数面板内）   |
-| 播放/暂停                    | Space（空格）                   |
-| 播放/停止                    | Enter                           |
-| 撤销/重做                    | Ctrl + Z / Ctrl + Y             |
-| 新建工程                     | Ctrl + N                        |
-| 打开工程                     | Ctrl + Shift + O                |
-| 保存                         | Ctrl + S                        |
-| 另存为                       | Ctrl + Shift + S                |
-| 导出音频                     | Ctrl + E                        |
-| 模式切换（选择/绘制）        | Tab                             |
-| 删除选中剪辑                 | Delete                          |
-| 复制选中剪辑（应用内剪贴板） | Ctrl + C                        |
-| 粘贴到播放头位置             | Ctrl + V                        |
-| 参数面板复制选区曲线         | Ctrl + C（Select 模式）         |
-| 参数面板粘贴到选区起点       | Ctrl + V（Select 模式）         |
-| 分割剪辑                     | S（在播放头位置分割选中的剪辑） |
-| 新建轨道                     | Ctrl + T                        |
-| 快速搜索                     | Ctrl + F                        |
-
-## 开发环境配置
-
-该部分内容为开发者提供，普通用户可以跳过。
-
-### 1. 克隆仓库
-
-```bash
-git clone https://github.com/funnymdzz/HachiShifter.git
-cd HachiShifter
+```text
+juce/
+├── CMakeLists.txt
+└── src/
+    ├── backend/          音高、拉伸与离线渲染服务
+    ├── AudioEngine.*     实时多轨播放与采样率转换
+    ├── ProjectModel.*    工程、轨道、采样、音符和音高线数据
+    ├── PianoRollComponent.*
+    ├── TrackListComponent.*
+    ├── MainComponent.*
+    ├── Theme.*
+    └── I18n.*
 ```
 
-### 2. 安装依赖
+界面、工程模型、音频设备、实时播放、离线渲染和 mld5 频谱组件均为原生
+C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行执行。
 
-#### Windows
+## 已迁移内容
 
-HachiShifter 提供了**一键式环境配置脚本**，可自动安装 ONNX Runtime 和 CUDA 运行时（Rust 工具链**默认跳过**，需手动添加 `-InstallRust` 启用）：
+- JUCE 原生窗口、工具栏、轨道列表和钢琴卷帘；
+- 深色/橙色统一配色；
+- 多轨采样播放、增益、声像、淡入淡出和重叠混音；
+- 与输出设备采样率无关的音频读取；
+- BPM、拍号和节拍原点；
+- 音符整体移调并保留原始音高调制；
+- 辅音浅色区域、齿音标记、无声区断线和音符连接状态；
+- 原始采样扳手编辑模式；
+- `.hspx` 原生工程保存与读取；
+- mld5 周期/非周期分离、共振峰包络保持、Attack 保护和块能量归一化；
+- 简体中文、繁体中文、日语、韩语和英语界面文本；
+- Linux 与 Windows 模型-free GitHub Actions 构建。
 
-```powershell
-.\scripts\setup-windows.ps1
-```
+## 构建
 
-该脚本支持可选参数：
+仓库使用 GitHub Actions 构建，不要求在本地下载 JUCE 或生成应用构建目录。
+推送到 `next` 后由 `Compile HachiShifter Next (JUCE)` 工作流生成：
 
-- `-InstallRust`：安装项目本地的便携 Rust 工具链（默认跳过，使用系统全局 Rust）
-- `-SkipOrt`：跳过 ONNX Runtime 下载
-- `-SkipCudaRuntime`：跳过 CUDA 运行时下载
-- `-SkipFrontend`：跳过前端依赖安装
-- `-LocalOrtDir <path>`：从本地已解压的 ORT 目录复制（免网络下载）
-- `-LocalPackage <path>`：从本地已下载的 ORT ZIP 包解压（免网络下载）
+- `HachiShifterNext-linux-x86_64-no-model.tar.gz`
+- `HachiShifterNext-windows-x64-no-model.zip`
 
-若需使用镜像加速下载：
+JUCE 依赖由 CMake FetchContent 在云端构建机获取，发布包不包含模型。
 
-```powershell
-$env:ORT_MIRROR = "https://ghproxy.com/https://github.com"
-.\scripts\setup-windows.ps1
-```
+## 使用说明
 
-若需从本地离线安装 ORT：
+## 许可证
 
-```powershell
-# 从已解压的本地 ORT 目录复制
-.\scripts\setup-windows.ps1 -LocalOrtDir "D:\ort\onnxruntime-win-x64-gpu-1.24.1"
-
-# 从本地 ZIP 包解压
-.\scripts\setup-windows.ps1 -LocalPackage "D:\Downloads\onnxruntime-win-x64-gpu-1.24.1.zip"
-```
-
-若只需加载本地 Rust 环境到当前 shell（不执行安装）：
-
-```powershell
-. .\scripts\setup-windows.ps1 -LoadEnv
-```
-
-如果希望手动安装，请确保已安装以下工具：
-
-- **Node.js**（建议 18+）及 npm
-- **Rust 工具链**（参见 `rust-toolchain.toml`）
-- **Tauri 2 CLI**：`cargo install tauri-cli --version "^2"`
-- **CMake**（用于编译 SoundTouch 库）
-
-安装前端依赖：
-
-```bash
-npm --prefix frontend install
-```
-
-#### macOS
-
-```bash
-chmod +x ./scripts/install_deps_macos.sh
-SKIP_FRONTEND=0 bash ./scripts/install_deps_macos.sh
-```
-
-#### Linux
-
-```bash
-chmod +x ./scripts/install_deps_linux.sh
-SKIP_FRONTEND=0 bash ./scripts/install_deps_linux.sh
-```
-
-本仓库的默认 feature 包含仅用于 Windows VocalShifter 的 `vslib`。Linux/WSL2
-构建时应显式关闭默认 feature，并仅启用 ONNX：
-
-```bash
-cd backend/src-tauri
-cargo build --target x86_64-unknown-linux-gnu --no-default-features --features onnx,custom-protocol
-```
-
-### 3. SoundTouch 源码
-
-SoundTouch 音频时间拉伸库在编译时从源码构建。首次构建时会**自动克隆**，无需手动操作。
-
-如需离线构建，可提前手动克隆：
-
-```bash
-cd backend/src-tauri/third_party/soundtouch-static
-git clone --depth 1 --branch 2.3.3 https://codeberg.org/soundtouch/soundtouch.git soundtouch
-```
-
-### 4. GPU 加速构建（CUDA）
-
-HachiShifter 支持通过 NVIDIA CUDA 实现 GPU 加速推理。
-
-#### Windows（CUDA）
-
-前置条件：
-
-- 一台支持 CUDA 的 NVIDIA GPU
-- [NVIDIA 显卡驱动](https://www.nvidia.com/drivers)（版本 ≥ 545）
-
-一键环境搭建：
-
-```powershell
-.\scripts\setup-windows.ps1
-```
-
-开发模式（热更新）：
-
-```powershell
-.\scripts\build-gpu.ps1 -Dev
-```
-
-构建 Release：
-
-```powershell
-# 快速构建（仅编译二进制文件，不含安装包）
-.\scripts\build-gpu.ps1
-
-# 快速构建 + 文件日志（log.txt 带时间戳，放在 exe 旁边）
-.\scripts\build-gpu.ps1 -Log
-
-# 完整构建（二进制 + NSIS 安装包，较慢--需压缩约 2 GB 的 GPU 组件）
-.\scripts\build-gpu.ps1 -Bundle
-```
-
-构建完成后，运行以下命令创建便携版压缩包：
-
-```powershell
-.\scripts\pack-portable.ps1 -SkipBuild
-```
-
-#### Linux（CUDA）
-
-前置条件：
-
-- 一台支持 CUDA 的 NVIDIA GPU
-- [NVIDIA 显卡驱动](https://www.nvidia.com/drivers)（版本 ≥ 545）
-
-```bash
-# 安装系统依赖（含 CUDA toolkit）
-sudo bash ./scripts/install-cuda-linux.sh
-
-# 下载 ONNX Runtime GPU + cuDNN
-bash ./scripts/download-ort.sh
-
-# 构建
-bash ./scripts/build-gpu-linux.sh
-```
-
-> **注意：** macOS 目前不支持 CUDA GPU 加速。
-
-## 快速开始
-
-### 运行开发模式
-
-```bash
-cd backend/src-tauri
-cargo tauri dev
-```
-
-前端启动模式可通过环境变量 `TAURI_UI_MODE` 切换：
-
-- `dev`：开发模式（默认，使用 Vite dev server，支持热更新）
-- `build`：构建模式（先构建前端静态资源，再启动）
-
-Linux/WSL2（bash）：
-
-```bash
-cd backend/src-tauri
-TAURI_UI_MODE=build cargo tauri dev --target x86_64-unknown-linux-gnu --no-default-features --features onnx
-```
-
-macOS（bash/zsh）：
-
-```bash
-cd backend/src-tauri
-TAURI_UI_MODE=build cargo tauri dev
-```
-
-Windows PowerShell：
-
-```powershell
-cd backend/src-tauri
-$env:TAURI_UI_MODE='build'; cargo tauri dev
-```
-
-**注意：** 首次编译需要很长的时间，请耐心等待
-
-## 文档
-
-- [使用手册](docs/i18n/USERMANUAL.md)
-- [采样分段、自动音符与 UTAU oto 转换](docs/SAMPLE_ANNOTATIONS.md)
-- [更新计划](todo.md)
-
-## 致谢
-
-本项目使用了以下开源库的代码或模型结构：
-
-- [WORLD](https://github.com/mmorise/World) - 高质量语音分析与合成系统
-- [SoundTouch](https://www.surina.net/soundtouch/) - 音频时间拉伸与变调库（LGPL）
-- [Signalsmith Stretch](https://github.com/Signalsmith-Audio/signalsmith-stretch) - 高质量音频时间拉伸库（MIT）
-- [VocalShifter Library (vslib)](https://ackiesound.ifdef.jp/) - 音声解析与合成库
-- [SingingVocoders](https://github.com/openvpi/SingingVocoders) - 歌声合成声码器（OpenVPI）
-- [HiFi-GAN](https://github.com/jik876/hifi-gan) - 高保真生成对抗网络声码器
-
-## License
-
-本项目基于 [MIT License](LICENSE) 发布。
+项目代码依据 [LICENSE](LICENSE) 发布。构建和分发时同时遵循 JUCE 及所选音频
+算法依赖的许可证要求。

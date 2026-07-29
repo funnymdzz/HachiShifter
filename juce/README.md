@@ -1,8 +1,8 @@
 # HachiShifter Next — JUCE native rewrite
 
-`next` is the native JUCE rewrite of HachiShifter. It is intentionally isolated
-from the Tauri/Vue application while the DSP and importers are migrated and
-validated against the existing regression fixtures.
+`next` is the native JUCE/C++20 rewrite of HachiShifter. The former Tauri/Vue
+frontend and Rust backend have been removed from this branch; their history
+remains available on `main` for regression reference.
 
 ## Current native foundation
 
@@ -17,17 +17,15 @@ validated against the existing regression fixtures.
 - native project save/load (`.hspx`);
 - complete strings for zh-CN, zh-TW, ja-JP, ko-KR and en-US.
 
-## Migration boundary
+## Native backend
 
-The existing `backend` and `frontend` remain in the branch as executable
-specifications and regression fixtures. New production code belongs under
-`juce/`. MPD parsing, GAME/FCPE inference and the reconstructed mld5 renderer
-will move behind native C++ service interfaces before the legacy directories
-are removed.
+Production code lives under `juce/`. `src/backend` contains model-free DSP and
+parallel offline render services; realtime transport and project scheduling are
+implemented by `AudioEngine`. Additional analysis backends are added as C++
+services rather than restoring the removed web/Rust layers.
 
 ## Cloud build
 
 No local build is required. Pushes to `next` trigger
 `.github/workflows/compile-next-juce.yml` and create model-free Linux and Windows
 archives.
-
