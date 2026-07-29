@@ -97,6 +97,8 @@ private:
     juce::Slider zoomSlider;
     double progress = 0.0;
     juce::ProgressBar progressBar;
+    bool importInProgress = false;
+    bool showingRenderProgress = false;
 
     TrackListComponent trackList;
     TimelineComponent timeline;

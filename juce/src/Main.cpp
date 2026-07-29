@@ -14,6 +14,29 @@ public:
     void initialise(const juce::String& commandLine) override
     {
         auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        if (arguments.size() >= 2 && arguments[0] == "--inspect-midi")
+        {
+            ProjectModel model;
+            juce::String error;
+            if (!model.addMidiFile(juce::File(arguments[1]), error))
+            {
+                std::cerr << "error=" << error << std::endl;
+                setApplicationReturnValue(2);
+            }
+            else
+            {
+                const auto project = model.snapshot();
+                std::size_t notes = 0;
+                for (const auto& track : project.tracks)
+                    for (const auto& clip : track.clips) notes += clip.notes.size();
+                std::cout << "project=" << project.name << '\n'
+                          << "bpm=" << project.bpm << '\n'
+                          << "tracks=" << project.tracks.size() << '\n'
+                          << "notes=" << notes << std::endl;
+            }
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         if (arguments.size() >= 2 && arguments[0] == "--inspect-mpd")
         {
             juce::String error;

@@ -5,6 +5,91 @@
 
 namespace hachi
 {
+namespace
+{
+std::optional<std::pair<float, float>> contourAt(const NoteData& note, double localSeconds)
+{
+    if (note.contour.empty()) return std::pair { 0.0f, 0.0f };
+    const auto right = std::lower_bound(note.contour.begin(), note.contour.end(), localSeconds,
+        [](const PitchPoint& point, double time) { return point.timeSeconds < time; });
+    const auto rightIndex = static_cast<std::size_t>(right == note.contour.end()
+        ? note.contour.size() - 1 : right - note.contour.begin());
+    const auto leftIndex = rightIndex > 0 && note.contour[rightIndex].timeSeconds > localSeconds
+        ? rightIndex - 1 : rightIndex;
+    const auto& left = note.contour[leftIndex];
+    const auto& next = note.contour[rightIndex];
+    if (!left.voiced || !next.voiced) return std::nullopt;
+    const auto amount = next.timeSeconds > left.timeSeconds
+        ? static_cast<float>(juce::jlimit(0.0, 1.0,
+            (localSeconds - left.timeSeconds) / (next.timeSeconds - left.timeSeconds))) : 0.0f;
+    return std::pair { left.relativeCents + (next.relativeCents - left.relativeCents) * amount,
+                       left.withoutVibratoCents
+                           + (next.withoutVibratoCents - left.withoutVibratoCents) * amount };
+}
+
+backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip)
+{
+    backend::Mld5FileRenderRequest request;
+    request.sourceFile = clip.sourceFile;
+    request.sourceOffsetSeconds = clip.sourceOffsetSeconds;
+    request.sourceDurationSeconds = clip.sourceDurationSeconds > 1.0e-9
+        ? clip.sourceDurationSeconds : clip.durationSeconds;
+    request.targetDurationSeconds = clip.durationSeconds;
+    constexpr auto framePeriodSeconds = 0.005;
+    request.framePeriodMs = framePeriodSeconds * 1000.0;
+    const auto frameCount = std::max(2, static_cast<int>(std::ceil(clip.durationSeconds
+                                                                   / framePeriodSeconds)) + 1);
+    request.sourceMidi.resize(static_cast<std::size_t>(frameCount), 0.0f);
+    request.targetMidi.resize(static_cast<std::size_t>(frameCount), 0.0f);
+    for (int frame = 0; frame < frameCount; ++frame)
+    {
+        const auto time = std::min(clip.durationSeconds, static_cast<double>(frame) * framePeriodSeconds);
+        for (const auto& note : clip.notes)
+        {
+            const auto local = time - note.startSeconds;
+            if (local < -1.0e-9 || local > note.durationSeconds + 1.0e-9) continue;
+            const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, local));
+            if (!cents) break;
+            const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;
+            request.sourceMidi[static_cast<std::size_t>(frame)] = sourceCenter + cents->first / 100.0f;
+            request.targetMidi[static_cast<std::size_t>(frame)] = note.midiNote
+                + note.drift * cents->second / 100.0f
+                + note.modulation * (cents->first - cents->second) / 100.0f;
+            break;
+        }
+    }
+    return request;
+}
+
+std::string renderKey(const ClipData& clip)
+{
+    juce::MemoryOutputStream stream;
+    const auto path = clip.sourceFile.getFullPathName().toUTF8();
+    stream.write(path.getAddress(), path.sizeInBytes());
+    stream.writeInt64(clip.sourceFile.getLastModificationTime().toMilliseconds());
+    stream.writeDouble(clip.sourceOffsetSeconds);
+    stream.writeDouble(clip.sourceDurationSeconds);
+    stream.writeDouble(clip.durationSeconds);
+    for (const auto& note : clip.notes)
+    {
+        stream.writeDouble(note.startSeconds);
+        stream.writeDouble(note.durationSeconds);
+        stream.writeFloat(note.midiNote);
+        stream.writeFloat(note.sourceMidiCenter);
+        stream.writeFloat(note.modulation);
+        stream.writeFloat(note.drift);
+        for (const auto& point : note.contour)
+        {
+            stream.writeDouble(point.timeSeconds);
+            stream.writeFloat(point.relativeCents);
+            stream.writeFloat(point.withoutVibratoCents);
+            stream.writeByte(static_cast<char>(point.voiced ? 1 : 0));
+        }
+    }
+    return juce::MD5(stream.getData(), stream.getDataSize()).toHexString().toStdString();
+}
+}
+
 AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats();
@@ -100,6 +185,29 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
             loaded->meter = meter;
             loaded->reader = reader;
+            if (track.compose && track.pitchAlgorithm == PitchAlgorithm::mld5 && !clip.notes.empty())
+            {
+                const auto key = renderKey(clip);
+                auto& state = renderCache[key];
+                if (state == nullptr) state = std::make_shared<RenderedClip>();
+                loaded->rendered = state;
+                if (!state->scheduled.exchange(true))
+                {
+                    auto request = makeRenderRequest(clip);
+                    renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
+                    {
+                        if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
+                        {
+                            state->finished.store(true, std::memory_order_release);
+                            return;
+                        }
+                        state->buffer = std::move(result.buffer);
+                        state->sampleRate = result.sampleRate;
+                        state->ready.store(true, std::memory_order_release);
+                        state->finished.store(true, std::memory_order_release);
+                    });
+                }
+            }
             loadedClips.push_back(std::move(loaded));
         }
     }
@@ -190,6 +298,51 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             static_cast<int>(std::ceil((overlapEnd - blockStart) * sampleRate)));
         const auto outputCount = outputEnd - outputBegin;
         if (outputCount <= 0) continue;
+
+        if (loaded->rendered != nullptr
+            && loaded->rendered->ready.load(std::memory_order_acquire)
+            && loaded->rendered->buffer.getNumSamples() > 0)
+        {
+            const auto& rendered = loaded->rendered->buffer;
+            const auto renderedRate = loaded->rendered->sampleRate;
+            const auto renderedChannels = juce::jlimit(1, 2, rendered.getNumChannels());
+            const auto firstPosition = (blockStart + static_cast<double>(outputBegin) / sampleRate
+                                        - clip.startSeconds) * renderedRate;
+            const auto leftPan = std::sqrt(0.5f * (1.0f - loaded->trackPan));
+            const auto rightPan = std::sqrt(0.5f * (1.0f + loaded->trackPan));
+            for (int outputOffset = 0; outputOffset < outputCount; ++outputOffset)
+            {
+                const auto position = firstPosition
+                    + static_cast<double>(outputOffset) * renderedRate / sampleRate;
+                const auto leftIndex = juce::jlimit(0, rendered.getNumSamples() - 1,
+                                                     static_cast<int>(std::floor(position)));
+                const auto rightIndex = std::min(rendered.getNumSamples() - 1, leftIndex + 1);
+                const auto fraction = static_cast<float>(position - std::floor(position));
+                const auto interpolate = [&](int channel)
+                {
+                    const auto* samples = rendered.getReadPointer(channel);
+                    return samples[leftIndex] + (samples[rightIndex] - samples[leftIndex]) * fraction;
+                };
+                const auto sourceLeft = interpolate(0);
+                const auto sourceRight = renderedChannels > 1 ? interpolate(1) : sourceLeft;
+                const auto absoluteSeconds = blockStart
+                    + static_cast<double>(outputBegin + outputOffset) / sampleRate;
+                const auto gain = fadeGain(clip, absoluteSeconds - clip.startSeconds) * loaded->trackGain;
+                const auto destination = info.startSample + outputBegin + outputOffset;
+                const auto renderedLeft = sourceLeft * gain * leftPan;
+                const auto renderedRight = sourceRight * gain * rightPan;
+                info.buffer->addSample(0, destination, renderedLeft);
+                if (info.buffer->getNumChannels() > 1)
+                    info.buffer->addSample(1, destination, renderedRight);
+                if (loaded->meter != nullptr)
+                {
+                    const auto peak = std::max(std::abs(renderedLeft), std::abs(renderedRight));
+                    loaded->meter->store(std::max(loaded->meter->load(std::memory_order_relaxed), peak),
+                                         std::memory_order_relaxed);
+                }
+            }
+            continue;
+        }
 
         const auto readerRate = loaded->reader->sampleRate;
         const auto sourceDuration = clip.sourceDurationSeconds > 1.0e-9
@@ -292,5 +445,20 @@ float AudioEngine::trackPeak(const juce::String& trackId) const
     if (const auto found = trackMeters.find(trackId.toStdString()); found != trackMeters.end())
         return found->second->load(std::memory_order_relaxed);
     return 0.0f;
+}
+
+std::optional<double> AudioEngine::renderProgress() const
+{
+    const juce::ScopedReadLock guard(renderLock);
+    int total = 0;
+    int finished = 0;
+    for (const auto& loaded : loadedClips)
+        if (loaded->rendered != nullptr)
+        {
+            ++total;
+            if (loaded->rendered->finished.load(std::memory_order_acquire)) ++finished;
+        }
+    if (total == 0 || finished >= total) return std::nullopt;
+    return static_cast<double>(finished) / static_cast<double>(total);
 }
 }

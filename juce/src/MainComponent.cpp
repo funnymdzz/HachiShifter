@@ -533,9 +533,29 @@ void MainComponent::timerCallback()
     pianoRoll.setPlayheadSeconds(audio.position());
     timeline.setPlayheadSeconds(audio.position());
     trackList.repaint();
-    statusLabel.setText((audio.isPlaying() ? strings.text("transport.play") : strings.text("status.ready"))
-                            + "  " + juce::String(audio.position(), 2) + " s",
-                        juce::dontSendNotification);
+    if (!importInProgress)
+    {
+        if (const auto render = audio.renderProgress())
+        {
+            showingRenderProgress = true;
+            progress = *render;
+            statusLabel.setText(strings.text("status.rendering") + "  "
+                                    + juce::String(static_cast<int>(std::round(*render * 100.0))) + "%",
+                                juce::dontSendNotification);
+        }
+        else
+        {
+            if (showingRenderProgress)
+            {
+                showingRenderProgress = false;
+                progress = 0.0;
+            }
+            statusLabel.setText((audio.isPlaying() ? strings.text("transport.play")
+                                                    : strings.text("status.ready"))
+                                    + "  " + juce::String(audio.position(), 2) + " s",
+                                juce::dontSendNotification);
+        }
+    }
 
     if (!syncingScroll)
     {
@@ -781,6 +801,7 @@ void MainComponent::importMidi()
 
 void MainComponent::loadMelodyneFile(const juce::File& file)
 {
+    importInProgress = true;
     progress = 0.01;
     statusLabel.setText(strings.text("status.loading"), juce::dontSendNotification);
     juce::Component::SafePointer<MainComponent> safe(this);
@@ -802,6 +823,7 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
         juce::MessageManager::callAsync([safe, imported = std::move(imported), error]() mutable
         {
             if (safe == nullptr) return;
+            safe->importInProgress = false;
             safe->progress = 0.0;
             if (!imported)
             {

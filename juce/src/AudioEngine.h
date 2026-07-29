@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProjectModel.h"
+#include "backend/RenderService.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
 #include <memory>
@@ -29,16 +30,27 @@ public:
     void setPosition(double seconds);
     [[nodiscard]] double position() const;
     [[nodiscard]] float trackPeak(const juce::String& trackId) const;
+    [[nodiscard]] std::optional<double> renderProgress() const;
     [[nodiscard]] bool isPlaying() const { return playing.load(); }
     [[nodiscard]] juce::AudioDeviceManager& devices() { return deviceManager; }
 
 private:
+    struct RenderedClip
+    {
+        juce::AudioBuffer<float> buffer;
+        double sampleRate = 0.0;
+        std::atomic<bool> scheduled { false };
+        std::atomic<bool> ready { false };
+        std::atomic<bool> finished { false };
+    };
+
     struct LoadedClip
     {
         ClipData clip;
         float trackGain = 1.0f;
         float trackPan = 0.0f;
         std::shared_ptr<std::atomic<float>> meter;
+        std::shared_ptr<RenderedClip> rendered;
         std::shared_ptr<juce::AudioFormatReader> reader;
         juce::AudioBuffer<float> scratch;
     };
@@ -47,11 +59,13 @@ private:
     void rebuildLoadedClips(const ProjectData& project);
 
     juce::AudioFormatManager formatManager;
+    backend::RenderService renderService;
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer sourcePlayer;
     mutable juce::ReadWriteLock renderLock;
     std::vector<std::unique_ptr<LoadedClip>> loadedClips;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<float>>> trackMeters;
+    std::unordered_map<std::string, std::shared_ptr<RenderedClip>> renderCache;
     std::shared_ptr<juce::AudioFormatReader> auditionReader;
     juce::AudioBuffer<float> auditionScratch;
     std::atomic<bool> auditionMode { false };
