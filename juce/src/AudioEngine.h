@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace hachi
 {
@@ -27,6 +28,7 @@ public:
     void stop();
     void setPosition(double seconds);
     [[nodiscard]] double position() const;
+    [[nodiscard]] float trackPeak(const juce::String& trackId) const;
     [[nodiscard]] bool isPlaying() const { return playing.load(); }
     [[nodiscard]] juce::AudioDeviceManager& devices() { return deviceManager; }
 
@@ -36,6 +38,7 @@ private:
         ClipData clip;
         float trackGain = 1.0f;
         float trackPan = 0.0f;
+        std::shared_ptr<std::atomic<float>> meter;
         std::shared_ptr<juce::AudioFormatReader> reader;
         juce::AudioBuffer<float> scratch;
     };
@@ -46,8 +49,9 @@ private:
     juce::AudioFormatManager formatManager;
     juce::AudioDeviceManager deviceManager;
     juce::AudioSourcePlayer sourcePlayer;
-    juce::ReadWriteLock renderLock;
+    mutable juce::ReadWriteLock renderLock;
     std::vector<std::unique_ptr<LoadedClip>> loadedClips;
+    std::unordered_map<std::string, std::shared_ptr<std::atomic<float>>> trackMeters;
     std::shared_ptr<juce::AudioFormatReader> auditionReader;
     juce::AudioBuffer<float> auditionScratch;
     std::atomic<bool> auditionMode { false };

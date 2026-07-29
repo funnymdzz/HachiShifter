@@ -23,6 +23,7 @@ public:
     void setPixelsPerSecond(float value);
     void setPlayheadSeconds(double seconds);
     [[nodiscard]] int pixelForSeconds(double seconds) const;
+    [[nodiscard]] double secondsForPixel(int pixel) const;
     std::function<void(double)> onSeek;
     std::function<void(const juce::String&)> onClipSelected;
 

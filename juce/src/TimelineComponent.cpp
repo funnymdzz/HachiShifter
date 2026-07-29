@@ -38,6 +38,11 @@ int TimelineComponent::pixelForSeconds(double seconds) const
     return static_cast<int>(std::round(timeToX(seconds)));
 }
 
+double TimelineComponent::secondsForPixel(int pixel) const
+{
+    return std::max(0.0, static_cast<double>(pixel) / pixelsPerSecond);
+}
+
 void TimelineComponent::setPixelsPerSecond(float value)
 {
     pixelsPerSecond = juce::jlimit(40.0f, 600.0f, value);

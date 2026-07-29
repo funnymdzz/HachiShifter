@@ -208,6 +208,7 @@ MainComponent::MainComponent()
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
     pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
+    trackList.peakProvider = [this](const juce::String& trackId) { return audio.trackPeak(trackId); };
 
     openButton.onClick = [this] { openProject(); };
     saveButton.onClick = [this] { saveProject(); };
@@ -388,12 +389,22 @@ void MainComponent::openExternalFile(const juce::File& file)
         project.addAudioFile(file, *duration);
 }
 
-void MainComponent::filesDropped(const juce::StringArray& files, int, int)
+void MainComponent::filesDropped(const juce::StringArray& files, int x, int y)
 {
+    auto dropSeconds = audio.position();
+    if (timelineViewport.getBounds().contains(x, y))
+        dropSeconds = timeline.secondsForPixel(x - timelineViewport.getX()
+                                               + timelineViewport.getViewPositionX());
     for (const auto& path : files)
     {
         const juce::File file(path);
-        openExternalFile(file);
+        if (file.hasFileExtension("wav;flac;aif;aiff;mp3;ogg"))
+        {
+            if (const auto duration = audio.probeDuration(file))
+                project.addAudioFile(file, *duration, dropSeconds);
+        }
+        else
+            openExternalFile(file);
     }
 }
 
@@ -518,6 +529,7 @@ void MainComponent::timerCallback()
     }
     pianoRoll.setPlayheadSeconds(audio.position());
     timeline.setPlayheadSeconds(audio.position());
+    trackList.repaint();
     statusLabel.setText((audio.isPlaying() ? strings.text("transport.play") : strings.text("status.ready"))
                             + "  " + juce::String(audio.position(), 2) + " s",
                         juce::dontSendNotification);
@@ -722,15 +734,18 @@ void MainComponent::importAudio()
 {
     chooser = std::make_unique<juce::FileChooser>(strings.text("file.audio"), juce::File{},
                                                    "*.wav;*.flac;*.aif;*.aiff;*.mp3;*.ogg");
-    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+    chooser->launchAsync(juce::FileBrowserComponent::openMode
+                             | juce::FileBrowserComponent::canSelectFiles
+                             | juce::FileBrowserComponent::canSelectMultipleItems,
         [this](const juce::FileChooser& selected)
         {
-            const auto file = selected.getResult();
-            if (file == juce::File{}) return;
-            if (const auto duration = audio.probeDuration(file))
-                project.addAudioFile(file, *duration);
-            else
-                showError(strings.text("error.audio"));
+            const auto files = selected.getResults();
+            const auto startSeconds = audio.position();
+            for (const auto& file : files)
+                if (const auto duration = audio.probeDuration(file))
+                    project.addAudioFile(file, *duration, startSeconds);
+                else
+                    showError(strings.text("error.audio") + "\n" + file.getFullPathName());
         });
 }
 

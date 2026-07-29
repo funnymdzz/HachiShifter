@@ -73,11 +73,14 @@ void AudioEngine::syncProject(const ProjectData& project)
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
 {
     loadedClips.clear();
+    trackMeters.clear();
     std::unordered_map<std::string, std::shared_ptr<juce::AudioFormatReader>> readers;
     const auto anySolo = std::any_of(project.tracks.begin(), project.tracks.end(),
                                      [](const auto& track) { return track.solo; });
     for (const auto& track : project.tracks)
     {
+        auto meter = std::make_shared<std::atomic<float>>(0.0f);
+        trackMeters[track.id.toStdString()] = meter;
         if (track.muted || (anySolo && !track.solo)) continue;
         for (const auto& clip : track.clips)
         {
@@ -94,6 +97,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             loaded->clip = clip;
             loaded->trackGain = track.volume;
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
+            loaded->meter = meter;
             loaded->reader = reader;
             loadedClips.push_back(std::move(loaded));
         }
@@ -121,6 +125,9 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     const auto blockStart = static_cast<double>(blockStartSample) / sampleRate;
     const auto blockEnd = static_cast<double>(blockStartSample + info.numSamples) / sampleRate;
     const juce::ScopedReadLock guard(renderLock);
+
+    for (const auto& [_, meter] : trackMeters)
+        meter->store(meter->load(std::memory_order_relaxed) * 0.88f, std::memory_order_relaxed);
 
     if (auditionMode.load() && auditionReader != nullptr)
     {
@@ -222,9 +229,17 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const auto absoluteSeconds = blockStart + static_cast<double>(outputBegin + outputOffset) / sampleRate;
             const auto gain = fadeGain(clip, absoluteSeconds - clip.startSeconds) * loaded->trackGain;
             const auto destination = info.startSample + outputBegin + outputOffset;
-            info.buffer->addSample(0, destination, sourceLeft * gain * leftPan);
+            const auto renderedLeft = sourceLeft * gain * leftPan;
+            const auto renderedRight = sourceRight * gain * rightPan;
+            info.buffer->addSample(0, destination, renderedLeft);
             if (info.buffer->getNumChannels() > 1)
-                info.buffer->addSample(1, destination, sourceRight * gain * rightPan);
+                info.buffer->addSample(1, destination, renderedRight);
+            if (loaded->meter != nullptr)
+            {
+                const auto peak = std::max(std::abs(renderedLeft), std::abs(renderedRight));
+                loaded->meter->store(std::max(loaded->meter->load(std::memory_order_relaxed), peak),
+                                     std::memory_order_relaxed);
+            }
         }
     }
 
@@ -253,5 +268,13 @@ void AudioEngine::setPosition(double seconds)
 double AudioEngine::position() const
 {
     return static_cast<double>(timelineSample.load()) / outputSampleRate.load();
+}
+
+float AudioEngine::trackPeak(const juce::String& trackId) const
+{
+    const juce::ScopedReadLock guard(renderLock);
+    if (const auto found = trackMeters.find(trackId.toStdString()); found != trackMeters.end())
+        return found->second->load(std::memory_order_relaxed);
+    return 0.0f;
 }
 }

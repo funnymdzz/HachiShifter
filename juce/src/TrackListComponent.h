@@ -3,6 +3,7 @@
 #include "I18n.h"
 #include "ProjectModel.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <functional>
 
 namespace hachi
 {
@@ -17,6 +18,7 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
+    std::function<float(const juce::String&)> peakProvider;
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -26,6 +28,7 @@ private:
     ProjectData snapshot;
     static constexpr int rulerHeight = 24;
     int rowHeight = 96;
+    juce::String selectedTrack;
     juce::String volumeDragTrack;
     int volumeDragRow = -1;
 };

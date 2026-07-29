@@ -85,7 +85,7 @@ juce::String ProjectModel::makeId(const char* prefix)
     return juce::String(prefix) + "_" + juce::Uuid().toString().removeCharacters("-");
 }
 
-void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds)
+void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, double startSeconds)
 {
     TrackData track;
     track.id = makeId("track");
@@ -94,6 +94,7 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds)
     ClipData clip;
     clip.id = makeId("clip");
     clip.sourceFile = file;
+    clip.startSeconds = std::max(0.0, startSeconds);
     clip.durationSeconds = std::max(0.01, durationSeconds);
     clip.sourceDurationSeconds = clip.durationSeconds;
     track.clips.push_back(std::move(clip));

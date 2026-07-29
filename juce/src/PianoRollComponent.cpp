@@ -15,6 +15,8 @@ PianoRollComponent::PianoRollComponent(ProjectModel& modelToUse) : model(modelTo
 
 PianoRollComponent::~PianoRollComponent()
 {
+    for (auto& [_, thumbnail] : thumbnails)
+        thumbnail->removeChangeListener(this);
     model.removeChangeListener(this);
 }
 
@@ -86,6 +88,7 @@ void PianoRollComponent::rebuildLayout()
                 continue;
             }
             auto thumbnail = std::make_unique<juce::AudioThumbnail>(256, formats, thumbnailCache);
+            thumbnail->addChangeListener(this);
             if (clip.sourceFile.existsAsFile())
                 thumbnail->setSource(new juce::FileInputSource(clip.sourceFile));
             next.emplace(key, std::move(thumbnail));
@@ -161,9 +164,15 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
     }
 }
 
-void PianoRollComponent::changeListenerCallback(juce::ChangeBroadcaster*)
+void PianoRollComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
-    rebuildLayout();
+    if (source == &model)
+        rebuildLayout();
+    else
+    {
+        updateCanvasSize();
+        repaint();
+    }
 }
 
 void PianoRollComponent::paint(juce::Graphics& g)
