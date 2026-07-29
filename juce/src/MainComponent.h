@@ -23,6 +23,9 @@ public:
 
     void paint(juce::Graphics& g) override;
     void resized() override;
+    void mouseDown(const juce::MouseEvent& event) override;
+    void mouseDrag(const juce::MouseEvent& event) override;
+    void mouseUp(const juce::MouseEvent& event) override;
     void openExternalFile(const juce::File& file);
     bool keyPressed(const juce::KeyPress& key) override;
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
@@ -99,6 +102,7 @@ private:
     juce::Viewport trackViewport;
     juce::Viewport timelineViewport;
     juce::Viewport pianoViewport;
+    juce::Component panelSplitter;
     std::unique_ptr<juce::FileChooser> chooser;
     int lastTimelineX = 0;
     int lastPianoX = 0;
@@ -106,5 +110,9 @@ private:
     int lastTrackY = 0;
     bool syncingScroll = false;
     bool pianoInitialScrollSet = false;
+    bool draggingPanelSplitter = false;
+    int panelSplitterDragScreenY = 0;
+    float panelSplitterDragRatio = 0.60f;
+    float panelSplitRatio = 0.60f;
 };
 }

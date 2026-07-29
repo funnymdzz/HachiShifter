@@ -30,6 +30,7 @@ const std::unordered_map<std::string, Row> strings {
     { "help.about",      { "关于 HachiShifter", "關於 HachiShifter", "HachiShifterについて", "HachiShifter 정보", "About HachiShifter" } },
     { "help.aboutText",  { "HachiShifter Next · JUCE/C++ 原生重构版", "HachiShifter Next · JUCE/C++ 原生重構版", "HachiShifter Next · JUCE/C++ ネイティブ版", "HachiShifter Next · JUCE/C++ 네이티브 버전", "HachiShifter Next · Native JUCE/C++ edition" } },
     { "transport.play",  { "播放", "播放", "再生", "재생", "Play" } },
+    { "transport.pause", { "暂停", "暫停", "一時停止", "일시 정지", "Pause" } },
     { "transport.stop",  { "停止", "停止", "停止", "정지", "Stop" } },
     { "tool.main",       { "音符编辑", "音符編輯", "ノート編集", "노트 편집", "Note Edit" } },
     { "tool.wrench",     { "采样精修", "取樣精修", "サンプル編集", "샘플 정밀 편집", "Sample Edit" } },

@@ -46,6 +46,7 @@ private:
     float pixelsPerSecond = 140.0f;
     int rowHeight = 96;
     double playheadSeconds = 0.0;
+    juce::String selectedClip;
     juce::String draggedClip;
     double draggedClipStart = 0.0;
     float dragAnchorX = 0.0f;

@@ -58,6 +58,14 @@ void TimelineComponent::timerCallback()
 void TimelineComponent::rebuild()
 {
     snapshot = model.snapshot();
+    const auto selectedStillExists = std::any_of(snapshot.tracks.begin(), snapshot.tracks.end(), [this](const auto& track)
+    {
+        return std::any_of(track.clips.begin(), track.clips.end(), [this](const auto& clip)
+        {
+            return clip.id == selectedClip;
+        });
+    });
+    if (!selectedStillExists) selectedClip.clear();
     std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> next;
     for (const auto& track : snapshot.tracks)
         for (const auto& clip : track.clips)
@@ -125,6 +133,11 @@ void TimelineComponent::paint(juce::Graphics& g)
             g.fillRect(bounds);
             g.setColour(colour.withAlpha(0.82f));
             g.drawRect(bounds, 1.0f);
+            if (clip.id == selectedClip)
+            {
+                g.setColour(Palette::text.withAlpha(0.92f));
+                g.drawRect(bounds.reduced(1.0f), 2.0f);
+            }
 
             if (const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString()); found != thumbnails.end())
             {
@@ -184,11 +197,15 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
     for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
         if (it->bounds.contains(event.position))
         {
+            selectedClip = it->id;
             draggedClip = it->id;
             draggedClipStart = it->startSeconds;
             dragAnchorX = event.position.x;
+            repaint();
             return;
         }
+    selectedClip.clear();
+    repaint();
     if (onSeek) onSeek(std::max(0.0, static_cast<double>(event.position.x) / pixelsPerSecond));
 }
 

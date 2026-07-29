@@ -87,8 +87,12 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&progressBar),
                              static_cast<juce::Component*>(&trackViewport),
                              static_cast<juce::Component*>(&timelineViewport),
-                             static_cast<juce::Component*>(&pianoViewport) })
+                             static_cast<juce::Component*>(&pianoViewport),
+                             static_cast<juce::Component*>(&panelSplitter) })
         addAndMakeVisible(*component);
+
+    panelSplitter.setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+    panelSplitter.addMouseListener(this, false);
 
     openButton.setComponentID("icon.open");
     saveButton.setComponentID("icon.save");
@@ -207,7 +211,7 @@ MainComponent::MainComponent()
     saveButton.onClick = [this] { saveProject(); };
     audioButton.onClick = [this] { importAudio(); };
     melodyneButton.onClick = [this] { importMelodyne(); };
-    playButton.onClick = [this] { audio.play(); };
+    playButton.onClick = [this] { audio.isPlaying() ? audio.stop() : audio.play(); };
     stopButton.onClick = [this]
     {
         audio.stop();
@@ -241,6 +245,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    panelSplitter.removeMouseListener(this);
     audio.removeChangeListener(this);
     project.removeChangeListener(this);
     menuBar.setModel(nullptr);
@@ -324,6 +329,14 @@ void MainComponent::paint(juce::Graphics& g)
     g.fillRect(0, 0, getWidth(), 61);
     g.setColour(Palette::border);
     g.drawHorizontalLine(60, 0.0f, static_cast<float>(getWidth()));
+    const auto splitterBounds = panelSplitter.getBounds();
+    g.setColour(Palette::background);
+    g.fillRect(splitterBounds);
+    g.setColour(Palette::border);
+    g.drawHorizontalLine(splitterBounds.getY(), static_cast<float>(splitterBounds.getX()),
+                         static_cast<float>(splitterBounds.getRight()));
+    g.drawHorizontalLine(splitterBounds.getBottom() - 1, static_cast<float>(splitterBounds.getX()),
+                         static_cast<float>(splitterBounds.getRight()));
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
@@ -416,11 +429,14 @@ void MainComponent::resized()
 
     auto footer = area.removeFromBottom(24);
     statusLabel.setBounds(footer.reduced(8, 0));
-    auto upper = area.removeFromTop(juce::jmax(190, static_cast<int>(area.getHeight() * 0.60f)));
+    const auto splitAvailable = std::max(1, area.getHeight() - 8 - 36);
+    const auto upperHeight = juce::jlimit(150, std::max(150, splitAvailable - 120),
+        static_cast<int>(std::round(static_cast<float>(splitAvailable) * panelSplitRatio)));
+    auto upper = area.removeFromTop(upperHeight);
     trackViewport.setBounds(upper.removeFromLeft(226));
     timelineViewport.setBounds(upper);
 
-    area.removeFromTop(8);
+    panelSplitter.setBounds(area.removeFromTop(8));
 
     auto parameterHeader = area.removeFromTop(36).reduced(4, 3);
     auto takeParameter = [&parameterHeader](juce::Component& component, int width)
@@ -455,6 +471,30 @@ void MainComponent::resized()
     }
 }
 
+void MainComponent::mouseDown(const juce::MouseEvent& event)
+{
+    if (event.eventComponent != &panelSplitter) return;
+    draggingPanelSplitter = true;
+    panelSplitterDragScreenY = event.getScreenY();
+    panelSplitterDragRatio = panelSplitRatio;
+}
+
+void MainComponent::mouseDrag(const juce::MouseEvent& event)
+{
+    if (!draggingPanelSplitter || event.eventComponent != &panelSplitter) return;
+    const auto splitAvailable = std::max(1, getHeight() - 27 - 34 - 24 - 8 - 36);
+    panelSplitRatio = juce::jlimit(0.15f, 0.85f,
+        panelSplitterDragRatio + static_cast<float>(event.getScreenY() - panelSplitterDragScreenY)
+            / static_cast<float>(splitAvailable));
+    resized();
+    repaint();
+}
+
+void MainComponent::mouseUp(const juce::MouseEvent&)
+{
+    draggingPanelSplitter = false;
+}
+
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
     if (source == &project)
@@ -466,6 +506,14 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 
 void MainComponent::timerCallback()
 {
+    const auto expectedPlayIcon = audio.isPlaying() ? juce::String("icon.pause")
+                                                     : juce::String("icon.play");
+    if (playButton.getComponentID() != expectedPlayIcon)
+    {
+        playButton.setComponentID(expectedPlayIcon);
+        playButton.setTooltip(strings.text(audio.isPlaying() ? "transport.pause" : "transport.play"));
+        playButton.repaint();
+    }
     pianoRoll.setPlayheadSeconds(audio.position());
     timeline.setPlayheadSeconds(audio.position());
     statusLabel.setText((audio.isPlaying() ? strings.text("transport.play") : strings.text("status.ready"))

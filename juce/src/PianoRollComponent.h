@@ -51,6 +51,7 @@ private:
     int lowestMidi = 24;
     bool sourceEditMode = false;
     double playheadSeconds = 0.0;
+    juce::String selectedNote;
     juce::String draggedNote;
     float dragStartMidi = 0.0f;
     float previewMidi = 0.0f;

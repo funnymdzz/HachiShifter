@@ -206,6 +206,11 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 g.fillRoundedRectangle(bounds.withWidth(consonantWidth), 4.0f);
                 g.setColour(Palette::noteEdge);
                 g.drawRoundedRectangle(bounds, 4.0f, 1.2f);
+                if (note.id == selectedNote)
+                {
+                    g.setColour(Palette::text.withAlpha(0.95f));
+                    g.drawRoundedRectangle(bounds.reduced(1.0f), 3.0f, 1.8f);
+                }
 
                 g.setColour(Palette::textMuted.withAlpha(0.55f));
                 const float dash[] { 4.0f, 3.0f };
@@ -289,6 +294,7 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
     for (auto it = noteHits.rbegin(); it != noteHits.rend(); ++it)
         if (it->bounds.contains(event.position))
         {
+            selectedNote = it->id;
             draggedNote = it->id;
             dragStartMidi = it->midi;
             previewMidi = dragStartMidi;
@@ -302,8 +308,11 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
                 dragMode = DragMode::resizeRight;
             else
                 dragMode = DragMode::pitch;
+            repaint();
             return;
         }
+    selectedNote.clear();
+    repaint();
 }
 
 void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)

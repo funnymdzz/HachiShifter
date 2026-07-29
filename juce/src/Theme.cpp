@@ -67,6 +67,13 @@ void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     if (id == "icon.play")
         path.addTriangle(bounds.getX() + 2.0f, bounds.getY(), bounds.getRight(), bounds.getCentreY(),
                          bounds.getX() + 2.0f, bounds.getBottom());
+    else if (id == "icon.pause")
+    {
+        const auto barWidth = juce::jmax(2.0f, bounds.getWidth() * 0.28f);
+        path.addRoundedRectangle(bounds.getX() + 1.0f, bounds.getY(), barWidth, bounds.getHeight(), 1.0f);
+        path.addRoundedRectangle(bounds.getRight() - barWidth - 1.0f, bounds.getY(),
+                                 barWidth, bounds.getHeight(), 1.0f);
+    }
     else if (id == "icon.stop")
         path.addRectangle(bounds.reduced(2.0f));
     else if (id == "icon.open")
