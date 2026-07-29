@@ -1,9 +1,8 @@
 #include "RenderService.h"
 #include <juce_audio_formats/juce_audio_formats.h>
-#include <juce_dsp/juce_dsp.h>
+#include <signalsmith-stretch.h>
 #include <algorithm>
 #include <cmath>
-#include <complex>
 #include <limits>
 #include <numeric>
 
@@ -11,119 +10,175 @@ namespace hachi::backend
 {
 namespace
 {
-float wrappedPhase(float value)
+std::optional<std::pair<float, float>> pitchAt(const std::vector<float>& sourceMidi,
+                                                const std::vector<float>& targetMidi,
+                                                double position)
 {
-    constexpr auto pi = juce::MathConstants<float>::pi;
-    constexpr auto twoPi = juce::MathConstants<float>::twoPi;
-    auto wrapped = std::fmod(value + pi, twoPi);
-    if (wrapped < 0.0f) wrapped += twoPi;
-    return wrapped - pi;
+    if (sourceMidi.empty() || targetMidi.empty() || !std::isfinite(position) || position < 0.0)
+        return std::nullopt;
+    const auto left = static_cast<std::size_t>(std::floor(position));
+    if (left >= sourceMidi.size() || left >= targetMidi.size()) return std::nullopt;
+    const auto right = std::min({ left + 1, sourceMidi.size() - 1, targetMidi.size() - 1 });
+    const auto amount = static_cast<float>(position - static_cast<double>(left));
+    const auto source = sourceMidi[left] + (sourceMidi[right] - sourceMidi[left]) * amount;
+    const auto target = targetMidi[left] + (targetMidi[right] - targetMidi[left]) * amount;
+    if (!(std::isfinite(source) && std::isfinite(target) && source > 0.0f && target > 0.0f))
+        return std::nullopt;
+    return std::pair { source, target };
 }
 
-float reflectedSample(const float* input, int length, int position)
-{
-    if (length <= 0) return 0.0f;
-    if (length == 1) return input[0];
-    const auto period = length * 2 - 2;
-    auto phase = position % period;
-    if (phase < 0) phase += period;
-    return input[phase < length ? phase : period - phase];
-}
-
-juce::AudioBuffer<float> stretchPreservingPitch(const juce::AudioBuffer<float>& source,
-                                                 int targetSamples)
+juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& source,
+                                                 int targetSamples,
+                                                 double sampleRate,
+                                                 double framePeriodMs,
+                                                 const std::vector<float>& sourceMidi,
+                                                 const std::vector<float>& targetMidi)
 {
     const auto sourceSamples = source.getNumSamples();
     const auto channels = source.getNumChannels();
-    if (sourceSamples <= 0 || channels <= 0 || targetSamples <= 0) return {};
-    if (sourceSamples == targetSamples) return source;
-    constexpr int fftOrder = 11;
-    constexpr int fftSize = 1 << fftOrder;
-    constexpr int analysisHop = fftSize / 8;
-    constexpr int half = fftSize / 2;
-    constexpr int pad = fftSize / 2;
-    const auto ratio = static_cast<double>(targetSamples) / static_cast<double>(sourceSamples);
-    const auto frameCount = (sourceSamples + analysisHop - 1) / analysisHop + 1;
-    juce::dsp::FFT fft(fftOrder);
-    std::vector<float> window(static_cast<std::size_t>(fftSize));
-    for (int index = 0; index < fftSize; ++index)
-        window[static_cast<std::size_t>(index)] = std::sqrt(std::max(0.0f,
-            0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi
-                                  * static_cast<float>(index) / static_cast<float>(fftSize))));
-    juce::AudioBuffer<float> result(channels, targetSamples);
-    result.clear();
-    using Complex = std::complex<float>;
+    if (sourceSamples <= 0 || channels <= 0 || targetSamples <= 0 || sampleRate <= 0.0) return {};
+
+    auto hasPitchEdit = false;
+    const auto curveSize = std::min(sourceMidi.size(), targetMidi.size());
+    for (std::size_t index = 0; index < curveSize; ++index)
+        if (sourceMidi[index] > 0.0f && targetMidi[index] > 0.0f
+            && std::abs(targetMidi[index] - sourceMidi[index]) > 1.0e-4f)
+        {
+            hasPitchEdit = true;
+            break;
+        }
+    if (sourceSamples == targetSamples && !hasPitchEdit) return source;
+
+    // Signalsmith's phase-coherent stretcher is used as the native model-free
+    // component stage.  Formant compensation is explicitly enabled: pitch and
+    // duration move independently while the vocal-tract envelope remains at
+    // the source frequencies.  A fixed seed makes cache renders repeatable.
+    signalsmith::stretch::SignalsmithStretch<float> stretch(0x48414348L);
+    stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
+    stretch.setFormantFactor(1.0f, true);
+    stretch.setFormantBase(200.0f / static_cast<float>(sampleRate));
+
+    const auto inputLatency = stretch.inputLatency();
+    const auto outputLatency = stretch.outputLatency();
+    const auto totalInput = sourceSamples + inputLatency;
+    const auto totalOutput = targetSamples + outputLatency;
+
+    std::vector<std::vector<float>> paddedInput(static_cast<std::size_t>(channels));
+    std::vector<std::vector<float>> allOutput(static_cast<std::size_t>(channels));
     for (int channel = 0; channel < channels; ++channel)
     {
-        const auto* input = source.getReadPointer(channel);
-        std::vector<Complex> frameData(static_cast<std::size_t>(fftSize));
-        std::vector<Complex> spectrum(static_cast<std::size_t>(fftSize));
-        std::vector<Complex> synthesisSpectrum(static_cast<std::size_t>(fftSize));
-        std::vector<Complex> inverse(static_cast<std::size_t>(fftSize));
-        std::vector<float> previousPhase(static_cast<std::size_t>(half + 1));
-        std::vector<float> synthesisPhase(static_cast<std::size_t>(half + 1));
-        std::vector<float> previousMagnitude(static_cast<std::size_t>(half + 1));
-        std::vector<float> output(static_cast<std::size_t>(targetSamples + fftSize));
-        std::vector<float> normalisation(output.size());
-        for (int frame = 0; frame < frameCount; ++frame)
+        auto& input = paddedInput[static_cast<std::size_t>(channel)];
+        input.resize(static_cast<std::size_t>(totalInput), 0.0f);
+        std::copy_n(source.getReadPointer(channel), sourceSamples, input.begin());
+        allOutput[static_cast<std::size_t>(channel)].reserve(
+            static_cast<std::size_t>(totalOutput + outputLatency));
+    }
+
+    constexpr int blockSize = 512;
+    auto inputConsumed = 0;
+    auto outputProduced = 0;
+    const auto framePeriod = std::max(0.1, framePeriodMs);
+    while (inputConsumed < totalInput && outputProduced < totalOutput)
+    {
+        const auto blockInput = std::min(blockSize, totalInput - inputConsumed);
+        const auto expectedNextOutput = static_cast<int>(std::llround(
+            static_cast<double>(inputConsumed + blockInput) * totalOutput / totalInput));
+        const auto blockOutput = std::max(1, expectedNextOutput - outputProduced);
+        const auto audibleCentre = juce::jlimit(0.0, static_cast<double>(targetSamples),
+            static_cast<double>(outputProduced + blockOutput / 2 - outputLatency));
+        const auto curvePosition = audibleCentre / sampleRate * 1000.0 / framePeriod;
+        const auto pitch = pitchAt(sourceMidi, targetMidi, curvePosition);
+        if (pitch)
         {
-            const auto analysisCentre = frame * analysisHop;
-            for (int index = 0; index < fftSize; ++index)
-                frameData[static_cast<std::size_t>(index)] = Complex(
-                    reflectedSample(input, sourceSamples, analysisCentre - pad + index)
-                        * window[static_cast<std::size_t>(index)], 0.0f);
-            fft.perform(frameData.data(), spectrum.data(), false);
-            auto energy = 1.0e-9f;
-            auto positiveFlux = 0.0f;
-            for (int bin = 0; bin <= half; ++bin)
-            {
-                const auto magnitude = std::abs(spectrum[static_cast<std::size_t>(bin)]);
-                energy += magnitude;
-                positiveFlux += std::max(0.0f, magnitude - previousMagnitude[static_cast<std::size_t>(bin)]);
-            }
-            const auto transient = frame == 0 || positiveFlux / energy > 0.34f;
-            std::fill(synthesisSpectrum.begin(), synthesisSpectrum.end(), Complex {});
-            for (int bin = 0; bin <= half; ++bin)
-            {
-                const auto magnitude = std::abs(spectrum[static_cast<std::size_t>(bin)]);
-                const auto phase = std::arg(spectrum[static_cast<std::size_t>(bin)]);
-                const auto expected = juce::MathConstants<float>::twoPi
-                    * static_cast<float>(bin * analysisHop) / static_cast<float>(fftSize);
-                const auto delta = wrappedPhase(phase - previousPhase[static_cast<std::size_t>(bin)] - expected);
-                synthesisPhase[static_cast<std::size_t>(bin)] = transient
-                    ? phase
-                    : wrappedPhase(synthesisPhase[static_cast<std::size_t>(bin)]
-                                   + (expected + delta) * static_cast<float>(ratio));
-                synthesisSpectrum[static_cast<std::size_t>(bin)] = std::polar(
-                    magnitude, synthesisPhase[static_cast<std::size_t>(bin)]);
-                previousPhase[static_cast<std::size_t>(bin)] = phase;
-                previousMagnitude[static_cast<std::size_t>(bin)] = magnitude;
-            }
-            for (int bin = 1; bin < half; ++bin)
-                synthesisSpectrum[static_cast<std::size_t>(fftSize - bin)] =
-                    std::conj(synthesisSpectrum[static_cast<std::size_t>(bin)]);
-            fft.perform(synthesisSpectrum.data(), inverse.data(), true);
-            const auto synthesisCentre = static_cast<int>(std::llround(static_cast<double>(frame * analysisHop)
-                                                                        * ratio));
-            for (int index = 0; index < fftSize; ++index)
-            {
-                const auto destination = synthesisCentre + index;
-                if (destination >= static_cast<int>(output.size())) break;
-                const auto weight = window[static_cast<std::size_t>(index)];
-                output[static_cast<std::size_t>(destination)] += inverse[static_cast<std::size_t>(index)].real()
-                    * weight;
-                normalisation[static_cast<std::size_t>(destination)] += weight * weight;
-            }
+            const auto semitones = juce::jlimit(-24.0f, 24.0f, pitch->second - pitch->first);
+            stretch.setTransposeSemitones(semitones, 8'000.0f / static_cast<float>(sampleRate));
+            const auto sourceHz = 440.0f * std::pow(2.0f, (pitch->first - 69.0f) / 12.0f);
+            stretch.setFormantBase(juce::jlimit(45.0f, 1'200.0f, sourceHz)
+                                   / static_cast<float>(sampleRate));
         }
-        auto* destination = result.getWritePointer(channel);
-        for (int sample = 0; sample < targetSamples; ++sample)
+        else
         {
-            const auto padded = sample + pad;
-            const auto norm = normalisation[static_cast<std::size_t>(padded)];
-            destination[sample] = norm > 1.0e-6f
-                ? output[static_cast<std::size_t>(padded)] / norm : 0.0f;
+            // Unvoiced, breath and sibilant regions keep their original spectrum.
+            stretch.setTransposeSemitones(0.0f);
+        }
+
+        std::vector<const float*> inputPointers(static_cast<std::size_t>(channels));
+        std::vector<std::vector<float>> blockBuffers(static_cast<std::size_t>(channels));
+        std::vector<float*> outputPointers(static_cast<std::size_t>(channels));
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            inputPointers[static_cast<std::size_t>(channel)] =
+                paddedInput[static_cast<std::size_t>(channel)].data() + inputConsumed;
+            auto& block = blockBuffers[static_cast<std::size_t>(channel)];
+            block.resize(static_cast<std::size_t>(blockOutput), 0.0f);
+            outputPointers[static_cast<std::size_t>(channel)] = block.data();
+        }
+        stretch.process(inputPointers.data(), blockInput, outputPointers.data(), blockOutput);
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            auto& output = allOutput[static_cast<std::size_t>(channel)];
+            const auto& block = blockBuffers[static_cast<std::size_t>(channel)];
+            output.insert(output.end(), block.begin(), block.end());
+        }
+        inputConsumed += blockInput;
+        outputProduced += blockOutput;
+    }
+
+    if (outputLatency > 0)
+    {
+        std::vector<std::vector<float>> flushBuffers(static_cast<std::size_t>(channels));
+        std::vector<float*> flushPointers(static_cast<std::size_t>(channels));
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            flushBuffers[static_cast<std::size_t>(channel)].resize(
+                static_cast<std::size_t>(outputLatency), 0.0f);
+            flushPointers[static_cast<std::size_t>(channel)] =
+                flushBuffers[static_cast<std::size_t>(channel)].data();
+        }
+        stretch.flush(flushPointers.data(), outputLatency);
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            auto& output = allOutput[static_cast<std::size_t>(channel)];
+            const auto& flush = flushBuffers[static_cast<std::size_t>(channel)];
+            output.insert(output.end(), flush.begin(), flush.end());
         }
     }
+
+    juce::AudioBuffer<float> result(channels, targetSamples);
+    result.clear();
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        auto* destination = result.getWritePointer(channel);
+        const auto& output = allOutput[static_cast<std::size_t>(channel)];
+        for (int sample = 0; sample < targetSamples; ++sample)
+        {
+            const auto sourceIndex = static_cast<std::size_t>(outputLatency + sample);
+            destination[sample] = sourceIndex < output.size() && std::isfinite(output[sourceIndex])
+                ? output[sourceIndex] : 0.0f;
+        }
+    }
+
+    // The component stage is energy preserving.  Bound the correction so a
+    // quiet consonant or a clipped source does not create a gain jump.
+    double sourcePower = 0.0;
+    double outputPower = 0.0;
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        for (int sample = 0; sample < sourceSamples; ++sample)
+        {
+            const auto value = source.getSample(channel, sample);
+            sourcePower += static_cast<double>(value) * value;
+        }
+        for (int sample = 0; sample < targetSamples; ++sample)
+        {
+            const auto value = result.getSample(channel, sample);
+            outputPower += static_cast<double>(value) * value;
+        }
+    }
+    const auto sourceRms = std::sqrt(sourcePower / std::max(1, channels * sourceSamples));
+    const auto outputRms = std::sqrt(outputPower / std::max(1, channels * targetSamples));
+    if (sourceRms > 1.0e-7 && outputRms > 1.0e-7)
+        result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8, sourceRms / outputRms)));
     return result;
 }
 }
@@ -192,15 +247,10 @@ public:
 
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
-        auto stretched = stretchPreservingPitch(source, targetSamples);
-        if (shouldExit()) return jobHasFinished;
-        Mld5RenderRequest renderRequest;
-        renderRequest.input = &stretched;
-        renderRequest.sampleRate = reader->sampleRate;
-        renderRequest.framePeriodMs = request.framePeriodMs;
-        renderRequest.sourceMidi = std::move(request.sourceMidi);
-        renderRequest.targetMidi = std::move(request.targetMidi);
-        RenderedAudio result { renderer.render(renderRequest), reader->sampleRate };
+        auto rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                                               request.framePeriodMs, request.sourceMidi,
+                                               request.targetMidi);
+        RenderedAudio result { std::move(rendered), reader->sampleRate };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable
         {
@@ -212,7 +262,6 @@ public:
 private:
     Mld5FileRenderRequest request;
     FileCompletion completion;
-    Mld5Renderer renderer;
 };
 
 RenderService::RenderService()

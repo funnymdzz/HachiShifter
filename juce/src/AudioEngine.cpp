@@ -185,7 +185,11 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
             loaded->meter = meter;
             loaded->reader = reader;
-            if (track.compose && track.pitchAlgorithm == PitchAlgorithm::mld5 && !clip.notes.empty())
+            // Every compose path must use a duration-preserving, formant-preserving render.
+            // Until a selected external engine is present, the native mld5 renderer is the
+            // deterministic model-free fallback rather than device-rate resampling, which
+            // shifts both F0 and formants and creates the "old/child voice" failure mode.
+            if (track.compose && !clip.notes.empty())
             {
                 const auto cacheKey = renderKey(clip);
                 auto& state = renderCache[cacheKey];

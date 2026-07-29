@@ -62,6 +62,10 @@ target_compile_definitions(HachiShifterNext PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=0
 )
 
+target_include_directories(HachiShifterNext PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/signalsmith-stretch"
+)
+
 target_link_libraries(HachiShifterNext PRIVATE
     juce::juce_audio_formats
     juce::juce_audio_utils
