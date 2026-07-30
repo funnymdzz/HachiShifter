@@ -118,6 +118,10 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     tabs.addTab({}, Palette::panel, &algorithmPage, false);
     tabs.addTab({}, Palette::panel, &operationPage, false);
     tabs.addTab({}, Palette::panel, &importPage, false);
+    // Select a concrete page before the dialog is attached to a peer.  On
+    // headless/device-delayed startup JUCE may otherwise keep index -1 until a
+    // tab click, making the settings dialog appear completely empty.
+    tabs.setCurrentTabIndex(0, false);
     loadValues();
     setTexts();
     applyButton.onClick = [this]
