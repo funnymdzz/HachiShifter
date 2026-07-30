@@ -3,6 +3,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace hachi
 {
@@ -279,6 +280,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
     loadedClips.clear();
     trackMeters.clear();
     std::unordered_map<std::string, std::shared_ptr<juce::AudioFormatReader>> readers;
+    std::unordered_set<std::string> activeRenderKeys;
     const auto anySolo = std::any_of(project.tracks.begin(), project.tracks.end(),
                                      [](const auto& track) { return track.solo; });
     for (const auto& track : project.tracks)
@@ -345,6 +347,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             if (track.compose && !clip.notes.empty())
             {
                 const auto cacheKey = renderKey(clip, track);
+                activeRenderKeys.insert(cacheKey);
                 auto& state = renderCache[cacheKey];
                 if (state == nullptr) state = std::make_shared<RenderedClip>();
                 loaded->rendered = state;
@@ -365,9 +368,18 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     });
                 }
             }
+            // Playback only needs clip timing/gain after the render request is
+            // created.  Drop duplicated contours here so large MPD projects do
+            // not keep a second full copy of every analysis point per clip.
+            loaded->clip.notes.clear();
+            loaded->clip.notes.shrink_to_fit();
             loadedClips.push_back(std::move(loaded));
         }
     }
+    std::erase_if(renderCache, [&](const auto& item)
+    {
+        return !activeRenderKeys.contains(item.first);
+    });
 }
 
 float AudioEngine::fadeGain(const ClipData& clip, double localSeconds)
