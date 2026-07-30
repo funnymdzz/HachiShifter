@@ -85,11 +85,64 @@ void applyExpressionAndTension(juce::AudioBuffer<float>& audio, double sampleRat
 {
     if (audio.getNumSamples() <= 0 || sampleRate <= 0.0) return;
     const auto framePeriod = std::max(0.1, framePeriodMs);
+    const auto hasTension = std::any_of(tension.begin(), tension.end(),
+        [](float value) { return std::abs(value) > 1.0e-4f; });
+
+    // Tension is applied separately from gain/breath so its spectral tilt can
+    // preserve loudness.  Combining both in one loop made +100% tension nearly
+    // double the RMS even though the user only requested a timbre change.
+    if (hasTension)
+        for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+        {
+            auto tiltLow = audio.getSample(channel, 0);
+            auto smoothedTension = 0.0f;
+            double inputPower = 0.0;
+            double outputPower = 0.0;
+            auto inputPeak = 0.0f;
+            auto outputPeak = 0.0f;
+            for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+            {
+                const auto curvePosition = static_cast<double>(sample) / sampleRate
+                    * 1000.0 / framePeriod;
+                const auto desiredTension = juce::jlimit(-1.0f, 1.0f,
+                    valueAt(tension, curvePosition, 0.0f));
+                const auto smoothing = static_cast<float>(1.0
+                    - std::exp(-1.0 / (sampleRate * 0.008)));
+                smoothedTension += (desiredTension - smoothedTension) * smoothing;
+
+                const auto midi = valueAt(targetMidi, curvePosition, 60.0f);
+                const auto f0 = midi > 0.0f
+                    ? 440.0 * std::pow(2.0, (static_cast<double>(midi) - 69.0) / 12.0)
+                    : 220.0;
+                const auto splitHz = juce::jlimit(260.0, 2'400.0, f0 * 2.0);
+                const auto coefficient = static_cast<float>(1.0
+                    - std::exp(-juce::MathConstants<double>::twoPi * splitHz / sampleRate));
+                const auto current = audio.getSample(channel, sample);
+                tiltLow += coefficient * (current - tiltLow);
+                const auto tiltHigh = current - tiltLow;
+                const auto highGain = std::pow(10.0f, smoothedTension * 8.0f / 20.0f);
+                const auto lowGain = std::pow(10.0f, -smoothedTension * 1.5f / 20.0f);
+                const auto tilted = tiltLow * lowGain + tiltHigh * highGain;
+                audio.setSample(channel, sample, tilted);
+                inputPower += static_cast<double>(current) * current;
+                outputPower += static_cast<double>(tilted) * tilted;
+                inputPeak = std::max(inputPeak, std::abs(current));
+                outputPeak = std::max(outputPeak, std::abs(tilted));
+            }
+
+            const auto inputRms = std::sqrt(inputPower / audio.getNumSamples());
+            const auto outputRms = std::sqrt(outputPower / audio.getNumSamples());
+            auto correction = inputRms > 1.0e-8 && outputRms > 1.0e-8
+                ? static_cast<float>(inputRms / outputRms) : 1.0f;
+            correction = juce::jlimit(0.4f, 2.5f, correction);
+            if (inputPeak > 1.0e-6f && outputPeak > 1.0e-6f)
+                correction = std::min(correction, inputPeak * 1.6f / outputPeak);
+            audio.applyGain(channel, 0, audio.getNumSamples(), correction);
+        }
+
     for (int channel = 0; channel < audio.getNumChannels(); ++channel)
     {
-        auto tiltLow = audio.getSample(channel, 0);
-        auto airLow = tiltLow;
-        auto smoothedTension = 0.0f;
+        auto airLow = audio.getSample(channel, 0);
         const auto airCoefficient = static_cast<float>(1.0
             - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
         for (int sample = 0; sample < audio.getNumSamples(); ++sample)
@@ -100,37 +153,10 @@ void applyExpressionAndTension(juce::AudioBuffer<float>& audio, double sampleRat
                 valueAt(noteGain, curvePosition, 1.0f));
             const auto air = juce::jlimit(0.0f, 1.0f,
                 valueAt(breath, curvePosition, 0.0f));
-            const auto desiredTension = juce::jlimit(-1.0f, 1.0f,
-                valueAt(tension, curvePosition, 0.0f));
-            // Smooth parameter boundaries over roughly 8 ms.  A sudden
-            // spectral-tilt step at a note boundary otherwise sounds like a
-            // click even when the waveform itself is continuous.
-            const auto smoothing = static_cast<float>(1.0
-                - std::exp(-1.0 / (sampleRate * 0.008)));
-            smoothedTension += (desiredTension - smoothedTension) * smoothing;
-
-            const auto midi = valueAt(targetMidi, curvePosition, 60.0f);
-            const auto f0 = midi > 0.0f
-                ? 440.0 * std::pow(2.0, (static_cast<double>(midi) - 69.0) / 12.0)
-                : 220.0;
-            const auto splitHz = juce::jlimit(260.0, 2'400.0, f0 * 2.0);
-            const auto coefficient = static_cast<float>(1.0
-                - std::exp(-juce::MathConstants<double>::twoPi * splitHz / sampleRate));
             const auto current = audio.getSample(channel, sample);
-            tiltLow += coefficient * (current - tiltLow);
             airLow += airCoefficient * (current - airLow);
-            const auto tiltHigh = current - tiltLow;
             const auto airHigh = current - airLow;
-
-            // HachiTune-style tension is a spectral tilt around approximately
-            // twice F0, not pitch drift.  Keep the low band nearly stationary
-            // and move the upper harmonic energy by at most +/-8 dB.  This is
-            // a causal one-pass filter, so it adds neither a delayed copy nor
-            // an STFT pre-echo to short consonants.
-            const auto highGain = std::pow(10.0f, smoothedTension * 8.0f / 20.0f);
-            const auto lowGain = std::pow(10.0f, -smoothedTension * 1.5f / 20.0f);
-            const auto tilted = tiltLow * lowGain + tiltHigh * highGain;
-            audio.setSample(channel, sample, (tilted + airHigh * air * 0.22f) * gain);
+            audio.setSample(channel, sample, (current + airHigh * air * 0.22f) * gain);
         }
     }
 }
