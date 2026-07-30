@@ -35,7 +35,8 @@ public:
                                                          const ProjectData& project);
     static bool save(const juce::File& audio, const std::vector<SampleRegionSetting>& rows,
                      juce::String& error);
-    static bool importOto(const juce::File& oto, std::vector<SampleRegionSetting>& rows,
+    static bool importOto(const juce::File& oto, const juce::File& audio,
+                          double audioDuration, std::vector<SampleRegionSetting>& rows,
                           juce::String& error);
     static bool exportOto(const juce::File& oto, const juce::File& audio,
                           const std::vector<SampleRegionSetting>& rows, double audioDuration,

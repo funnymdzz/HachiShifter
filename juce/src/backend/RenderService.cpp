@@ -449,11 +449,32 @@ public:
 
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
-        auto rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                                               request.framePeriodMs, request.sourceMidi,
-                                               request.targetMidi, request.formantSemitones,
-                                               request.noteGain, request.breath, request.timeMap,
-                                               request.pitchAlgorithm, request.stretchAlgorithm);
+        juce::AudioBuffer<float> rendered;
+        if (request.pitchAlgorithm == 0)
+        {
+            // Match the proven JS/Rust order: first map source time with a
+            // persistent neutral-pitch stretcher, then move only the periodic
+            // component under the retained vocal-tract envelope.  Asking one
+            // phase-vocoder pass to perform both operations created a second,
+            // delayed-sounding harmonic image on edited vowels.
+            const auto neutralTarget = request.sourceMidi;
+            auto timeWarped = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, neutralTarget,
+                request.formantSemitones, request.noteGain, request.breath, request.timeMap,
+                request.pitchAlgorithm, request.stretchAlgorithm);
+            Mld5RenderRequest componentRequest;
+            componentRequest.input = &timeWarped;
+            componentRequest.sampleRate = reader->sampleRate;
+            componentRequest.framePeriodMs = request.framePeriodMs;
+            componentRequest.sourceMidi = request.sourceMidi;
+            componentRequest.targetMidi = request.targetMidi;
+            rendered = Mld5Renderer().render(componentRequest);
+        }
+        else
+            rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                request.formantSemitones, request.noteGain, request.breath, request.timeMap,
+                request.pitchAlgorithm, request.stretchAlgorithm);
         RenderedAudio result { std::move(rendered), reader->sampleRate };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable

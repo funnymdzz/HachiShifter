@@ -183,7 +183,8 @@ bool SampleSettings::save(const juce::File& audio,
     return true;
 }
 
-bool SampleSettings::importOto(const juce::File& oto,
+bool SampleSettings::importOto(const juce::File& oto, const juce::File& audio,
+                               double audioDuration,
                                std::vector<SampleRegionSetting>& rows,
                                juce::String& error)
 {
@@ -194,6 +195,13 @@ bool SampleSettings::importOto(const juce::File& oto,
         const auto equals = raw.indexOfChar('=');
         if (equals <= 0) continue;
         const auto wav = raw.substring(0, equals).trim();
+        // An oto.ini normally describes a complete voicebank.  Wrench mode is
+        // scoped to one source file, so only import rows belonging to that WAV
+        // instead of accidentally applying every alias in the bank to it.
+        if (audio != juce::File{}
+            && !juce::File(wav.replaceCharacter('\\', '/')).getFileName()
+                    .equalsIgnoreCase(audio.getFileName()))
+            continue;
         auto fields = juce::StringArray::fromTokens(raw.substring(equals + 1), ",", "\"");
         if (fields.size() < 6) continue;
         const auto offset = std::max(0.0, fields[1].getDoubleValue() / 1000.0);
@@ -206,11 +214,29 @@ bool SampleSettings::importOto(const juce::File& oto,
         row.regionStartSeconds = offset;
         row.fixedDurationSeconds = consonant;
         row.alignmentSeconds = offset + preutter;
-        row.regionEndSeconds = cutoffMs > 0.0 ? offset + cutoffMs / 1000.0
-                                               : offset + std::max({ 0.05, consonant, preutter });
+        // UTAU uses a negative cutoff as the region length from offset, while
+        // a positive cutoff trims that amount from the physical file end.
+        row.regionEndSeconds = cutoffMs < 0.0
+            ? offset + (-cutoffMs) / 1000.0
+            : audioDuration > 0.0 ? audioDuration - cutoffMs / 1000.0
+                                  : offset + std::max({ 0.05, consonant, preutter });
+        if (audioDuration > 0.0)
+            row.regionEndSeconds = juce::jlimit(offset + 0.001,
+                                                std::max(offset + 0.001, audioDuration),
+                                                row.regionEndSeconds);
+        else row.regionEndSeconds = std::max(offset + 0.001, row.regionEndSeconds);
+        row.alignmentSeconds = juce::jlimit(row.regionStartSeconds, row.regionEndSeconds,
+                                            row.alignmentSeconds);
+        row.fixedDurationSeconds = juce::jlimit(0.0,
+            row.regionEndSeconds - row.regionStartSeconds, row.fixedDurationSeconds);
         rows.push_back(std::move(row));
     }
-    if (rows.empty()) { error = "oto.ini contains no valid entries"; return false; }
+    if (rows.empty())
+    {
+        error = audio == juce::File{} ? "oto.ini contains no valid entries"
+                                      : "oto.ini contains no entries for " + audio.getFileName();
+        return false;
+    }
     return true;
 }
 

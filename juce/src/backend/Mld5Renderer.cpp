@@ -97,7 +97,6 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
     std::vector<float> mappedMagnitude(static_cast<std::size_t>(half + 1));
     std::vector<float> phase(static_cast<std::size_t>(half + 1));
     std::vector<float> logEnvelope(static_cast<std::size_t>(half + 1));
-    std::vector<float> smoothedEnvelope(static_cast<std::size_t>(half + 1));
     std::vector<float> prefix(static_cast<std::size_t>(half + 2));
     std::vector<float> output(static_cast<std::size_t>(inputLength + fftSize));
     std::vector<float> normalisation(output.size());
@@ -119,11 +118,11 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             phase[static_cast<std::size_t>(bin)] = std::arg(spectrum[static_cast<std::size_t>(bin)]);
         }
 
-        // Smooth across several harmonics so the envelope represents the stationary vocal-tract
-        // resonances rather than the harmonic comb. Keeping this envelope at the original bins
-        // is what prevents pitch changes from turning a voice into a child/elderly timbre.
-        const auto envelopeRadius = juce::jlimit(12, 48,
-            static_cast<int>(std::round(650.0 * static_cast<double>(fftSize) / sampleRate)));
+        // Keep the smoothing width in Hz.  The main JS/Rust renderer uses a
+        // compact 180 Hz log envelope: a much wider envelope blurred nearby
+        // partials together and produced the hollow/echoed native result.
+        const auto envelopeRadius = juce::jlimit(4, 18,
+            static_cast<int>(std::round(180.0 * static_cast<double>(fftSize) / sampleRate)));
         prefix[0] = 0.0f;
         for (int bin = 0; bin <= half; ++bin)
             prefix[static_cast<std::size_t>(bin + 1)] = prefix[static_cast<std::size_t>(bin)]
@@ -136,27 +135,13 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
                 (prefix[static_cast<std::size_t>(end)] - prefix[static_cast<std::size_t>(begin)])
                 / static_cast<float>(std::max(1, end - begin));
         }
-        prefix[0] = 0.0f;
-        for (int bin = 0; bin <= half; ++bin)
-            prefix[static_cast<std::size_t>(bin + 1)] = prefix[static_cast<std::size_t>(bin)]
-                + logEnvelope[static_cast<std::size_t>(bin)];
-        const auto secondRadius = std::max(3, envelopeRadius / 3);
-        for (int bin = 0; bin <= half; ++bin)
-        {
-            const auto begin = std::max(0, bin - secondRadius);
-            const auto end = std::min(half + 1, bin + secondRadius + 1);
-            smoothedEnvelope[static_cast<std::size_t>(bin)] =
-                (prefix[static_cast<std::size_t>(end)] - prefix[static_cast<std::size_t>(begin)])
-                / static_cast<float>(std::max(1, end - begin));
-        }
-
         for (int bin = 0; bin <= half; ++bin)
         {
             const auto frequency = static_cast<float>(bin) * static_cast<float>(sampleRate)
                 / static_cast<float>(fftSize);
             const auto highBand = juce::jlimit(0.0f, 1.0f, (frequency - 3'200.0f) / 4'800.0f);
-            const auto residualFloorRatio = 0.06f + 0.58f * highBand * highBand;
-            const auto envelope = std::max(1.0e-9f, std::exp(smoothedEnvelope[static_cast<std::size_t>(bin)]));
+            const auto residualFloorRatio = 0.20f + 0.42f * highBand * highBand;
+            const auto envelope = std::max(1.0e-9f, std::exp(logEnvelope[static_cast<std::size_t>(bin)]));
             const auto totalPower = magnitude[static_cast<std::size_t>(bin)] * magnitude[static_cast<std::size_t>(bin)];
             const auto residualPower = std::min(totalPower,
                 envelope * envelope * residualFloorRatio * residualFloorRatio);
@@ -190,9 +175,9 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             const auto interpolate = [fraction](float left, float right) { return left + (right - left) * fraction; };
             const auto sourceHarmonic = interpolate(harmonicMagnitude[static_cast<std::size_t>(sourceLeft)],
                                                     harmonicMagnitude[static_cast<std::size_t>(sourceRight)]);
-            const auto sourceEnvelope = interpolate(smoothedEnvelope[static_cast<std::size_t>(sourceLeft)],
-                                                     smoothedEnvelope[static_cast<std::size_t>(sourceRight)]);
-            const auto targetEnvelope = smoothedEnvelope[static_cast<std::size_t>(outputBin)];
+            const auto sourceEnvelope = interpolate(logEnvelope[static_cast<std::size_t>(sourceLeft)],
+                                                     logEnvelope[static_cast<std::size_t>(sourceRight)]);
+            const auto targetEnvelope = logEnvelope[static_cast<std::size_t>(outputBin)];
             mappedMagnitude[static_cast<std::size_t>(outputBin)] = sourceHarmonic
                 * juce::jlimit(0.18f, 5.5f, std::exp(targetEnvelope - sourceEnvelope));
             const auto sourcePhase = phase[static_cast<std::size_t>(sourceLeft)]

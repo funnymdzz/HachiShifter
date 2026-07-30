@@ -1091,7 +1091,9 @@ void MainComponent::importOto()
             const auto file = selected.getResult();
             if (file == juce::File{}) return;
             juce::String error;
-            if (!SampleSettings::importOto(file, sampleSettingsRows, error))
+            const auto duration = audio.probeDuration(sampleSettingsFile).value_or(0.0);
+            if (!SampleSettings::importOto(file, sampleSettingsFile, duration,
+                                           sampleSettingsRows, error))
             {
                 showError(error);
                 return;
