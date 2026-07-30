@@ -107,7 +107,9 @@ public:
     [[nodiscard]] bool canUndo() const;
     [[nodiscard]] bool canRedo() const;
 
-    void addAudioFile(const juce::File& file, double durationSeconds, double startSeconds = 0.0);
+    [[nodiscard]] juce::String addAudioFile(const juce::File& file, double durationSeconds,
+                                            double startSeconds = 0.0);
+    bool setClipNotesIfEmpty(const juce::String& clipId, std::vector<NoteData> notes);
     bool addMidiFile(const juce::File& file, juce::String& error);
     void setTempo(double bpm, int numerator, int denominator = 4);
     void setGridDivision(const juce::String& division);

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <thread>
 
 namespace hachi
 {
@@ -233,14 +234,21 @@ MainComponent::MainComponent()
         const auto algorithm = id == 2 ? PitchAlgorithm::nsfHifigan
             : id == 3 ? PitchAlgorithm::world
             : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
-        if (selectedTrackId.isNotEmpty())
-            project.setTrackPitchAlgorithm(selectedTrackId, algorithm);
+        const auto data = project.snapshot();
+        const auto selectedCompose = std::find_if(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track)
+            {
+                return track.id == selectedTrackId && track.compose;
+            });
+        if (selectedCompose != data.tracks.end())
+            project.setTrackPitchAlgorithm(selectedCompose->id, algorithm);
         else
             project.setPitchAlgorithm(algorithm);
         if (previousStretch != stretchAlgorithm.getSelectedId())
         {
-            if (selectedTrackId.isNotEmpty())
-                project.setTrackStretchAlgorithm(selectedTrackId, StretchAlgorithm::melodyneHybrid);
+            if (selectedCompose != data.tracks.end())
+                project.setTrackStretchAlgorithm(selectedCompose->id,
+                                                  StretchAlgorithm::melodyneHybrid);
             else
                 project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
         }
@@ -251,8 +259,14 @@ MainComponent::MainComponent()
         const auto algorithm = id == 2 ? StretchAlgorithm::variableMelHop
             : id == 3 ? StretchAlgorithm::loop
             : id == 4 ? StretchAlgorithm::soundTouch : StretchAlgorithm::melodyneHybrid;
-        if (selectedTrackId.isNotEmpty())
-            project.setTrackStretchAlgorithm(selectedTrackId, algorithm);
+        const auto data = project.snapshot();
+        const auto selectedCompose = std::find_if(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track)
+            {
+                return track.id == selectedTrackId && track.compose;
+            });
+        if (selectedCompose != data.tracks.end())
+            project.setTrackStretchAlgorithm(selectedCompose->id, algorithm);
         else
             project.setStretchAlgorithm(algorithm);
     };
@@ -685,7 +699,7 @@ void MainComponent::openExternalFile(const juce::File& file)
             showError(strings.text("error.midi") + "\n" + error);
     }
     else if (const auto duration = audio.probeDuration(file))
-        project.addAudioFile(file, *duration);
+        addAnalysedAudioFile(file, *duration);
 }
 
 void MainComponent::filesDropped(const juce::StringArray& files, int x, int y)
@@ -700,7 +714,7 @@ void MainComponent::filesDropped(const juce::StringArray& files, int x, int y)
         if (file.hasFileExtension("wav;flac;aif;aiff;mp3;ogg"))
         {
             if (const auto duration = audio.probeDuration(file))
-                project.addAudioFile(file, *duration, dropSeconds);
+                addAnalysedAudioFile(file, *duration, dropSeconds);
         }
         else
             openExternalFile(file);
@@ -902,10 +916,16 @@ void MainComponent::timerCallback()
                 showingRenderProgress = false;
                 progress = 0.0;
             }
-            statusLabel.setText((audio.isPlaying() ? strings.text("transport.play")
-                                                    : strings.text("status.ready"))
-                                    + "  " + juce::String(audio.position(), 2) + " s",
-                                juce::dontSendNotification);
+            if (pendingNativeAnalyses > 0)
+                statusLabel.setText(strings.text("status.analyzing") + "  "
+                    + nativeAnalysisName + "  "
+                    + juce::String(static_cast<int>(std::round(nativeAnalysisProgress * 100.0)))
+                    + "%", juce::dontSendNotification);
+            else
+                statusLabel.setText((audio.isPlaying() ? strings.text("transport.play")
+                                                        : strings.text("status.ready"))
+                                        + "  " + juce::String(audio.position(), 2) + " s",
+                                    juce::dontSendNotification);
             if (playWhenRenderReady)
             {
                 playWhenRenderReady = false;
@@ -1374,10 +1394,61 @@ void MainComponent::importAudio()
             const auto startSeconds = audio.position();
             for (const auto& file : files)
                 if (const auto duration = audio.probeDuration(file))
-                    project.addAudioFile(file, *duration, startSeconds);
+                    addAnalysedAudioFile(file, *duration, startSeconds);
                 else
                     showError(strings.text("error.audio") + "\n" + file.getFullPathName());
         });
+}
+
+void MainComponent::addAnalysedAudioFile(const juce::File& file, double durationSeconds,
+                                         double startSeconds)
+{
+    const auto clipId = project.addAudioFile(file, durationSeconds, startSeconds);
+    const auto nativeSidecar = SampleSettings::sidecarFor(file);
+    const juce::File legacySidecar(file.getFullPathName() + ".hachi.csv");
+    // HJM/OTO data is authoritative.  The native detector is only the
+    // model-free path for ordinary audio and must not overwrite those notes.
+    if (!nativeSidecar.existsAsFile() && !legacySidecar.existsAsFile())
+        scheduleNativeAnalysis(file, clipId);
+}
+
+void MainComponent::scheduleNativeAnalysis(const juce::File& file,
+                                           const juce::String& clipId)
+{
+    juce::Component::SafePointer<MainComponent> safe(this);
+    ++pendingNativeAnalyses;
+    nativeAnalysisProgress = 0.0;
+    nativeAnalysisName = file.getFileName();
+    statusLabel.setText(strings.text("status.analyzing") + "  " + file.getFileName(),
+                        juce::dontSendNotification);
+    std::thread([safe, file, clipId]
+    {
+        juce::String error;
+        auto notes = backend::NativeAnalyzer::analyse(file, error,
+            [safe, name = file.getFileName()](double value)
+            {
+                juce::MessageManager::callAsync([safe, name, value]
+                {
+                    if (safe == nullptr || safe->importInProgress) return;
+                    safe->nativeAnalysisName = name;
+                    safe->nativeAnalysisProgress = value;
+                });
+            });
+        juce::MessageManager::callAsync(
+            [safe, clipId, notes = std::move(notes), error]() mutable
+            {
+                if (safe == nullptr) return;
+                const auto inserted = safe->project.setClipNotesIfEmpty(clipId, std::move(notes));
+                safe->pendingNativeAnalyses = std::max(0, safe->pendingNativeAnalyses - 1);
+                safe->nativeAnalysisProgress = inserted ? 1.0 : 0.0;
+                if (inserted)
+                    safe->statusLabel.setText(safe->strings.text("status.analysisComplete"),
+                                              juce::dontSendNotification);
+                else if (error.isNotEmpty())
+                    safe->statusLabel.setText(safe->strings.text("status.analysisSkipped"),
+                                              juce::dontSendNotification);
+            });
+    }).detach();
 }
 
 void MainComponent::importMelodyne()

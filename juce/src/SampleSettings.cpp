@@ -187,7 +187,9 @@ std::vector<SampleRegionSetting> SampleSettings::loadOrDerive(const juce::File& 
         row.melodynePitchDrift = item.note->drift;
         row.melodynePitchModulation = item.note->modulation;
         row.melodyneFormantCents = item.note->formantSemitones * 100.0;
-        row.melodyneAmplitude = item.clip->gain;
+        // Melodyne amplitude is note-local.  Persisting the clip gain here
+        // discarded the vocal's per-note level when the HJM file was loaded.
+        row.melodyneAmplitude = item.note->gain;
         row.melodyneSibilantBalance = item.note->breath;
         row.melodyneAttackSeconds = item.note->consonantSeconds;
         rows.push_back(std::move(row));

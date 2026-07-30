@@ -10,6 +10,7 @@
 #include "TimelineComponent.h"
 #include "TrackListComponent.h"
 #include "backend/MelodyneImporter.h"
+#include "backend/NativeAnalyzer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 
 namespace hachi
@@ -64,6 +65,9 @@ private:
     void saveProject();
     void exportMixdown();
     void importAudio();
+    void addAnalysedAudioFile(const juce::File& file, double durationSeconds,
+                              double startSeconds = 0.0);
+    void scheduleNativeAnalysis(const juce::File& file, const juce::String& clipId);
     void importMidi();
     void importMelodyne();
     void showSettings();
@@ -138,6 +142,9 @@ private:
     bool importInProgress = false;
     bool showingRenderProgress = false;
     bool playWhenRenderReady = false;
+    int pendingNativeAnalyses = 0;
+    double nativeAnalysisProgress = 0.0;
+    juce::String nativeAnalysisName;
 
     TrackListComponent trackList;
     TimelineComponent timeline;

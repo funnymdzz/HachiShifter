@@ -58,6 +58,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/McpServer.h
     src/backend/RenderService.cpp
     src/backend/RenderService.h
+    src/backend/NativeAnalyzer.cpp
+    src/backend/NativeAnalyzer.h
 )
 
 target_compile_definitions(HachiShifterNext PRIVATE

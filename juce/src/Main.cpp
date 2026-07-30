@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include "backend/McpServer.h"
+#include "backend/NativeAnalyzer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <cmath>
 #include <iostream>
@@ -36,7 +37,7 @@ public:
             else
             {
                 ProjectModel model;
-                model.addAudioFile(input, *duration);
+                (void) model.addAudioFile(input, *duration);
                 auto data = model.snapshot();
                 if (!data.tracks.empty()) data.tracks.front().compose = false;
                 cliAudioEngine->syncProject(data);
@@ -166,14 +167,19 @@ public:
             else
             {
                 ProjectModel model;
-                model.addAudioFile(file,
+                const auto clipId = model.addAudioFile(file,
                     static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
+                juce::String analysisError;
+                auto analysed = backend::NativeAnalyzer::analyse(file, analysisError);
+                (void) model.setClipNotesIfEmpty(clipId, std::move(analysed));
                 const auto data = model.snapshot();
                 std::size_t notes = 0;
                 for (const auto& track : data.tracks)
                     for (const auto& clip : track.clips) notes += clip.notes.size();
                 std::cout << "tracks=" << data.tracks.size() << '\n'
-                          << "notes=" << notes << std::endl;
+                          << "notes=" << notes << '\n'
+                          << "analysis=" << (analysisError.isEmpty() ? "native" : "skipped")
+                          << std::endl;
             }
             juce::MessageManager::callAsync([this] { quit(); });
             return;

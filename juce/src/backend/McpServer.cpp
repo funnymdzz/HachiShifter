@@ -240,7 +240,8 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         else if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
         {
             project.clear();
-            project.addAudioFile(file, static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
+            (void) project.addAudioFile(file,
+                static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
             return toolResult(summary(project.snapshot()));
         }
         else error = "Unsupported or unreadable file";
@@ -250,8 +251,9 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         const juce::File file(string(args, "path"));
         if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
         {
-            project.addAudioFile(file, static_cast<double>(reader->lengthInSamples) / reader->sampleRate,
-                                 number(args, "start_seconds"));
+            (void) project.addAudioFile(file,
+                static_cast<double>(reader->lengthInSamples) / reader->sampleRate,
+                number(args, "start_seconds"));
             return toolResult("ok");
         }
         error = "Audio read failed";

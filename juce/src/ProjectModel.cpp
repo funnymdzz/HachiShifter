@@ -136,7 +136,8 @@ juce::String ProjectModel::makeId(const char* prefix)
     return juce::String(prefix) + "_" + juce::Uuid().toString().removeCharacters("-");
 }
 
-void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, double startSeconds)
+juce::String ProjectModel::addAudioFile(const juce::File& file, double durationSeconds,
+                                        double startSeconds)
 {
     TrackData track;
     track.id = makeId("track");
@@ -203,6 +204,7 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, 
             clip.notes.push_back(std::move(note));
         }
     }
+    const auto clipId = clip.id;
     track.clips.push_back(std::move(clip));
 
     {
@@ -213,6 +215,29 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, 
             project.name = file.getFileNameWithoutExtension();
     }
     sendChangeMessage();
+    return clipId;
+}
+
+bool ProjectModel::setClipNotesIfEmpty(const juce::String& clipId,
+                                       std::vector<NoteData> notes)
+{
+    if (notes.empty()) return false;
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId && clip.notes.empty())
+                {
+                    // Import analysis is one operation.  More importantly,
+                    // do not replace notes the user drew while it was running.
+                    clip.notes = std::move(notes);
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+    return changed;
 }
 
 bool ProjectModel::addMidiFile(const juce::File& file, juce::String& error)
@@ -851,7 +876,7 @@ void ProjectModel::applySourceSettings(const juce::File& source,
             clip.sourceOffsetSeconds = std::max(0.0, row.regionStartSeconds);
             clip.sourceDurationSeconds = std::max(0.001,
                 row.regionEndSeconds - row.regionStartSeconds);
-            clip.gain = juce::jlimit(0.0f, 4.0f,
+            note.gain = juce::jlimit(0.0f, 4.0f,
                 static_cast<float>(row.melodyneAmplitude));
             const auto targetPerSource = clip.durationSeconds / clip.sourceDurationSeconds;
             note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds,
