@@ -7,6 +7,14 @@
 
 namespace hachi::backend
 {
+enum class PitchRenderBackend
+{
+    mld5 = 0,
+    nsfHifigan = 1,
+    world = 2,
+    vslib = 3
+};
+
 struct TimeMapPoint
 {
     double targetSeconds = 0.0;
@@ -26,7 +34,7 @@ struct Mld5FileRenderRequest
     std::vector<float> noteGain;
     std::vector<float> breath;
     std::vector<TimeMapPoint> timeMap;
-    int pitchAlgorithm = 0;
+    PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;
     int stretchAlgorithm = 0;
 };
 

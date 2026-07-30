@@ -119,10 +119,12 @@ public:
             request.breath.assign(static_cast<std::size_t>(frames), breath);
             if (arguments.size() >= 9)
             {
-                const auto backend = arguments[8].toLowerCase();
-                request.pitchAlgorithm = backend.contains("nsf") ? 1
-                    : backend == "world" ? 2
-                    : backend.contains("vslib") ? 3 : 0;
+                const auto backendName = arguments[8].toLowerCase();
+                request.pitchBackend = backendName.contains("nsf")
+                    ? backend::PitchRenderBackend::nsfHifigan
+                    : backendName == "world" ? backend::PitchRenderBackend::world
+                    : backendName.contains("vslib") ? backend::PitchRenderBackend::vslib
+                    : backend::PitchRenderBackend::mld5;
             }
             cliRenderService = std::make_unique<backend::RenderService>();
             cliRenderService->renderMld5File(std::move(request), [this, outputFile](backend::RenderedAudio result)

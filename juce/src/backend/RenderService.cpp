@@ -86,7 +86,7 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
                                                  const std::vector<float>& noteGain,
                                                  const std::vector<float>& breath,
                                                  const std::vector<TimeMapPoint>& timeMap,
-                                                 int pitchAlgorithm,
+                                                 PitchRenderBackend pitchBackend,
                                                  int stretchAlgorithm)
 {
     const auto sourceSamples = source.getNumSamples();
@@ -157,13 +157,17 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     // duration move independently while the vocal-tract envelope remains at
     // the source frequencies.  A fixed seed makes cache renders repeatable.
     signalsmith::stretch::SignalsmithStretch<float> stretch(0x48414348L);
-    // The selected algorithms now affect the native fallback instead of being
-    // UI-only state.  mld5/Melodyne Hybrid uses the higher-resolution preset;
-    // the lighter WORLD/vslib/SoundTouch fallbacks use the cheaper preset.
-    if (pitchAlgorithm == 0 && stretchAlgorithm == 0)
-        stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
-    else
+    // Keep both mld5 and the model-free nsf-hifigan fallback on the same proven
+    // single-pass, low-latency phase clock.  The former presetDefault route had
+    // a much longer analysis window and audibly pre/post-rang short vocal
+    // elements, which was perceived as an echo.  mld5-specific treatment is
+    // deliberately applied only once after this common render below.
+    const auto stableVocalClock = pitchBackend == PitchRenderBackend::mld5
+        || pitchBackend == PitchRenderBackend::nsfHifigan;
+    if (stableVocalClock || stretchAlgorithm != 0)
         stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
+    else
+        stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
     stretch.setFormantSemitones(valueAt(formantSemitones, 0.0, 0.0f), true);
     stretch.setFormantBase(200.0f / static_cast<float>(sampleRate));
 
@@ -464,7 +468,7 @@ public:
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
         juce::AudioBuffer<float> rendered;
-        if (request.pitchAlgorithm == 0)
+        if (request.pitchBackend == PitchRenderBackend::mld5)
         {
             // The file/playback entry must be one persistent render pass.  The
             // previous neutral stretch + component pass processed every vowel
@@ -475,7 +479,7 @@ public:
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
                 request.formantSemitones, request.noteGain, request.breath, request.timeMap,
-                request.pitchAlgorithm, request.stretchAlgorithm);
+                request.pitchBackend, request.stretchAlgorithm);
             applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
                                     request.sourceMidi, request.targetMidi);
         }
@@ -483,10 +487,11 @@ public:
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
                 request.formantSemitones, request.noteGain, request.breath, request.timeMap,
-                request.pitchAlgorithm, request.stretchAlgorithm);
-        const auto backend = request.pitchAlgorithm == 0 ? juce::String("mld5-single-pass")
-            : request.pitchAlgorithm == 1 ? juce::String("nsf-hifigan")
-            : request.pitchAlgorithm == 2 ? juce::String("WORLD")
+                request.pitchBackend, request.stretchAlgorithm);
+        const auto backend = request.pitchBackend == PitchRenderBackend::mld5
+            ? juce::String("mld5-single-pass-stable-clock")
+            : request.pitchBackend == PitchRenderBackend::nsfHifigan ? juce::String("nsf-hifigan")
+            : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         RenderedAudio result { std::move(rendered), reader->sampleRate, backend };
         if (shouldExit()) return jobHasFinished;

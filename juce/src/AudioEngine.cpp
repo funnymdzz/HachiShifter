@@ -49,7 +49,22 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     request.sourceDurationSeconds = clip.sourceDurationSeconds > 1.0e-9
         ? clip.sourceDurationSeconds : clip.durationSeconds;
     request.targetDurationSeconds = clip.durationSeconds;
-    request.pitchAlgorithm = static_cast<int>(track.pitchAlgorithm);
+    switch (track.pitchAlgorithm)
+    {
+        case PitchAlgorithm::nsfHifigan:
+            request.pitchBackend = backend::PitchRenderBackend::nsfHifigan;
+            break;
+        case PitchAlgorithm::world:
+            request.pitchBackend = backend::PitchRenderBackend::world;
+            break;
+        case PitchAlgorithm::vocalShifter:
+            request.pitchBackend = backend::PitchRenderBackend::vslib;
+            break;
+        case PitchAlgorithm::mld5:
+        default:
+            request.pitchBackend = backend::PitchRenderBackend::mld5;
+            break;
+    }
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
     const auto sourceDuration = request.sourceDurationSeconds;
     std::vector<backend::TimeMapPoint> timeAnchors { { 0.0, 0.0 } };

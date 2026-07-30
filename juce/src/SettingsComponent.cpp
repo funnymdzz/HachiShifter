@@ -246,7 +246,7 @@ void SettingsComponent::resized()
 
 void SettingsComponent::refreshAudioValues()
 {
-    if (const auto* device = devices.getCurrentAudioDevice())
+    if (auto* device = devices.getCurrentAudioDevice())
     {
         currentAudioDevice.setText(device->getName(), juce::dontSendNotification);
         sampleRate.setText(juce::String(static_cast<int>(std::llround(device->getCurrentSampleRate())))
