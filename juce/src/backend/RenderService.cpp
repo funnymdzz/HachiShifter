@@ -1,4 +1,5 @@
 #include "RenderService.h"
+#include "WorldRenderer.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <signalsmith-stretch.h>
 #include <algorithm>
@@ -525,7 +526,28 @@ public:
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
         juce::AudioBuffer<float> rendered;
-        if (request.pitchBackend == PitchRenderBackend::mld5)
+        if (request.pitchBackend == PitchRenderBackend::world)
+        {
+            std::vector<WorldTimeMapPoint> worldTimeMap;
+            worldTimeMap.reserve(request.timeMap.size());
+            for (const auto& point : request.timeMap)
+                worldTimeMap.push_back({ point.targetSeconds, point.sourceSeconds });
+            rendered = WorldRenderer::render(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                request.formantSemitones, worldTimeMap);
+            // A malformed or exceptionally constrained source still remains
+            // playable through the established model-free route.
+            if (rendered.getNumSamples() != targetSamples)
+                rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                    request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                    request.formantSemitones, request.noteGain, request.tension, request.breath,
+                    request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+            else
+                applyExpressionAndTension(rendered, reader->sampleRate, request.framePeriodMs,
+                                          request.targetMidi, request.noteGain, request.tension,
+                                          request.breath);
+        }
+        else if (request.pitchBackend == PitchRenderBackend::mld5)
         {
             // The file/playback entry must be one persistent render pass.  The
             // previous neutral stretch + component pass processed every vowel

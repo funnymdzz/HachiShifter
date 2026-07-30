@@ -15,6 +15,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+# WORLD is vendored so model-free builds have a genuinely independent WORLD
+# analysis/synthesis path instead of routing the WORLD selector through the
+# common phase-vocoder fallback.
+set(WORLD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(WORLD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/world EXCLUDE_FROM_ALL)
+
 juce_add_gui_app(HachiShifterNext
     PRODUCT_NAME "HachiShifter Next"
     COMPANY_NAME "funnymdzz"
@@ -58,6 +65,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/McpServer.h
     src/backend/RenderService.cpp
     src/backend/RenderService.h
+    src/backend/WorldRenderer.cpp
+    src/backend/WorldRenderer.h
     src/backend/NativeAnalyzer.cpp
     src/backend/NativeAnalyzer.h
 )
@@ -85,6 +94,7 @@ target_link_libraries(HachiShifterNext PRIVATE
     juce::juce_recommended_config_flags
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
+    world::core
 )
 
 # UTAU voicebanks commonly store oto.ini in CP932/Shift-JIS.  iconv is part of

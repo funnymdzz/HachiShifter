@@ -437,7 +437,7 @@ void ProjectModel::setTrackPitchAlgorithm(const juce::String& trackId,
     {
         const juce::ScopedLock guard(lock);
         for (auto& track : project.tracks)
-            if (track.id == trackId && track.compose && track.pitchAlgorithm != algorithm)
+            if (track.id == trackId && track.pitchAlgorithm != algorithm)
             {
                 pushUndoLocked();
                 track.pitchAlgorithm = algorithm;
@@ -467,7 +467,7 @@ void ProjectModel::setTrackStretchAlgorithm(const juce::String& trackId,
     {
         const juce::ScopedLock guard(lock);
         for (auto& track : project.tracks)
-            if (track.id == trackId && track.compose && track.stretchAlgorithm != algorithm)
+            if (track.id == trackId && track.stretchAlgorithm != algorithm)
             {
                 pushUndoLocked();
                 track.stretchAlgorithm = algorithm;

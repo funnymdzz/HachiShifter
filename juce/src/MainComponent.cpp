@@ -235,19 +235,19 @@ MainComponent::MainComponent()
             : id == 3 ? PitchAlgorithm::world
             : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
         const auto data = project.snapshot();
-        const auto selectedCompose = std::find_if(data.tracks.begin(), data.tracks.end(),
+        const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
             {
-                return track.id == selectedTrackId && track.compose;
+                return track.id == selectedTrackId;
             });
-        if (selectedCompose != data.tracks.end())
-            project.setTrackPitchAlgorithm(selectedCompose->id, algorithm);
+        if (selectedTrack != data.tracks.end())
+            project.setTrackPitchAlgorithm(selectedTrack->id, algorithm);
         else
             project.setPitchAlgorithm(algorithm);
         if (previousStretch != stretchAlgorithm.getSelectedId())
         {
-            if (selectedCompose != data.tracks.end())
-                project.setTrackStretchAlgorithm(selectedCompose->id,
+            if (selectedTrack != data.tracks.end())
+                project.setTrackStretchAlgorithm(selectedTrack->id,
                                                   StretchAlgorithm::melodyneHybrid);
             else
                 project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
@@ -260,13 +260,13 @@ MainComponent::MainComponent()
             : id == 3 ? StretchAlgorithm::loop
             : id == 4 ? StretchAlgorithm::soundTouch : StretchAlgorithm::melodyneHybrid;
         const auto data = project.snapshot();
-        const auto selectedCompose = std::find_if(data.tracks.begin(), data.tracks.end(),
+        const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
             {
-                return track.id == selectedTrackId && track.compose;
+                return track.id == selectedTrackId;
             });
-        if (selectedCompose != data.tracks.end())
-            project.setTrackStretchAlgorithm(selectedCompose->id, algorithm);
+        if (selectedTrack != data.tracks.end())
+            project.setTrackStretchAlgorithm(selectedTrack->id, algorithm);
         else
             project.setStretchAlgorithm(algorithm);
     };
@@ -476,7 +476,7 @@ void MainComponent::refreshProjectControls()
     scaleSelector.setText(data.baseScale, juce::dontSendNotification);
     auto selected = selectedTrackId.isNotEmpty()
         ? std::find_if(data.tracks.begin(), data.tracks.end(),
-            [this](const auto& track) { return track.id == selectedTrackId && track.compose; })
+            [this](const auto& track) { return track.id == selectedTrackId; })
         : data.tracks.end();
     if (selected == data.tracks.end())
         selected = std::find_if(data.tracks.begin(), data.tracks.end(),
