@@ -19,6 +19,13 @@ public:
                       juce::PropertiesFile& propertiesToUse, Applied appliedToUse);
     ~SettingsComponent() override;
     void resized() override;
+    [[nodiscard]] int diagnosticTabCount() const { return tabs.getNumTabs(); }
+    [[nodiscard]] int diagnosticCurrentPageChildCount() const
+    {
+        if (const auto* page = tabs.getCurrentContentComponent())
+            return page->getNumChildComponents();
+        return 0;
+    }
 
 private:
     class FormPage final : public juce::Component

@@ -38,16 +38,8 @@ public:
                                        diagnosticProperties, [] {});
             settings.setBounds(0, 0, 720, 570);
             settings.resized();
-            auto tabs = 0;
-            auto pageChildren = 0;
-            for (int index = 0; index < settings.getNumChildComponents(); ++index)
-                if (auto* tabbed = dynamic_cast<juce::TabbedComponent*>(
-                        settings.getChildComponent(index)))
-                {
-                    tabs = tabbed->getNumTabs();
-                    if (const auto* page = tabbed->getCurrentContentComponent())
-                        pageChildren = page->getNumChildComponents();
-                }
+            const auto tabs = settings.diagnosticTabCount();
+            const auto pageChildren = settings.diagnosticCurrentPageChildCount();
             std::cout << "tabs=" << tabs << '\n'
                       << "page_children=" << pageChildren << '\n'
                       << "width=" << settings.getWidth() << '\n'
