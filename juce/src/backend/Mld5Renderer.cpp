@@ -57,6 +57,24 @@ juce::AudioBuffer<float> Mld5Renderer::render(const Mld5RenderRequest& request) 
                                          request.targetMidi);
         result.copyFrom(channel, 0, rendered.data(), static_cast<int>(rendered.size()));
     }
+    // Spectral remapping can discard bins beyond Nyquist (especially for an
+    // upward move), but Melodyne's note operation is loudness preserving.
+    // Restore one linked RMS factor so stereo balance and imported amplitude
+    // automation remain intact rather than making high notes several dB quieter.
+    double sourcePower = 0.0;
+    double renderedPower = 0.0;
+    const auto count = request.input->getNumChannels() * request.input->getNumSamples();
+    for (int channel = 0; channel < request.input->getNumChannels(); ++channel)
+        for (int sample = 0; sample < request.input->getNumSamples(); ++sample)
+        {
+            const auto source = request.input->getSample(channel, sample);
+            const auto output = result.getSample(channel, sample);
+            sourcePower += static_cast<double>(source) * source;
+            renderedPower += static_cast<double>(output) * output;
+        }
+    if (count > 0 && sourcePower > 1.0e-12 && renderedPower > 1.0e-12)
+        result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8,
+            std::sqrt(sourcePower / renderedPower))));
     return result;
 }
 
