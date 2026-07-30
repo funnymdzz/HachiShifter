@@ -437,6 +437,33 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         onSeek(std::max(0.0, static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond));
 }
 
+void PianoRollComponent::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    if (sourceEditMode) return;
+    for (auto it = noteHits.rbegin(); it != noteHits.rend(); ++it)
+    {
+        if (!it->bounds.contains(event.position)) continue;
+        for (const auto& track : snapshot.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    if (note.id == it->id)
+                    {
+                        draggedNote.clear();
+                        dragMode = DragMode::none;
+                        const auto noteStart = clip.startSeconds + note.startSeconds;
+                        const auto boundary = noteStart + note.consonantSeconds;
+                        const auto step = gridSeconds();
+                        const auto quantized = snapshot.beatOriginSeconds
+                            + std::round((boundary - snapshot.beatOriginSeconds) / step) * step;
+                        model.setNoteAttack(note.id,
+                            juce::jlimit(0.0, note.durationSeconds, quantized - noteStart),
+                            note.attackSpeed);
+                        return;
+                    }
+        return;
+    }
+}
+
 void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
 {
     if (draggedNote.isEmpty()) return;

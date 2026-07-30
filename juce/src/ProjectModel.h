@@ -120,6 +120,9 @@ public:
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
+    void setNoteModulation(const juce::String& noteId, float modulation);
+    void setNoteDrift(const juce::String& noteId, float drift);
+    void setNoteAttack(const juce::String& noteId, double consonantSeconds, float attackSpeed);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
                                        double absoluteStart, double duration, float midiNote);
     void removeNote(const juce::String& noteId);

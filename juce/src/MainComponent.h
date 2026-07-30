@@ -40,6 +40,7 @@ private:
     void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
     void refreshTexts();
     void refreshProjectControls();
+    void refreshSelectedNoteParameter();
     void refreshStretchAlgorithmItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
     void togglePlayback();
@@ -121,6 +122,9 @@ private:
     bool sourceEditActive = false;
     juce::String selectedClipId;
     juce::String selectedTrackId;
+    juce::String selectedNoteId;
+    bool updatingSmoothSlider = false;
+    bool smoothSliderDragging = false;
     bool draggingPanelSplitter = false;
     int panelSplitterDragScreenY = 0;
     float panelSplitterDragRatio = 0.60f;

@@ -483,6 +483,66 @@ void ProjectModel::resizeNote(const juce::String& noteId, double newStart, doubl
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setNoteModulation(const juce::String& noteId, float modulation)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.modulation = juce::jlimit(0.0f, 2.0f, modulation);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setNoteDrift(const juce::String& noteId, float drift)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.drift = juce::jlimit(0.0f, 2.0f, drift);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setNoteAttack(const juce::String& noteId, double consonantSeconds,
+                                 float attackSpeed)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds,
+                                                            consonantSeconds);
+                        note.attackSpeed = juce::jlimit(0.05f, 20.0f, attackSpeed);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
 juce::String ProjectModel::addNote(const juce::String& preferredClipId,
                                    double absoluteStart, double duration, float midiNote)
 {

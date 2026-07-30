@@ -192,9 +192,26 @@ MainComponent::MainComponent()
     };
 
     smoothSlider.setRange(0.0, 100.0, 1.0);
-    smoothSlider.setValue(35.0);
+    smoothSlider.setValue(0.0);
     smoothSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     smoothSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    smoothSlider.onValueChange = [this]
+    {
+        if (updatingSmoothSlider || smoothSliderDragging || selectedNoteId.isEmpty()
+            || !pitchParamButton.getToggleState()) return;
+        // 0% smoothing preserves the imported modulation exactly; 100%
+        // removes vibrato while keeping the note's macro drift curve.
+        project.setNoteModulation(selectedNoteId,
+            1.0f - static_cast<float>(smoothSlider.getValue() / 100.0));
+    };
+    smoothSlider.onDragStart = [this] { smoothSliderDragging = true; };
+    smoothSlider.onDragEnd = [this]
+    {
+        smoothSliderDragging = false;
+        if (selectedNoteId.isNotEmpty() && pitchParamButton.getToggleState())
+            project.setNoteModulation(selectedNoteId,
+                1.0f - static_cast<float>(smoothSlider.getValue() / 100.0));
+    };
 
     zoomSlider.setRange(40.0, 600.0, 1.0);
     zoomSlider.setValue(140.0);
@@ -209,6 +226,11 @@ MainComponent::MainComponent()
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
     pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
+    pianoRoll.onNoteSelected = [this](const juce::String& noteId)
+    {
+        selectedNoteId = noteId;
+        refreshSelectedNoteParameter();
+    };
     trackList.peakProvider = [this](const juce::String& trackId) { return audio.trackPeak(trackId); };
     trackList.onTrackSelected = [this](const juce::String& trackId) { selectedTrackId = trackId; };
 
@@ -255,7 +277,11 @@ MainComponent::MainComponent()
     };
     for (auto* button : { &pitchParamButton, &breathParamButton, &tensionParamButton,
                           &formantParamButton, &volumeParamButton })
-        button->onClick = [this, button] { setToolButton(*button); };
+        button->onClick = [this, button]
+        {
+            setToolButton(*button);
+            refreshSelectedNoteParameter();
+        };
     midiButton.onClick = [this] { importMidi(); };
     noteEditButton.setClickingTogglesState(false);
     wrenchButton.setClickingTogglesState(false);
@@ -265,7 +291,8 @@ MainComponent::MainComponent()
     refreshTexts();
     refreshProjectControls();
     setSourceEditMode(false);
-    pitchParamButton.setToggleState(true, juce::dontSendNotification);
+    setToolButton(pitchParamButton);
+    refreshSelectedNoteParameter();
     setSize(1280, 760);
     startTimerHz(30);
 }
@@ -346,6 +373,26 @@ void MainComponent::refreshProjectControls()
         pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
         refreshStretchAlgorithmItems(stretchId);
     }
+}
+
+void MainComponent::refreshSelectedNoteParameter()
+{
+    auto modulation = 1.0f;
+    auto found = false;
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            for (const auto& note : clip.notes)
+                if (note.id == selectedNoteId)
+                {
+                    modulation = note.modulation;
+                    found = true;
+                }
+    updatingSmoothSlider = true;
+    smoothSlider.setValue(juce::jlimit(0.0, 100.0,
+        (1.0 - static_cast<double>(modulation)) * 100.0), juce::dontSendNotification);
+    updatingSmoothSlider = false;
+    smoothSlider.setEnabled(found && pitchParamButton.getToggleState());
 }
 
 void MainComponent::refreshStretchAlgorithmItems(int preferredId)
@@ -619,7 +666,14 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
             selectedClipId.clear();
             pianoRoll.setFocusedClip({});
         }
+        auto noteExists = false;
+        for (const auto& track : data.tracks)
+            for (const auto& clip : track.clips)
+                noteExists = noteExists || std::any_of(clip.notes.begin(), clip.notes.end(),
+                    [this](const auto& note) { return note.id == selectedNoteId; });
+        if (!noteExists) selectedNoteId.clear();
         refreshProjectControls();
+        refreshSelectedNoteParameter();
         menuItemsChanged();
     }
 }

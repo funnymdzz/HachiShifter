@@ -136,6 +136,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
+            makeTool("set_note", "Set modulation, drift, Attack and consonant length / 设置音符调制与 Attack"),
             makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
             makeTool("remove_note", "Delete a note / 删除音符"),
             makeTool("toggle_note_connection", "Connect or separate adjacent notes / 连接或分离相邻音符"),
@@ -296,6 +297,30 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     {
         project.resizeNote(string(args, "note_id"), number(args, "start_seconds"),
                            number(args, "duration_seconds", 0.25));
+        return toolResult("ok");
+    }
+    else if (name == "set_note")
+    {
+        const auto id = string(args, "note_id");
+        if (args.hasProperty("modulation"))
+            project.setNoteModulation(id, static_cast<float>(number(args, "modulation", 1.0)));
+        if (args.hasProperty("drift"))
+            project.setNoteDrift(id, static_cast<float>(number(args, "drift", 1.0)));
+        if (args.hasProperty("consonant_seconds") || args.hasProperty("attack_speed"))
+        {
+            auto consonant = number(args, "consonant_seconds", 0.04);
+            auto speed = static_cast<float>(number(args, "attack_speed", 1.0));
+            const auto data = project.snapshot();
+            for (const auto& track : data.tracks)
+                for (const auto& clip : track.clips)
+                    for (const auto& note : clip.notes)
+                        if (note.id == id)
+                        {
+                            if (!args.hasProperty("consonant_seconds")) consonant = note.consonantSeconds;
+                            if (!args.hasProperty("attack_speed")) speed = note.attackSpeed;
+                        }
+            project.setNoteAttack(id, consonant, speed);
+        }
         return toolResult("ok");
     }
     else if (name == "add_note")
