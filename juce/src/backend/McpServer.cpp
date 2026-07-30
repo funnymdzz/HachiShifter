@@ -51,6 +51,22 @@ juce::String string(const juce::var& args, const char* key)
     return args.getProperty(key, {}).toString();
 }
 
+juce::String pitchAlgorithmText(PitchAlgorithm value)
+{
+    if (value == PitchAlgorithm::nsfHifigan) return "nsf-hifigan";
+    if (value == PitchAlgorithm::world) return "world";
+    if (value == PitchAlgorithm::vocalShifter) return "vslib";
+    return "mld5";
+}
+
+juce::String stretchAlgorithmText(StretchAlgorithm value)
+{
+    if (value == StretchAlgorithm::variableMelHop) return "variable-mel-hop";
+    if (value == StretchAlgorithm::loop) return "loop";
+    if (value == StretchAlgorithm::soundTouch) return "soundtouch";
+    return "melodyne-hybrid";
+}
+
 juce::String summary(const ProjectData& project)
 {
     std::size_t clips = 0;
@@ -132,7 +148,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("import_midi", "Import MIDI notes and tempo / 导入 MIDI"),
             makeTool("import_melodyne", "Import Melodyne MPD edits / 导入 Melodyne 工程"),
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
-            makeTool("set_track", "Set compose, mute, solo or volume for a track / 设置轨道"),
+            makeTool("set_track", "Set compose, mute, solo, gain, pan and render algorithms / 设置轨道及算法"),
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
@@ -424,6 +440,8 @@ juce::var McpServer::projectJson() const
         set(trackValue, "solo", track.solo);
         set(trackValue, "volume", track.volume);
         set(trackValue, "pan", track.pan);
+        set(trackValue, "pitch_algorithm", pitchAlgorithmText(track.pitchAlgorithm));
+        set(trackValue, "stretch_algorithm", stretchAlgorithmText(track.stretchAlgorithm));
         std::vector<juce::var> clips;
         for (const auto& clip : track.clips)
         {

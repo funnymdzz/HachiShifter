@@ -28,6 +28,18 @@ std::optional<std::pair<float, float>> contourAt(const NoteData& note, double lo
                            + (next.withoutVibratoCents - left.withoutVibratoCents) * amount };
 }
 
+std::pair<float, float> panGains(float pan, bool mono)
+{
+    pan = juce::jlimit(-1.0f, 1.0f, pan);
+    if (mono)
+        return { std::sqrt(0.5f * (1.0f - pan)),
+                 std::sqrt(0.5f * (1.0f + pan)) };
+    // Stereo tracks use a balance law: centre must preserve both source
+    // channels at unity instead of applying an unintended -3 dB attenuation.
+    return { pan > 0.0f ? std::sqrt(1.0f - pan) : 1.0f,
+             pan < 0.0f ? std::sqrt(1.0f + pan) : 1.0f };
+}
+
 backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track)
 {
     backend::Mld5FileRenderRequest request;
@@ -451,8 +463,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const auto renderedChannels = juce::jlimit(1, 2, rendered.getNumChannels());
             const auto firstPosition = (blockStart + static_cast<double>(outputBegin) / sampleRate
                                         - clip.startSeconds) * renderedRate;
-            const auto leftPan = std::sqrt(0.5f * (1.0f - loaded->trackPan));
-            const auto rightPan = std::sqrt(0.5f * (1.0f + loaded->trackPan));
+            const auto [leftPan, rightPan] = panGains(loaded->trackPan, renderedChannels == 1);
             for (int outputOffset = 0; outputOffset < outputCount; ++outputOffset)
             {
                 const auto position = firstPosition
@@ -506,8 +517,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         loaded->scratch.clear();
         loaded->reader->read(&loaded->scratch, 0, sourceCount, sourceBase, true, sourceChannels > 1);
 
-        const auto leftPan = std::sqrt(0.5f * (1.0f - loaded->trackPan));
-        const auto rightPan = std::sqrt(0.5f * (1.0f + loaded->trackPan));
+        const auto [leftPan, rightPan] = panGains(loaded->trackPan, sourceChannels == 1);
         for (int outputOffset = 0; outputOffset < outputCount; ++outputOffset)
         {
             const auto sourcePosition = firstSourcePosition

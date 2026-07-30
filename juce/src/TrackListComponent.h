@@ -32,6 +32,8 @@ private:
     juce::String selectedTrack;
     juce::String volumeDragTrack;
     float volumeDragPreview = 1.0f;
+    juce::String panDragTrack;
+    float panDragPreview = 0.0f;
     int volumeDragRow = -1;
 };
 }

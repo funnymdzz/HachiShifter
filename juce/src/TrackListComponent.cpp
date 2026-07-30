@@ -107,6 +107,22 @@ void TrackListComponent::paint(juce::Graphics& g)
         g.drawText(track.compose ? strings.text("track.compose") : strings.text("track.audio"),
                    10, row.getY() + 61, 94, 19, juce::Justification::centredLeft);
 
+        const auto displayedPan = track.id == panDragTrack ? panDragPreview : track.pan;
+        const juce::Rectangle<float> panRail(112.0f, static_cast<float>(row.getY() + 84),
+                                             std::max(20.0f, static_cast<float>(getWidth()) - 152.0f), 5.0f);
+        g.setColour(Palette::background);
+        g.fillRoundedRectangle(panRail, 2.5f);
+        g.setColour(Palette::grid.brighter(0.25f));
+        g.drawVerticalLine(static_cast<int>(panRail.getCentreX()), panRail.getY() - 2.0f,
+                           panRail.getBottom() + 2.0f);
+        const auto panX = panRail.getX() + (displayedPan + 1.0f) * 0.5f * panRail.getWidth();
+        g.setColour(colour.brighter(0.4f));
+        g.fillEllipse(panX - 3.5f, panRail.getCentreY() - 3.5f, 7.0f, 7.0f);
+        g.setColour(Palette::textMuted);
+        g.setFont(9.0f);
+        g.drawText("P " + juce::String(displayedPan, 2), 80, row.getY() + 77, 30, 16,
+                   juce::Justification::centredRight);
+
         const auto peak = peakProvider ? std::max(0.0f, peakProvider(track.id)) : 0.0f;
         const auto peakDb = peak > 1.0e-6f ? 20.0f * std::log10(peak) : -60.0f;
         const auto meterAmount = juce::jlimit(0.0f, 1.0f, (peakDb + 48.0f) / 51.0f);
@@ -154,14 +170,22 @@ void TrackListComponent::mouseDown(const juce::MouseEvent& event)
         volumeDragPreview = track.volume;
         mouseDrag(event);
     }
+    else if (localY >= 77 && localY < 96 && event.x >= 108 && event.x < getWidth() - 32)
+    {
+        panDragTrack = track.id;
+        panDragPreview = track.pan;
+        mouseDrag(event);
+    }
 }
 
 void TrackListComponent::mouseDrag(const juce::MouseEvent& event)
 {
-    if (volumeDragTrack.isEmpty()) return;
     const auto width = std::max(20, getWidth() - 152);
-    const auto normalized = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.x - 112) / static_cast<float>(width));
-    volumeDragPreview = normalized * 2.0f;
+    const auto normalized = juce::jlimit(0.0f, 1.0f,
+        static_cast<float>(event.x - 112) / static_cast<float>(width));
+    if (volumeDragTrack.isNotEmpty()) volumeDragPreview = normalized * 2.0f;
+    else if (panDragTrack.isNotEmpty()) panDragPreview = normalized * 2.0f - 1.0f;
+    else return;
     repaint();
 }
 
@@ -169,7 +193,10 @@ void TrackListComponent::mouseUp(const juce::MouseEvent&)
 {
     if (volumeDragTrack.isNotEmpty())
         model.setTrackVolume(volumeDragTrack, volumeDragPreview);
+    if (panDragTrack.isNotEmpty())
+        model.setTrackPan(panDragTrack, panDragPreview);
     volumeDragTrack.clear();
+    panDragTrack.clear();
     volumeDragRow = -1;
 }
 }
