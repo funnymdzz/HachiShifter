@@ -9,8 +9,10 @@ AssetManagerComponent::AssetManagerComponent(I18n& stringsToUse,
     : strings(stringsToUse), properties(propertiesToUse)
 {
     addAndMakeVisible(registerButton);
+    addAndMakeVisible(utauButton);
     addAndMakeVisible(removeButton);
     registerButton.setButtonText(strings.text("asset.register"));
+    utauButton.setButtonText(strings.text("asset.utau"));
     removeButton.setButtonText(strings.text("asset.remove"));
     registerButton.onClick = [this]
     {
@@ -24,6 +26,35 @@ AssetManagerComponent::AssetManagerComponent(I18n& stringsToUse,
                 juce::StringArray paths;
                 for (const auto& file : selectedFiles.getResults()) paths.add(file.getFullPathName());
                 addFiles(paths);
+            });
+    };
+    utauButton.onClick = [this]
+    {
+        chooser = std::make_unique<juce::FileChooser>(strings.text("asset.utau"), juce::File{});
+        chooser->launchAsync(juce::FileBrowserComponent::openMode
+                                 | juce::FileBrowserComponent::canSelectDirectories,
+            [this](const juce::FileChooser& selectedDirectory)
+            {
+                const auto directory = selectedDirectory.getResult();
+                if (!directory.isDirectory()) return;
+                juce::StringArray imported, warnings;
+                int sidecars = 0;
+                int regions = 0;
+                if (!SampleSettings::importVoicebank(directory, imported, sidecars,
+                                                      regions, warnings))
+                {
+                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                        strings.text("asset.utau"), warnings.joinIntoString("\n"));
+                    return;
+                }
+                addFiles(imported);
+                auto message = strings.text("asset.utauDone")
+                    .replace("{files}", juce::String(imported.size()))
+                    .replace("{sidecars}", juce::String(sidecars))
+                    .replace("{regions}", juce::String(regions));
+                if (!warnings.isEmpty()) message += "\n\n" + warnings.joinIntoString("\n");
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+                    strings.text("asset.utau"), message);
             });
     };
     removeButton.onClick = [this]
@@ -135,6 +166,8 @@ void AssetManagerComponent::resized()
 {
     auto toolbar = getLocalBounds().removeFromTop(toolbarHeight).reduced(6, 5);
     registerButton.setBounds(toolbar.removeFromLeft(150));
+    toolbar.removeFromLeft(6);
+    utauButton.setBounds(toolbar.removeFromLeft(150));
     toolbar.removeFromLeft(6);
     removeButton.setBounds(toolbar.removeFromLeft(110));
 }

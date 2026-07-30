@@ -41,5 +41,8 @@ public:
     static bool exportOto(const juce::File& oto, const juce::File& audio,
                           const std::vector<SampleRegionSetting>& rows, double audioDuration,
                           juce::String& error);
+    static bool importVoicebank(const juce::File& root, juce::StringArray& audioFiles,
+                                int& sidecarsWritten, int& regionsWritten,
+                                juce::StringArray& warnings);
 };
 }

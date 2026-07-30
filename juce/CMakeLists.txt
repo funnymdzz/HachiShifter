@@ -85,6 +85,16 @@ target_link_libraries(HachiShifterNext PRIVATE
     juce::juce_recommended_warning_flags
 )
 
+# UTAU voicebanks commonly store oto.ini in CP932/Shift-JIS.  iconv is part of
+# libc on Linux and a system library on macOS; Windows uses MultiByteToWideChar.
+if(NOT WIN32)
+    find_package(Iconv)
+    if(Iconv_FOUND)
+        target_link_libraries(HachiShifterNext PRIVATE Iconv::Iconv)
+        target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ICONV=1)
+    endif()
+endif()
+
 if(MSVC)
     target_compile_options(HachiShifterNext PRIVATE /utf-8 /W4)
 else()

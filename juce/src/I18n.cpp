@@ -119,6 +119,8 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "sample.exportOto", { "导出 oto", "匯出 oto", "oto書出", "oto 내보내기", "Export oto" } }
     ,{ "asset.title", { "素材管理器", "素材管理器", "素材マネージャー", "소재 관리자", "Asset Manager" } }
     ,{ "asset.register", { "注册音频素材", "註冊音訊素材", "音声素材を登録", "오디오 소재 등록", "Register Audio Assets" } }
+    ,{ "asset.utau", { "导入 UTAU 音源库", "匯入 UTAU 音源庫", "UTAU 音源を読み込む", "UTAU 음원 가져오기", "Import UTAU Voicebank" } }
+    ,{ "asset.utauDone", { "已注册 {files} 个音频，生成 {sidecars} 个 HJM 文件、{regions} 个分段。", "已註冊 {files} 個音訊，產生 {sidecars} 個 HJM 檔案、{regions} 個分段。", "{files} 件の音声を登録し、{sidecars} 件の HJM と {regions} 件の区間を作成しました。", "오디오 {files}개를 등록하고 HJM {sidecars}개와 구간 {regions}개를 생성했습니다.", "Registered {files} audio files and generated {sidecars} HJM files with {regions} regions." } }
     ,{ "asset.remove", { "移除", "移除", "削除", "제거", "Remove" } }
     ,{ "asset.empty", { "把音频拖入此处注册；注册后可拖到时间线或钢琴卷帘。", "將音訊拖入此處註冊；註冊後可拖到時間軸或鋼琴捲簾。", "音声をここへドロップして登録し、タイムラインまたはピアノロールへドラッグできます。", "오디오를 여기에 놓아 등록한 뒤 타임라인이나 피아노 롤로 끌 수 있습니다.", "Drop audio here to register it, then drag it to the timeline or piano roll." } }
 };

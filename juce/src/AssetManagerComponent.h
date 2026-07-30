@@ -1,6 +1,7 @@
 #pragma once
 
 #include "I18n.h"
+#include "SampleSettings.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <memory>
 
@@ -26,7 +27,7 @@ private:
 
     I18n& strings;
     juce::PropertiesFile& properties;
-    juce::TextButton registerButton, removeButton;
+    juce::TextButton registerButton, utauButton, removeButton;
     juce::StringArray assets;
     int selected = -1;
     int dragStartRow = -1;

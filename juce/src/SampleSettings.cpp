@@ -1,6 +1,17 @@
 #include "SampleSettings.h"
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <array>
+#include <vector>
+
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#elif defined(HACHI_HAS_ICONV)
+ #include <iconv.h>
+#endif
 
 namespace hachi
 {
@@ -44,6 +55,50 @@ double number(const juce::StringArray& values, int index, double fallback)
 {
     if (index >= values.size() || values[index].trim().isEmpty()) return fallback;
     return values[index].getDoubleValue();
+}
+
+juce::String decodeOtoText(const juce::File& file)
+{
+    juce::MemoryBlock bytes;
+    if (!file.loadFileAsData(bytes) || bytes.getSize() == 0) return {};
+    const auto* data = static_cast<const char*>(bytes.getData());
+    auto size = bytes.getSize();
+    if (size >= 3 && static_cast<unsigned char>(data[0]) == 0xef
+        && static_cast<unsigned char>(data[1]) == 0xbb
+        && static_cast<unsigned char>(data[2]) == 0xbf)
+    {
+        data += 3;
+        size -= 3;
+    }
+    if (juce::CharPointer_UTF8::isValidString(data, static_cast<int>(size)))
+        return juce::String::fromUTF8(data, static_cast<int>(size));
+
+#if JUCE_WINDOWS
+    const auto wideLength = MultiByteToWideChar(932, 0, data, static_cast<int>(size), nullptr, 0);
+    if (wideLength > 0)
+    {
+        std::vector<wchar_t> wide(static_cast<std::size_t>(wideLength + 1), 0);
+        if (MultiByteToWideChar(932, 0, data, static_cast<int>(size), wide.data(), wideLength) > 0)
+            return juce::String(wide.data());
+    }
+#elif defined(HACHI_HAS_ICONV)
+    auto decoder = iconv_open("UTF-8", "CP932");
+    if (decoder == reinterpret_cast<iconv_t>(-1)) decoder = iconv_open("UTF-8", "SHIFT-JIS");
+    if (decoder != reinterpret_cast<iconv_t>(-1))
+    {
+        std::vector<char> decoded(size * 4 + 4, 0);
+        auto* input = const_cast<char*>(data);
+        auto inputLeft = size;
+        auto* output = decoded.data();
+        auto outputLeft = decoded.size() - 1;
+        const auto result = iconv(decoder, &input, &inputLeft, &output, &outputLeft);
+        iconv_close(decoder);
+        if (result != static_cast<std::size_t>(-1))
+            return juce::String::fromUTF8(decoded.data(),
+                static_cast<int>(decoded.size() - outputLeft - 1));
+    }
+#endif
+    return juce::String::fromUTF8(data, static_cast<int>(size));
 }
 }
 
@@ -190,7 +245,7 @@ bool SampleSettings::importOto(const juce::File& oto, const juce::File& audio,
 {
     if (!oto.existsAsFile()) { error = "oto.ini not found"; return false; }
     rows.clear();
-    for (const auto& raw : juce::StringArray::fromLines(oto.loadFileAsString()))
+    for (const auto& raw : juce::StringArray::fromLines(decodeOtoText(oto)))
     {
         const auto equals = raw.indexOfChar('=');
         if (equals <= 0) continue;
@@ -261,5 +316,57 @@ bool SampleSettings::exportOto(const juce::File& oto, const juce::File& audio,
         return false;
     }
     return true;
+}
+
+bool SampleSettings::importVoicebank(const juce::File& root, juce::StringArray& audioFiles,
+                                     int& sidecarsWritten, int& regionsWritten,
+                                     juce::StringArray& warnings)
+{
+    audioFiles.clear();
+    warnings.clear();
+    sidecarsWritten = 0;
+    regionsWritten = 0;
+    juce::Array<juce::File> otoFiles;
+    if (root.existsAsFile() && root.getFileName().equalsIgnoreCase("oto.ini"))
+        otoFiles.add(root);
+    else if (root.isDirectory())
+    {
+        juce::Array<juce::File> candidates;
+        root.findChildFiles(candidates, juce::File::findFiles, true, "*");
+        for (const auto& candidate : candidates)
+            if (candidate.getFileName().equalsIgnoreCase("oto.ini")) otoFiles.add(candidate);
+    }
+    if (otoFiles.isEmpty())
+    {
+        warnings.add("oto.ini not found under " + root.getFullPathName());
+        return false;
+    }
+
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    for (const auto& oto : otoFiles)
+    {
+        juce::Array<juce::File> samples;
+        oto.getParentDirectory().findChildFiles(samples, juce::File::findFiles, false, "*");
+        for (const auto& sample : samples)
+        {
+            if (!sample.hasFileExtension("wav;flac;aif;aiff;mp3;ogg")) continue;
+            audioFiles.addIfNotAlreadyThere(sample.getFullPathName(), false);
+            auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(sample));
+            if (reader == nullptr || reader->sampleRate <= 0.0) continue;
+            const auto duration = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+            std::vector<SampleRegionSetting> rows;
+            juce::String error;
+            if (!importOto(oto, sample, duration, rows, error)) continue;
+            if (!save(sample, rows, error))
+            {
+                warnings.add(error);
+                continue;
+            }
+            ++sidecarsWritten;
+            regionsWritten += static_cast<int>(rows.size());
+        }
+    }
+    return !audioFiles.isEmpty();
 }
 }
