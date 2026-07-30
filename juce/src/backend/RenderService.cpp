@@ -250,6 +250,36 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
       }
     }
 
+    // Streaming stretch has an input-side analysis look-ahead in addition to
+    // its output latency.  Feed that look-ahead with zero tail and retain the
+    // generated frames, then crop both latency domains below.  Cropping only
+    // outputLatency left the transformed voice about 59 ms behind its F0 and
+    // waveform at 48 kHz.
+    const auto inputLatencyInTargetSamples = std::max(0, static_cast<int>(std::llround(
+        static_cast<double>(inputLatency) * targetSamples / std::max(1, sourceSamples))));
+    if (inputLatency > 0 && inputLatencyInTargetSamples > 0)
+    {
+        std::vector<const float*> inputPointers(static_cast<std::size_t>(channels));
+        std::vector<std::vector<float>> tailBuffers(static_cast<std::size_t>(channels));
+        std::vector<float*> outputPointers(static_cast<std::size_t>(channels));
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            inputPointers[static_cast<std::size_t>(channel)] =
+                paddedInput[static_cast<std::size_t>(channel)].data() + sourceSamples;
+            auto& tail = tailBuffers[static_cast<std::size_t>(channel)];
+            tail.resize(static_cast<std::size_t>(inputLatencyInTargetSamples), 0.0f);
+            outputPointers[static_cast<std::size_t>(channel)] = tail.data();
+        }
+        stretch.process(inputPointers.data(), inputLatency, outputPointers.data(),
+                        inputLatencyInTargetSamples);
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            auto& output = allOutput[static_cast<std::size_t>(channel)];
+            const auto& tail = tailBuffers[static_cast<std::size_t>(channel)];
+            output.insert(output.end(), tail.begin(), tail.end());
+        }
+    }
+
     if (outputLatency > 0)
     {
         std::vector<std::vector<float>> flushBuffers(static_cast<std::size_t>(channels));
@@ -280,7 +310,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             const auto& output = allOutput[static_cast<std::size_t>(channel)];
             for (int sample = 0; sample < targetSamples; ++sample)
             {
-                const auto sourceIndex = static_cast<std::size_t>(outputLatency + sample);
+                const auto sourceIndex = static_cast<std::size_t>(
+                    outputLatency + inputLatencyInTargetSamples + sample);
                 destination[sample] = sourceIndex < output.size() && std::isfinite(output[sourceIndex])
                     ? output[sourceIndex] : 0.0f;
             }
