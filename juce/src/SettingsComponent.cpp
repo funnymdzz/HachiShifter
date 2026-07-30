@@ -113,11 +113,14 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     importPage.addWide(preserveProjectEdits);
     importPage.addWide(locateMediaRecursively);
 
-    tabs.addTab({}, Palette::panel, &interfacePage, false);
-    tabs.addTab({}, Palette::panel, &audioPage, false);
-    tabs.addTab({}, Palette::panel, &algorithmPage, false);
-    tabs.addTab({}, Palette::panel, &operationPage, false);
-    tabs.addTab({}, Palette::panel, &importPage, false);
+    // JUCE does not create a tab button for an empty caption on every backend.
+    // Adding empty names and renaming them later therefore produced a valid
+    // dialog shell with zero pages.  Seed translated names immediately.
+    tabs.addTab(strings.text("settings.interface"), Palette::panel, &interfacePage, false);
+    tabs.addTab(strings.text("settings.audio"), Palette::panel, &audioPage, false);
+    tabs.addTab(strings.text("settings.algorithm"), Palette::panel, &algorithmPage, false);
+    tabs.addTab(strings.text("settings.operation"), Palette::panel, &operationPage, false);
+    tabs.addTab(strings.text("settings.import"), Palette::panel, &importPage, false);
     // Select a concrete page before the dialog is attached to a peer.  On
     // headless/device-delayed startup JUCE may otherwise keep index -1 until a
     // tab click, making the settings dialog appear completely empty.
