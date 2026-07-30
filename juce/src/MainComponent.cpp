@@ -922,10 +922,14 @@ void MainComponent::timerCallback()
                     + juce::String(static_cast<int>(std::round(nativeAnalysisProgress * 100.0)))
                     + "%", juce::dontSendNotification);
             else
+            {
+                const auto backend = audio.activeRenderBackends();
                 statusLabel.setText((audio.isPlaying() ? strings.text("transport.play")
                                                         : strings.text("status.ready"))
-                                        + "  " + juce::String(audio.position(), 2) + " s",
+                                        + "  " + juce::String(audio.position(), 2) + " s"
+                                        + (backend.isNotEmpty() ? "  ·  " + backend : juce::String()),
                                     juce::dontSendNotification);
+            }
             if (playWhenRenderReady)
             {
                 playWhenRenderReady = false;

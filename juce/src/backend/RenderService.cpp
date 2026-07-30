@@ -312,7 +312,13 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             / std::max(1, firstChunk.targetFrames);
         stretch.seek(seekPointers.data(), inputLatency, playbackRate);
     }
-    constexpr int blockSize = 128;
+    // These are separate render clocks, rather than four UI aliases for the
+    // same block scheduler.  Variable-mel follows edits more densely; the loop
+    // path favours stable repeated vowels; SoundTouch-style operation updates
+    // in longer grains.  Melodyne Hybrid stays at the proven vocal setting.
+    const auto blockSize = stretchAlgorithm == 1 ? 64
+        : stretchAlgorithm == 2 ? 256
+        : stretchAlgorithm == 3 ? 512 : 128;
     auto outputProduced = 0;
     const auto framePeriod = std::max(0.1, framePeriodMs);
     for (const auto& chunk : chunks)
@@ -541,11 +547,15 @@ public:
                 request.formantSemitones, request.noteGain, request.tension, request.breath,
                 request.timeMap,
                 request.pitchBackend, request.stretchAlgorithm);
-        const auto backend = request.pitchBackend == PitchRenderBackend::mld5
+        auto backend = request.pitchBackend == PitchRenderBackend::mld5
             ? juce::String("mld5-single-pass-stable-clock")
             : request.pitchBackend == PitchRenderBackend::nsfHifigan ? juce::String("nsf-hifigan")
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
+        backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop"
+            : request.stretchAlgorithm == 2 ? "+loop"
+            : request.stretchAlgorithm == 3 ? "+soundtouch"
+            : "+melodyne-hybrid";
         RenderedAudio result { std::move(rendered), reader->sampleRate, backend };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable

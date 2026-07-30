@@ -6,6 +6,23 @@
 
 namespace hachi
 {
+namespace
+{
+juce::String algorithmLabel(const TrackData& track)
+{
+    const auto pitch = track.pitchAlgorithm == PitchAlgorithm::nsfHifigan ? juce::String("nsf-hifigan")
+        : track.pitchAlgorithm == PitchAlgorithm::world ? juce::String("WORLD")
+        : track.pitchAlgorithm == PitchAlgorithm::vocalShifter ? juce::String("vslib")
+        : juce::String("mld5");
+    const auto stretch = track.stretchAlgorithm == StretchAlgorithm::variableMelHop
+        ? juce::String("variable-mel-hop")
+        : track.stretchAlgorithm == StretchAlgorithm::loop ? juce::String("loop")
+        : track.stretchAlgorithm == StretchAlgorithm::soundTouch ? juce::String("soundtouch")
+        : juce::String("melodyne-hybrid");
+    return pitch + " / " + stretch;
+}
+}
+
 TrackListComponent::TrackListComponent(ProjectModel& modelToUse, I18n& stringsToUse)
     : model(modelToUse), strings(stringsToUse), snapshot(model.snapshot())
 {
@@ -70,7 +87,9 @@ void TrackListComponent::paint(juce::Graphics& g)
         g.fillEllipse(9.0f, static_cast<float>(row.getY() + 12), 9.0f, 9.0f);
         g.setColour(track.muted ? Palette::textMuted : Palette::text);
         g.setFont(13.0f);
-        g.drawText(track.name, row.getX() + 24, row.getY() + 5, row.getWidth() - 60, 23,
+        const auto displayedName = track.name
+            + (track.compose ? "  [" + algorithmLabel(track) + "]" : juce::String());
+        g.drawText(displayedName, row.getX() + 24, row.getY() + 5, row.getWidth() - 60, 23,
                    juce::Justification::centredLeft, true);
 
         const auto buttonY = static_cast<float>(row.getY() + 34);

@@ -31,6 +31,7 @@ public:
     [[nodiscard]] double position() const;
     [[nodiscard]] float trackPeak(const juce::String& trackId) const;
     [[nodiscard]] std::optional<double> renderProgress() const;
+    [[nodiscard]] juce::String activeRenderBackends() const;
     bool exportWav(const juce::File& file, juce::String& error);
     [[nodiscard]] bool isPlaying() const { return playing.load(); }
     [[nodiscard]] juce::AudioDeviceManager& devices() { return deviceManager; }
@@ -42,6 +43,7 @@ private:
     {
         juce::AudioBuffer<float> buffer;
         double sampleRate = 0.0;
+        juce::String backend;
         std::atomic<bool> scheduled { false };
         std::atomic<bool> ready { false };
         std::atomic<bool> finished { false };

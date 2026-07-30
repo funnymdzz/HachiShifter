@@ -2,6 +2,7 @@
 #include "backend/McpServer.h"
 #include "backend/NativeAnalyzer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 
@@ -233,10 +234,20 @@ public:
             {
                 std::size_t clips = 0;
                 std::size_t notes = 0;
+                std::size_t flatNotes = 0;
+                auto minModulation = 2.0f;
+                auto maxModulation = 0.0f;
                 for (const auto& track : imported->project.tracks)
                 {
                     clips += track.clips.size();
-                    for (const auto& clip : track.clips) notes += clip.notes.size();
+                    for (const auto& clip : track.clips)
+                        for (const auto& note : clip.notes)
+                        {
+                            ++notes;
+                            minModulation = std::min(minModulation, note.modulation);
+                            maxModulation = std::max(maxModulation, note.modulation);
+                            if (note.modulation <= 1.0e-4f) ++flatNotes;
+                        }
                 }
                 std::cout << "project=" << imported->project.name << '\n'
                           << "bpm=" << imported->project.bpm << '\n'
@@ -244,6 +255,9 @@ public:
                           << "tracks=" << imported->project.tracks.size() << '\n'
                           << "clips=" << clips << '\n'
                           << "notes=" << notes << '\n'
+                          << "flat_notes=" << flatNotes << '\n'
+                          << "modulation_min=" << (notes > 0 ? minModulation : 0.0f) << '\n'
+                          << "modulation_max=" << (notes > 0 ? maxModulation : 0.0f) << '\n'
                           << "missing=" << imported->missingFiles.size() << std::endl;
             }
             juce::MessageManager::callAsync([this] { quit(); });

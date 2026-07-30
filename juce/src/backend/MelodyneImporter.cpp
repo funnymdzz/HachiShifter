@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <tuple>
@@ -289,6 +290,13 @@ public:
         if (!item) return std::nullopt;
         if (item->kind == RawValue::Kind::number) return std::isfinite(item->number) ? std::optional(item->number) : std::nullopt;
         if (item->kind == RawValue::Kind::integer) return static_cast<double>(item->integer);
+        return std::nullopt;
+    }
+    std::optional<double> numberAlias(std::uint32_t id,
+                                      std::initializer_list<const char*> fields) const
+    {
+        for (const auto* field : fields)
+            if (const auto result = number(id, field)) return result;
         return std::nullopt;
     }
     bool boolean(std::uint32_t id, const std::string& field) const
@@ -655,12 +663,18 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             note.startSeconds = 0.0;
             note.durationSeconds = duration;
             note.consonantSeconds = std::clamp(graph.number(element, "attackDuration").value_or(0.0), 0.0, duration);
-            const auto targetCenter = static_cast<float>(graph.number(element, "pitchCenter").value_or(6000.0));
+            const auto targetCenter = static_cast<float>(graph.numberAlias(
+                element, { "pitchCenter", "targetPitchCenter" }).value_or(6000.0));
             auto sourceCenter = static_cast<float>(graph.number(item, "pitchCenter").value_or(targetCenter));
             note.midiNote = std::clamp(targetCenter / 100.0f, 0.0f, 127.0f);
             note.sourceMidiCenter = std::clamp(sourceCenter / 100.0f, 0.0f, 127.0f);
-            note.drift = static_cast<float>(graph.number(element, "pitchDriftFactor").value_or(1.0));
-            note.modulation = static_cast<float>(graph.number(element, "pitchModulationFactor").value_or(1.0));
+            note.drift = std::clamp(static_cast<float>(graph.numberAlias(element,
+                { "pitchDriftFactor", "pitchDrift", "driftFactor" }).value_or(1.0)),
+                0.0f, 2.0f);
+            note.modulation = std::clamp(static_cast<float>(graph.numberAlias(element,
+                { "pitchModulationFactor", "pitchModulationAmplitudeFactor",
+                  "pitchModulation", "modulationFactor" }).value_or(1.0)),
+                0.0f, 2.0f);
             // These are element edits, not analysis defaults.  Dropping them
             // made a saved Melodyne voice colour disappear on import even
             // though pitch and timing were restored correctly.

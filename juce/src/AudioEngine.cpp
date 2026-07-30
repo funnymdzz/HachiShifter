@@ -401,6 +401,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         }
                         state->buffer = std::move(result.buffer);
                         state->sampleRate = result.sampleRate;
+                        state->backend = std::move(result.backend);
                         state->ready.store(true, std::memory_order_release);
                         state->finished.store(true, std::memory_order_release);
                     });
@@ -703,6 +704,19 @@ std::optional<double> AudioEngine::renderProgress() const
         }
     if (total == 0 || finished >= total) return std::nullopt;
     return static_cast<double>(finished) / static_cast<double>(total);
+}
+
+juce::String AudioEngine::activeRenderBackends() const
+{
+    const juce::ScopedReadLock guard(renderLock);
+    juce::StringArray names;
+    for (const auto& loaded : loadedClips)
+        if (loaded->rendered != nullptr
+            && loaded->rendered->ready.load(std::memory_order_acquire)
+            && loaded->rendered->backend.isNotEmpty())
+            names.addIfNotAlreadyThere(loaded->rendered->backend);
+    names.sort(true);
+    return names.joinIntoString(" + ");
 }
 
 bool AudioEngine::exportWav(const juce::File& file, juce::String& error)
