@@ -218,6 +218,26 @@ AudioEngine::~AudioEngine()
     deviceManager.removeAudioCallback(&sourcePlayer);
 }
 
+void AudioEngine::restoreDeviceState(juce::PropertiesFile& properties)
+{
+    const auto saved = properties.getValue("audio.deviceState");
+    if (saved.isEmpty()) return;
+    const auto xml = juce::parseXML(saved);
+    if (xml == nullptr) return;
+    // Keep the application usable if a previously selected interface has
+    // been unplugged; JUCE then selects the current system default.
+    deviceManager.initialise(0, 2, xml.get(), true);
+}
+
+void AudioEngine::saveDeviceState(juce::PropertiesFile& properties) const
+{
+    if (const auto state = deviceManager.createStateXml())
+    {
+        properties.setValue("audio.deviceState", state->toString());
+        properties.saveIfNeeded();
+    }
+}
+
 void AudioEngine::prepareToPlay(int, double sampleRate)
 {
     outputSampleRate.store(sampleRate > 0.0 ? sampleRate : 48'000.0);

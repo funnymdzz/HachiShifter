@@ -14,6 +14,18 @@
 
 namespace hachi
 {
+class EditorViewport final : public juce::Viewport
+{
+public:
+    std::function<bool(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
+    void mouseWheelMove(const juce::MouseEvent& event,
+                        const juce::MouseWheelDetails& wheel) override
+    {
+        if (onWheel && onWheel(event, wheel)) return;
+        juce::Viewport::mouseWheelMove(event, wheel);
+    }
+};
+
 class MainComponent final : public juce::Component,
                             public juce::FileDragAndDropTarget,
                             private juce::ChangeListener,
@@ -130,8 +142,8 @@ private:
     TimelineComponent timeline;
     PianoRollComponent pianoRoll;
     juce::Viewport trackViewport;
-    juce::Viewport timelineViewport;
-    juce::Viewport pianoViewport;
+    EditorViewport timelineViewport;
+    EditorViewport pianoViewport;
     juce::Component panelSplitter;
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<juce::PropertiesFile> preferences;

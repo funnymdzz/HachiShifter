@@ -34,6 +34,8 @@ public:
     bool exportWav(const juce::File& file, juce::String& error);
     [[nodiscard]] bool isPlaying() const { return playing.load(); }
     [[nodiscard]] juce::AudioDeviceManager& devices() { return deviceManager; }
+    void restoreDeviceState(juce::PropertiesFile& properties);
+    void saveDeviceState(juce::PropertiesFile& properties) const;
 
 private:
     struct RenderedClip

@@ -61,6 +61,7 @@ MainComponent::MainComponent()
     options.osxLibrarySubFolder = "Application Support";
     options.storageFormat = juce::PropertiesFile::storeAsXML;
     preferences = std::make_unique<juce::PropertiesFile>(options);
+    audio.restoreDeviceState(*preferences);
     applyPreferences();
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
@@ -202,6 +203,21 @@ MainComponent::MainComponent()
     pianoViewport.setViewedComponent(&pianoRoll, false);
     pianoViewport.setScrollBarsShown(true, true);
     pianoViewport.setScrollBarThickness(10);
+    const auto editorWheel = [this](const juce::MouseEvent&,
+                                    const juce::MouseWheelDetails& wheel)
+    {
+        if (preferences == nullptr
+            || preferences->getIntValue("operation.wheelAction", 1) != 1)
+            return false;
+        auto delta = wheel.deltaY;
+        if (wheel.isReversed) delta = -delta;
+        const auto factor = std::exp(static_cast<double>(delta) * 1.35);
+        zoomSlider.setValue(juce::jlimit(40.0, 600.0,
+            zoomSlider.getValue() * factor));
+        return true;
+    };
+    timelineViewport.onWheel = editorWheel;
+    pianoViewport.onWheel = editorWheel;
 
     pitchAlgorithm.addItem("mld5", 1);
     pitchAlgorithm.addItem("nsf-hifigan", 2);
@@ -355,6 +371,7 @@ MainComponent::MainComponent()
 MainComponent::~MainComponent()
 {
     stopTimer();
+    if (preferences != nullptr) audio.saveDeviceState(*preferences);
     panelSplitter.removeMouseListener(this);
     audio.removeChangeListener(this);
     project.removeChangeListener(this);
@@ -618,7 +635,9 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         pianoRoll.selectAllNotes();
         return true;
     }
-    if (key == juce::KeyPress::spaceKey)
+    if (key == juce::KeyPress::spaceKey
+        && (preferences == nullptr
+            || preferences->getBoolValue("operation.spacePlayback", true)))
     {
         togglePlayback();
         return true;
@@ -1230,6 +1249,8 @@ void MainComponent::showSettings()
         [safe]
         {
             if (safe == nullptr) return;
+            if (safe->preferences != nullptr)
+                safe->audio.saveDeviceState(*safe->preferences);
             safe->applyPreferences();
             safe->refreshTexts();
             safe->menuItemsChanged();
