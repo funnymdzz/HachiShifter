@@ -73,7 +73,7 @@ juce::AudioBuffer<float> Mld5Renderer::render(const Mld5RenderRequest& request) 
             renderedPower += static_cast<double>(output) * output;
         }
     if (count > 0 && sourcePower > 1.0e-12 && renderedPower > 1.0e-12)
-        result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8,
+        result.applyGain(static_cast<float>(juce::jlimit(0.55, 4.0,
             std::sqrt(sourcePower / renderedPower))));
     return result;
 }
@@ -158,7 +158,11 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             const auto frequency = static_cast<float>(bin) * static_cast<float>(sampleRate)
                 / static_cast<float>(fftSize);
             const auto highBand = juce::jlimit(0.0f, 1.0f, (frequency - 3'200.0f) / 4'800.0f);
-            const auto residualFloorRatio = 0.20f + 0.42f * highBand * highBand;
+            // A voiced frame keeps only a small low-band residual.  Retaining
+            // 20% there leaves a quiet copy of the source F0 under the shifted
+            // one, perceived as chorus/echo.  The residual rises in the upper
+            // vocal band so fricatives and breath remain natural.
+            const auto residualFloorRatio = 0.05f + 0.57f * highBand * highBand;
             const auto envelope = std::max(1.0e-9f, std::exp(logEnvelope[static_cast<std::size_t>(bin)]));
             const auto totalPower = magnitude[static_cast<std::size_t>(bin)] * magnitude[static_cast<std::size_t>(bin)];
             const auto residualPower = std::min(totalPower,
