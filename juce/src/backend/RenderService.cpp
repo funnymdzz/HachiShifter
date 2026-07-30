@@ -236,7 +236,22 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     // deliberately applied only once after this common render below.
     const auto stableVocalClock = pitchBackend == PitchRenderBackend::mld5
         || pitchBackend == PitchRenderBackend::nsfHifigan;
-    if (stableVocalClock || stretchAlgorithm != 0)
+    // The stretch selector changes the actual analysis clock, not only the
+    // process-call chunk size.  This makes project/MPD algorithm overrides
+    // audible and keeps each model-free route deterministic.
+    if (stretchAlgorithm == 1) // variable Mel-hop: dense target-time updates
+        stretch.configure(channels,
+            std::max(512, static_cast<int>(std::llround(sampleRate * 0.046))),
+            std::max(64, static_cast<int>(std::llround(sampleRate * 0.005))), false);
+    else if (stretchAlgorithm == 2) // loop: long periodic window for stable vowels
+        stretch.configure(channels,
+            std::max(1'024, static_cast<int>(std::llround(sampleRate * 0.140))),
+            std::max(128, static_cast<int>(std::llround(sampleRate * 0.020))), false);
+    else if (stretchAlgorithm == 3) // SoundTouch-style shorter sequence/overlap clock
+        stretch.configure(channels,
+            std::max(512, static_cast<int>(std::llround(sampleRate * 0.055))),
+            std::max(96, static_cast<int>(std::llround(sampleRate * 0.012))), false);
+    else if (stableVocalClock)
         stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
     else
         stretch.presetDefault(channels, static_cast<float>(sampleRate), false);

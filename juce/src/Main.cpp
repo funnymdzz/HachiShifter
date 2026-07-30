@@ -121,6 +121,8 @@ public:
             }
             const auto tension = arguments.size() >= 10 ? arguments[9].getFloatValue() : 0.0f;
             request.tension.assign(static_cast<std::size_t>(frames), tension);
+            if (arguments.size() >= 11)
+                request.stretchAlgorithm = juce::jlimit(0, 3, arguments[10].getIntValue());
             cliRenderService = std::make_unique<backend::RenderService>();
             cliRenderService->renderMld5File(std::move(request), [this, outputFile](backend::RenderedAudio result)
             {
