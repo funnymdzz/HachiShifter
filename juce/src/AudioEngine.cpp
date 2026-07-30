@@ -38,25 +38,46 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     request.targetDurationSeconds = clip.durationSeconds;
     request.pitchAlgorithm = static_cast<int>(track.pitchAlgorithm);
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
-    request.timeMap.push_back({ 0.0, 0.0 });
     const auto sourceDuration = request.sourceDurationSeconds;
+    std::vector<backend::TimeMapPoint> timeAnchors { { 0.0, 0.0 } };
     for (const auto& note : clip.notes)
     {
-        if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
         const auto noteTargetStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
-        const auto targetAttack = juce::jlimit(noteTargetStart, clip.durationSeconds,
-            noteTargetStart + note.consonantSeconds);
         const auto sourceStart = clip.durationSeconds > 1.0e-9
             ? noteTargetStart / clip.durationSeconds * sourceDuration : 0.0;
+        timeAnchors.push_back({ noteTargetStart, sourceStart });
+        if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
+        const auto targetAttack = juce::jlimit(noteTargetStart, clip.durationSeconds,
+            noteTargetStart + note.consonantSeconds);
         const auto sourceAttack = juce::jlimit(sourceStart, sourceDuration,
             sourceStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
-        if (targetAttack > request.timeMap.back().targetSeconds + 1.0e-7
-            && sourceAttack > request.timeMap.back().sourceSeconds + 1.0e-7
-            && targetAttack < clip.durationSeconds - 1.0e-7
-            && sourceAttack < sourceDuration - 1.0e-7)
-            request.timeMap.push_back({ targetAttack, sourceAttack });
+        timeAnchors.push_back({ targetAttack, sourceAttack });
     }
-    request.timeMap.push_back({ clip.durationSeconds, sourceDuration });
+    timeAnchors.push_back({ clip.durationSeconds, sourceDuration });
+    std::stable_sort(timeAnchors.begin(), timeAnchors.end(), [](const auto& left, const auto& right)
+    {
+        if (std::abs(left.targetSeconds - right.targetSeconds) > 1.0e-9)
+            return left.targetSeconds < right.targetSeconds;
+        return left.sourceSeconds < right.sourceSeconds;
+    });
+    for (const auto& anchor : timeAnchors)
+    {
+        if (request.timeMap.empty())
+        {
+            request.timeMap.push_back(anchor);
+            continue;
+        }
+        auto& previous = request.timeMap.back();
+        if (std::abs(anchor.targetSeconds - previous.targetSeconds) <= 1.0e-7)
+        {
+            previous.sourceSeconds = std::max(previous.sourceSeconds, anchor.sourceSeconds);
+            continue;
+        }
+        if (anchor.sourceSeconds > previous.sourceSeconds + 1.0e-7)
+            request.timeMap.push_back(anchor);
+    }
+    if (request.timeMap.empty() || request.timeMap.back().targetSeconds < clip.durationSeconds - 1.0e-7)
+        request.timeMap.push_back({ clip.durationSeconds, sourceDuration });
     constexpr auto framePeriodSeconds = 0.005;
     request.framePeriodMs = framePeriodSeconds * 1000.0;
     const auto frameCount = std::max(2, static_cast<int>(std::ceil(clip.durationSeconds
@@ -521,26 +542,33 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
 
     // A Melodyne project may contain several overlapping elements whose
     // individual gains are valid but whose sum exceeds full scale.  Apply one
-    // linked, block-lookahead gain (fast attack, slow release) after mixing so
-    // those joins do not turn into digital crack/burst artefacts.
-    auto mixedPeak = 0.0f;
-    for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
-        mixedPeak = std::max(mixedPeak, info.buffer->getMagnitude(
-            channel, info.startSample, info.numSamples));
-    const auto targetLimiterGain = mixedPeak > 0.98f ? 0.98f / mixedPeak : 1.0f;
+    // linked sample envelope (fast attack, slow release) after mixing so block
+    // boundaries cannot become gain steps or digital crack/burst artefacts.
     auto limiterGain = masterLimiterGain.load(std::memory_order_relaxed);
-    if (targetLimiterGain < limiterGain)
-        limiterGain = targetLimiterGain;
-    else
+    const auto attackMemory = std::exp(-1.0f / static_cast<float>(
+        std::max(1.0, sampleRate) * 0.0005));
+    const auto releaseMemory = std::exp(-1.0f / static_cast<float>(
+        std::max(1.0, sampleRate) * 0.18));
+    for (int index = 0; index < info.numSamples; ++index)
     {
-        const auto release = 1.0f - std::exp(-static_cast<float>(info.numSamples)
-            / static_cast<float>(std::max(1.0, sampleRate) * 0.18));
-        limiterGain += (1.0f - limiterGain) * release;
+        auto linkedPeak = 0.0f;
+        for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
+            linkedPeak = std::max(linkedPeak, std::abs(info.buffer->getSample(
+                channel, info.startSample + index)));
+        const auto target = linkedPeak > 0.98f ? 0.98f / linkedPeak : 1.0f;
+        const auto memory = target < limiterGain ? attackMemory : releaseMemory;
+        limiterGain = target + (limiterGain - target) * memory;
+        for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
+        {
+            auto value = info.buffer->getSample(channel, info.startSample + index) * limiterGain;
+            const auto magnitude = std::abs(value);
+            if (magnitude > 0.98f)
+                value = std::copysign(0.98f + 0.02f
+                    * std::tanh((magnitude - 0.98f) / 0.02f), value);
+            info.buffer->setSample(channel, info.startSample + index, value);
+        }
     }
     masterLimiterGain.store(limiterGain, std::memory_order_relaxed);
-    if (limiterGain < 0.99999f)
-        for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
-            info.buffer->applyGain(channel, info.startSample, info.numSamples, limiterGain);
 
     const auto nextSample = timelineSample.fetch_add(info.numSamples) + info.numSamples;
     if (static_cast<double>(nextSample) / sampleRate >= projectDurationSeconds.load())

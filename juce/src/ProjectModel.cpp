@@ -426,19 +426,61 @@ void ProjectModel::transposeNote(const juce::String& noteId, float semitones)
 
 void ProjectModel::resizeNote(const juce::String& noteId, double newStart, double newDuration)
 {
+    auto changed = false;
     {
         const juce::ScopedLock guard(lock);
-        pushUndoLocked();
         for (auto& track : project.tracks)
+        {
             for (auto& clip : track.clips)
+            {
                 for (auto& note : clip.notes)
+                {
                     if (note.id == noteId)
                     {
+                        pushUndoLocked();
+                        const auto oldStart = note.startSeconds;
+                        const auto oldDuration = std::max(0.01, note.durationSeconds);
+                        const auto oldEnd = oldStart + oldDuration;
+                        auto otherEnd = 0.0;
+                        for (const auto& candidate : clip.notes)
+                            if (candidate.id != noteId)
+                                otherEnd = std::max(otherEnd,
+                                    candidate.startSeconds + candidate.durationSeconds);
+                        const auto wasTail = oldEnd >= otherEnd - 1.0e-6
+                            && oldEnd >= clip.durationSeconds - 0.002;
+                        const auto targetDuration = std::max(0.01, newDuration);
+                        const auto oldAttack = juce::jlimit(0.0, oldDuration,
+                            note.consonantSeconds);
+                        const auto newAttack = std::min(oldAttack, targetDuration);
+                        const auto remapTime = [&](double time)
+                        {
+                            const auto clamped = juce::jlimit(0.0, oldDuration, time);
+                            if (clamped <= oldAttack || oldDuration <= oldAttack + 1.0e-9)
+                                return oldAttack > 1.0e-9
+                                    ? clamped * newAttack / oldAttack : 0.0;
+                            return newAttack + (clamped - oldAttack)
+                                * (targetDuration - newAttack) / (oldDuration - oldAttack);
+                        };
+                        for (auto& point : note.contour)
+                            point.timeSeconds = remapTime(point.timeSeconds);
+                        for (auto& marker : note.sibilantMarkers)
+                            marker = remapTime(marker);
                         note.startSeconds = std::max(0.0, newStart);
-                        note.durationSeconds = std::max(0.01, newDuration);
+                        note.durationSeconds = targetDuration;
+                        note.consonantSeconds = newAttack;
+                        if (wasTail)
+                            clip.durationSeconds = std::max(0.01,
+                                std::max(otherEnd, note.startSeconds + note.durationSeconds));
+                        changed = true;
+                        break;
                     }
+                }
+                if (changed) break;
+            }
+            if (changed) break;
+        }
     }
-    sendChangeMessage();
+    if (changed) sendChangeMessage();
 }
 
 juce::String ProjectModel::addNote(const juce::String& preferredClipId,
