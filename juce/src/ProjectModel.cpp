@@ -1,6 +1,7 @@
 #include "ProjectModel.h"
 #include "SampleSettings.h"
 #include <algorithm>
+#include <cmath>
 #include <optional>
 
 namespace hachi
@@ -744,6 +745,27 @@ void ProjectModel::setNoteAttack(const juce::String& noteId, double consonantSec
                         note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds,
                                                             consonantSeconds);
                         note.attackSpeed = juce::jlimit(0.05f, 20.0f, attackSpeed);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setNoteAttackSpeed(const juce::String& noteId, float attackSpeed)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        const auto next = juce::jlimit(0.05f, 20.0f, attackSpeed);
+                        if (std::abs(note.attackSpeed - next) <= 1.0e-6f) return;
+                        pushUndoLocked();
+                        note.attackSpeed = next;
                         changed = true;
                         break;
                     }

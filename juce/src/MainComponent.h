@@ -114,6 +114,7 @@ private:
     juce::TextButton connectButton;
     juce::TextButton pitchParamButton;
     juce::TextButton driftParamButton;
+    juce::TextButton attackParamButton;
     juce::TextButton breathParamButton;
     juce::TextButton tensionParamButton;
     juce::TextButton formantParamButton;
@@ -169,7 +170,7 @@ private:
     juce::String selectedClipId;
     juce::String selectedTrackId;
     juce::String selectedNoteId;
-    enum class ParameterMode { pitchSmooth, pitchDrift, breath, tension, formant, volume };
+    enum class ParameterMode { pitchSmooth, pitchDrift, attackSpeed, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;
     bool smoothSliderDragging = false;

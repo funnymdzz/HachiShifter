@@ -137,6 +137,7 @@ public:
     void setNoteFormant(const juce::String& noteId, float semitones);
     void setNoteGain(const juce::String& noteId, float gain);
     void setNoteAttack(const juce::String& noteId, double consonantSeconds, float attackSpeed);
+    void setNoteAttackSpeed(const juce::String& noteId, float attackSpeed);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
                                        double absoluteStart, double duration, float midiNote);
     void removeNote(const juce::String& noteId);

@@ -71,7 +71,7 @@ MainComponent::MainComponent()
     for (auto* button : { &openButton, &saveButton, &audioButton, &melodyneButton,
                           &playButton, &stopButton, &noteEditButton, &wrenchButton,
                           &drawButton, &lineButton, &connectButton, &pitchParamButton,
-                          &driftParamButton,
+                          &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton, &formantParamButton,
                           &volumeParamButton, &midiButton })
         addAndMakeVisible(*button);
@@ -356,12 +356,14 @@ MainComponent::MainComponent()
         pianoRoll.setTool(PianoRollComponent::Tool::connect);
         setToolButton(connectButton);
     };
-    for (auto* button : { &pitchParamButton, &driftParamButton, &breathParamButton, &tensionParamButton,
+    for (auto* button : { &pitchParamButton, &driftParamButton, &attackParamButton,
+                          &breathParamButton, &tensionParamButton,
                           &formantParamButton, &volumeParamButton })
         button->onClick = [this, button]
         {
             setToolButton(*button);
             parameterMode = button == &driftParamButton ? ParameterMode::pitchDrift
+                : button == &attackParamButton ? ParameterMode::attackSpeed
                 : button == &breathParamButton ? ParameterMode::breath
                 : button == &tensionParamButton ? ParameterMode::tension
                 : button == &formantParamButton ? ParameterMode::formant
@@ -442,6 +444,7 @@ void MainComponent::refreshTexts()
     smoothCaption.setText(strings.text("editor.smooth"), juce::dontSendNotification);
     pitchParamButton.setButtonText(strings.text("param.pitch"));
     driftParamButton.setButtonText(strings.text("param.drift"));
+    attackParamButton.setButtonText(strings.text("param.attack"));
     breathParamButton.setButtonText(strings.text("param.breath"));
     tensionParamButton.setButtonText(strings.text("param.tension"));
     formantParamButton.setButtonText(strings.text("param.formant"));
@@ -529,6 +532,13 @@ void MainComponent::refreshSelectedNoteParameter()
         smoothSlider.setTextValueSuffix("%");
         value = (1.0 - static_cast<double>(selected.drift)) * 100.0;
     }
+    else if (parameterMode == ParameterMode::attackSpeed)
+    {
+        smoothCaption.setText(strings.text("editor.attackSpeed"), juce::dontSendNotification);
+        smoothSlider.setRange(5.0, 2000.0, 1.0);
+        smoothSlider.setTextValueSuffix("%");
+        value = static_cast<double>(selected.attackSpeed) * 100.0;
+    }
     else if (parameterMode == ParameterMode::breath)
     {
         smoothCaption.setText(strings.text("param.breath"), juce::dontSendNotification);
@@ -571,6 +581,9 @@ void MainComponent::applySelectedNoteParameter()
     else if (parameterMode == ParameterMode::pitchDrift)
         project.setNoteDrift(selectedNoteId,
             1.0f - static_cast<float>(value / 100.0));
+    else if (parameterMode == ParameterMode::attackSpeed)
+        project.setNoteAttackSpeed(selectedNoteId,
+            static_cast<float>(value / 100.0));
     else if (parameterMode == ParameterMode::breath)
         project.setNoteBreath(selectedNoteId, static_cast<float>(value / 100.0));
     else if (parameterMode == ParameterMode::tension)
@@ -603,12 +616,14 @@ void MainComponent::setToolButton(juce::Button& selected)
     };
     for (auto* button : editTools)
         button->setToggleState(button == &selected, juce::dontSendNotification);
-    const std::array<juce::Button*, 6> parameterTools {
-        &pitchParamButton, &driftParamButton, &breathParamButton, &tensionParamButton,
+    const std::array<juce::Button*, 7> parameterTools {
+        &pitchParamButton, &driftParamButton, &attackParamButton,
+        &breathParamButton, &tensionParamButton,
         &formantParamButton, &volumeParamButton
     };
     for (auto* button : parameterTools)
         if (&selected == button || &selected == &pitchParamButton || &selected == &driftParamButton
+            || &selected == &attackParamButton
             || &selected == &breathParamButton
             || &selected == &tensionParamButton || &selected == &formantParamButton
             || &selected == &volumeParamButton)
@@ -808,6 +823,7 @@ void MainComponent::resized()
     takeParameter(smoothSlider, 112);
     takeParameter(pitchParamButton, 58);
     takeParameter(driftParamButton, 58);
+    takeParameter(attackParamButton, 58);
     takeParameter(breathParamButton, 58);
     takeParameter(tensionParamButton, 58);
     takeParameter(formantParamButton, 58);

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <limits>
 
 namespace hachi
 {
@@ -239,6 +240,8 @@ public:
                 std::size_t flatNotes = 0;
                 auto minModulation = 2.0f;
                 auto maxModulation = 0.0f;
+                auto minAttackSpeed = std::numeric_limits<float>::max();
+                auto maxAttackSpeed = 0.0f;
                 for (const auto& track : imported->project.tracks)
                 {
                     clips += track.clips.size();
@@ -248,6 +251,8 @@ public:
                             ++notes;
                             minModulation = std::min(minModulation, note.modulation);
                             maxModulation = std::max(maxModulation, note.modulation);
+                            minAttackSpeed = std::min(minAttackSpeed, note.attackSpeed);
+                            maxAttackSpeed = std::max(maxAttackSpeed, note.attackSpeed);
                             if (note.modulation <= 1.0e-4f) ++flatNotes;
                         }
                 }
@@ -260,6 +265,8 @@ public:
                           << "flat_notes=" << flatNotes << '\n'
                           << "modulation_min=" << (notes > 0 ? minModulation : 0.0f) << '\n'
                           << "modulation_max=" << (notes > 0 ? maxModulation : 0.0f) << '\n'
+                          << "attack_speed_min=" << (notes > 0 ? minAttackSpeed : 0.0f) << '\n'
+                          << "attack_speed_max=" << (notes > 0 ? maxAttackSpeed : 0.0f) << '\n'
                           << "missing=" << imported->missingFiles.size() << std::endl;
             }
             juce::MessageManager::callAsync([this] { quit(); });
