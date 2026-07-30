@@ -995,7 +995,7 @@ void MainComponent::focusClip(const juce::String& clipId)
 
 void MainComponent::loadSampleSettings()
 {
-    sampleSettingsFile = {};
+    sampleSettingsFile = juce::File{};
     const auto data = project.snapshot();
     for (const auto& track : data.tracks)
         for (const auto& clip : track.clips)
