@@ -137,6 +137,14 @@ MainComponent::MainComponent()
     sampleSaveButton.onClick = [this] { saveSampleSettings(); };
     otoImportButton.onClick = [this] { importOto(); };
     otoExportButton.onClick = [this] { exportOto(); };
+    pianoRoll.onSampleRegionEdited = [this](int index, const SampleRegionSetting& row, bool)
+    {
+        if (index < 0 || index >= static_cast<int>(sampleSettingsRows.size())) return;
+        activeSampleSetting = index;
+        sampleSettingsRows[static_cast<std::size_t>(index)] = row;
+        sampleRegionSelector.setSelectedItemIndex(index, juce::dontSendNotification);
+        refreshSampleEditors();
+    };
 
     openButton.setComponentID("icon.open");
     saveButton.setComponentID("icon.save");
@@ -1012,6 +1020,7 @@ void MainComponent::loadSampleSettings()
                                      static_cast<int>(index + 1));
     if (!sampleSettingsRows.empty())
         sampleRegionSelector.setSelectedId(1, juce::dontSendNotification);
+    pianoRoll.setSampleRegions(sampleSettingsRows, activeSampleSetting);
     refreshSampleEditors();
 }
 
@@ -1033,6 +1042,7 @@ void MainComponent::refreshSampleEditors()
     sampleEndEditor.setText(juce::String(row.regionEndSeconds, 4), false);
     sampleAlignmentEditor.setText(juce::String(row.alignmentSeconds, 4), false);
     sampleFixedEditor.setText(juce::String(row.fixedDurationSeconds, 4), false);
+    pianoRoll.setSampleRegions(sampleSettingsRows, activeSampleSetting);
 }
 
 void MainComponent::commitSampleEditors()
@@ -1050,6 +1060,7 @@ void MainComponent::commitSampleEditors()
                                             sampleFixedEditor.getText().getDoubleValue());
     sampleRegionSelector.changeItemText(activeSampleSetting + 1,
         juce::String(activeSampleSetting + 1) + " · " + row.name);
+    pianoRoll.setSampleRegions(sampleSettingsRows, activeSampleSetting);
 }
 
 void MainComponent::saveSampleSettings()
@@ -1091,6 +1102,7 @@ void MainComponent::importOto()
                 sampleRegionSelector.addItem(juce::String(index + 1) + " · "
                     + sampleSettingsRows[index].name, static_cast<int>(index + 1));
             sampleRegionSelector.setSelectedId(1, juce::dontSendNotification);
+            pianoRoll.setSampleRegions(sampleSettingsRows, activeSampleSetting);
             refreshSampleEditors();
         });
 }

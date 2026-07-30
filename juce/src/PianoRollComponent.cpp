@@ -48,6 +48,15 @@ void PianoRollComponent::setFocusedClip(const juce::String& clipId)
     repaint();
 }
 
+void PianoRollComponent::setSampleRegions(const std::vector<SampleRegionSetting>& regions,
+                                          int activeRegion)
+{
+    sampleRegions = regions;
+    activeSampleRegion = juce::jlimit(-1, static_cast<int>(sampleRegions.size()) - 1,
+                                      activeRegion);
+    repaint();
+}
+
 void PianoRollComponent::setPlayheadSeconds(double seconds)
 {
     playheadSeconds = seconds;
@@ -233,6 +242,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
 {
     g.fillAll(Palette::graphBackground);
     noteHits.clear();
+    regionHandleHits.clear();
 
     for (int midi = lowestMidi; midi <= highestMidi; ++midi)
     {
@@ -288,6 +298,66 @@ void PianoRollComponent::paint(juce::Graphics& g)
     }
 
     drawClipWaveforms(g);
+
+    // In wrench mode all timing edits are made against the untouched source.
+    // The four handles mirror the main-branch HJM editor and intentionally sit
+    // above the note hit targets so a boundary can always be grabbed.
+    if (sourceEditMode)
+    {
+        for (int index = 0; index < static_cast<int>(sampleRegions.size()); ++index)
+        {
+            const auto& region = sampleRegions[static_cast<std::size_t>(index)];
+            const auto selected = index == activeSampleRegion;
+            const auto startX = timeToX(region.regionStartSeconds);
+            const auto endX = timeToX(region.regionEndSeconds);
+            const auto fixedX = timeToX(region.regionStartSeconds + region.fixedDurationSeconds);
+            const auto alignmentX = timeToX(region.alignmentSeconds);
+            const auto band = juce::Rectangle<float>(startX, 4.0f,
+                std::max(1.0f, endX - startX), static_cast<float>(getHeight() - 8));
+            g.setColour(Palette::accentLight.withAlpha(selected ? 0.105f : 0.035f));
+            g.fillRect(band);
+
+            const auto drawHandle = [&](float x, RegionHandle handle, juce::Colour colour,
+                                        float thickness, bool dashed)
+            {
+                juce::Path path;
+                path.startNewSubPath(x, 4.0f);
+                path.lineTo(x, static_cast<float>(getHeight() - 4));
+                g.setColour(colour.withAlpha(selected ? 0.94f : 0.48f));
+                if (dashed)
+                {
+                    const float dashes[] { 5.0f, 4.0f };
+                    juce::Path dashedPath;
+                    juce::PathStrokeType(thickness).createDashedStroke(dashedPath, path, dashes, 2);
+                    g.fillPath(dashedPath);
+                }
+                else g.strokePath(path, juce::PathStrokeType(thickness));
+                regionHandleHits.push_back({ index, handle, x });
+            };
+            drawHandle(startX, RegionHandle::start, Palette::accentLight, selected ? 2.2f : 1.0f, false);
+            if (region.fixedDurationSeconds > 0.0)
+                drawHandle(fixedX, RegionHandle::fixedEnd, Palette::noteLight,
+                           selected ? 2.0f : 1.0f, true);
+            drawHandle(alignmentX, RegionHandle::alignment, Palette::noteFill,
+                       selected ? 2.4f : 1.2f, false);
+            drawHandle(endX, RegionHandle::end, Palette::accentLight,
+                       selected ? 2.2f : 1.0f, false);
+
+            if (selected)
+            {
+                const auto label = region.name.isEmpty() ? "region " + juce::String(index + 1)
+                                                         : region.name;
+                const auto labelBounds = juce::Rectangle<float>(startX + 3.0f, 6.0f,
+                    std::max(40.0f, endX - startX - 6.0f), 18.0f);
+                g.setColour(Palette::panelRaised.withAlpha(0.88f));
+                g.fillRoundedRectangle(labelBounds, 3.0f);
+                g.setColour(Palette::text);
+                g.setFont(11.0f);
+                g.drawFittedText(label, labelBounds.toNearestInt().reduced(4, 0),
+                                 juce::Justification::centredLeft, 1);
+            }
+        }
+    }
 
     static const std::array<juce::Colour, 5> contourColours {
         Palette::accentLight, Palette::accent, Palette::noteFill,
@@ -418,6 +488,33 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
     if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
         if (event.x < viewport->getViewPositionX() + 58)
             return;
+    if (sourceEditMode)
+    {
+        const RegionHandleHit* closest = nullptr;
+        auto closestDistance = 7.0f;
+        // Reverse order gives the active/later region priority at shared edges.
+        for (auto it = regionHandleHits.rbegin(); it != regionHandleHits.rend(); ++it)
+        {
+            const auto distance = std::abs(event.position.x - it->x);
+            if (distance <= closestDistance)
+            {
+                closest = &*it;
+                closestDistance = distance;
+            }
+        }
+        if (closest != nullptr)
+        {
+            draggedSampleRegion = closest->region;
+            draggedRegionHandle = closest->handle;
+            activeSampleRegion = closest->region;
+            setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            if (onSampleRegionEdited)
+                onSampleRegionEdited(activeSampleRegion,
+                    sampleRegions[static_cast<std::size_t>(activeSampleRegion)], false);
+            repaint();
+            return;
+        }
+    }
     for (auto it = noteHits.rbegin(); it != noteHits.rend(); ++it)
         if (it->bounds.contains(event.position))
         {
@@ -517,6 +614,48 @@ void PianoRollComponent::mouseDoubleClick(const juce::MouseEvent& event)
 
 void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
 {
+    if (draggedSampleRegion >= 0
+        && draggedSampleRegion < static_cast<int>(sampleRegions.size()))
+    {
+        auto& region = sampleRegions[static_cast<std::size_t>(draggedSampleRegion)];
+        const auto seconds = std::max(0.0,
+            static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond);
+        constexpr double minimum = 0.001;
+        switch (draggedRegionHandle)
+        {
+            case RegionHandle::start:
+            {
+                const auto next = std::min(region.regionEndSeconds - minimum, seconds);
+                const auto fixedEnd = region.regionStartSeconds + region.fixedDurationSeconds;
+                region.regionStartSeconds = next;
+                region.fixedDurationSeconds = juce::jlimit(0.0,
+                    region.regionEndSeconds - region.regionStartSeconds,
+                    fixedEnd - region.regionStartSeconds);
+                region.alignmentSeconds = juce::jlimit(region.regionStartSeconds,
+                    region.regionEndSeconds, region.alignmentSeconds);
+                break;
+            }
+            case RegionHandle::fixedEnd:
+                region.fixedDurationSeconds = juce::jlimit(0.0,
+                    region.regionEndSeconds - region.regionStartSeconds,
+                    seconds - region.regionStartSeconds);
+                break;
+            case RegionHandle::alignment:
+                region.alignmentSeconds = juce::jlimit(region.regionStartSeconds,
+                    region.regionEndSeconds, seconds);
+                break;
+            case RegionHandle::end:
+                region.regionEndSeconds = std::max(region.regionStartSeconds + minimum, seconds);
+                region.fixedDurationSeconds = std::min(region.fixedDurationSeconds,
+                    region.regionEndSeconds - region.regionStartSeconds);
+                region.alignmentSeconds = std::min(region.alignmentSeconds, region.regionEndSeconds);
+                break;
+            case RegionHandle::none: break;
+        }
+        if (onSampleRegionEdited) onSampleRegionEdited(draggedSampleRegion, region, false);
+        repaint();
+        return;
+    }
     if (draggedNote.isEmpty()) return;
     if (tool == Tool::connect) return;
     if (dragMode == DragMode::pitch)
@@ -536,6 +675,17 @@ void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
 
 void PianoRollComponent::mouseUp(const juce::MouseEvent&)
 {
+    if (draggedSampleRegion >= 0
+        && draggedSampleRegion < static_cast<int>(sampleRegions.size()))
+    {
+        if (onSampleRegionEdited)
+            onSampleRegionEdited(draggedSampleRegion,
+                sampleRegions[static_cast<std::size_t>(draggedSampleRegion)], true);
+        draggedSampleRegion = -1;
+        draggedRegionHandle = RegionHandle::none;
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+        return;
+    }
     if (draggedNote.isEmpty()) return;
     if (dragMode == DragMode::pitch)
     {

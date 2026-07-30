@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ProjectModel.h"
+#include "SampleSettings.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <functional>
 #include <memory>
@@ -21,6 +22,7 @@ public:
     void setPixelsPerSecond(float value);
     void setSourceEditMode(bool enabled);
     void setFocusedClip(const juce::String& clipId);
+    void setSampleRegions(const std::vector<SampleRegionSetting>& regions, int activeRegion);
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
     void selectAllNotes();
@@ -33,6 +35,7 @@ public:
     bool keyPressed(const juce::KeyPress& key) override;
     std::function<void(double)> onSeek;
     std::function<void(const juce::String&)> onNoteSelected;
+    std::function<void(int, const SampleRegionSetting&, bool)> onSampleRegionEdited;
 
 private:
     struct NoteHit
@@ -42,6 +45,14 @@ private:
         float midi = 60.0f;
         double startSeconds = 0.0;
         double durationSeconds = 0.0;
+    };
+
+    enum class RegionHandle { none, start, fixedEnd, alignment, end };
+    struct RegionHandleHit
+    {
+        int region = -1;
+        RegionHandle handle = RegionHandle::none;
+        float x = 0.0f;
     };
 
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -59,6 +70,11 @@ private:
     juce::AudioThumbnailCache thumbnailCache { 96 };
     std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> thumbnails;
     std::vector<NoteHit> noteHits;
+    std::vector<SampleRegionSetting> sampleRegions;
+    std::vector<RegionHandleHit> regionHandleHits;
+    int activeSampleRegion = -1;
+    int draggedSampleRegion = -1;
+    RegionHandle draggedRegionHandle = RegionHandle::none;
     float pixelsPerSecond = 140.0f;
     float rowHeight = 18.0f;
     int highestMidi = 96;

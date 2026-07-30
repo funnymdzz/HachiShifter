@@ -13,6 +13,9 @@ juce/
     ├── backend/          音高、拉伸与离线渲染服务
     ├── AudioEngine.*     实时多轨播放与采样率转换
     ├── ProjectModel.*    工程、轨道、采样、音符和音高线数据
+    ├── SampleSettings.*  扳手设定、HJM CSV 与 UTAU oto 互换
+    ├── SettingsComponent.*
+    ├── AssetManagerComponent.*
     ├── PianoRollComponent.*
     ├── TrackListComponent.*
     ├── MainComponent.*
@@ -36,6 +39,12 @@ C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行�
 - 音高平滑、漂移、呼吸、共振峰、音量及 Attack 参数编辑；
 - 辅音浅色区域、齿音标记、无声区断线和音符连接状态；
 - 原始采样扳手编辑模式；
+- 扳手内嵌分段、别名、起止、节奏对齐与辅音时间编辑，保存为
+  `音频文件.hjm.csv`；原始波形上可直接拖动分段、固定辅音、对齐及结束
+  竖线，并支持 UTAU `oto.ini` 读取/导出；
+- 文件菜单原生设置窗口：界面语言与配色、音频设备、GAME/HiFi-GAN
+  模型目录和推理设备、操作方式、工程导入默认项及 UTAU 重采样器预留项；
+- 可注册音频并拖放到时间线或钢琴卷帘的素材管理器；
 - `.hspx` 原生工程保存与读取、撤销/重做及 WAV 混音导出；
 - mld5 周期/非周期分离、共振峰包络保持、Attack 保护和块能量归一化；
 - JSON-RPC MCP 工程读取、导入与编辑接口；
