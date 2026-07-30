@@ -1,4 +1,5 @@
 #include "SettingsComponent.h"
+#include <cmath>
 
 namespace hachi
 {
@@ -35,7 +36,8 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
                                      juce::AudioDeviceManager& devicesToUse,
                                      juce::PropertiesFile& propertiesToUse,
                                      Applied appliedToUse)
-    : strings(stringsToUse), properties(propertiesToUse), onApplied(std::move(appliedToUse))
+    : strings(stringsToUse), devices(devicesToUse), properties(propertiesToUse),
+      onApplied(std::move(appliedToUse))
 {
     addAndMakeVisible(tabs);
     addAndMakeVisible(applyButton);
@@ -53,9 +55,20 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     interfacePage.addRow(accentLightLabel, accentLight);
     interfacePage.addRow(noteColourLabel, noteColour);
 
-    deviceSelector = std::make_unique<juce::AudioDeviceSelectorComponent>(
-        devicesToUse, 0, 2, 1, 2, true, true, true, false);
-    audioPage.addAndMakeVisible(*deviceSelector);
+    currentAudioDevice.setColour(juce::Label::backgroundColourId, Palette::background);
+    currentAudioDevice.setColour(juce::Label::outlineColourId, Palette::border);
+    currentAudioDevice.setJustificationType(juce::Justification::centredLeft);
+    sampleRate.setEditableText(true);
+    bufferSize.setEditableText(true);
+    for (const auto value : { 32000, 44100, 48000, 88200, 96000, 192000 })
+        sampleRate.addItem(juce::String(value) + " Hz", sampleRate.getNumItems() + 1);
+    for (const auto value : { 32, 64, 128, 256, 512, 1024, 2048, 4096 })
+        bufferSize.addItem(juce::String(value), bufferSize.getNumItems() + 1);
+    audioPage.addRow(audioDeviceLabel, currentAudioDevice);
+    audioPage.addRow(sampleRateLabel, sampleRate);
+    audioPage.addRow(bufferSizeLabel, bufferSize);
+    audioPage.addWide(advancedAudio);
+    advancedAudio.onClick = [this] { openAdvancedAudioPanel(); };
 
     gameModel.addItem("large", 1);
     gameModel.addItem("small", 2);
@@ -155,10 +168,12 @@ void SettingsComponent::loadValues()
     importedAlgorithm.setSelectedId(properties.getIntValue("import.algorithm", 1), juce::dontSendNotification);
     preserveProjectEdits.setToggleState(properties.getBoolValue("import.preserveEdits", true), juce::dontSendNotification);
     locateMediaRecursively.setToggleState(properties.getBoolValue("import.recursiveMedia", true), juce::dontSendNotification);
+    refreshAudioValues();
 }
 
 void SettingsComponent::saveValues()
 {
+    applyAudioValues();
     properties.setValue("ui.language", language.getSelectedId());
     properties.setValue("ui.theme", theme.getSelectedId() == 2 ? "light" : "dark");
     properties.setValue("ui.accent", accent.getText().trim());
@@ -199,6 +214,10 @@ void SettingsComponent::setTexts()
     accentLabel.setText(strings.text("settings.accent"), juce::dontSendNotification);
     accentLightLabel.setText(strings.text("settings.accentLight"), juce::dontSendNotification);
     noteColourLabel.setText(strings.text("settings.noteColour"), juce::dontSendNotification);
+    audioDeviceLabel.setText(strings.text("settings.audioDevice"), juce::dontSendNotification);
+    sampleRateLabel.setText(strings.text("settings.sampleRate"), juce::dontSendNotification);
+    bufferSizeLabel.setText(strings.text("settings.bufferSize"), juce::dontSendNotification);
+    advancedAudio.setButtonText(strings.text("settings.advancedAudio"));
     gamePathLabel.setText(strings.text("settings.gamePath"), juce::dontSendNotification);
     gameModelLabel.setText(strings.text("settings.gameModel"), juce::dontSendNotification);
     hifiganPathLabel.setText(strings.text("settings.hifiganPath"), juce::dontSendNotification);
@@ -223,7 +242,68 @@ void SettingsComponent::resized()
     auto footer = area.removeFromBottom(40);
     applyButton.setBounds(footer.removeFromRight(120).reduced(4));
     tabs.setBounds(area);
-    if (deviceSelector != nullptr)
-        deviceSelector->setBounds(audioPage.getLocalBounds().reduced(12));
+}
+
+void SettingsComponent::refreshAudioValues()
+{
+    if (const auto* device = devices.getCurrentAudioDevice())
+    {
+        currentAudioDevice.setText(device->getName(), juce::dontSendNotification);
+        sampleRate.setText(juce::String(static_cast<int>(std::llround(device->getCurrentSampleRate())))
+                           + " Hz", juce::dontSendNotification);
+        bufferSize.setText(juce::String(device->getCurrentBufferSizeSamples()),
+                           juce::dontSendNotification);
+    }
+    else
+    {
+        currentAudioDevice.setText(strings.text("settings.noAudioDevice"),
+                                   juce::dontSendNotification);
+        sampleRate.setText("48000 Hz", juce::dontSendNotification);
+        bufferSize.setText("512", juce::dontSendNotification);
+    }
+}
+
+void SettingsComponent::applyAudioValues()
+{
+    if (devices.getCurrentAudioDevice() == nullptr) return;
+    auto setup = devices.getAudioDeviceSetup();
+    const auto requestedRate = sampleRate.getText().retainCharacters("0123456789.")
+        .getDoubleValue();
+    const auto requestedBuffer = bufferSize.getText().retainCharacters("0123456789")
+        .getIntValue();
+    auto changed = false;
+    if (requestedRate > 0.0 && std::abs(setup.sampleRate - requestedRate) > 0.5)
+    {
+        setup.sampleRate = requestedRate;
+        changed = true;
+    }
+    if (requestedBuffer > 0 && setup.bufferSize != requestedBuffer)
+    {
+        setup.bufferSize = requestedBuffer;
+        changed = true;
+    }
+    if (changed)
+    {
+        const auto error = devices.setAudioDeviceSetup(setup, true);
+        if (error.isNotEmpty())
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+                strings.text("settings.audio"), error);
+    }
+    refreshAudioValues();
+}
+
+void SettingsComponent::openAdvancedAudioPanel()
+{
+    auto* selector = new juce::AudioDeviceSelectorComponent(
+        devices, 0, 2, 1, 2, true, true, true, false);
+    selector->setSize(680, 500);
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = strings.text("settings.advancedAudio");
+    options.dialogBackgroundColour = Palette::panel;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.content.setOwned(selector);
+    options.launchAsync();
 }
 }

@@ -90,6 +90,11 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.title", { "设置", "設定", "設定", "설정", "Settings" } }
     ,{ "settings.interface", { "界面", "介面", "インターフェース", "인터페이스", "Interface" } }
     ,{ "settings.audio", { "音频", "音訊", "オーディオ", "오디오", "Audio" } }
+    ,{ "settings.audioDevice", { "当前音频设备", "目前音訊裝置", "現在のオーディオデバイス", "현재 오디오 장치", "Current Audio Device" } }
+    ,{ "settings.sampleRate", { "采样率", "取樣率", "サンプルレート", "샘플 레이트", "Sample Rate" } }
+    ,{ "settings.bufferSize", { "缓冲区大小", "緩衝區大小", "バッファサイズ", "버퍼 크기", "Buffer Size" } }
+    ,{ "settings.advancedAudio", { "选择输入、输出和驱动…", "選擇輸入、輸出與驅動…", "入出力とドライバーを選択…", "입출력 및 드라이버 선택…", "Choose Inputs, Outputs and Driver…" } }
+    ,{ "settings.noAudioDevice", { "未选择音频设备", "尚未選擇音訊裝置", "オーディオデバイス未選択", "오디오 장치가 선택되지 않음", "No audio device selected" } }
     ,{ "settings.algorithm", { "算法", "演算法", "アルゴリズム", "알고리즘", "Algorithms" } }
     ,{ "settings.operation", { "操作", "操作", "操作", "조작", "Operations" } }
     ,{ "settings.import", { "文件导入", "檔案匯入", "ファイル読込", "파일 가져오기", "File Import" } }

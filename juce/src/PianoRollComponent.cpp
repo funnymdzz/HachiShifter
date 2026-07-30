@@ -74,17 +74,15 @@ void PianoRollComponent::setTool(Tool nextTool)
 void PianoRollComponent::selectAllNotes()
 {
     selectedNotes.clear();
-    juce::String focusedSource;
-    if (sourceEditMode)
-        for (const auto& track : snapshot.tracks)
-            for (const auto& clip : track.clips)
-                if (clip.id == focusedClip) focusedSource = clip.sourceFile.getFullPathName();
     for (const auto& track : snapshot.tracks)
     {
         if (!track.compose && !sourceEditMode) continue;
         for (const auto& clip : track.clips)
         {
-            if (sourceEditMode && clip.sourceFile.getFullPathName() != focusedSource) continue;
+            // Wrench mode edits one source instance.  Drawing every project
+            // use of the same WAV stacked duplicate vertical sliders on top
+            // of one HJM region.
+            if (sourceEditMode && clip.id != focusedClip) continue;
             for (const auto& note : clip.notes) selectedNotes.insert(note.id.toStdString());
         }
     }
@@ -189,8 +187,7 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
         if (!track.compose && !sourceEditMode) continue;
         for (const auto& clip : track.clips)
         {
-            if (sourceEditMode && (focusedSource.isEmpty()
-                                   || clip.sourceFile.getFullPathName() != focusedSource))
+            if (sourceEditMode && clip.id != focusedClip)
                 continue;
             const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString());
             if (found == thumbnails.end()) continue;
@@ -363,12 +360,6 @@ void PianoRollComponent::paint(juce::Graphics& g)
         Palette::accentLight, Palette::accent, Palette::noteFill,
         juce::Colour(0xff45b8aa), juce::Colour(0xffad7ad6)
     };
-    juce::String focusedSource;
-    if (sourceEditMode)
-        for (const auto& track : snapshot.tracks)
-            for (const auto& clip : track.clips)
-                if (clip.id == focusedClip)
-                    focusedSource = clip.sourceFile.getFullPathName();
     std::size_t trackIndex = 0;
     for (const auto& track : snapshot.tracks)
     {
@@ -376,8 +367,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
         const auto originalColour = contourColours[trackIndex % contourColours.size()];
         for (const auto& clip : track.clips)
         {
-            if (sourceEditMode && (focusedSource.isEmpty()
-                                   || clip.sourceFile.getFullPathName() != focusedSource))
+            if (sourceEditMode && clip.id != focusedClip)
                 continue;
             const auto sourceScale = sourceEditMode && clip.durationSeconds > 1.0e-9
                 ? (clip.sourceDurationSeconds > 1.0e-9 ? clip.sourceDurationSeconds : clip.durationSeconds)

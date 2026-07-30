@@ -24,6 +24,37 @@ public:
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }
+        if (!arguments.isEmpty() && arguments[0] == "--inspect-settings")
+        {
+            I18n diagnosticStrings;
+            juce::AudioDeviceManager diagnosticDevices;
+            juce::PropertiesFile::Options options;
+            options.applicationName = "HachiShifterSettingsSmoke";
+            options.filenameSuffix = "settings";
+            options.folderName = "HachiShifterNextSmoke";
+            options.storageFormat = juce::PropertiesFile::storeAsXML;
+            juce::PropertiesFile diagnosticProperties(options);
+            SettingsComponent settings(diagnosticStrings, diagnosticDevices,
+                                       diagnosticProperties, [] {});
+            settings.setBounds(0, 0, 720, 570);
+            settings.resized();
+            auto tabs = 0;
+            auto pageChildren = 0;
+            for (auto* child : settings.getChildren())
+                if (auto* tabbed = dynamic_cast<juce::TabbedComponent*>(child))
+                {
+                    tabs = tabbed->getNumTabs();
+                    if (const auto* page = tabbed->getCurrentContentComponent())
+                        pageChildren = page->getNumChildComponents();
+                }
+            std::cout << "tabs=" << tabs << '\n'
+                      << "page_children=" << pageChildren << '\n'
+                      << "width=" << settings.getWidth() << '\n'
+                      << "height=" << settings.getHeight() << std::endl;
+            if (tabs != 5 || pageChildren <= 0) setApplicationReturnValue(5);
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         if (arguments.size() >= 3 && arguments[0] == "--smoke-export")
         {
             cliAudioEngine = std::make_unique<AudioEngine>();

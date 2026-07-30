@@ -115,6 +115,7 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
     std::vector<float> mappedMagnitude(static_cast<std::size_t>(half + 1));
     std::vector<float> phase(static_cast<std::size_t>(half + 1));
     std::vector<float> logEnvelope(static_cast<std::size_t>(half + 1));
+    std::vector<float> formantEnvelope(static_cast<std::size_t>(half + 1));
     std::vector<float> prefix(static_cast<std::size_t>(half + 2));
     std::vector<float> output(static_cast<std::size_t>(inputLength + fftSize));
     std::vector<float> normalisation(output.size());
@@ -141,6 +142,11 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
         // partials together and produced the hollow/echoed native result.
         const auto envelopeRadius = juce::jlimit(4, 18,
             static_cast<int>(std::round(180.0 * static_cast<double>(fftSize) / sampleRate)));
+        // A second, wider envelope represents the vocal tract rather than
+        // individual F0 harmonics.  Using the narrow residual envelope for
+        // formant compensation made isolated notes acquire an old/child voice.
+        const auto formantRadius = juce::jlimit(10, 42,
+            static_cast<int>(std::round(520.0 * static_cast<double>(fftSize) / sampleRate)));
         prefix[0] = 0.0f;
         for (int bin = 0; bin <= half; ++bin)
             prefix[static_cast<std::size_t>(bin + 1)] = prefix[static_cast<std::size_t>(bin)]
@@ -152,6 +158,12 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             logEnvelope[static_cast<std::size_t>(bin)] =
                 (prefix[static_cast<std::size_t>(end)] - prefix[static_cast<std::size_t>(begin)])
                 / static_cast<float>(std::max(1, end - begin));
+            const auto formantBegin = std::max(0, bin - formantRadius);
+            const auto formantEnd = std::min(half + 1, bin + formantRadius + 1);
+            formantEnvelope[static_cast<std::size_t>(bin)] =
+                (prefix[static_cast<std::size_t>(formantEnd)]
+                    - prefix[static_cast<std::size_t>(formantBegin)])
+                / static_cast<float>(std::max(1, formantEnd - formantBegin));
         }
         for (int bin = 0; bin <= half; ++bin)
         {
@@ -162,7 +174,9 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             // 20% there leaves a quiet copy of the source F0 under the shifted
             // one, perceived as chorus/echo.  The residual rises in the upper
             // vocal band so fricatives and breath remain natural.
-            const auto residualFloorRatio = 0.05f + 0.57f * highBand * highBand;
+            // A voiced low-band residual is a delayed copy of the source F0.
+            // Keep the residual only in the breath/sibilant band.
+            const auto residualFloorRatio = 0.58f * highBand * highBand;
             const auto envelope = std::max(1.0e-9f, std::exp(logEnvelope[static_cast<std::size_t>(bin)]));
             const auto totalPower = magnitude[static_cast<std::size_t>(bin)] * magnitude[static_cast<std::size_t>(bin)];
             const auto residualPower = std::min(totalPower,
@@ -177,6 +191,13 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
         const auto target = curveAt(targetMidi, curvePosition);
         const auto semitones = source && target ? juce::jlimit(-24.0f, 24.0f, *target - *source) : 0.0f;
         const auto ratio = juce::jlimit(0.25f, 4.0f, std::pow(2.0f, semitones / 12.0f));
+        const auto highCutStart = semitones > 0.0f
+            ? juce::jlimit(4'800.0f, 11'500.0f, 11'500.0f - semitones * 760.0f)
+            : juce::jlimit(7'000.0f, 14'000.0f, 14'000.0f + semitones * 360.0f);
+        const auto highCutEnd = std::min(static_cast<float>(sampleRate * 0.49),
+                                         highCutStart + 4'000.0f);
+        const auto highCutStrength = juce::jlimit(0.0f, 0.82f,
+            0.16f + std::abs(semitones) / 18.0f);
         const auto energy = std::max(1.0e-9f,
             std::accumulate(magnitude.begin(), magnitude.end(), 0.0f));
         auto positiveFlux = 0.0f;
@@ -197,11 +218,21 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
             const auto interpolate = [fraction](float left, float right) { return left + (right - left) * fraction; };
             const auto sourceHarmonic = interpolate(harmonicMagnitude[static_cast<std::size_t>(sourceLeft)],
                                                     harmonicMagnitude[static_cast<std::size_t>(sourceRight)]);
-            const auto sourceEnvelope = interpolate(logEnvelope[static_cast<std::size_t>(sourceLeft)],
-                                                     logEnvelope[static_cast<std::size_t>(sourceRight)]);
-            const auto targetEnvelope = logEnvelope[static_cast<std::size_t>(outputBin)];
+            const auto sourceEnvelope = interpolate(
+                formantEnvelope[static_cast<std::size_t>(sourceLeft)],
+                formantEnvelope[static_cast<std::size_t>(sourceRight)]);
+            const auto targetEnvelope = formantEnvelope[static_cast<std::size_t>(outputBin)];
+            const auto frequency = static_cast<float>(outputBin)
+                * static_cast<float>(sampleRate) / static_cast<float>(fftSize);
+            const auto highPhase = highCutEnd > highCutStart
+                ? juce::jlimit(0.0f, 1.0f,
+                    (frequency - highCutStart) / (highCutEnd - highCutStart))
+                : frequency >= highCutStart ? 1.0f : 0.0f;
+            const auto highSmooth = highPhase * highPhase * (3.0f - 2.0f * highPhase);
+            const auto highGain = 1.0f - highCutStrength * highSmooth;
             mappedMagnitude[static_cast<std::size_t>(outputBin)] = sourceHarmonic
-                * juce::jlimit(0.18f, 5.5f, std::exp(targetEnvelope - sourceEnvelope));
+                * juce::jlimit(0.35f, 2.8f, std::exp(targetEnvelope - sourceEnvelope))
+                * highGain;
             const auto sourcePhase = phase[static_cast<std::size_t>(sourceLeft)]
                 + wrapPhase(phase[static_cast<std::size_t>(sourceRight)]
                             - phase[static_cast<std::size_t>(sourceLeft)]) * fraction;
@@ -215,22 +246,32 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
                 : wrapPhase(synthesisPhase[static_cast<std::size_t>(outputBin)] + instantaneous);
         }
 
+        for (int bin = 0; bin <= half; ++bin)
+        {
+            const auto tonal = std::polar(mappedMagnitude[static_cast<std::size_t>(bin)],
+                                          synthesisPhase[static_cast<std::size_t>(bin)]);
+            const auto residualScale = residualMagnitude[static_cast<std::size_t>(bin)]
+                / std::max(1.0e-9f, magnitude[static_cast<std::size_t>(bin)]);
+            auto aperiodic = spectrum[static_cast<std::size_t>(bin)] * residualScale;
+            if (transient)
+            {
+                // Preserve broadband attack detail without copying the source
+                // fundamental into the edited vowel.
+                const auto frequency = static_cast<float>(bin)
+                    * static_cast<float>(sampleRate) / static_cast<float>(fftSize);
+                const auto attackHigh = juce::jlimit(0.0f, 1.0f,
+                    (frequency - 1'600.0f) / 2'200.0f);
+                aperiodic = spectrum[static_cast<std::size_t>(bin)]
+                    * (attackHigh * attackHigh * (3.0f - 2.0f * attackHigh));
+            }
+            shifted[static_cast<std::size_t>(bin)] = tonal + aperiodic;
+        }
         if (transient)
         {
-            std::copy_n(spectrum.begin(), half + 1, shifted.begin());
             smoothedFrameGain = 1.0f;
         }
         else
         {
-            for (int bin = 0; bin <= half; ++bin)
-            {
-                const auto tonal = std::polar(mappedMagnitude[static_cast<std::size_t>(bin)],
-                                              synthesisPhase[static_cast<std::size_t>(bin)]);
-                const auto residualScale = residualMagnitude[static_cast<std::size_t>(bin)]
-                    / std::max(1.0e-9f, magnitude[static_cast<std::size_t>(bin)]);
-                shifted[static_cast<std::size_t>(bin)] = tonal
-                    + spectrum[static_cast<std::size_t>(bin)] * residualScale;
-            }
             auto sourcePower = 0.0f;
             auto renderedPower = 0.0f;
             for (int bin = 0; bin <= half; ++bin)
@@ -261,6 +302,9 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
     }
 
     std::vector<float> cropped(static_cast<std::size_t>(inputLength));
+    auto wetMix = 0.0f;
+    const auto wetCoefficient = static_cast<float>(1.0
+        - std::exp(-1.0 / (sampleRate * 0.003)));
     for (int index = 0; index < inputLength; ++index)
     {
         const auto sourceIndex = index + pad;
@@ -270,8 +314,13 @@ std::vector<float> Mld5Renderer::renderMono(const float* input, int inputLength,
         const auto source = curveAt(sourceMidi, curvePosition);
         const auto target = curveAt(targetMidi, curvePosition);
         const auto shift = source && target ? std::abs(*target - *source) : 0.0f;
-        const auto blend = juce::jlimit(0.0f, 1.0f, shift / 0.20f);
-        cropped[static_cast<std::size_t>(index)] = input[index] + (wet - input[index]) * blend;
+        // A magnitude-proportional dry/wet blend runs two F0s in parallel for
+        // ordinary 5-20 cent corrections.  Switch fully to the component path
+        // for every real edit and smooth only the temporal hand-off.
+        const auto desiredWet = shift > 0.001f ? 1.0f : 0.0f;
+        wetMix += (desiredWet - wetMix) * wetCoefficient;
+        cropped[static_cast<std::size_t>(index)] = input[index]
+            + (wet - input[index]) * wetMix;
     }
     return cropped;
 }

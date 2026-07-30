@@ -2,6 +2,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <vector>
 
 #if JUCE_WINDOWS
@@ -167,6 +168,28 @@ std::vector<SampleRegionSetting> SampleSettings::loadOrDerive(const juce::File& 
     {
         return left.sourceStart < right.sourceStart;
     });
+    // The same source may be placed many times on the timeline.  Wrench mode
+    // describes the source file, so equal source regions are one HJM row rather
+    // than one row per project placement.
+    std::vector<Positioned> uniqueNotes;
+    uniqueNotes.reserve(notes.size());
+    for (const auto& item : notes)
+    {
+        const auto ratio = item.clip->durationSeconds > 1.0e-9
+            ? item.clip->sourceDurationSeconds / item.clip->durationSeconds : 1.0;
+        const auto sourceDuration = item.note->durationSeconds * ratio;
+        const auto duplicate = std::any_of(uniqueNotes.begin(), uniqueNotes.end(),
+            [&](const auto& existing)
+            {
+                const auto existingRatio = existing.clip->durationSeconds > 1.0e-9
+                    ? existing.clip->sourceDurationSeconds / existing.clip->durationSeconds : 1.0;
+                return std::abs(existing.sourceStart - item.sourceStart) < 0.0005
+                    && std::abs(existing.note->durationSeconds * existingRatio - sourceDuration)
+                        < 0.0005;
+            });
+        if (!duplicate) uniqueNotes.push_back(item);
+    }
+    notes = std::move(uniqueNotes);
     for (std::size_t index = 0; index < notes.size(); ++index)
     {
         const auto& item = notes[index];

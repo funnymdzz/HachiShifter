@@ -36,8 +36,12 @@ private:
     void loadValues();
     void saveValues();
     void setTexts();
+    void refreshAudioValues();
+    void applyAudioValues();
+    void openAdvancedAudioPanel();
 
     I18n& strings;
+    juce::AudioDeviceManager& devices;
     juce::PropertiesFile& properties;
     Applied onApplied;
     juce::TabbedComponent tabs { juce::TabbedButtonBar::TabsAtTop };
@@ -45,12 +49,15 @@ private:
     FormPage algorithmPage;
     FormPage operationPage;
     FormPage importPage;
-    juce::Component audioPage;
-    std::unique_ptr<juce::AudioDeviceSelectorComponent> deviceSelector;
+    FormPage audioPage;
 
     juce::Label languageLabel, themeLabel, accentLabel, accentLightLabel, noteColourLabel;
     juce::ComboBox language, theme;
     juce::TextEditor accent, accentLight, noteColour;
+
+    juce::Label audioDeviceLabel, sampleRateLabel, bufferSizeLabel, currentAudioDevice;
+    juce::ComboBox sampleRate, bufferSize;
+    juce::TextButton advancedAudio;
 
     juce::Label gamePathLabel, gameModelLabel, hifiganPathLabel, inferenceLabel,
                 inferenceDeviceLabel, utauResamplerLabel;
