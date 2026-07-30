@@ -41,6 +41,7 @@ private:
     void refreshTexts();
     void refreshProjectControls();
     void refreshSelectedNoteParameter();
+    void applySelectedNoteParameter();
     void refreshStretchAlgorithmItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
     void togglePlayback();
@@ -123,6 +124,8 @@ private:
     juce::String selectedClipId;
     juce::String selectedTrackId;
     juce::String selectedNoteId;
+    enum class ParameterMode { pitchSmooth, breath, drift, formant, volume };
+    ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;
     bool smoothSliderDragging = false;
     bool draggingPanelSplitter = false;

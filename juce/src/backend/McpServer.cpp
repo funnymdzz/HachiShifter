@@ -152,7 +152,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
-            makeTool("set_note", "Set modulation, drift, Attack and consonant length / 设置音符调制与 Attack"),
+            makeTool("set_note", "Set pitch, breath, formant, gain, Attack and consonant parameters / 设置全部音符参数"),
             makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
             makeTool("remove_note", "Delete a note / 删除音符"),
             makeTool("toggle_note_connection", "Connect or separate adjacent notes / 连接或分离相邻音符"),
@@ -322,6 +322,12 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             project.setNoteModulation(id, static_cast<float>(number(args, "modulation", 1.0)));
         if (args.hasProperty("drift"))
             project.setNoteDrift(id, static_cast<float>(number(args, "drift", 1.0)));
+        if (args.hasProperty("breath"))
+            project.setNoteBreath(id, static_cast<float>(number(args, "breath")));
+        if (args.hasProperty("formant_semitones"))
+            project.setNoteFormant(id, static_cast<float>(number(args, "formant_semitones")));
+        if (args.hasProperty("gain"))
+            project.setNoteGain(id, static_cast<float>(number(args, "gain", 1.0)));
         if (args.hasProperty("consonant_seconds") || args.hasProperty("attack_speed"))
         {
             auto consonant = number(args, "consonant_seconds", 0.04);
@@ -468,6 +474,9 @@ juce::var McpServer::projectJson() const
                 set(noteValue, "source_midi_center", note.sourceMidiCenter);
                 set(noteValue, "modulation", note.modulation);
                 set(noteValue, "drift", note.drift);
+                set(noteValue, "breath", note.breath);
+                set(noteValue, "formant_semitones", note.formantSemitones);
+                set(noteValue, "gain", note.gain);
                 set(noteValue, "attack_speed", note.attackSpeed);
                 set(noteValue, "connected_previous", note.connectedToPrevious);
                 set(noteValue, "connected_next", note.connectedToNext);

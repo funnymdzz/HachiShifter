@@ -22,6 +22,9 @@ struct Mld5FileRenderRequest
     double framePeriodMs = 5.0;
     std::vector<float> sourceMidi;
     std::vector<float> targetMidi;
+    std::vector<float> formantSemitones;
+    std::vector<float> noteGain;
+    std::vector<float> breath;
     std::vector<TimeMapPoint> timeMap;
     int pitchAlgorithm = 0;
     int stretchAlgorithm = 0;

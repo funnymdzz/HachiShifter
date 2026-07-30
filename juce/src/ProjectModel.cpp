@@ -521,6 +521,63 @@ void ProjectModel::setNoteDrift(const juce::String& noteId, float drift)
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setNoteBreath(const juce::String& noteId, float breath)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.breath = juce::jlimit(0.0f, 1.0f, breath);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setNoteFormant(const juce::String& noteId, float semitones)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.formantSemitones = juce::jlimit(-12.0f, 12.0f, semitones);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setNoteGain(const juce::String& noteId, float gain)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.gain = juce::jlimit(0.0f, 4.0f, gain);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::setNoteAttack(const juce::String& noteId, double consonantSeconds,
                                  float attackSpeed)
 {
@@ -654,7 +711,7 @@ juce::ValueTree ProjectModel::toValueTree() const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 2, nullptr);
+    root.setProperty("version", 3, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -701,6 +758,9 @@ juce::ValueTree ProjectModel::toValueTree() const
                 noteTree.setProperty("sourceMidiCenter", note.sourceMidiCenter, nullptr);
                 noteTree.setProperty("modulation", note.modulation, nullptr);
                 noteTree.setProperty("drift", note.drift, nullptr);
+                noteTree.setProperty("breath", note.breath, nullptr);
+                noteTree.setProperty("formantSemitones", note.formantSemitones, nullptr);
+                noteTree.setProperty("gain", note.gain, nullptr);
                 noteTree.setProperty("attackSpeed", note.attackSpeed, nullptr);
                 noteTree.setProperty("connectedToPrevious", note.connectedToPrevious, nullptr);
                 noteTree.setProperty("connectedToNext", note.connectedToNext, nullptr);
@@ -780,6 +840,9 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
                 note.sourceMidiCenter = static_cast<float>(noteTree.getProperty("sourceMidiCenter", -1.0));
                 note.modulation = static_cast<float>(noteTree.getProperty("modulation", 1.0));
                 note.drift = static_cast<float>(noteTree.getProperty("drift", 1.0));
+                note.breath = static_cast<float>(noteTree.getProperty("breath", 0.0));
+                note.formantSemitones = static_cast<float>(noteTree.getProperty("formantSemitones", 0.0));
+                note.gain = static_cast<float>(noteTree.getProperty("gain", 1.0));
                 note.attackSpeed = static_cast<float>(noteTree.getProperty("attackSpeed", 1.0));
                 note.connectedToPrevious = static_cast<bool>(noteTree.getProperty("connectedToPrevious", false));
                 note.connectedToNext = static_cast<bool>(noteTree.getProperty("connectedToNext", false));

@@ -40,6 +40,9 @@ struct NoteData
     float sourceMidiCenter = -1.0f;
     float modulation = 1.0f;
     float drift = 1.0f;
+    float breath = 0.0f;
+    float formantSemitones = 0.0f;
+    float gain = 1.0f;
     float attackSpeed = 1.0f;
     bool connectedToPrevious = false;
     bool connectedToNext = false;
@@ -122,6 +125,9 @@ public:
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);
+    void setNoteBreath(const juce::String& noteId, float breath);
+    void setNoteFormant(const juce::String& noteId, float semitones);
+    void setNoteGain(const juce::String& noteId, float gain);
     void setNoteAttack(const juce::String& noteId, double consonantSeconds, float attackSpeed);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
                                        double absoluteStart, double duration, float midiNote);

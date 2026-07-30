@@ -194,23 +194,19 @@ MainComponent::MainComponent()
     smoothSlider.setRange(0.0, 100.0, 1.0);
     smoothSlider.setValue(0.0);
     smoothSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    smoothSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    smoothSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 48, 18);
     smoothSlider.onValueChange = [this]
     {
         if (updatingSmoothSlider || smoothSliderDragging || selectedNoteId.isEmpty()
-            || !pitchParamButton.getToggleState()) return;
-        // 0% smoothing preserves the imported modulation exactly; 100%
-        // removes vibrato while keeping the note's macro drift curve.
-        project.setNoteModulation(selectedNoteId,
-            1.0f - static_cast<float>(smoothSlider.getValue() / 100.0));
+            || !smoothSlider.isEnabled()) return;
+        applySelectedNoteParameter();
     };
     smoothSlider.onDragStart = [this] { smoothSliderDragging = true; };
     smoothSlider.onDragEnd = [this]
     {
         smoothSliderDragging = false;
-        if (selectedNoteId.isNotEmpty() && pitchParamButton.getToggleState())
-            project.setNoteModulation(selectedNoteId,
-                1.0f - static_cast<float>(smoothSlider.getValue() / 100.0));
+        if (selectedNoteId.isNotEmpty() && smoothSlider.isEnabled())
+            applySelectedNoteParameter();
     };
 
     zoomSlider.setRange(40.0, 600.0, 1.0);
@@ -280,6 +276,11 @@ MainComponent::MainComponent()
         button->onClick = [this, button]
         {
             setToolButton(*button);
+            parameterMode = button == &breathParamButton ? ParameterMode::breath
+                : button == &tensionParamButton ? ParameterMode::drift
+                : button == &formantParamButton ? ParameterMode::formant
+                : button == &volumeParamButton ? ParameterMode::volume
+                : ParameterMode::pitchSmooth;
             refreshSelectedNoteParameter();
         };
     midiButton.onClick = [this] { importMidi(); };
@@ -350,6 +351,7 @@ void MainComponent::refreshTexts()
     stretchAlgorithm.setTooltip(strings.text("algo.stretch"));
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
+    refreshSelectedNoteParameter();
 }
 
 void MainComponent::refreshProjectControls()
@@ -377,7 +379,7 @@ void MainComponent::refreshProjectControls()
 
 void MainComponent::refreshSelectedNoteParameter()
 {
-    auto modulation = 1.0f;
+    NoteData selected;
     auto found = false;
     const auto data = project.snapshot();
     for (const auto& track : data.tracks)
@@ -385,14 +387,66 @@ void MainComponent::refreshSelectedNoteParameter()
             for (const auto& note : clip.notes)
                 if (note.id == selectedNoteId)
                 {
-                    modulation = note.modulation;
+                    selected = note;
                     found = true;
                 }
     updatingSmoothSlider = true;
-    smoothSlider.setValue(juce::jlimit(0.0, 100.0,
-        (1.0 - static_cast<double>(modulation)) * 100.0), juce::dontSendNotification);
+    double value = 0.0;
+    if (parameterMode == ParameterMode::pitchSmooth)
+    {
+        smoothCaption.setText(strings.text("editor.smooth"), juce::dontSendNotification);
+        smoothSlider.setRange(0.0, 100.0, 1.0);
+        smoothSlider.setTextValueSuffix("%");
+        value = (1.0 - static_cast<double>(selected.modulation)) * 100.0;
+    }
+    else if (parameterMode == ParameterMode::breath)
+    {
+        smoothCaption.setText(strings.text("param.breath"), juce::dontSendNotification);
+        smoothSlider.setRange(0.0, 100.0, 1.0);
+        smoothSlider.setTextValueSuffix("%");
+        value = static_cast<double>(selected.breath) * 100.0;
+    }
+    else if (parameterMode == ParameterMode::drift)
+    {
+        smoothCaption.setText(strings.text("param.tension"), juce::dontSendNotification);
+        smoothSlider.setRange(0.0, 200.0, 1.0);
+        smoothSlider.setTextValueSuffix("%");
+        value = static_cast<double>(selected.drift) * 100.0;
+    }
+    else if (parameterMode == ParameterMode::formant)
+    {
+        smoothCaption.setText(strings.text("param.formant"), juce::dontSendNotification);
+        smoothSlider.setRange(-12.0, 12.0, 0.1);
+        smoothSlider.setTextValueSuffix(" st");
+        value = selected.formantSemitones;
+    }
+    else
+    {
+        smoothCaption.setText(strings.text("param.volume"), juce::dontSendNotification);
+        smoothSlider.setRange(-60.0, 12.0, 0.1);
+        smoothSlider.setTextValueSuffix(" dB");
+        value = selected.gain > 1.0e-6f ? 20.0 * std::log10(selected.gain) : -60.0;
+    }
+    smoothSlider.setValue(value, juce::dontSendNotification);
     updatingSmoothSlider = false;
-    smoothSlider.setEnabled(found && pitchParamButton.getToggleState());
+    smoothSlider.setEnabled(found);
+}
+
+void MainComponent::applySelectedNoteParameter()
+{
+    const auto value = smoothSlider.getValue();
+    if (parameterMode == ParameterMode::pitchSmooth)
+        project.setNoteModulation(selectedNoteId,
+            1.0f - static_cast<float>(value / 100.0));
+    else if (parameterMode == ParameterMode::breath)
+        project.setNoteBreath(selectedNoteId, static_cast<float>(value / 100.0));
+    else if (parameterMode == ParameterMode::drift)
+        project.setNoteDrift(selectedNoteId, static_cast<float>(value / 100.0));
+    else if (parameterMode == ParameterMode::formant)
+        project.setNoteFormant(selectedNoteId, static_cast<float>(value));
+    else
+        project.setNoteGain(selectedNoteId, value <= -59.9 ? 0.0f
+            : static_cast<float>(std::pow(10.0, value / 20.0)));
 }
 
 void MainComponent::refreshStretchAlgorithmItems(int preferredId)
@@ -609,7 +663,7 @@ void MainComponent::resized()
     takeParameter(wrenchButton, 27);
     takeParameter(connectButton, 27);
     takeParameter(smoothCaption, 42);
-    takeParameter(smoothSlider, 82);
+    takeParameter(smoothSlider, 112);
     takeParameter(pitchParamButton, 58);
     takeParameter(breathParamButton, 58);
     takeParameter(tensionParamButton, 58);
