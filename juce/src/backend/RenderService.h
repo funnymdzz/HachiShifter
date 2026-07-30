@@ -34,6 +34,7 @@ struct RenderedAudio
 {
     juce::AudioBuffer<float> buffer;
     double sampleRate = 0.0;
+    juce::String backend;
 };
 
 class RenderService final

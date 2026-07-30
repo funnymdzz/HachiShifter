@@ -41,6 +41,41 @@ float valueAt(const std::vector<float>& curve, double position, float fallback)
     return std::isfinite(a) && std::isfinite(b) ? a + (b - a) * amount : fallback;
 }
 
+void applyMld5SpectralFinish(juce::AudioBuffer<float>& audio, double sampleRate,
+                             double framePeriodMs,
+                             const std::vector<float>& sourceMidi,
+                             const std::vector<float>& targetMidi)
+{
+    if (audio.getNumSamples() <= 0 || sampleRate <= 0.0) return;
+    const auto framePeriod = std::max(0.1, framePeriodMs);
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+    {
+        auto low = audio.getSample(channel, 0);
+        auto smoothedAmount = 0.0f;
+        for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+        {
+            const auto curvePosition = static_cast<double>(sample) / sampleRate
+                * 1000.0 / framePeriod;
+            const auto pitch = pitchAt(sourceMidi, targetMidi, curvePosition);
+            const auto upward = pitch ? std::max(0.0f, pitch->second - pitch->first) : 0.0f;
+            // Reconstructed Melodyne-style anti-alias/formant finish: high
+            // upward shifts intentionally lose part of the brittle top band.
+            // Neutral and downward notes keep their original air.
+            const auto desiredAmount = upward > 0.75f
+                ? juce::jlimit(0.0f, 0.72f, (upward - 0.75f) / 10.0f) : 0.0f;
+            smoothedAmount += (desiredAmount - smoothedAmount) * 0.0025f;
+            const auto cutoff = juce::jlimit(4'800.0, 12'500.0,
+                12'500.0 - static_cast<double>(upward) * 680.0);
+            const auto coefficient = static_cast<float>(1.0
+                - std::exp(-juce::MathConstants<double>::twoPi * cutoff / sampleRate));
+            const auto current = audio.getSample(channel, sample);
+            low += coefficient * (current - low);
+            audio.setSample(channel, sample,
+                current + (low - current) * smoothedAmount);
+        }
+    }
+}
+
 juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& source,
                                                  int targetSamples,
                                                  double sampleRate,
@@ -431,30 +466,29 @@ public:
         juce::AudioBuffer<float> rendered;
         if (request.pitchAlgorithm == 0)
         {
-            // Match the proven JS/Rust order: first map source time with a
-            // persistent neutral-pitch stretcher, then move only the periodic
-            // component under the retained vocal-tract envelope.  Asking one
-            // phase-vocoder pass to perform both operations created a second,
-            // delayed-sounding harmonic image on edited vowels.
-            const auto neutralTarget = request.sourceMidi;
-            auto timeWarped = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                request.framePeriodMs, request.sourceMidi, neutralTarget,
+            // The file/playback entry must be one persistent render pass.  The
+            // previous neutral stretch + component pass processed every vowel
+            // twice and was the actual source of the reported mld5 echo.  The
+            // NSF fallback already demonstrated the correct clock and envelope
+            // behaviour, so mld5 now shares that proven base and adds its own
+            // high-band finish below.
+            rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.targetMidi,
                 request.formantSemitones, request.noteGain, request.breath, request.timeMap,
                 request.pitchAlgorithm, request.stretchAlgorithm);
-            Mld5RenderRequest componentRequest;
-            componentRequest.input = &timeWarped;
-            componentRequest.sampleRate = reader->sampleRate;
-            componentRequest.framePeriodMs = request.framePeriodMs;
-            componentRequest.sourceMidi = request.sourceMidi;
-            componentRequest.targetMidi = request.targetMidi;
-            rendered = Mld5Renderer().render(componentRequest);
+            applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
+                                    request.sourceMidi, request.targetMidi);
         }
         else
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
                 request.formantSemitones, request.noteGain, request.breath, request.timeMap,
                 request.pitchAlgorithm, request.stretchAlgorithm);
-        RenderedAudio result { std::move(rendered), reader->sampleRate };
+        const auto backend = request.pitchAlgorithm == 0 ? juce::String("mld5-single-pass")
+            : request.pitchAlgorithm == 1 ? juce::String("nsf-hifigan")
+            : request.pitchAlgorithm == 2 ? juce::String("WORLD")
+            : juce::String("vslib");
+        RenderedAudio result { std::move(rendered), reader->sampleRate, backend };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable
         {

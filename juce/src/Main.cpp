@@ -40,8 +40,9 @@ public:
             settings.resized();
             auto tabs = 0;
             auto pageChildren = 0;
-            for (auto* child : settings.getChildren())
-                if (auto* tabbed = dynamic_cast<juce::TabbedComponent*>(child))
+            for (int index = 0; index < settings.getNumChildComponents(); ++index)
+                if (auto* tabbed = dynamic_cast<juce::TabbedComponent*>(
+                        settings.getChildComponent(index)))
                 {
                     tabs = tabbed->getNumTabs();
                     if (const auto* page = tabbed->getCurrentContentComponent())
@@ -116,6 +117,13 @@ public:
             request.formantSemitones.assign(static_cast<std::size_t>(frames), formant);
             request.noteGain.assign(static_cast<std::size_t>(frames), gain);
             request.breath.assign(static_cast<std::size_t>(frames), breath);
+            if (arguments.size() >= 9)
+            {
+                const auto backend = arguments[8].toLowerCase();
+                request.pitchAlgorithm = backend.contains("nsf") ? 1
+                    : backend == "world" ? 2
+                    : backend.contains("vslib") ? 3 : 0;
+            }
             cliRenderService = std::make_unique<backend::RenderService>();
             cliRenderService->renderMld5File(std::move(request), [this, outputFile](backend::RenderedAudio result)
             {
@@ -136,6 +144,7 @@ public:
                     const auto count = std::max(1, result.buffer.getNumChannels()
                                                   * result.buffer.getNumSamples());
                     std::cout << "sample_rate=" << result.sampleRate << '\n'
+                              << "backend=" << result.backend << '\n'
                               << "channels=" << result.buffer.getNumChannels() << '\n'
                               << "samples=" << result.buffer.getNumSamples() << '\n'
                               << "rms=" << std::sqrt(squareSum / static_cast<double>(count)) << std::endl;
