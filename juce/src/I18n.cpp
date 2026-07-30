@@ -17,6 +17,8 @@ const std::unordered_map<std::string, Row> strings {
     { "file.new",        { "新建工程", "新增工程", "新規プロジェクト", "새 프로젝트", "New Project" } },
     { "file.midi",       { "导入 MIDI", "匯入 MIDI", "MIDIを読み込む", "MIDI 가져오기", "Import MIDI" } },
     { "file.exit",       { "退出", "結束", "終了", "종료", "Exit" } },
+    { "file.settings",   { "设置…", "設定…", "設定…", "설정…", "Settings…" } },
+    { "file.assets",     { "素材管理器…", "素材管理器…", "素材マネージャー…", "소재 관리자…", "Asset Manager…" } },
     { "menu.file",       { "文件", "檔案", "ファイル", "파일", "File" } },
     { "menu.edit",       { "编辑", "編輯", "編集", "편집", "Edit" } },
     { "menu.track",      { "轨道", "軌道", "トラック", "트랙", "Track" } },
@@ -79,6 +81,46 @@ const std::unordered_map<std::string, Row> strings {
     { "mpd.compose.description", { "勾选需要恢复 Melodyne 音符和修音的旋律轨道；其余轨道按普通音频播放。", "勾選需要還原 Melodyne 音符與修音的旋律軌道；其餘軌道作為一般音訊播放。", "Melodyneのノート編集を復元する旋律トラックを選択します。その他は通常の音声トラックとして扱います。", "Melodyne 노트 편집을 복원할 멜로디 트랙을 선택하세요. 나머지는 일반 오디오 트랙으로 처리됩니다.", "Select melodic tracks whose Melodyne note edits should be restored. Other tracks remain regular audio tracks." } },
     { "dialog.import", { "导入", "匯入", "読み込む", "가져오기", "Import" } },
     { "dialog.cancel", { "取消", "取消", "キャンセル", "취소", "Cancel" } }
+    ,{ "dialog.apply", { "应用", "套用", "適用", "적용", "Apply" } }
+    ,{ "settings.title", { "设置", "設定", "設定", "설정", "Settings" } }
+    ,{ "settings.interface", { "界面", "介面", "インターフェース", "인터페이스", "Interface" } }
+    ,{ "settings.audio", { "音频", "音訊", "オーディオ", "오디오", "Audio" } }
+    ,{ "settings.algorithm", { "算法", "演算法", "アルゴリズム", "알고리즘", "Algorithms" } }
+    ,{ "settings.operation", { "操作", "操作", "操作", "조작", "Operations" } }
+    ,{ "settings.import", { "文件导入", "檔案匯入", "ファイル読込", "파일 가져오기", "File Import" } }
+    ,{ "settings.language", { "语言", "語言", "言語", "언어", "Language" } }
+    ,{ "settings.theme", { "颜色主题", "色彩主題", "カラーテーマ", "색상 테마", "Colour Theme" } }
+    ,{ "settings.accent", { "主色（Hex）", "主色（Hex）", "アクセント（Hex）", "강조색 (Hex)", "Accent (Hex)" } }
+    ,{ "settings.accentLight", { "浅主色（Hex）", "淺主色（Hex）", "明るい主色（Hex）", "밝은 강조색 (Hex)", "Light Accent (Hex)" } }
+    ,{ "settings.noteColour", { "音符色（Hex）", "音符色（Hex）", "ノート色（Hex）", "노트 색상 (Hex)", "Note Colour (Hex)" } }
+    ,{ "settings.gamePath", { "GAME 模型目录", "GAME 模型目錄", "GAMEモデルフォルダー", "GAME 모델 폴더", "GAME Model Directory" } }
+    ,{ "settings.gameModel", { "GAME 默认模型", "GAME 預設模型", "GAME既定モデル", "GAME 기본 모델", "Default GAME Model" } }
+    ,{ "settings.hifiganPath", { "HiFi-GAN 模型目录", "HiFi-GAN 模型目錄", "HiFi-GANモデルフォルダー", "HiFi-GAN 모델 폴더", "HiFi-GAN Model Directory" } }
+    ,{ "settings.inference", { "推理方式", "推理方式", "推論バックエンド", "추론 백엔드", "Inference Backend" } }
+    ,{ "settings.device", { "推理设备", "推理裝置", "推論デバイス", "추론 장치", "Inference Device" } }
+    ,{ "settings.utauResampler", { "UTAU 重采样器（预留）", "UTAU 重取樣器（預留）", "UTAUリサンプラー（予約）", "UTAU 리샘플러 (예약)", "UTAU Resampler (reserved)" } }
+    ,{ "settings.shortcuts", { "快捷键方案", "快速鍵配置", "ショートカット方式", "단축키 방식", "Shortcut Scheme" } }
+    ,{ "settings.wheel", { "鼠标滚轮", "滑鼠滾輪", "マウスホイール", "마우스 휠", "Mouse Wheel" } }
+    ,{ "settings.spacePlayback", { "空格键播放/暂停", "空白鍵播放/暫停", "スペースで再生/一時停止", "스페이스바 재생/일시정지", "Space toggles playback" } }
+    ,{ "settings.confirmDestructive", { "删除前确认", "刪除前確認", "削除前に確認", "삭제 전 확인", "Confirm before delete" } }
+    ,{ "settings.melodyneCompose", { "Melodyne Compose 默认方式", "Melodyne Compose 預設方式", "Melodyne Composeの既定値", "Melodyne Compose 기본값", "Default Melodyne Compose" } }
+    ,{ "settings.melodynePitch", { "Melodyne 原音高来源", "Melodyne 原音高來源", "Melodyne元ピッチの取得元", "Melodyne 원본 피치 소스", "Melodyne Source Pitch" } }
+    ,{ "settings.importAlgorithm", { "导入工程默认算法", "匯入工程預設演算法", "読込時の既定アルゴリズム", "가져오기 기본 알고리즘", "Default Import Algorithm" } }
+    ,{ "settings.preserveEdits", { "保留工程中的音符、分界、Attack、音量和音色编辑", "保留工程中的音符、分界、Attack、音量與音色編輯", "ノート・境界・Attack・音量・音色の編集を保持", "노트·경계·Attack·음량·음색 편집 유지", "Preserve notes, boundaries, Attack, level and timbre edits" } }
+    ,{ "settings.recursiveMedia", { "递归查找缺失素材", "遞迴尋找遺失素材", "不足素材を再帰検索", "누락 미디어 재귀 검색", "Search recursively for missing media" } }
+    ,{ "sample.alias", { "别名", "別名", "エイリアス", "별칭", "Alias" } }
+    ,{ "sample.start", { "起点", "起點", "開始", "시작", "Start" } }
+    ,{ "sample.end", { "终点", "終點", "終了", "끝", "End" } }
+    ,{ "sample.alignment", { "对齐", "對齊", "整列", "정렬", "Align" } }
+    ,{ "sample.fixed", { "辅音", "子音", "子音", "자음", "Fixed" } }
+    ,{ "sample.save", { "保存设定", "儲存設定", "設定を保存", "설정 저장", "Save Settings" } }
+    ,{ "sample.saved", { "音频设定已保存", "音訊設定已儲存", "音声設定を保存しました", "오디오 설정 저장됨", "Audio settings saved" } }
+    ,{ "sample.importOto", { "读取 oto", "讀取 oto", "oto読込", "oto 읽기", "Import oto" } }
+    ,{ "sample.exportOto", { "导出 oto", "匯出 oto", "oto書出", "oto 내보내기", "Export oto" } }
+    ,{ "asset.title", { "素材管理器", "素材管理器", "素材マネージャー", "소재 관리자", "Asset Manager" } }
+    ,{ "asset.register", { "注册音频素材", "註冊音訊素材", "音声素材を登録", "오디오 소재 등록", "Register Audio Assets" } }
+    ,{ "asset.remove", { "移除", "移除", "削除", "제거", "Remove" } }
+    ,{ "asset.empty", { "把音频拖入此处注册；注册后可拖到时间线或钢琴卷帘。", "將音訊拖入此處註冊；註冊後可拖到時間軸或鋼琴捲簾。", "音声をここへドロップして登録し、タイムラインまたはピアノロールへドラッグできます。", "오디오를 여기에 놓아 등록한 뒤 타임라인이나 피아노 롤로 끌 수 있습니다.", "Drop audio here to register it, then drag it to the timeline or piano roll." } }
 };
 }
 

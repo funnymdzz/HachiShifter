@@ -661,6 +661,13 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             note.sourceMidiCenter = std::clamp(sourceCenter / 100.0f, 0.0f, 127.0f);
             note.drift = static_cast<float>(graph.number(element, "pitchDriftFactor").value_or(1.0));
             note.modulation = static_cast<float>(graph.number(element, "pitchModulationFactor").value_or(1.0));
+            // These are element edits, not analysis defaults.  Dropping them
+            // made a saved Melodyne voice colour disappear on import even
+            // though pitch and timing were restored correctly.
+            note.formantSemitones = static_cast<float>(std::clamp(
+                graph.number(element, "formantOffset").value_or(0.0) / 100.0, -12.0, 12.0));
+            note.breath = static_cast<float>(std::clamp(
+                graph.number(element, "sibilantBalance").value_or(0.0), 0.0, 1.0));
             note.attackSpeed = static_cast<float>(std::max(1.0e-6,
                 graph.number(element, "sourceTimeForElementTimeFunctionAttackSlope").value_or(1.0)));
             note.connectedToPrevious = connectedPrevious.contains(element);

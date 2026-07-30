@@ -50,7 +50,9 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
                                                  const std::vector<float>& formantSemitones,
                                                  const std::vector<float>& noteGain,
                                                  const std::vector<float>& breath,
-                                                 const std::vector<TimeMapPoint>& timeMap)
+                                                 const std::vector<TimeMapPoint>& timeMap,
+                                                 int pitchAlgorithm,
+                                                 int stretchAlgorithm)
 {
     const auto sourceSamples = source.getNumSamples();
     const auto channels = source.getNumChannels();
@@ -74,21 +76,59 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             hasTimeWarp = true;
             break;
         }
-    auto hasExpressionEdit = false;
+    auto hasFormantEdit = false;
+    auto hasLevelEdit = false;
     for (const auto value : formantSemitones)
-        hasExpressionEdit = hasExpressionEdit || std::abs(value) > 1.0e-4f;
+        hasFormantEdit = hasFormantEdit || std::abs(value) > 1.0e-4f;
     for (const auto value : noteGain)
-        hasExpressionEdit = hasExpressionEdit || std::abs(value - 1.0f) > 1.0e-4f;
+        hasLevelEdit = hasLevelEdit || std::abs(value - 1.0f) > 1.0e-4f;
     for (const auto value : breath)
-        hasExpressionEdit = hasExpressionEdit || value > 1.0e-4f;
-    if (!hasTimeWarp && !hasPitchEdit && !hasExpressionEdit) return source;
+        hasLevelEdit = hasLevelEdit || value > 1.0e-4f;
+    if (!hasTimeWarp && !hasPitchEdit && !hasFormantEdit && !hasLevelEdit) return source;
+
+    // Gain and breath are amplitude/spectral expression controls.  Sending an
+    // otherwise untouched note through an identity phase vocoder created the
+    // audible doubled/echoed voice reported on the native rewrite.  Keep that
+    // path sample-exact and apply expression below without a phase transform.
+    const auto needsSpectralRender = hasTimeWarp || hasPitchEdit || hasFormantEdit;
+    juce::AudioBuffer<float> result;
+    if (!needsSpectralRender)
+    {
+        result = source;
+        for (int channel = 0; channel < channels; ++channel)
+        {
+            auto low = result.getSample(channel, 0);
+            const auto lowCoefficient = static_cast<float>(
+                1.0 - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
+            for (int sample = 0; sample < targetSamples; ++sample)
+            {
+                const auto curvePosition = static_cast<double>(sample) / sampleRate
+                    * 1000.0 / std::max(0.1, framePeriodMs);
+                const auto gain = juce::jlimit(0.0f, 4.0f,
+                    valueAt(noteGain, curvePosition, 1.0f));
+                const auto air = juce::jlimit(0.0f, 1.0f,
+                    valueAt(breath, curvePosition, 0.0f));
+                const auto current = result.getSample(channel, sample);
+                low += lowCoefficient * (current - low);
+                result.setSample(channel, sample,
+                    (current + (current - low) * air * 0.22f) * gain);
+            }
+        }
+        return result;
+    }
 
     // Signalsmith's phase-coherent stretcher is used as the native model-free
     // component stage.  Formant compensation is explicitly enabled: pitch and
     // duration move independently while the vocal-tract envelope remains at
     // the source frequencies.  A fixed seed makes cache renders repeatable.
     signalsmith::stretch::SignalsmithStretch<float> stretch(0x48414348L);
-    stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
+    // The selected algorithms now affect the native fallback instead of being
+    // UI-only state.  mld5/Melodyne Hybrid uses the higher-resolution preset;
+    // the lighter WORLD/vslib/SoundTouch fallbacks use the cheaper preset.
+    if (pitchAlgorithm == 0 && stretchAlgorithm == 0)
+        stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
+    else
+        stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
     stretch.setFormantSemitones(valueAt(formantSemitones, 0.0, 0.0f), true);
     stretch.setFormantBase(200.0f / static_cast<float>(sampleRate));
 
@@ -121,9 +161,6 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         last.sourceFrames += sourceSamples - (last.sourceStart + last.sourceFrames);
         last.targetFrames += targetSamples - (last.targetStart + last.targetFrames);
     }
-    const auto playbackRate = static_cast<double>(chunks.front().sourceFrames)
-        / static_cast<double>(std::max(1, chunks.front().targetFrames));
-
     std::vector<std::vector<float>> paddedInput(static_cast<std::size_t>(channels));
     std::vector<std::vector<float>> allOutput(static_cast<std::size_t>(channels));
     for (int channel = 0; channel < channels; ++channel)
@@ -149,16 +186,13 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         stretch.setFormantBase(juce::jlimit(45.0f, 1'200.0f, sourceHz)
                                / static_cast<float>(sampleRate));
     }
-    if (inputLatency > 0)
-    {
-        std::vector<const float*> seekPointers(static_cast<std::size_t>(channels));
-        for (int channel = 0; channel < channels; ++channel)
-            seekPointers[static_cast<std::size_t>(channel)] =
-                paddedInput[static_cast<std::size_t>(channel)].data();
-        stretch.seek(seekPointers.data(), inputLatency, playbackRate);
-    }
-
-    constexpr int blockSize = 512;
+    // Do not call seek() with the first inputLatency samples and then advance
+    // the source pointer by inputLatency.  That discarded the beginning of
+    // every element (often 50-80 ms), shifted the F0 curve relative to audio,
+    // and made the internal overlap sound like an echo.  Starting at sample 0
+    // and cropping the documented output latency after flush keeps both clocks
+    // aligned.
+    constexpr int blockSize = 128;
     auto outputProduced = 0;
     const auto framePeriod = std::max(0.1, framePeriodMs);
     for (const auto& chunk : chunks)
@@ -197,7 +231,7 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         for (int channel = 0; channel < channels; ++channel)
         {
             inputPointers[static_cast<std::size_t>(channel)] =
-                paddedInput[static_cast<std::size_t>(channel)].data() + inputLatency
+                paddedInput[static_cast<std::size_t>(channel)].data()
                     + chunk.sourceStart + chunkInput;
             auto& block = blockBuffers[static_cast<std::size_t>(channel)];
             block.resize(static_cast<std::size_t>(blockOutput), 0.0f);
@@ -236,17 +270,20 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         }
     }
 
-    juce::AudioBuffer<float> result(channels, targetSamples);
-    result.clear();
-    for (int channel = 0; channel < channels; ++channel)
+    if (needsSpectralRender)
     {
-        auto* destination = result.getWritePointer(channel);
-        const auto& output = allOutput[static_cast<std::size_t>(channel)];
-        for (int sample = 0; sample < targetSamples; ++sample)
+        result.setSize(channels, targetSamples);
+        result.clear();
+        for (int channel = 0; channel < channels; ++channel)
         {
-            const auto sourceIndex = static_cast<std::size_t>(outputLatency + sample);
-            destination[sample] = sourceIndex < output.size() && std::isfinite(output[sourceIndex])
-                ? output[sourceIndex] : 0.0f;
+            auto* destination = result.getWritePointer(channel);
+            const auto& output = allOutput[static_cast<std::size_t>(channel)];
+            for (int sample = 0; sample < targetSamples; ++sample)
+            {
+                const auto sourceIndex = static_cast<std::size_t>(outputLatency + sample);
+                destination[sample] = sourceIndex < output.size() && std::isfinite(output[sourceIndex])
+                    ? output[sourceIndex] : 0.0f;
+            }
         }
     }
 
@@ -269,12 +306,17 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     }
     const auto sourceRms = std::sqrt(sourcePower / std::max(1, channels * sourceSamples));
     const auto outputRms = std::sqrt(outputPower / std::max(1, channels * targetSamples));
-    if (sourceRms > 1.0e-7 && outputRms > 1.0e-7)
+    if (needsSpectralRender && sourceRms > 1.0e-7 && outputRms > 1.0e-7)
         result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8, sourceRms / outputRms)));
 
     for (int channel = 0; channel < channels; ++channel)
     {
-        auto previous = result.getSample(channel, 0);
+        // Stable one-pole air shelf.  The previous first-difference boost
+        // exaggerated sample-to-sample phase errors and could turn preserved
+        // timbre into a metallic/raspy voice.
+        auto low = result.getSample(channel, 0);
+        const auto lowCoefficient = static_cast<float>(
+            1.0 - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
         for (int sample = 0; sample < targetSamples; ++sample)
         {
             const auto curvePosition = static_cast<double>(sample) / sampleRate
@@ -284,9 +326,9 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             const auto air = juce::jlimit(0.0f, 1.0f,
                 valueAt(breath, curvePosition, 0.0f));
             const auto current = result.getSample(channel, sample);
-            const auto highBand = current - previous;
-            result.setSample(channel, sample, (current + highBand * air * 0.65f) * gain);
-            previous = current;
+            low += lowCoefficient * (current - low);
+            const auto highBand = current - low;
+            result.setSample(channel, sample, (current + highBand * air * 0.22f) * gain);
         }
     }
 
@@ -379,7 +421,8 @@ public:
         auto rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                                                request.framePeriodMs, request.sourceMidi,
                                                request.targetMidi, request.formantSemitones,
-                                               request.noteGain, request.breath, request.timeMap);
+                                               request.noteGain, request.breath, request.timeMap,
+                                               request.pitchAlgorithm, request.stretchAlgorithm);
         RenderedAudio result { std::move(rendered), reader->sampleRate };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable

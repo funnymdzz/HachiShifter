@@ -2,29 +2,60 @@
 
 namespace hachi
 {
-const juce::Colour Palette::background  { 0xff353535 };
-const juce::Colour Palette::base        { 0xff2d2d2d };
-const juce::Colour Palette::panel       { 0xff2a2a2a };
-const juce::Colour Palette::panelRaised { 0xff404040 };
-const juce::Colour Palette::button      { 0xff3d3d3d };
-const juce::Colour Palette::buttonHover { 0xff484848 };
-const juce::Colour Palette::border      { 0xff505050 };
-const juce::Colour Palette::graphBackground { 0xff232323 };
-const juce::Colour Palette::clipBackground  { 0xff343434 };
-const juce::Colour Palette::grid        { 0xff373737 };
-const juce::Colour Palette::beatGrid    { 0xff4a4a4a };
-const juce::Colour Palette::accent      { 0xff7f69ca };
-const juce::Colour Palette::accentLight { 0xffcbcbfa };
-const juce::Colour Palette::noteFill    { 0xfff4c000 };
-const juce::Colour Palette::noteLight   { 0xffcbcbfa };
-const juce::Colour Palette::noteEdge    { 0xff7f69ca };
-const juce::Colour Palette::pitchLine   { 0xfff4f4f4 };
-const juce::Colour Palette::playhead    { 0xfff05a5a };
-const juce::Colour Palette::text        { 0xffd0d0d0 };
-const juce::Colour Palette::textMuted   { 0xff909090 };
-const juce::Colour Palette::scrollThumb { 0xff555555 };
+juce::Colour Palette::background  { 0xff353535 };
+juce::Colour Palette::base        { 0xff2d2d2d };
+juce::Colour Palette::panel       { 0xff2a2a2a };
+juce::Colour Palette::panelRaised { 0xff404040 };
+juce::Colour Palette::button      { 0xff3d3d3d };
+juce::Colour Palette::buttonHover { 0xff484848 };
+juce::Colour Palette::border      { 0xff505050 };
+juce::Colour Palette::graphBackground { 0xff232323 };
+juce::Colour Palette::clipBackground  { 0xff343434 };
+juce::Colour Palette::grid        { 0xff373737 };
+juce::Colour Palette::beatGrid    { 0xff4a4a4a };
+juce::Colour Palette::accent      { 0xff7f69ca };
+juce::Colour Palette::accentLight { 0xffcbcbfa };
+juce::Colour Palette::noteFill    { 0xfff4c000 };
+juce::Colour Palette::noteLight   { 0xffcbcbfa };
+juce::Colour Palette::noteEdge    { 0xff7f69ca };
+juce::Colour Palette::pitchLine   { 0xfff4f4f4 };
+juce::Colour Palette::playhead    { 0xfff05a5a };
+juce::Colour Palette::text        { 0xffd0d0d0 };
+juce::Colour Palette::textMuted   { 0xff909090 };
+juce::Colour Palette::scrollThumb { 0xff555555 };
+
+void Palette::applyTheme(const juce::String& theme, juce::Colour accentColour,
+                         juce::Colour accentLightColour, juce::Colour noteColour)
+{
+    const auto light = theme == "light";
+    background = light ? juce::Colour(0xffeeeeee) : juce::Colour(0xff353535);
+    base = light ? juce::Colour(0xfffafafa) : juce::Colour(0xff2d2d2d);
+    panel = light ? juce::Colour(0xfff3f3f3) : juce::Colour(0xff2a2a2a);
+    panelRaised = light ? juce::Colour(0xffe2e2e2) : juce::Colour(0xff404040);
+    button = light ? juce::Colour(0xffdedede) : juce::Colour(0xff3d3d3d);
+    buttonHover = light ? juce::Colour(0xffd2d2d2) : juce::Colour(0xff484848);
+    border = light ? juce::Colour(0xffbcbcbc) : juce::Colour(0xff505050);
+    graphBackground = light ? juce::Colour(0xfff8f8f8) : juce::Colour(0xff232323);
+    clipBackground = light ? juce::Colour(0xffe9e9e9) : juce::Colour(0xff343434);
+    grid = light ? juce::Colour(0xffdddddd) : juce::Colour(0xff373737);
+    beatGrid = light ? juce::Colour(0xffc9c9c9) : juce::Colour(0xff4a4a4a);
+    text = light ? juce::Colour(0xff282828) : juce::Colour(0xffd0d0d0);
+    textMuted = light ? juce::Colour(0xff6f6f6f) : juce::Colour(0xff909090);
+    scrollThumb = light ? juce::Colour(0xffa9a9a9) : juce::Colour(0xff555555);
+    pitchLine = light ? juce::Colour(0xff242424) : juce::Colour(0xfff4f4f4);
+    accent = accentColour;
+    accentLight = accentLightColour;
+    noteFill = noteColour;
+    noteLight = accentLightColour;
+    noteEdge = accentColour;
+}
 
 HachiLookAndFeel::HachiLookAndFeel()
+{
+    refreshColours();
+}
+
+void HachiLookAndFeel::refreshColours()
 {
     setColour(juce::ResizableWindow::backgroundColourId, Palette::background);
     setColour(juce::Label::textColourId, Palette::text);

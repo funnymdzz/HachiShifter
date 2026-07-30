@@ -6,6 +6,7 @@
 
 namespace hachi
 {
+struct SampleRegionSetting;
 enum class PitchAlgorithm
 {
     mld5,
@@ -116,6 +117,8 @@ public:
     void setTrackSolo(const juce::String& trackId, bool solo);
     void setTrackVolume(const juce::String& trackId, float volume);
     void setTrackPan(const juce::String& trackId, float pan);
+    void setTrackPitchAlgorithm(const juce::String& trackId, PitchAlgorithm algorithm);
+    void setTrackStretchAlgorithm(const juce::String& trackId, StretchAlgorithm algorithm);
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
     void moveClip(const juce::String& clipId, double startSeconds);
@@ -135,6 +138,8 @@ public:
     void removeNote(const juce::String& noteId);
     void removeNotes(const std::vector<juce::String>& noteIds);
     void toggleNoteConnection(const juce::String& noteId);
+    void applySourceSettings(const juce::File& source,
+                             const std::vector<SampleRegionSetting>& rows);
 
     bool save(const juce::File& file, juce::String& error) const;
     bool load(const juce::File& file, juce::String& error);

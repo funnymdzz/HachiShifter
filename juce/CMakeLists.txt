@@ -44,6 +44,12 @@ target_sources(HachiShifterNext PRIVATE
     src/Theme.h
     src/I18n.cpp
     src/I18n.h
+    src/SettingsComponent.cpp
+    src/SettingsComponent.h
+    src/SampleSettings.cpp
+    src/SampleSettings.h
+    src/AssetManagerComponent.cpp
+    src/AssetManagerComponent.h
     src/backend/Mld5Renderer.cpp
     src/backend/Mld5Renderer.h
     src/backend/MelodyneImporter.cpp

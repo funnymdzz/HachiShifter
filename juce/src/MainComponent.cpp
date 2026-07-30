@@ -54,6 +54,14 @@ private:
 MainComponent::MainComponent()
     : menuBar(this), progressBar(progress), trackList(project, strings), timeline(project), pianoRoll(project)
 {
+    juce::PropertiesFile::Options options;
+    options.applicationName = "HachiShifterNext";
+    options.filenameSuffix = "settings";
+    options.folderName = "HachiShifterNext";
+    options.osxLibrarySubFolder = "Application Support";
+    options.storageFormat = juce::PropertiesFile::storeAsXML;
+    preferences = std::make_unique<juce::PropertiesFile>(options);
+    applyPreferences();
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
     setWantsKeyboardFocus(true);
@@ -74,13 +82,26 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&gridSelector),
                              static_cast<juce::Component*>(&scaleCaption),
                              static_cast<juce::Component*>(&scaleSelector),
-                             static_cast<juce::Component*>(&languageSelector),
                              static_cast<juce::Component*>(&pitchAlgorithm),
                              static_cast<juce::Component*>(&stretchAlgorithm),
                              static_cast<juce::Component*>(&pitchLabel),
                              static_cast<juce::Component*>(&stretchLabel),
                              static_cast<juce::Component*>(&statusLabel),
                              static_cast<juce::Component*>(&sourceEditHint),
+                             static_cast<juce::Component*>(&sampleRegionSelector),
+                             static_cast<juce::Component*>(&sampleAliasEditor),
+                             static_cast<juce::Component*>(&sampleStartEditor),
+                             static_cast<juce::Component*>(&sampleEndEditor),
+                             static_cast<juce::Component*>(&sampleAlignmentEditor),
+                             static_cast<juce::Component*>(&sampleFixedEditor),
+                             static_cast<juce::Component*>(&sampleAliasLabel),
+                             static_cast<juce::Component*>(&sampleStartLabel),
+                             static_cast<juce::Component*>(&sampleEndLabel),
+                             static_cast<juce::Component*>(&sampleAlignmentLabel),
+                             static_cast<juce::Component*>(&sampleFixedLabel),
+                             static_cast<juce::Component*>(&sampleSaveButton),
+                             static_cast<juce::Component*>(&otoImportButton),
+                             static_cast<juce::Component*>(&otoExportButton),
                              static_cast<juce::Component*>(&parameterTitle),
                              static_cast<juce::Component*>(&smoothCaption),
                              static_cast<juce::Component*>(&smoothSlider),
@@ -94,6 +115,28 @@ MainComponent::MainComponent()
 
     panelSplitter.setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
     panelSplitter.addMouseListener(this, false);
+
+    for (auto* editor : { &sampleAliasEditor, &sampleStartEditor, &sampleEndEditor,
+                          &sampleAlignmentEditor, &sampleFixedEditor })
+        editor->setSelectAllWhenFocused(true);
+    for (auto* editor : { &sampleStartEditor, &sampleEndEditor,
+                          &sampleAlignmentEditor, &sampleFixedEditor })
+        editor->setInputRestrictions(14, "0123456789.-");
+    sampleRegionSelector.onChange = [this]
+    {
+        commitSampleEditors();
+        activeSampleSetting = std::max(0, sampleRegionSelector.getSelectedItemIndex());
+        refreshSampleEditors();
+    };
+    const auto commit = [this] { commitSampleEditors(); };
+    sampleAliasEditor.onFocusLost = commit;
+    sampleStartEditor.onFocusLost = commit;
+    sampleEndEditor.onFocusLost = commit;
+    sampleAlignmentEditor.onFocusLost = commit;
+    sampleFixedEditor.onFocusLost = commit;
+    sampleSaveButton.onClick = [this] { saveSampleSettings(); };
+    otoImportButton.onClick = [this] { importOto(); };
+    otoExportButton.onClick = [this] { exportOto(); };
 
     openButton.setComponentID("icon.open");
     saveButton.setComponentID("icon.save");
@@ -142,20 +185,6 @@ MainComponent::MainComponent()
     gridSelector.onChange = [this] { project.setGridDivision(gridSelector.getText()); };
     scaleSelector.onChange = [this] { project.setBaseScale(scaleSelector.getText()); };
 
-    languageSelector.addItem("简体中文", 1);
-    languageSelector.addItem("繁體中文", 2);
-    languageSelector.addItem("日本語", 3);
-    languageSelector.addItem("한국어", 4);
-    languageSelector.addItem("English", 5);
-    languageSelector.setSelectedId(static_cast<int>(strings.getLanguage()) + 1, juce::dontSendNotification);
-    languageSelector.onChange = [this]
-    {
-        strings.setLanguage(static_cast<I18n::Language>(languageSelector.getSelectedId() - 1));
-        refreshTexts();
-        menuItemsChanged();
-        trackList.repaint();
-    };
-
     trackViewport.setViewedComponent(&trackList, false);
     trackViewport.setScrollBarsShown(true, false);
     trackViewport.setScrollBarThickness(10);
@@ -177,18 +206,31 @@ MainComponent::MainComponent()
         const auto id = pitchAlgorithm.getSelectedId();
         const auto previousStretch = stretchAlgorithm.getSelectedId();
         refreshStretchAlgorithmItems(previousStretch);
-        project.setPitchAlgorithm(id == 2 ? PitchAlgorithm::nsfHifigan
-                                  : id == 3 ? PitchAlgorithm::world
-                                  : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5);
+        const auto algorithm = id == 2 ? PitchAlgorithm::nsfHifigan
+            : id == 3 ? PitchAlgorithm::world
+            : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
+        if (selectedTrackId.isNotEmpty())
+            project.setTrackPitchAlgorithm(selectedTrackId, algorithm);
+        else
+            project.setPitchAlgorithm(algorithm);
         if (previousStretch != stretchAlgorithm.getSelectedId())
-            project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
+        {
+            if (selectedTrackId.isNotEmpty())
+                project.setTrackStretchAlgorithm(selectedTrackId, StretchAlgorithm::melodyneHybrid);
+            else
+                project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
+        }
     };
     stretchAlgorithm.onChange = [this]
     {
         const auto id = stretchAlgorithm.getSelectedId();
-        project.setStretchAlgorithm(id == 2 ? StretchAlgorithm::variableMelHop
-                                    : id == 3 ? StretchAlgorithm::loop
-                                    : id == 4 ? StretchAlgorithm::soundTouch : StretchAlgorithm::melodyneHybrid);
+        const auto algorithm = id == 2 ? StretchAlgorithm::variableMelHop
+            : id == 3 ? StretchAlgorithm::loop
+            : id == 4 ? StretchAlgorithm::soundTouch : StretchAlgorithm::melodyneHybrid;
+        if (selectedTrackId.isNotEmpty())
+            project.setTrackStretchAlgorithm(selectedTrackId, algorithm);
+        else
+            project.setStretchAlgorithm(algorithm);
     };
 
     smoothSlider.setRange(0.0, 100.0, 1.0);
@@ -228,7 +270,11 @@ MainComponent::MainComponent()
         refreshSelectedNoteParameter();
     };
     trackList.peakProvider = [this](const juce::String& trackId) { return audio.trackPeak(trackId); };
-    trackList.onTrackSelected = [this](const juce::String& trackId) { selectedTrackId = trackId; };
+    trackList.onTrackSelected = [this](const juce::String& trackId)
+    {
+        selectedTrackId = trackId;
+        refreshProjectControls();
+    };
 
     openButton.onClick = [this] { openProject(); };
     saveButton.onClick = [this] { saveProject(); };
@@ -308,6 +354,25 @@ MainComponent::~MainComponent()
     setLookAndFeel(nullptr);
 }
 
+void MainComponent::applyPreferences()
+{
+    if (preferences == nullptr) return;
+    strings.setLanguage(static_cast<I18n::Language>(juce::jlimit(1, 5,
+        preferences->getIntValue("ui.language", static_cast<int>(strings.getLanguage()) + 1)) - 1));
+    const auto parseColour = [](juce::String value, juce::Colour fallback)
+    {
+        value = value.trim().removeCharacters("#");
+        if (value.length() != 6 && value.length() != 8) return fallback;
+        if (value.length() == 6) value = "ff" + value;
+        return juce::Colour::fromString(value);
+    };
+    Palette::applyTheme(preferences->getValue("ui.theme", "dark"),
+        parseColour(preferences->getValue("ui.accent", "7F69CA"), juce::Colour(0xff7f69ca)),
+        parseColour(preferences->getValue("ui.accentLight", "CBCBFA"), juce::Colour(0xffcbcbfa)),
+        parseColour(preferences->getValue("ui.noteColour", "F4C000"), juce::Colour(0xfff4c000)));
+    lookAndFeel.refreshColours();
+}
+
 void MainComponent::refreshTexts()
 {
     openButton.setButtonText({});
@@ -351,6 +416,14 @@ void MainComponent::refreshTexts()
     stretchAlgorithm.setTooltip(strings.text("algo.stretch"));
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
+    sampleAliasLabel.setText(strings.text("sample.alias"), juce::dontSendNotification);
+    sampleStartLabel.setText(strings.text("sample.start"), juce::dontSendNotification);
+    sampleEndLabel.setText(strings.text("sample.end"), juce::dontSendNotification);
+    sampleAlignmentLabel.setText(strings.text("sample.alignment"), juce::dontSendNotification);
+    sampleFixedLabel.setText(strings.text("sample.fixed"), juce::dontSendNotification);
+    sampleSaveButton.setButtonText(strings.text("sample.save"));
+    otoImportButton.setButtonText(strings.text("sample.importOto"));
+    otoExportButton.setButtonText(strings.text("sample.exportOto"));
     refreshSelectedNoteParameter();
 }
 
@@ -362,9 +435,14 @@ void MainComponent::refreshProjectControls()
     beatsEditor.setText(juce::String(data.numerator), juce::dontSendNotification);
     gridSelector.setText(data.gridDivision, juce::dontSendNotification);
     scaleSelector.setText(data.baseScale, juce::dontSendNotification);
-    if (const auto selected = std::find_if(data.tracks.begin(), data.tracks.end(),
-                                           [](const auto& track) { return track.compose; });
-        selected != data.tracks.end())
+    auto selected = selectedTrackId.isNotEmpty()
+        ? std::find_if(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track) { return track.id == selectedTrackId && track.compose; })
+        : data.tracks.end();
+    if (selected == data.tracks.end())
+        selected = std::find_if(data.tracks.begin(), data.tracks.end(),
+                                [](const auto& track) { return track.compose; });
+    if (selected != data.tracks.end())
     {
         const auto pitchId = selected->pitchAlgorithm == PitchAlgorithm::nsfHifigan ? 2
             : selected->pitchAlgorithm == PitchAlgorithm::world ? 3
@@ -606,7 +684,6 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds();
     auto menu = area.removeFromTop(27);
-    languageSelector.setBounds(menu.removeFromRight(112).reduced(2));
     menuBar.setBounds(menu);
     auto toolbar = area.removeFromTop(34).reduced(5, 3);
     auto take = [&toolbar](juce::Component& component, int width)
@@ -636,7 +713,8 @@ void MainComponent::resized()
 
     auto footer = area.removeFromBottom(24);
     statusLabel.setBounds(footer.reduced(8, 0));
-    const auto splitAvailable = std::max(1, area.getHeight() - 8 - 36);
+    const auto sampleEditorHeight = sourceEditActive ? 36 : 0;
+    const auto splitAvailable = std::max(1, area.getHeight() - 8 - 36 - sampleEditorHeight);
     const auto upperHeight = juce::jlimit(150, std::max(150, splitAvailable - 120),
         static_cast<int>(std::round(static_cast<float>(splitAvailable) * panelSplitRatio)));
     auto upper = area.removeFromTop(upperHeight);
@@ -675,6 +753,36 @@ void MainComponent::resized()
     takeParameter(formantParamButton, 58);
     takeParameter(volumeParamButton, 58);
     sourceEditHint.setBounds(parameterHeader.reduced(3, 0));
+    auto sampleBar = area.removeFromTop(sampleEditorHeight).reduced(4, 3);
+    auto setSampleVisible = [this](bool visible)
+    {
+        for (auto* component : { static_cast<juce::Component*>(&sampleRegionSelector),
+             static_cast<juce::Component*>(&sampleAliasEditor), static_cast<juce::Component*>(&sampleStartEditor),
+             static_cast<juce::Component*>(&sampleEndEditor), static_cast<juce::Component*>(&sampleAlignmentEditor),
+             static_cast<juce::Component*>(&sampleFixedEditor), static_cast<juce::Component*>(&sampleAliasLabel),
+             static_cast<juce::Component*>(&sampleStartLabel), static_cast<juce::Component*>(&sampleEndLabel),
+             static_cast<juce::Component*>(&sampleAlignmentLabel), static_cast<juce::Component*>(&sampleFixedLabel),
+             static_cast<juce::Component*>(&sampleSaveButton), static_cast<juce::Component*>(&otoImportButton),
+             static_cast<juce::Component*>(&otoExportButton) }) component->setVisible(visible);
+    };
+    setSampleVisible(sourceEditActive);
+    if (sourceEditActive)
+    {
+        const auto takeSample = [&sampleBar](juce::Component& component, int width)
+        {
+            component.setBounds(sampleBar.removeFromLeft(width));
+            sampleBar.removeFromLeft(3);
+        };
+        takeSample(sampleRegionSelector, 104);
+        takeSample(sampleAliasLabel, 34); takeSample(sampleAliasEditor, 100);
+        takeSample(sampleStartLabel, 34); takeSample(sampleStartEditor, 64);
+        takeSample(sampleEndLabel, 30); takeSample(sampleEndEditor, 64);
+        takeSample(sampleAlignmentLabel, 44); takeSample(sampleAlignmentEditor, 64);
+        takeSample(sampleFixedLabel, 44); takeSample(sampleFixedEditor, 64);
+        takeSample(sampleSaveButton, 64);
+        takeSample(otoImportButton, 82);
+        takeSample(otoExportButton, 82);
+    }
     pianoViewport.setBounds(area);
     if (!pianoInitialScrollSet && pianoViewport.getHeight() > 0)
     {
@@ -848,6 +956,7 @@ void MainComponent::setSourceEditMode(bool enabled)
                                                               - pianoViewport.getViewWidth() / 4),
                                                   pianoViewport.getViewPositionY());
                 }
+        loadSampleSettings();
     }
     else
     {
@@ -857,6 +966,7 @@ void MainComponent::setSourceEditMode(bool enabled)
     noteEditButton.setToggleState(!enabled, juce::dontSendNotification);
     wrenchButton.setToggleState(enabled, juce::dontSendNotification);
     sourceEditHint.setVisible(enabled);
+    resized();
 }
 
 void MainComponent::focusClip(const juce::String& clipId)
@@ -877,9 +987,132 @@ void MainComponent::focusClip(const juce::String& clipId)
                 audio.setAuditionFile(clip.sourceFile);
                 pianoViewport.setViewPosition(std::max(0, pianoRoll.pixelForSeconds(clip.sourceOffsetSeconds)
                                                           - pianoViewport.getViewWidth() / 4),
-                                              pianoViewport.getViewPositionY());
+                                                  pianoViewport.getViewPositionY());
+                loadSampleSettings();
                 return;
             }
+}
+
+void MainComponent::loadSampleSettings()
+{
+    sampleSettingsFile = {};
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.id == selectedClipId)
+                sampleSettingsFile = clip.sourceFile;
+    sampleSettingsRows = sampleSettingsFile.existsAsFile()
+        ? SampleSettings::loadOrDerive(sampleSettingsFile, data)
+        : std::vector<SampleRegionSetting>{};
+    activeSampleSetting = 0;
+    sampleRegionSelector.clear(juce::dontSendNotification);
+    for (std::size_t index = 0; index < sampleSettingsRows.size(); ++index)
+        sampleRegionSelector.addItem(juce::String(index + 1) + " · "
+                                     + sampleSettingsRows[index].name,
+                                     static_cast<int>(index + 1));
+    if (!sampleSettingsRows.empty())
+        sampleRegionSelector.setSelectedId(1, juce::dontSendNotification);
+    refreshSampleEditors();
+}
+
+void MainComponent::refreshSampleEditors()
+{
+    const auto enabled = activeSampleSetting >= 0
+        && activeSampleSetting < static_cast<int>(sampleSettingsRows.size());
+    for (auto* editor : { &sampleAliasEditor, &sampleStartEditor, &sampleEndEditor,
+                          &sampleAlignmentEditor, &sampleFixedEditor }) editor->setEnabled(enabled);
+    if (!enabled)
+    {
+        for (auto* editor : { &sampleAliasEditor, &sampleStartEditor, &sampleEndEditor,
+                              &sampleAlignmentEditor, &sampleFixedEditor }) editor->clear();
+        return;
+    }
+    const auto& row = sampleSettingsRows[static_cast<std::size_t>(activeSampleSetting)];
+    sampleAliasEditor.setText(row.name, false);
+    sampleStartEditor.setText(juce::String(row.regionStartSeconds, 4), false);
+    sampleEndEditor.setText(juce::String(row.regionEndSeconds, 4), false);
+    sampleAlignmentEditor.setText(juce::String(row.alignmentSeconds, 4), false);
+    sampleFixedEditor.setText(juce::String(row.fixedDurationSeconds, 4), false);
+}
+
+void MainComponent::commitSampleEditors()
+{
+    if (activeSampleSetting < 0
+        || activeSampleSetting >= static_cast<int>(sampleSettingsRows.size())) return;
+    auto& row = sampleSettingsRows[static_cast<std::size_t>(activeSampleSetting)];
+    row.name = sampleAliasEditor.getText().trim();
+    row.regionStartSeconds = std::max(0.0, sampleStartEditor.getText().getDoubleValue());
+    row.regionEndSeconds = std::max(row.regionStartSeconds + 0.001,
+                                    sampleEndEditor.getText().getDoubleValue());
+    row.alignmentSeconds = juce::jlimit(row.regionStartSeconds, row.regionEndSeconds,
+                                        sampleAlignmentEditor.getText().getDoubleValue());
+    row.fixedDurationSeconds = juce::jlimit(0.0, row.regionEndSeconds - row.regionStartSeconds,
+                                            sampleFixedEditor.getText().getDoubleValue());
+    sampleRegionSelector.changeItemText(activeSampleSetting + 1,
+        juce::String(activeSampleSetting + 1) + " · " + row.name);
+}
+
+void MainComponent::saveSampleSettings()
+{
+    commitSampleEditors();
+    if (!sampleSettingsFile.existsAsFile() || sampleSettingsRows.empty()) return;
+    juce::String error;
+    if (!SampleSettings::save(sampleSettingsFile, sampleSettingsRows, error))
+    {
+        showError(error);
+        return;
+    }
+    project.applySourceSettings(sampleSettingsFile, sampleSettingsRows);
+    statusLabel.setText(strings.text("sample.saved") + "  "
+                        + SampleSettings::sidecarFor(sampleSettingsFile).getFullPathName(),
+                        juce::dontSendNotification);
+}
+
+void MainComponent::importOto()
+{
+    chooser = std::make_unique<juce::FileChooser>(strings.text("sample.importOto"),
+                                                   sampleSettingsFile.getParentDirectory(),
+                                                   "oto.ini;*.ini");
+    chooser->launchAsync(juce::FileBrowserComponent::openMode
+                             | juce::FileBrowserComponent::canSelectFiles,
+        [this](const juce::FileChooser& selected)
+        {
+            const auto file = selected.getResult();
+            if (file == juce::File{}) return;
+            juce::String error;
+            if (!SampleSettings::importOto(file, sampleSettingsRows, error))
+            {
+                showError(error);
+                return;
+            }
+            activeSampleSetting = 0;
+            sampleRegionSelector.clear(juce::dontSendNotification);
+            for (std::size_t index = 0; index < sampleSettingsRows.size(); ++index)
+                sampleRegionSelector.addItem(juce::String(index + 1) + " · "
+                    + sampleSettingsRows[index].name, static_cast<int>(index + 1));
+            sampleRegionSelector.setSelectedId(1, juce::dontSendNotification);
+            refreshSampleEditors();
+        });
+}
+
+void MainComponent::exportOto()
+{
+    commitSampleEditors();
+    if (!sampleSettingsFile.existsAsFile() || sampleSettingsRows.empty()) return;
+    chooser = std::make_unique<juce::FileChooser>(strings.text("sample.exportOto"),
+        sampleSettingsFile.getParentDirectory().getChildFile("oto.ini"), "*.ini");
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                             | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this](const juce::FileChooser& selected)
+        {
+            auto file = selected.getResult();
+            if (file == juce::File{}) return;
+            if (!file.hasFileExtension("ini")) file = file.withFileExtension("ini");
+            const auto duration = audio.probeDuration(sampleSettingsFile).value_or(0.0);
+            juce::String error;
+            if (!SampleSettings::exportOto(file, sampleSettingsFile, sampleSettingsRows,
+                                           duration, error)) showError(error);
+        });
 }
 
 juce::StringArray MainComponent::getMenuBarNames()
@@ -901,6 +1134,9 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(4, strings.text("file.audio"));
         menu.addItem(5, strings.text("file.melodyne"));
         menu.addItem(6, strings.text("file.midi"));
+        menu.addSeparator();
+        menu.addItem(9, strings.text("file.settings"));
+        menu.addItem(10, strings.text("file.assets"));
         menu.addSeparator();
         menu.addItem(7, strings.text("file.exit"));
     }
@@ -939,6 +1175,8 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 4 || id == 30) importAudio();
     else if (id == 5) importMelodyne();
     else if (id == 6) importMidi();
+    else if (id == 9) showSettings();
+    else if (id == 10) showAssetManager();
     else if (id == 7) juce::JUCEApplication::getInstance()->systemRequestedQuit();
     else if (id == 20) project.undo();
     else if (id == 21) project.redo();
@@ -962,6 +1200,44 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 50)
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
             strings.text("app.title"), strings.text("help.aboutText"));
+}
+
+void MainComponent::showSettings()
+{
+    if (preferences == nullptr) return;
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = strings.text("settings.title");
+    options.dialogBackgroundColour = Palette::panel;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    options.content.setOwned(new SettingsComponent(strings, audio.devices(), *preferences,
+        [safe]
+        {
+            if (safe == nullptr) return;
+            safe->applyPreferences();
+            safe->refreshTexts();
+            safe->menuItemsChanged();
+            safe->repaint();
+            safe->trackList.repaint();
+            safe->timeline.repaint();
+            safe->pianoRoll.repaint();
+        }));
+    options.launchAsync();
+}
+
+void MainComponent::showAssetManager()
+{
+    if (preferences == nullptr) return;
+    juce::DialogWindow::LaunchOptions options;
+    options.dialogTitle = strings.text("asset.title");
+    options.dialogBackgroundColour = Palette::panel;
+    options.escapeKeyTriggersCloseButton = true;
+    options.useNativeTitleBar = true;
+    options.resizable = true;
+    options.content.setOwned(new AssetManagerComponent(strings, *preferences));
+    options.launchAsync();
 }
 
 void MainComponent::openProject()
@@ -1098,6 +1374,29 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
 
 void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResult imported)
 {
+    const auto algorithmId = preferences != nullptr
+        ? preferences->getIntValue("import.algorithm", 1) : 1;
+    const auto importedPitch = algorithmId == 2 ? PitchAlgorithm::nsfHifigan
+        : algorithmId == 3 ? PitchAlgorithm::world
+        : algorithmId == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
+    for (auto& track : imported.project.tracks) track.pitchAlgorithm = importedPitch;
+
+    const auto composeMode = preferences != nullptr
+        ? preferences->getIntValue("import.melodyneCompose", 1) : 1;
+    if (composeMode != 1)
+    {
+        for (auto& track : imported.project.tracks)
+        {
+            if (composeMode == 3) track.compose = true;
+            else if (composeMode == 4) track.compose = false;
+            // Mode 2 retains the melodic classification stored by Melodyne.
+        }
+        project.replace(std::move(imported.project));
+        if (!imported.missingFiles.isEmpty())
+            showError(strings.text("warning.missingMedia") + "\n"
+                      + imported.missingFiles.joinIntoString("\n"));
+        return;
+    }
     auto state = std::make_shared<backend::MelodyneImportResult>(std::move(imported));
     auto* selector = new ComposeTrackSelector(state->project.tracks, strings);
     auto* dialog = new juce::AlertWindow(strings.text("mpd.compose.title"),

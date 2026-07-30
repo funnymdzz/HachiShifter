@@ -3,6 +3,9 @@
 #include "AudioEngine.h"
 #include "I18n.h"
 #include "PianoRollComponent.h"
+#include "SettingsComponent.h"
+#include "SampleSettings.h"
+#include "AssetManagerComponent.h"
 #include "Theme.h"
 #include "TimelineComponent.h"
 #include "TrackListComponent.h"
@@ -51,6 +54,15 @@ private:
     void importAudio();
     void importMidi();
     void importMelodyne();
+    void showSettings();
+    void applyPreferences();
+    void loadSampleSettings();
+    void refreshSampleEditors();
+    void commitSampleEditors();
+    void saveSampleSettings();
+    void importOto();
+    void exportOto();
+    void showAssetManager();
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);
     void focusClip(const juce::String& clipId);
@@ -72,7 +84,6 @@ private:
     juce::ComboBox gridSelector;
     juce::Label scaleCaption;
     juce::ComboBox scaleSelector;
-    juce::ComboBox languageSelector;
     juce::TextButton openButton;
     juce::TextButton saveButton;
     juce::TextButton audioButton;
@@ -96,6 +107,15 @@ private:
     juce::Label stretchLabel;
     juce::Label statusLabel;
     juce::Label sourceEditHint;
+    juce::ComboBox sampleRegionSelector;
+    juce::TextEditor sampleAliasEditor;
+    juce::TextEditor sampleStartEditor;
+    juce::TextEditor sampleEndEditor;
+    juce::TextEditor sampleAlignmentEditor;
+    juce::TextEditor sampleFixedEditor;
+    juce::Label sampleAliasLabel, sampleStartLabel, sampleEndLabel,
+                sampleAlignmentLabel, sampleFixedLabel;
+    juce::TextButton sampleSaveButton, otoImportButton, otoExportButton;
     juce::Label parameterTitle;
     juce::Label smoothCaption;
     juce::Slider smoothSlider;
@@ -114,6 +134,7 @@ private:
     juce::Viewport pianoViewport;
     juce::Component panelSplitter;
     std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<juce::PropertiesFile> preferences;
     int lastTimelineX = 0;
     int lastPianoX = 0;
     int lastTimelineY = 0;
@@ -121,6 +142,9 @@ private:
     bool syncingScroll = false;
     bool pianoInitialScrollSet = false;
     bool sourceEditActive = false;
+    juce::File sampleSettingsFile;
+    std::vector<SampleRegionSetting> sampleSettingsRows;
+    int activeSampleSetting = 0;
     juce::String selectedClipId;
     juce::String selectedTrackId;
     juce::String selectedNoteId;

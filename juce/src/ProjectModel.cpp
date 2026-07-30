@@ -1,4 +1,5 @@
 #include "ProjectModel.h"
+#include "SampleSettings.h"
 #include <algorithm>
 #include <optional>
 
@@ -349,6 +350,24 @@ void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
     sendChangeMessage();
 }
 
+void ProjectModel::setTrackPitchAlgorithm(const juce::String& trackId,
+                                          PitchAlgorithm algorithm)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.compose && track.pitchAlgorithm != algorithm)
+            {
+                pushUndoLocked();
+                track.pitchAlgorithm = algorithm;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::setStretchAlgorithm(StretchAlgorithm algorithm)
 {
     {
@@ -359,6 +378,24 @@ void ProjectModel::setStretchAlgorithm(StretchAlgorithm algorithm)
                 track.stretchAlgorithm = algorithm;
     }
     sendChangeMessage();
+}
+
+void ProjectModel::setTrackStretchAlgorithm(const juce::String& trackId,
+                                            StretchAlgorithm algorithm)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.compose && track.stretchAlgorithm != algorithm)
+            {
+                pushUndoLocked();
+                track.stretchAlgorithm = algorithm;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
 }
 
 void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
@@ -727,6 +764,61 @@ void ProjectModel::toggleNoteConnection(const juce::String& noteId)
                     break;
                 }
             if (changed) break;
+        }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::applySourceSettings(const juce::File& source,
+                                       const std::vector<SampleRegionSetting>& rows)
+{
+    if (rows.empty()) return;
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        struct Entry { ClipData* clip; NoteData* note; };
+        std::vector<Entry> entries;
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.sourceFile == source)
+                    for (auto& note : clip.notes) entries.push_back({ &clip, &note });
+        std::stable_sort(entries.begin(), entries.end(), [](const auto& left, const auto& right)
+        {
+            return left.clip->sourceOffsetSeconds < right.clip->sourceOffsetSeconds;
+        });
+        if (entries.empty()) return;
+        pushUndoLocked();
+        for (std::size_t index = 0; index < std::min(entries.size(), rows.size()); ++index)
+        {
+            auto& clip = *entries[index].clip;
+            auto& note = *entries[index].note;
+            const auto& row = rows[index];
+            clip.sourceOffsetSeconds = std::max(0.0, row.regionStartSeconds);
+            clip.sourceDurationSeconds = std::max(0.001,
+                row.regionEndSeconds - row.regionStartSeconds);
+            clip.gain = juce::jlimit(0.0f, 4.0f,
+                static_cast<float>(row.melodyneAmplitude));
+            const auto targetPerSource = clip.durationSeconds / clip.sourceDurationSeconds;
+            note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds,
+                row.fixedDurationSeconds * targetPerSource);
+            if (note.sourceMidiCenter >= 0.0f)
+                note.midiNote = juce::jlimit(0.0f, 127.0f,
+                    note.sourceMidiCenter + static_cast<float>(row.relativePitchCents / 100.0));
+            if (row.melodyneData)
+            {
+                note.drift = juce::jlimit(0.0f, 2.0f,
+                    static_cast<float>(row.melodynePitchDrift));
+                note.modulation = juce::jlimit(0.0f, 2.0f,
+                    static_cast<float>(row.melodynePitchModulation));
+                note.formantSemitones = juce::jlimit(-12.0f, 12.0f,
+                    static_cast<float>(row.melodyneFormantCents / 100.0));
+                note.breath = juce::jlimit(0.0f, 1.0f,
+                    static_cast<float>(row.melodyneSibilantBalance));
+                note.attackSpeed = juce::jlimit(0.05f, 20.0f,
+                    static_cast<float>(row.melodyneAttackSeconds > 1.0e-6
+                        ? row.fixedDurationSeconds / row.melodyneAttackSeconds : 1.0));
+            }
+            changed = true;
         }
     }
     if (changed) sendChangeMessage();
