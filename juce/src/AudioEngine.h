@@ -31,6 +31,7 @@ public:
     [[nodiscard]] double position() const;
     [[nodiscard]] float trackPeak(const juce::String& trackId) const;
     [[nodiscard]] std::optional<double> renderProgress() const;
+    bool exportWav(const juce::File& file, juce::String& error);
     [[nodiscard]] bool isPlaying() const { return playing.load(); }
     [[nodiscard]] juce::AudioDeviceManager& devices() { return deviceManager; }
 
@@ -74,5 +75,6 @@ private:
     std::atomic<double> outputSampleRate { 48'000.0 };
     std::atomic<double> projectDurationSeconds { 0.0 };
     std::atomic<float> masterLimiterGain { 1.0f };
+    std::atomic<bool> offlineRendering { false };
 };
 }

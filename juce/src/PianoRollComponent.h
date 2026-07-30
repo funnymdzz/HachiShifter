@@ -12,6 +12,8 @@ class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener
 {
 public:
+    enum class Tool { note, draw, line, connect };
+
     explicit PianoRollComponent(ProjectModel& modelToUse);
     ~PianoRollComponent() override;
 
@@ -19,12 +21,15 @@ public:
     void setSourceEditMode(bool enabled);
     void setFocusedClip(const juce::String& clipId);
     void setPlayheadSeconds(double seconds);
+    void setTool(Tool nextTool);
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
+    bool keyPressed(const juce::KeyPress& key) override;
     std::function<void(double)> onSeek;
+    std::function<void(const juce::String&)> onNoteSelected;
 
 private:
     struct NoteHit
@@ -43,6 +48,7 @@ private:
     [[nodiscard]] float timeToX(double seconds) const;
     [[nodiscard]] float midiToY(float midi) const;
     [[nodiscard]] float yToMidi(float y) const;
+    [[nodiscard]] double gridSeconds() const;
 
     ProjectModel& model;
     ProjectData snapshot;
@@ -55,6 +61,7 @@ private:
     int highestMidi = 96;
     int lowestMidi = 24;
     bool sourceEditMode = false;
+    Tool tool = Tool::note;
     juce::String focusedClip;
     double playheadSeconds = 0.0;
     juce::String selectedNote;

@@ -222,11 +222,36 @@ MainComponent::MainComponent()
         audio.stop();
         audio.setPosition(0.0);
     };
-    noteEditButton.onClick = [this] { setSourceEditMode(false); };
-    wrenchButton.onClick = [this] { setSourceEditMode(true); };
-    drawButton.onClick = [this] { setToolButton(drawButton); };
-    lineButton.onClick = [this] { setToolButton(lineButton); };
-    connectButton.onClick = [this] { setToolButton(connectButton); };
+    noteEditButton.onClick = [this]
+    {
+        setSourceEditMode(false);
+        pianoRoll.setTool(PianoRollComponent::Tool::note);
+        setToolButton(noteEditButton);
+    };
+    wrenchButton.onClick = [this]
+    {
+        setSourceEditMode(true);
+        pianoRoll.setTool(PianoRollComponent::Tool::note);
+        setToolButton(wrenchButton);
+    };
+    drawButton.onClick = [this]
+    {
+        setSourceEditMode(false);
+        pianoRoll.setTool(PianoRollComponent::Tool::draw);
+        setToolButton(drawButton);
+    };
+    lineButton.onClick = [this]
+    {
+        setSourceEditMode(false);
+        pianoRoll.setTool(PianoRollComponent::Tool::line);
+        setToolButton(lineButton);
+    };
+    connectButton.onClick = [this]
+    {
+        setSourceEditMode(false);
+        pianoRoll.setTool(PianoRollComponent::Tool::connect);
+        setToolButton(connectButton);
+    };
     for (auto* button : { &pitchParamButton, &breathParamButton, &tensionParamButton,
                           &formantParamButton, &volumeParamButton })
         button->onClick = [this, button] { setToolButton(*button); };
@@ -732,6 +757,7 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(1, strings.text("file.new"));
         menu.addItem(2, strings.text("file.open"));
         menu.addItem(3, strings.text("file.save"));
+        menu.addItem(8, strings.text("file.export"));
         menu.addSeparator();
         menu.addItem(4, strings.text("file.audio"));
         menu.addItem(5, strings.text("file.melodyne"));
@@ -767,6 +793,7 @@ void MainComponent::menuItemSelected(int id, int)
     if (id == 1) project.clear();
     else if (id == 2) openProject();
     else if (id == 3) saveProject();
+    else if (id == 8) exportMixdown();
     else if (id == 4 || id == 30) importAudio();
     else if (id == 5) importMelodyne();
     else if (id == 6) importMidi();
@@ -810,6 +837,27 @@ void MainComponent::saveProject()
             if (!file.hasFileExtension("hspx")) file = file.withFileExtension("hspx");
             juce::String error;
             if (!project.save(file, error)) showError(error);
+        });
+}
+
+void MainComponent::exportMixdown()
+{
+    chooser = std::make_unique<juce::FileChooser>(strings.text("file.export"),
+        juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+            .getChildFile(project.snapshot().name + ".wav"), "*.wav");
+    chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                             | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this](const juce::FileChooser& selected)
+        {
+            auto file = selected.getResult();
+            if (file == juce::File{}) return;
+            if (!file.hasFileExtension("wav")) file = file.withFileExtension("wav");
+            statusLabel.setText(strings.text("status.exporting"), juce::dontSendNotification);
+            repaint();
+            juce::String error;
+            if (!audio.exportWav(file, error))
+                showError(strings.text("error.export") + "\n" + error);
+            statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
         });
 }
 

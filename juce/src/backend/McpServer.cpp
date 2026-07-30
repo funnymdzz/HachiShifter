@@ -136,6 +136,9 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
+            makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
+            makeTool("remove_note", "Delete a note / 删除音符"),
+            makeTool("toggle_note_connection", "Connect or separate adjacent notes / 连接或分离相邻音符"),
             makeTool("read_file", "Read a byte range as base64 / 读取任意文件内容"),
             makeTool("list_directory", "List a directory with type and size / 列出目录内容")
         }));
@@ -257,6 +260,22 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         if (args.hasProperty("muted")) project.setTrackMuted(id, static_cast<bool>(args["muted"]));
         if (args.hasProperty("solo")) project.setTrackSolo(id, static_cast<bool>(args["solo"]));
         if (args.hasProperty("volume")) project.setTrackVolume(id, static_cast<float>(number(args, "volume", 1.0)));
+        if (args.hasProperty("pan")) project.setTrackPan(id, static_cast<float>(number(args, "pan")));
+        if (args.hasProperty("pitch_algorithm"))
+        {
+            const auto value = string(args, "pitch_algorithm").toLowerCase();
+            project.setPitchAlgorithm(value == "nsf-hifigan" ? PitchAlgorithm::nsfHifigan
+                : value == "world" ? PitchAlgorithm::world
+                : value == "vslib" ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5);
+        }
+        if (args.hasProperty("stretch_algorithm"))
+        {
+            const auto value = string(args, "stretch_algorithm").toLowerCase();
+            project.setStretchAlgorithm(value == "variable-mel-hop" ? StretchAlgorithm::variableMelHop
+                : value == "loop" ? StretchAlgorithm::loop
+                : value == "soundtouch" ? StretchAlgorithm::soundTouch
+                : StretchAlgorithm::melodyneHybrid);
+        }
         return toolResult("ok");
     }
     else if (name == "move_clip")
@@ -273,6 +292,23 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     {
         project.resizeNote(string(args, "note_id"), number(args, "start_seconds"),
                            number(args, "duration_seconds", 0.25));
+        return toolResult("ok");
+    }
+    else if (name == "add_note")
+    {
+        const auto id = project.addNote(string(args, "clip_id"), number(args, "start_seconds"),
+            number(args, "duration_seconds", 0.25), static_cast<float>(number(args, "midi", 60.0)));
+        return id.isNotEmpty() ? toolResult("note_id=" + id)
+                               : toolResult("No compose clip accepts the note", true);
+    }
+    else if (name == "remove_note")
+    {
+        project.removeNote(string(args, "note_id"));
+        return toolResult("ok");
+    }
+    else if (name == "toggle_note_connection")
+    {
+        project.toggleNoteConnection(string(args, "note_id"));
         return toolResult("ok");
     }
     else if (name == "read_file")

@@ -267,6 +267,17 @@ void ProjectModel::setTrackVolume(const juce::String& trackId, float volume)
     sendChangeMessage();
 }
 
+void ProjectModel::setTrackPan(const juce::String& trackId, float pan)
+{
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId)
+                track.pan = juce::jlimit(-1.0f, 1.0f, pan);
+    }
+    sendChangeMessage();
+}
+
 void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
 {
     {
@@ -328,6 +339,110 @@ void ProjectModel::resizeNote(const juce::String& noteId, double newStart, doubl
                     }
     }
     sendChangeMessage();
+}
+
+juce::String ProjectModel::addNote(const juce::String& preferredClipId,
+                                   double absoluteStart, double duration, float midiNote)
+{
+    juce::String created;
+    {
+        const juce::ScopedLock guard(lock);
+        ClipData* destination = nullptr;
+        for (auto& track : project.tracks)
+            if (track.compose)
+                for (auto& clip : track.clips)
+                {
+                    if (clip.id == preferredClipId) destination = &clip;
+                    if (destination == nullptr
+                        && absoluteStart >= clip.startSeconds
+                        && absoluteStart <= clip.startSeconds + clip.durationSeconds)
+                        destination = &clip;
+                }
+        if (destination != nullptr)
+        {
+            NoteData note;
+            note.id = makeId("note");
+            note.startSeconds = juce::jlimit(0.0, destination->durationSeconds,
+                absoluteStart - destination->startSeconds);
+            note.durationSeconds = juce::jlimit(0.01,
+                std::max(0.01, destination->durationSeconds - note.startSeconds), duration);
+            note.consonantSeconds = std::min(0.04, note.durationSeconds * 0.3);
+            note.midiNote = juce::jlimit(0.0f, 127.0f, midiNote);
+            note.sourceMidiCenter = note.midiNote;
+            note.contour.push_back({ 0.0, 0.0f, 0.0f, true });
+            note.contour.push_back({ note.durationSeconds, 0.0f, 0.0f, true });
+            created = note.id;
+            destination->notes.push_back(std::move(note));
+            std::stable_sort(destination->notes.begin(), destination->notes.end(),
+                [](const auto& left, const auto& right) { return left.startSeconds < right.startSeconds; });
+        }
+    }
+    if (created.isNotEmpty()) sendChangeMessage();
+    return created;
+}
+
+void ProjectModel::removeNote(const juce::String& noteId)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+        {
+            struct Positioned { NoteData* note; double start; };
+            std::vector<Positioned> ordered;
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    ordered.push_back({ &note, clip.startSeconds + note.startSeconds });
+            std::stable_sort(ordered.begin(), ordered.end(),
+                [](const auto& left, const auto& right) { return left.start < right.start; });
+            for (std::size_t index = 0; index < ordered.size(); ++index)
+                if (ordered[index].note->id == noteId)
+                {
+                    if (index > 0) ordered[index - 1].note->connectedToNext = false;
+                    if (index + 1 < ordered.size()) ordered[index + 1].note->connectedToPrevious = false;
+                    changed = true;
+                    break;
+                }
+            if (!changed) continue;
+            for (auto& clip : track.clips)
+            {
+                clip.notes.erase(std::remove_if(clip.notes.begin(), clip.notes.end(),
+                    [&](const auto& note) { return note.id == noteId; }), clip.notes.end());
+            }
+            break;
+        }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::toggleNoteConnection(const juce::String& noteId)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+        {
+            struct Positioned { NoteData* note; double start; };
+            std::vector<Positioned> ordered;
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    ordered.push_back({ &note, clip.startSeconds + note.startSeconds });
+            std::stable_sort(ordered.begin(), ordered.end(),
+                [](const auto& left, const auto& right) { return left.start < right.start; });
+            for (std::size_t index = 1; index < ordered.size(); ++index)
+                if (ordered[index].note->id == noteId)
+                {
+                    const auto connected = ordered[index].note->connectedToPrevious
+                        && ordered[index - 1].note->connectedToNext;
+                    ordered[index].note->connectedToPrevious = !connected;
+                    ordered[index - 1].note->connectedToNext = !connected;
+                    changed = true;
+                    break;
+                }
+            if (changed) break;
+        }
+    }
+    if (changed) sendChangeMessage();
 }
 
 juce::ValueTree ProjectModel::toValueTree() const

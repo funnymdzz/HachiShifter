@@ -108,11 +108,16 @@ public:
     void setTrackMuted(const juce::String& trackId, bool muted);
     void setTrackSolo(const juce::String& trackId, bool solo);
     void setTrackVolume(const juce::String& trackId, float volume);
+    void setTrackPan(const juce::String& trackId, float pan);
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
     void moveClip(const juce::String& clipId, double startSeconds);
     void transposeNote(const juce::String& noteId, float semitones);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
+    [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
+                                       double absoluteStart, double duration, float midiNote);
+    void removeNote(const juce::String& noteId);
+    void toggleNoteConnection(const juce::String& noteId);
 
     bool save(const juce::File& file, juce::String& error) const;
     bool load(const juce::File& file, juce::String& error);

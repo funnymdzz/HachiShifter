@@ -45,6 +45,7 @@ private:
     void togglePlayback();
     void openProject();
     void saveProject();
+    void exportMixdown();
     void importAudio();
     void importMidi();
     void importMelodyne();

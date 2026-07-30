@@ -23,6 +23,36 @@ public:
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }
+        if (arguments.size() >= 3 && arguments[0] == "--smoke-export")
+        {
+            cliAudioEngine = std::make_unique<AudioEngine>();
+            const auto input = juce::File(arguments[1]);
+            const auto duration = cliAudioEngine->probeDuration(input);
+            if (!duration)
+            {
+                std::cerr << "error=audio_read" << std::endl;
+                setApplicationReturnValue(2);
+            }
+            else
+            {
+                ProjectModel model;
+                model.addAudioFile(input, *duration);
+                auto data = model.snapshot();
+                if (!data.tracks.empty()) data.tracks.front().compose = false;
+                cliAudioEngine->syncProject(data);
+                juce::String error;
+                if (cliAudioEngine->exportWav(juce::File(arguments[2]), error))
+                    std::cout << "duration=" << *duration << '\n'
+                              << "output=" << arguments[2] << std::endl;
+                else
+                {
+                    std::cerr << "error=" << error << std::endl;
+                    setApplicationReturnValue(3);
+                }
+            }
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         if (arguments.size() >= 4 && arguments[0] == "--smoke-mld5")
         {
             juce::AudioFormatManager formats;
@@ -154,6 +184,7 @@ public:
     {
         mainWindow.reset();
         cliRenderService.reset();
+        cliAudioEngine.reset();
     }
 
     void systemRequestedQuit() override { quit(); }
@@ -187,6 +218,7 @@ private:
 
     std::unique_ptr<MainWindow> mainWindow;
     std::unique_ptr<backend::RenderService> cliRenderService;
+    std::unique_ptr<AudioEngine> cliAudioEngine;
 };
 }
 

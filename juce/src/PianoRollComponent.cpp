@@ -10,6 +10,7 @@ PianoRollComponent::PianoRollComponent(ProjectModel& modelToUse) : model(modelTo
 {
     formats.registerBasicFormats();
     model.addChangeListener(this);
+    setWantsKeyboardFocus(true);
     rebuildLayout();
 }
 
@@ -51,6 +52,29 @@ void PianoRollComponent::setPlayheadSeconds(double seconds)
 {
     playheadSeconds = seconds;
     repaint();
+}
+
+void PianoRollComponent::setTool(Tool nextTool)
+{
+    tool = nextTool;
+    setMouseCursor(tool == Tool::draw || tool == Tool::line
+                       ? juce::MouseCursor::CrosshairCursor
+                       : juce::MouseCursor::NormalCursor);
+}
+
+double PianoRollComponent::gridSeconds() const
+{
+    auto text = snapshot.gridDivision.trim().toLowerCase();
+    auto dotted = text.endsWithChar('.');
+    auto triplet = text.endsWithChar('t');
+    if (dotted || triplet) text = text.dropLastCharacters(1);
+    const auto slash = text.indexOfChar('/');
+    const auto denominator = slash >= 0 ? text.substring(slash + 1).getIntValue() : 16;
+    auto duration = 60.0 / std::max(1.0, snapshot.bpm)
+        * 4.0 / static_cast<double>(std::max(1, denominator));
+    if (dotted) duration *= 1.5;
+    if (triplet) duration *= 2.0 / 3.0;
+    return std::max(0.005, duration);
 }
 
 int PianoRollComponent::pixelForSeconds(double seconds) const
@@ -360,6 +384,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
 
 void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
 {
+    grabKeyboardFocus();
     if (const auto* viewport = findParentComponentOfClass<juce::Viewport>())
         if (event.x < viewport->getViewPositionX() + 58)
             return;
@@ -367,6 +392,12 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         if (it->bounds.contains(event.position))
         {
             selectedNote = it->id;
+            if (onNoteSelected) onNoteSelected(selectedNote);
+            if (tool == Tool::connect && !sourceEditMode)
+            {
+                model.toggleNoteConnection(selectedNote);
+                return;
+            }
             draggedNote = it->id;
             dragStartMidi = it->midi;
             previewMidi = dragStartMidi;
@@ -384,7 +415,24 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             return;
         }
     selectedNote.clear();
+    if (onNoteSelected) onNoteSelected({});
     repaint();
+    if ((tool == Tool::draw || tool == Tool::line) && !sourceEditMode)
+    {
+        const auto rawSeconds = std::max(0.0,
+            static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond);
+        const auto step = gridSeconds();
+        const auto relative = rawSeconds - snapshot.beatOriginSeconds;
+        const auto quantized = snapshot.beatOriginSeconds + std::round(relative / step) * step;
+        const auto id = model.addNote(focusedClip, std::max(0.0, quantized), step,
+                                      juce::jlimit(0.0f, 127.0f, std::round(yToMidi(event.position.y))));
+        if (id.isNotEmpty())
+        {
+            selectedNote = id;
+            if (onNoteSelected) onNoteSelected(id);
+        }
+        return;
+    }
     if (onSeek)
         onSeek(std::max(0.0, static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond));
 }
@@ -392,6 +440,7 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
 void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
 {
     if (draggedNote.isEmpty()) return;
+    if (tool == Tool::connect) return;
     if (dragMode == DragMode::pitch)
         previewMidi = juce::jlimit(0.0f, 127.0f, std::round(yToMidi(event.position.y)));
     else if (dragMode == DragMode::resizeLeft)
@@ -416,5 +465,20 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
         model.resizeNote(draggedNote, previewStartSeconds, previewDurationSeconds);
     draggedNote.clear();
     dragMode = DragMode::none;
+}
+
+bool PianoRollComponent::keyPressed(const juce::KeyPress& key)
+{
+    if ((key.getKeyCode() == juce::KeyPress::deleteKey
+         || key.getKeyCode() == juce::KeyPress::backspaceKey)
+        && selectedNote.isNotEmpty())
+    {
+        const auto removed = selectedNote;
+        selectedNote.clear();
+        model.removeNote(removed);
+        if (onNoteSelected) onNoteSelected({});
+        return true;
+    }
+    return false;
 }
 }

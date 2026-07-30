@@ -1,6 +1,7 @@
 #include "AudioEngine.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <unordered_map>
 
 namespace hachi
@@ -79,6 +80,49 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             break;
         }
     }
+
+    for (const auto& joinedNote : clip.notes)
+    {
+        if (!joinedNote.connectedToPrevious) continue;
+        const NoteData* previousNote = nullptr;
+        auto previousEnd = -std::numeric_limits<double>::infinity();
+        const auto joinedStart = clip.startSeconds + joinedNote.startSeconds;
+        for (const auto& candidateClip : track.clips)
+            for (const auto& candidate : candidateClip.notes)
+            {
+                const auto end = candidateClip.startSeconds + candidate.startSeconds
+                    + candidate.durationSeconds;
+                if (end <= joinedStart + 0.002
+                    && end > previousEnd && candidate.id != joinedNote.id)
+                {
+                    previousEnd = end;
+                    previousNote = &candidate;
+                }
+            }
+        if (previousNote != nullptr)
+        {
+            const auto previousCents = contourAt(*previousNote, previousNote->durationSeconds);
+            const auto previousPitch = previousNote->midiNote + (previousCents
+                ? previousNote->drift * previousCents->second / 100.0f
+                    + previousNote->modulation * (previousCents->first - previousCents->second) / 100.0f
+                : 0.0f);
+            const auto joinSeconds = std::min(0.08,
+                std::max(0.012, joinedNote.durationSeconds * 0.22));
+            const auto firstFrame = juce::jlimit(0, frameCount - 1,
+                static_cast<int>(std::llround(joinedNote.startSeconds / framePeriodSeconds)));
+            const auto joinFrames = std::min(frameCount - firstFrame,
+                std::max(2, static_cast<int>(std::ceil(joinSeconds / framePeriodSeconds))));
+            if (joinFrames < 2) continue;
+            for (int frame = 0; frame < joinFrames; ++frame)
+            {
+                auto& target = request.targetMidi[static_cast<std::size_t>(firstFrame + frame)];
+                if (!(target > 0.0f)) continue;
+                const auto x = static_cast<float>(frame) / static_cast<float>(joinFrames - 1);
+                const auto smooth = x * x * (3.0f - 2.0f * x);
+                target = previousPitch + (target - previousPitch) * smooth;
+            }
+        }
+    }
     return request;
 }
 
@@ -101,6 +145,8 @@ std::string renderKey(const ClipData& clip, const TrackData& track)
         stream.writeFloat(note.sourceMidiCenter);
         stream.writeDouble(note.consonantSeconds);
         stream.writeFloat(note.attackSpeed);
+        stream.writeByte(static_cast<char>(note.connectedToPrevious ? 1 : 0));
+        stream.writeByte(static_cast<char>(note.connectedToNext ? 1 : 0));
         stream.writeFloat(note.modulation);
         stream.writeFloat(note.drift);
         for (const auto& point : note.contour)
@@ -178,7 +224,12 @@ void AudioEngine::syncProject(const ProjectData& project)
 {
     const juce::ScopedWriteLock guard(renderLock);
     rebuildLoadedClips(project);
-    projectDurationSeconds.store(project.durationSeconds());
+    auto contentDuration = 0.0;
+    for (const auto& track : project.tracks)
+        for (const auto& clip : track.clips)
+            if (!clip.muted)
+                contentDuration = std::max(contentDuration, clip.startSeconds + clip.durationSeconds);
+    projectDurationSeconds.store(contentDuration);
 }
 
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
@@ -351,7 +402,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         }
         timelineSample.fetch_add(outputCount);
         if (outputCount < info.numSamples) playing.store(false);
-        sendChangeMessage();
+        if (!offlineRendering.load(std::memory_order_relaxed)) sendChangeMessage();
         return;
     }
 
@@ -494,7 +545,7 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
     const auto nextSample = timelineSample.fetch_add(info.numSamples) + info.numSamples;
     if (static_cast<double>(nextSample) / sampleRate >= projectDurationSeconds.load())
         playing.store(false);
-    sendChangeMessage();
+    if (!offlineRendering.load(std::memory_order_relaxed)) sendChangeMessage();
 }
 
 void AudioEngine::play()
@@ -555,5 +606,75 @@ std::optional<double> AudioEngine::renderProgress() const
         }
     if (total == 0 || finished >= total) return std::nullopt;
     return static_cast<double>(finished) / static_cast<double>(total);
+}
+
+bool AudioEngine::exportWav(const juce::File& file, juce::String& error)
+{
+    {
+        const juce::ScopedReadLock guard(renderLock);
+        for (const auto& loaded : loadedClips)
+            if (loaded->rendered != nullptr
+                && !loaded->rendered->finished.load(std::memory_order_acquire))
+            {
+                error = "Pre-render is still running";
+                return false;
+            }
+    }
+
+    file.deleteFile();
+    auto stream = file.createOutputStream();
+    if (stream == nullptr)
+    {
+        error = "Could not create " + file.getFullPathName();
+        return false;
+    }
+    const auto sampleRate = juce::jlimit(8'000.0, 192'000.0, outputSampleRate.load());
+    juce::WavAudioFormat format;
+    auto writer = std::unique_ptr<juce::AudioFormatWriter>(format.createWriterFor(
+        stream.release(), sampleRate, 2, 24, {}, 0));
+    if (writer == nullptr)
+    {
+        error = "Could not create WAV writer";
+        return false;
+    }
+
+    stop();
+    deviceManager.removeAudioCallback(&sourcePlayer);
+    const auto previousPosition = timelineSample.load();
+    const auto previousAudition = auditionMode.exchange(false);
+    offlineRendering.store(true, std::memory_order_release);
+    timelineSample.store(0);
+    masterLimiterGain.store(1.0f, std::memory_order_relaxed);
+    playing.store(true);
+
+    constexpr int blockSize = 2048;
+    juce::AudioBuffer<float> block(2, blockSize);
+    const auto totalSamples = static_cast<juce::int64>(std::ceil(
+        projectDurationSeconds.load() * sampleRate));
+    auto written = juce::int64(0);
+    auto ok = true;
+    while (written < totalSamples)
+    {
+        const auto count = static_cast<int>(std::min<juce::int64>(blockSize, totalSamples - written));
+        block.clear();
+        juce::AudioSourceChannelInfo info(&block, 0, count);
+        getNextAudioBlock(info);
+        if (!writer->writeFromAudioSampleBuffer(block, 0, count))
+        {
+            ok = false;
+            error = "WAV write failed";
+            break;
+        }
+        written += count;
+    }
+
+    writer.reset();
+    playing.store(false);
+    timelineSample.store(previousPosition);
+    auditionMode.store(previousAudition);
+    offlineRendering.store(false, std::memory_order_release);
+    deviceManager.addAudioCallback(&sourcePlayer);
+    sendChangeMessage();
+    return ok;
 }
 }
