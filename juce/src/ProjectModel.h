@@ -98,6 +98,10 @@ public:
     [[nodiscard]] ProjectData snapshot() const;
     void replace(ProjectData replacement);
     void clear();
+    bool undo();
+    bool redo();
+    [[nodiscard]] bool canUndo() const;
+    [[nodiscard]] bool canRedo() const;
 
     void addAudioFile(const juce::File& file, double durationSeconds, double startSeconds = 0.0);
     bool addMidiFile(const juce::File& file, juce::String& error);
@@ -112,6 +116,8 @@ public:
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
     void moveClip(const juce::String& clipId, double startSeconds);
+    void removeClip(const juce::String& clipId);
+    void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
@@ -123,11 +129,17 @@ public:
     bool load(const juce::File& file, juce::String& error);
 
 private:
+    void pushUndoLocked();
     juce::ValueTree toValueTree() const;
     static ProjectData fromValueTree(const juce::ValueTree& tree);
     static juce::String makeId(const char* prefix);
 
     mutable juce::CriticalSection lock;
     ProjectData project;
+    std::vector<ProjectData> undoHistory;
+    std::vector<ProjectData> redoHistory;
+    // Keep large Melodyne projects bounded: snapshots are full native project
+    // states, so a short history is preferable to unbounded contour copies.
+    static constexpr std::size_t maxHistory = 24;
 };
 }

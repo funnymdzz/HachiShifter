@@ -1,5 +1,6 @@
 #include "TrackListComponent.h"
 #include "Theme.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -20,6 +21,9 @@ TrackListComponent::~TrackListComponent()
 void TrackListComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     snapshot = model.snapshot();
+    const auto selectedStillExists = std::any_of(snapshot.tracks.begin(), snapshot.tracks.end(),
+        [this](const auto& track) { return track.id == selectedTrack; });
+    if (!selectedStillExists) selectedTrack.clear();
     setSize(226, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
     repaint();
 }
@@ -87,14 +91,15 @@ void TrackListComponent::paint(juce::Graphics& g)
                                                     std::max(20.0f, static_cast<float>(getWidth()) - 152.0f), 8.0f);
         g.setColour(Palette::background);
         g.fillRoundedRectangle(slider, 4.0f);
-        const auto normalized = juce::jlimit(0.0f, 1.0f, track.volume * 0.5f);
+        const auto displayedVolume = track.id == volumeDragTrack ? volumeDragPreview : track.volume;
+        const auto normalized = juce::jlimit(0.0f, 1.0f, displayedVolume * 0.5f);
         g.setColour(colour);
         g.fillRoundedRectangle(slider.withWidth(slider.getWidth() * normalized), 4.0f);
         g.setColour(Palette::accentLight);
         g.fillEllipse(slider.getX() + slider.getWidth() * normalized - 4.0f,
                       slider.getCentreY() - 4.0f, 8.0f, 8.0f);
-        const auto db = track.volume <= 0.0001f ? juce::String("-inf")
-            : juce::String(20.0f * std::log10(track.volume), 1);
+        const auto db = displayedVolume <= 0.0001f ? juce::String("-inf")
+            : juce::String(20.0f * std::log10(displayedVolume), 1);
         g.setColour(Palette::textMuted);
         g.setFont(10.0f);
         g.drawText(strings.text("track.volume") + "  " + db + " dB", 112, row.getY() + 61, getWidth() - 150, 19,
@@ -133,6 +138,7 @@ void TrackListComponent::mouseDown(const juce::MouseEvent& event)
     if (index < 0 || index >= static_cast<int>(snapshot.tracks.size())) return;
     const auto& track = snapshot.tracks[static_cast<std::size_t>(index)];
     selectedTrack = track.id;
+    if (onTrackSelected) onTrackSelected(selectedTrack);
     repaint();
     const auto localY = event.y - rulerHeight - index * rowHeight;
     if (localY >= 34 && localY < 56 && event.x >= 10 && event.x < 38)
@@ -145,6 +151,7 @@ void TrackListComponent::mouseDown(const juce::MouseEvent& event)
     {
         volumeDragTrack = track.id;
         volumeDragRow = index;
+        volumeDragPreview = track.volume;
         mouseDrag(event);
     }
 }
@@ -154,11 +161,14 @@ void TrackListComponent::mouseDrag(const juce::MouseEvent& event)
     if (volumeDragTrack.isEmpty()) return;
     const auto width = std::max(20, getWidth() - 152);
     const auto normalized = juce::jlimit(0.0f, 1.0f, static_cast<float>(event.x - 112) / static_cast<float>(width));
-    model.setTrackVolume(volumeDragTrack, normalized * 2.0f);
+    volumeDragPreview = normalized * 2.0f;
+    repaint();
 }
 
 void TrackListComponent::mouseUp(const juce::MouseEvent&)
 {
+    if (volumeDragTrack.isNotEmpty())
+        model.setTrackVolume(volumeDragTrack, volumeDragPreview);
     volumeDragTrack.clear();
     volumeDragRow = -1;
 }

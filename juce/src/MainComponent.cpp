@@ -210,6 +210,7 @@ MainComponent::MainComponent()
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
     pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     trackList.peakProvider = [this](const juce::String& trackId) { return audio.trackPeak(trackId); };
+    trackList.onTrackSelected = [this](const juce::String& trackId) { selectedTrackId = trackId; };
 
     openButton.onClick = [this] { openProject(); };
     saveButton.onClick = [this] { saveProject(); };
@@ -414,6 +415,17 @@ void MainComponent::paint(juce::Graphics& g)
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
 {
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Z')
+    {
+        if (key.getModifiers().isShiftDown()) project.redo();
+        else project.undo();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'Y')
+    {
+        project.redo();
+        return true;
+    }
     if (key == juce::KeyPress::spaceKey)
     {
         togglePlayback();
@@ -593,8 +605,22 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
 {
     if (source == &project)
     {
-        audio.syncProject(project.snapshot());
+        const auto data = project.snapshot();
+        audio.syncProject(data);
+        const auto trackExists = std::any_of(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track) { return track.id == selectedTrackId; });
+        if (!trackExists) selectedTrackId.clear();
+        auto clipExists = false;
+        for (const auto& track : data.tracks)
+            clipExists = clipExists || std::any_of(track.clips.begin(), track.clips.end(),
+                [this](const auto& clip) { return clip.id == selectedClipId; });
+        if (!clipExists)
+        {
+            selectedClipId.clear();
+            pianoRoll.setFocusedClip({});
+        }
         refreshProjectControls();
+        menuItemsChanged();
     }
 }
 
@@ -767,15 +793,18 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
     }
     else if (index == 1)
     {
-        menu.addItem(20, strings.text("edit.undo"), false);
-        menu.addItem(21, strings.text("edit.redo"), false);
+        menu.addItem(20, strings.text("edit.undo"), project.canUndo());
+        menu.addItem(21, strings.text("edit.redo"), project.canRedo());
         menu.addSeparator();
         menu.addItem(22, strings.text("edit.selectAll"));
     }
     else if (index == 2)
     {
         menu.addItem(30, strings.text("file.audio"));
-        menu.addItem(31, strings.text("track.compose"));
+        menu.addItem(31, strings.text("track.toggleCompose"), selectedTrackId.isNotEmpty());
+        menu.addSeparator();
+        menu.addItem(32, strings.text("track.delete"), selectedTrackId.isNotEmpty());
+        menu.addItem(33, strings.text("clip.delete"), selectedClipId.isNotEmpty());
     }
     else if (index == 3)
     {
@@ -798,6 +827,17 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 5) importMelodyne();
     else if (id == 6) importMidi();
     else if (id == 7) juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    else if (id == 20) project.undo();
+    else if (id == 21) project.redo();
+    else if (id == 31)
+    {
+        const auto data = project.snapshot();
+        const auto found = std::find_if(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track) { return track.id == selectedTrackId; });
+        if (found != data.tracks.end()) project.setTrackCompose(found->id, !found->compose);
+    }
+    else if (id == 32) project.removeTrack(selectedTrackId);
+    else if (id == 33) project.removeClip(selectedClipId);
     else if (id == 40) zoomSlider.setValue(zoomSlider.getValue() * 1.25);
     else if (id == 41) zoomSlider.setValue(zoomSlider.getValue() / 1.25);
     else if (id == 42)

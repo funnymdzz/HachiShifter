@@ -67,10 +67,19 @@ ProjectData ProjectModel::snapshot() const
     return project;
 }
 
+void ProjectModel::pushUndoLocked()
+{
+    undoHistory.push_back(project);
+    if (undoHistory.size() > maxHistory)
+        undoHistory.erase(undoHistory.begin());
+    redoHistory.clear();
+}
+
 void ProjectModel::replace(ProjectData replacement)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         project = std::move(replacement);
     }
     sendChangeMessage();
@@ -79,6 +88,46 @@ void ProjectModel::replace(ProjectData replacement)
 void ProjectModel::clear()
 {
     replace(ProjectData{});
+}
+
+bool ProjectModel::undo()
+{
+    {
+        const juce::ScopedLock guard(lock);
+        if (undoHistory.empty()) return false;
+        redoHistory.push_back(project);
+        if (redoHistory.size() > maxHistory) redoHistory.erase(redoHistory.begin());
+        project = std::move(undoHistory.back());
+        undoHistory.pop_back();
+    }
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::redo()
+{
+    {
+        const juce::ScopedLock guard(lock);
+        if (redoHistory.empty()) return false;
+        undoHistory.push_back(project);
+        if (undoHistory.size() > maxHistory) undoHistory.erase(undoHistory.begin());
+        project = std::move(redoHistory.back());
+        redoHistory.pop_back();
+    }
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::canUndo() const
+{
+    const juce::ScopedLock guard(lock);
+    return !undoHistory.empty();
+}
+
+bool ProjectModel::canRedo() const
+{
+    const juce::ScopedLock guard(lock);
+    return !redoHistory.empty();
 }
 
 juce::String ProjectModel::makeId(const char* prefix)
@@ -102,6 +151,7 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, 
 
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         project.tracks.push_back(std::move(track));
         if (project.name == "Untitled")
             project.name = file.getFileNameWithoutExtension();
@@ -184,6 +234,7 @@ bool ProjectModel::addMidiFile(const juce::File& file, juce::String& error)
     }
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         if (project.tracks.empty() && importedBpm)
             project.bpm = juce::jlimit(20.0, 400.0, *importedBpm);
         for (auto& track : importedTracks) project.tracks.push_back(std::move(track));
@@ -197,6 +248,7 @@ void ProjectModel::setTempo(double bpm, int numerator, int denominator)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         project.bpm = juce::jlimit(20.0, 400.0, bpm);
         project.numerator = juce::jlimit(1, 32, numerator);
         project.denominator = denominator == 2 || denominator == 8 || denominator == 16
@@ -209,6 +261,7 @@ void ProjectModel::setGridDivision(const juce::String& division)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         project.gridDivision = division;
     }
     sendChangeMessage();
@@ -218,6 +271,7 @@ void ProjectModel::setBaseScale(const juce::String& scale)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         project.baseScale = scale;
     }
     sendChangeMessage();
@@ -227,6 +281,7 @@ void ProjectModel::setTrackCompose(const juce::String& trackId, bool enabled)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.compose = enabled;
@@ -238,6 +293,7 @@ void ProjectModel::setTrackMuted(const juce::String& trackId, bool muted)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.muted = muted;
@@ -249,6 +305,7 @@ void ProjectModel::setTrackSolo(const juce::String& trackId, bool solo)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.solo = solo;
@@ -260,6 +317,7 @@ void ProjectModel::setTrackVolume(const juce::String& trackId, float volume)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.volume = juce::jlimit(0.0f, 2.0f, volume);
@@ -271,6 +329,7 @@ void ProjectModel::setTrackPan(const juce::String& trackId, float pan)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.id == trackId)
                 track.pan = juce::jlimit(-1.0f, 1.0f, pan);
@@ -282,6 +341,7 @@ void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.compose)
                 track.pitchAlgorithm = algorithm;
@@ -293,6 +353,7 @@ void ProjectModel::setStretchAlgorithm(StretchAlgorithm algorithm)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             if (track.compose)
                 track.stretchAlgorithm = algorithm;
@@ -304,6 +365,7 @@ void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             for (auto& clip : track.clips)
                 if (clip.id == clipId)
@@ -312,10 +374,47 @@ void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
     sendChangeMessage();
 }
 
+void ProjectModel::removeClip(const juce::String& clipId)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+        {
+            const auto found = std::find_if(track.clips.begin(), track.clips.end(),
+                [&](const auto& clip) { return clip.id == clipId; });
+            if (found == track.clips.end()) continue;
+            pushUndoLocked();
+            track.clips.erase(found);
+            changed = true;
+            break;
+        }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::removeTrack(const juce::String& trackId)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        const auto found = std::find_if(project.tracks.begin(), project.tracks.end(),
+            [&](const auto& track) { return track.id == trackId; });
+        if (found != project.tracks.end())
+        {
+            pushUndoLocked();
+            project.tracks.erase(found);
+            changed = true;
+        }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::transposeNote(const juce::String& noteId, float semitones)
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             for (auto& clip : track.clips)
                 for (auto& note : clip.notes)
@@ -329,6 +428,7 @@ void ProjectModel::resizeNote(const juce::String& noteId, double newStart, doubl
 {
     {
         const juce::ScopedLock guard(lock);
+        pushUndoLocked();
         for (auto& track : project.tracks)
             for (auto& clip : track.clips)
                 for (auto& note : clip.notes)
@@ -360,6 +460,7 @@ juce::String ProjectModel::addNote(const juce::String& preferredClipId,
                 }
         if (destination != nullptr)
         {
+            pushUndoLocked();
             NoteData note;
             note.id = makeId("note");
             note.startSeconds = juce::jlimit(0.0, destination->durationSeconds,
@@ -398,6 +499,7 @@ void ProjectModel::removeNote(const juce::String& noteId)
             for (std::size_t index = 0; index < ordered.size(); ++index)
                 if (ordered[index].note->id == noteId)
                 {
+                    pushUndoLocked();
                     if (index > 0) ordered[index - 1].note->connectedToNext = false;
                     if (index + 1 < ordered.size()) ordered[index + 1].note->connectedToPrevious = false;
                     changed = true;
@@ -432,6 +534,7 @@ void ProjectModel::toggleNoteConnection(const juce::String& noteId)
             for (std::size_t index = 1; index < ordered.size(); ++index)
                 if (ordered[index].note->id == noteId)
                 {
+                    pushUndoLocked();
                     const auto connected = ordered[index].note->connectedToPrevious
                         && ordered[index - 1].note->connectedToNext;
                     ordered[index].note->connectedToPrevious = !connected;

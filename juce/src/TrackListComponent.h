@@ -19,6 +19,7 @@ public:
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
     std::function<float(const juce::String&)> peakProvider;
+    std::function<void(const juce::String&)> onTrackSelected;
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -30,6 +31,7 @@ private:
     int rowHeight = 96;
     juce::String selectedTrack;
     juce::String volumeDragTrack;
+    float volumeDragPreview = 1.0f;
     int volumeDragRow = -1;
 };
 }

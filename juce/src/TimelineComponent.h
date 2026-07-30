@@ -53,6 +53,7 @@ private:
     juce::String selectedClip;
     juce::String draggedClip;
     double draggedClipStart = 0.0;
+    double draggedClipPreviewStart = 0.0;
     float dragAnchorX = 0.0f;
 };
 }

@@ -139,6 +139,10 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
             makeTool("remove_note", "Delete a note / 删除音符"),
             makeTool("toggle_note_connection", "Connect or separate adjacent notes / 连接或分离相邻音符"),
+            makeTool("remove_clip", "Delete a clip / 删除采样"),
+            makeTool("remove_track", "Delete a track / 删除轨道"),
+            makeTool("undo", "Undo the last project edit / 撤销工程编辑"),
+            makeTool("redo", "Redo the last project edit / 重做工程编辑"),
             makeTool("read_file", "Read a byte range as base64 / 读取任意文件内容"),
             makeTool("list_directory", "List a directory with type and size / 列出目录内容")
         }));
@@ -310,6 +314,26 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     {
         project.toggleNoteConnection(string(args, "note_id"));
         return toolResult("ok");
+    }
+    else if (name == "remove_clip")
+    {
+        project.removeClip(string(args, "clip_id"));
+        return toolResult("ok");
+    }
+    else if (name == "remove_track")
+    {
+        project.removeTrack(string(args, "track_id"));
+        return toolResult("ok");
+    }
+    else if (name == "undo")
+    {
+        const auto ok = project.undo();
+        return toolResult(ok ? "ok" : "history_empty", !ok);
+    }
+    else if (name == "redo")
+    {
+        const auto ok = project.redo();
+        return toolResult(ok ? "ok" : "history_empty", !ok);
     }
     else if (name == "read_file")
     {

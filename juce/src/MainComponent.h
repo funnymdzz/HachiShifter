@@ -120,6 +120,7 @@ private:
     bool pianoInitialScrollSet = false;
     bool sourceEditActive = false;
     juce::String selectedClipId;
+    juce::String selectedTrackId;
     bool draggingPanelSplitter = false;
     int panelSplitterDragScreenY = 0;
     float panelSplitterDragRatio = 0.60f;
