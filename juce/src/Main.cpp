@@ -78,6 +78,12 @@ public:
             request.sourceMidi.assign(static_cast<std::size_t>(frames), 60.0f);
             request.targetMidi.assign(static_cast<std::size_t>(frames), 60.0f + shift);
             const auto outputFile = arguments.size() >= 5 ? juce::File(arguments[4]) : juce::File();
+            const auto formant = arguments.size() >= 6 ? arguments[5].getFloatValue() : 0.0f;
+            const auto gain = arguments.size() >= 7 ? arguments[6].getFloatValue() : 1.0f;
+            const auto breath = arguments.size() >= 8 ? arguments[7].getFloatValue() : 0.0f;
+            request.formantSemitones.assign(static_cast<std::size_t>(frames), formant);
+            request.noteGain.assign(static_cast<std::size_t>(frames), gain);
+            request.breath.assign(static_cast<std::size_t>(frames), breath);
             cliRenderService = std::make_unique<backend::RenderService>();
             cliRenderService->renderMld5File(std::move(request), [this, outputFile](backend::RenderedAudio result)
             {

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace hachi
 {
@@ -22,6 +23,7 @@ public:
     void setFocusedClip(const juce::String& clipId);
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
+    void selectAllNotes();
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& event) override;
@@ -66,6 +68,7 @@ private:
     juce::String focusedClip;
     double playheadSeconds = 0.0;
     juce::String selectedNote;
+    std::unordered_set<std::string> selectedNotes;
     juce::String draggedNote;
     float dragStartMidi = 0.0f;
     float previewMidi = 0.0f;

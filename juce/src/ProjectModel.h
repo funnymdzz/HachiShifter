@@ -122,6 +122,7 @@ public:
     void removeClip(const juce::String& clipId);
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);
+    void transposeNotes(const std::vector<juce::String>& noteIds, float semitones);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);
@@ -132,6 +133,7 @@ public:
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
                                        double absoluteStart, double duration, float midiNote);
     void removeNote(const juce::String& noteId);
+    void removeNotes(const std::vector<juce::String>& noteIds);
     void toggleNoteConnection(const juce::String& noteId);
 
     bool save(const juce::File& file, juce::String& error) const;

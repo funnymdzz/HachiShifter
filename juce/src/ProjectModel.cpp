@@ -412,16 +412,31 @@ void ProjectModel::removeTrack(const juce::String& trackId)
 
 void ProjectModel::transposeNote(const juce::String& noteId, float semitones)
 {
+    transposeNotes({ noteId }, semitones);
+}
+
+void ProjectModel::transposeNotes(const std::vector<juce::String>& noteIds, float semitones)
+{
+    const auto includes = [&](const juce::String& id)
+    {
+        return std::find(noteIds.begin(), noteIds.end(), id) != noteIds.end();
+    };
+    auto changed = false;
     {
         const juce::ScopedLock guard(lock);
+        for (const auto& track : project.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    changed = changed || includes(note.id);
+        if (!changed) return;
         pushUndoLocked();
         for (auto& track : project.tracks)
             for (auto& clip : track.clips)
                 for (auto& note : clip.notes)
-                    if (note.id == noteId)
+                    if (includes(note.id))
                         note.midiNote = juce::jlimit(0.0f, 127.0f, note.midiNote + semitones);
     }
-    sendChangeMessage();
+    if (changed) sendChangeMessage();
 }
 
 void ProjectModel::resizeNote(const juce::String& noteId, double newStart, double newDuration)
@@ -643,9 +658,24 @@ juce::String ProjectModel::addNote(const juce::String& preferredClipId,
 
 void ProjectModel::removeNote(const juce::String& noteId)
 {
+    removeNotes({ noteId });
+}
+
+void ProjectModel::removeNotes(const std::vector<juce::String>& noteIds)
+{
+    const auto includes = [&](const juce::String& id)
+    {
+        return std::find(noteIds.begin(), noteIds.end(), id) != noteIds.end();
+    };
     auto changed = false;
     {
         const juce::ScopedLock guard(lock);
+        for (const auto& track : project.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    changed = changed || includes(note.id);
+        if (!changed) return;
+        pushUndoLocked();
         for (auto& track : project.tracks)
         {
             struct Positioned { NoteData* note; double start; };
@@ -656,21 +686,16 @@ void ProjectModel::removeNote(const juce::String& noteId)
             std::stable_sort(ordered.begin(), ordered.end(),
                 [](const auto& left, const auto& right) { return left.start < right.start; });
             for (std::size_t index = 0; index < ordered.size(); ++index)
-                if (ordered[index].note->id == noteId)
+                if (includes(ordered[index].note->id))
                 {
-                    pushUndoLocked();
-                    if (index > 0) ordered[index - 1].note->connectedToNext = false;
-                    if (index + 1 < ordered.size()) ordered[index + 1].note->connectedToPrevious = false;
-                    changed = true;
-                    break;
+                    if (index > 0 && !includes(ordered[index - 1].note->id))
+                        ordered[index - 1].note->connectedToNext = false;
+                    if (index + 1 < ordered.size() && !includes(ordered[index + 1].note->id))
+                        ordered[index + 1].note->connectedToPrevious = false;
                 }
-            if (!changed) continue;
             for (auto& clip : track.clips)
-            {
                 clip.notes.erase(std::remove_if(clip.notes.begin(), clip.notes.end(),
-                    [&](const auto& note) { return note.id == noteId; }), clip.notes.end());
-            }
-            break;
+                    [&](const auto& note) { return includes(note.id); }), clip.notes.end());
         }
     }
     if (changed) sendChangeMessage();

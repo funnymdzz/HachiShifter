@@ -62,6 +62,29 @@ void PianoRollComponent::setTool(Tool nextTool)
                        : juce::MouseCursor::NormalCursor);
 }
 
+void PianoRollComponent::selectAllNotes()
+{
+    selectedNotes.clear();
+    juce::String focusedSource;
+    if (sourceEditMode)
+        for (const auto& track : snapshot.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == focusedClip) focusedSource = clip.sourceFile.getFullPathName();
+    for (const auto& track : snapshot.tracks)
+    {
+        if (!track.compose && !sourceEditMode) continue;
+        for (const auto& clip : track.clips)
+        {
+            if (sourceEditMode && clip.sourceFile.getFullPathName() != focusedSource) continue;
+            for (const auto& note : clip.notes) selectedNotes.insert(note.id.toStdString());
+        }
+    }
+    selectedNote = selectedNotes.empty() ? juce::String()
+        : juce::String::fromUTF8(selectedNotes.begin()->c_str());
+    if (onNoteSelected) onNoteSelected(selectedNote);
+    repaint();
+}
+
 double PianoRollComponent::gridSeconds() const
 {
     auto text = snapshot.gridDivision.trim().toLowerCase();
@@ -100,6 +123,13 @@ float PianoRollComponent::yToMidi(float y) const
 void PianoRollComponent::rebuildLayout()
 {
     snapshot = model.snapshot();
+    std::unordered_set<std::string> validNotes;
+    for (const auto& track : snapshot.tracks)
+        for (const auto& clip : track.clips)
+            for (const auto& note : clip.notes) validNotes.insert(note.id.toStdString());
+    std::erase_if(selectedNotes, [&](const auto& id) { return !validNotes.contains(id); });
+    if (selectedNote.isNotEmpty() && !validNotes.contains(selectedNote.toStdString()))
+        selectedNote.clear();
     std::unordered_map<std::string, std::unique_ptr<juce::AudioThumbnail>> next;
     for (const auto& track : snapshot.tracks)
         for (const auto& clip : track.clips)
@@ -302,7 +332,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 g.fillRoundedRectangle(bounds.withWidth(consonantWidth), 4.0f);
                 g.setColour(Palette::noteEdge);
                 g.drawRoundedRectangle(bounds, 4.0f, 1.2f);
-                if (note.id == selectedNote)
+                if (selectedNotes.contains(note.id.toStdString()))
                 {
                     g.setColour(Palette::text.withAlpha(0.95f));
                     g.drawRoundedRectangle(bounds.reduced(1.0f), 3.0f, 1.8f);
@@ -392,7 +422,25 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         if (it->bounds.contains(event.position))
         {
             selectedNote = it->id;
+            const auto id = selectedNote.toStdString();
+            if (event.mods.isCommandDown())
+            {
+                if (selectedNotes.contains(id)) selectedNotes.erase(id);
+                else selectedNotes.insert(id);
+                if (!selectedNotes.contains(id))
+                    selectedNote = selectedNotes.empty() ? juce::String()
+                        : juce::String::fromUTF8(selectedNotes.begin()->c_str());
+            }
+            else
+            {
+                if (!selectedNotes.contains(id))
+                {
+                    selectedNotes.clear();
+                    selectedNotes.insert(id);
+                }
+            }
             if (onNoteSelected) onNoteSelected(selectedNote);
+            if (selectedNote.isEmpty()) { repaint(); return; }
             if (tool == Tool::connect && !sourceEditMode)
             {
                 model.toggleNoteConnection(selectedNote);
@@ -415,6 +463,7 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             return;
         }
     selectedNote.clear();
+    selectedNotes.clear();
     if (onNoteSelected) onNoteSelected({});
     repaint();
     if ((tool == Tool::draw || tool == Tool::line) && !sourceEditMode)
@@ -429,6 +478,8 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         if (id.isNotEmpty())
         {
             selectedNote = id;
+            selectedNotes.clear();
+            selectedNotes.insert(id.toStdString());
             if (onNoteSelected) onNoteSelected(id);
         }
         return;
@@ -487,7 +538,13 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
 {
     if (draggedNote.isEmpty()) return;
     if (dragMode == DragMode::pitch)
-        model.transposeNote(draggedNote, previewMidi - dragStartMidi);
+    {
+        std::vector<juce::String> ids;
+        ids.reserve(selectedNotes.size());
+        for (const auto& id : selectedNotes) ids.push_back(juce::String::fromUTF8(id.c_str()));
+        if (ids.empty()) ids.push_back(draggedNote);
+        model.transposeNotes(ids, previewMidi - dragStartMidi);
+    }
     else
         model.resizeNote(draggedNote, previewStartSeconds, previewDurationSeconds);
     draggedNote.clear();
@@ -496,13 +553,22 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
 
 bool PianoRollComponent::keyPressed(const juce::KeyPress& key)
 {
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'A')
+    {
+        selectAllNotes();
+        return true;
+    }
     if ((key.getKeyCode() == juce::KeyPress::deleteKey
          || key.getKeyCode() == juce::KeyPress::backspaceKey)
-        && selectedNote.isNotEmpty())
+        && (selectedNote.isNotEmpty() || !selectedNotes.empty()))
     {
-        const auto removed = selectedNote;
+        std::vector<juce::String> removed;
+        removed.reserve(selectedNotes.size());
+        for (const auto& id : selectedNotes) removed.push_back(juce::String::fromUTF8(id.c_str()));
+        if (removed.empty()) removed.push_back(selectedNote);
         selectedNote.clear();
-        model.removeNote(removed);
+        selectedNotes.clear();
+        model.removeNotes(removed);
         if (onNoteSelected) onNoteSelected({});
         return true;
     }

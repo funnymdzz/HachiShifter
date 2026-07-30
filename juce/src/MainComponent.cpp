@@ -527,6 +527,11 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         project.redo();
         return true;
     }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'A')
+    {
+        pianoRoll.selectAllNotes();
+        return true;
+    }
     if (key == juce::KeyPress::spaceKey)
     {
         togglePlayback();
@@ -937,6 +942,7 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 7) juce::JUCEApplication::getInstance()->systemRequestedQuit();
     else if (id == 20) project.undo();
     else if (id == 21) project.redo();
+    else if (id == 22) pianoRoll.selectAllNotes();
     else if (id == 31)
     {
         const auto data = project.snapshot();
