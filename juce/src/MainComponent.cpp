@@ -1221,8 +1221,18 @@ void MainComponent::menuItemSelected(int id, int)
             [this](const auto& track) { return track.id == selectedTrackId; });
         if (found != data.tracks.end()) project.setTrackCompose(found->id, !found->compose);
     }
-    else if (id == 32) project.removeTrack(selectedTrackId);
-    else if (id == 33) project.removeClip(selectedClipId);
+    else if (id == 32)
+    {
+        const auto trackId = selectedTrackId;
+        confirmDestructive(strings.text("track.delete"),
+            [this, trackId] { project.removeTrack(trackId); });
+    }
+    else if (id == 33)
+    {
+        const auto clipId = selectedClipId;
+        confirmDestructive(strings.text("clip.delete"),
+            [this, clipId] { project.removeClip(clipId); });
+    }
     else if (id == 40) zoomSlider.setValue(zoomSlider.getValue() * 1.25);
     else if (id == 41) zoomSlider.setValue(zoomSlider.getValue() / 1.25);
     else if (id == 42)
@@ -1273,6 +1283,31 @@ void MainComponent::showAssetManager()
     options.resizable = true;
     options.content.setOwned(new AssetManagerComponent(strings, *preferences));
     options.launchAsync();
+}
+
+void MainComponent::confirmDestructive(const juce::String& title,
+                                       std::function<void()> action)
+{
+    if (preferences == nullptr
+        || !preferences->getBoolValue("operation.confirmDestructive", true))
+    {
+        if (action) action();
+        return;
+    }
+    auto* dialog = new juce::AlertWindow(title, strings.text("dialog.destructiveMessage"),
+                                          juce::MessageBoxIconType::WarningIcon);
+    dialog->addButton(strings.text("dialog.delete"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create(
+            [safe, dialog, action = std::move(action)](int result) mutable
+            {
+                if (safe != nullptr && result == 1 && action) action();
+                delete dialog;
+            }), false);
 }
 
 void MainComponent::openProject()

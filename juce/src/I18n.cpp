@@ -81,6 +81,8 @@ const std::unordered_map<std::string, Row> strings {
     { "mpd.compose.description", { "勾选需要恢复 Melodyne 音符和修音的旋律轨道；其余轨道按普通音频播放。", "勾選需要還原 Melodyne 音符與修音的旋律軌道；其餘軌道作為一般音訊播放。", "Melodyneのノート編集を復元する旋律トラックを選択します。その他は通常の音声トラックとして扱います。", "Melodyne 노트 편집을 복원할 멜로디 트랙을 선택하세요. 나머지는 일반 오디오 트랙으로 처리됩니다.", "Select melodic tracks whose Melodyne note edits should be restored. Other tracks remain regular audio tracks." } },
     { "dialog.import", { "导入", "匯入", "読み込む", "가져오기", "Import" } },
     { "dialog.cancel", { "取消", "取消", "キャンセル", "취소", "Cancel" } }
+    ,{ "dialog.delete", { "删除", "刪除", "削除", "삭제", "Delete" } }
+    ,{ "dialog.destructiveMessage", { "此操作会删除所选内容，是否继续？", "此操作會刪除所選內容，是否繼續？", "選択した内容を削除します。続行しますか？", "선택한 내용을 삭제합니다. 계속할까요?", "The selected content will be deleted. Continue?" } }
     ,{ "dialog.apply", { "应用", "套用", "適用", "적용", "Apply" } }
     ,{ "settings.title", { "设置", "設定", "設定", "설정", "Settings" } }
     ,{ "settings.interface", { "界面", "介面", "インターフェース", "인터페이스", "Interface" } }
