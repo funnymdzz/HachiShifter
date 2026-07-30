@@ -287,14 +287,16 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         if (args.hasProperty("pitch_algorithm"))
         {
             const auto value = string(args, "pitch_algorithm").toLowerCase();
-            project.setPitchAlgorithm(value == "nsf-hifigan" ? PitchAlgorithm::nsfHifigan
+            project.setTrackPitchAlgorithm(id,
+                value == "nsf-hifigan" ? PitchAlgorithm::nsfHifigan
                 : value == "world" ? PitchAlgorithm::world
                 : value == "vslib" ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5);
         }
         if (args.hasProperty("stretch_algorithm"))
         {
             const auto value = string(args, "stretch_algorithm").toLowerCase();
-            project.setStretchAlgorithm(value == "variable-mel-hop" ? StretchAlgorithm::variableMelHop
+            project.setTrackStretchAlgorithm(id,
+                value == "variable-mel-hop" ? StretchAlgorithm::variableMelHop
                 : value == "loop" ? StretchAlgorithm::loop
                 : value == "soundtouch" ? StretchAlgorithm::soundTouch
                 : StretchAlgorithm::melodyneHybrid);
