@@ -148,6 +148,61 @@ void ProjectModel::addAudioFile(const juce::File& file, double durationSeconds, 
     clip.startSeconds = std::max(0.0, startSeconds);
     clip.durationSeconds = std::max(0.01, durationSeconds);
     clip.sourceDurationSeconds = clip.durationSeconds;
+
+    // Voicebank registration writes timing beside the source before the file
+    // is dragged into a project.  Consume that sidecar immediately so an OTO
+    // sample arrives as editable note objects instead of a silent/empty piano
+    // roll that requires drawing every region again.
+    const auto sidecar = SampleSettings::sidecarFor(file);
+    const juce::File legacy(file.getFullPathName() + ".hachi.csv");
+    if (sidecar.existsAsFile() || legacy.existsAsFile())
+    {
+        const auto rows = SampleSettings::loadOrDerive(file, ProjectData{});
+        for (const auto& row : rows)
+        {
+            const auto regionStart = juce::jlimit(0.0, clip.durationSeconds,
+                                                   row.regionStartSeconds);
+            const auto regionEnd = juce::jlimit(regionStart, clip.durationSeconds,
+                                                 row.regionEndSeconds);
+            if (regionEnd - regionStart < 0.001) continue;
+            NoteData note;
+            note.id = makeId("note");
+            note.startSeconds = regionStart;
+            note.durationSeconds = regionEnd - regionStart;
+            note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds,
+                                                  row.fixedDurationSeconds);
+            const auto storedSource = row.melodyneOriginalPitchCenterCents > 0.0
+                ? static_cast<float>(row.melodyneOriginalPitchCenterCents / 100.0)
+                : row.melodynePitchCenterCents > 0.0
+                    ? static_cast<float>(row.melodynePitchCenterCents / 100.0)
+                    : 60.0f;
+            note.sourceMidiCenter = juce::jlimit(0.0f, 127.0f, storedSource);
+            note.midiNote = row.melodynePitchCenterCents > 0.0
+                ? juce::jlimit(0.0f, 127.0f,
+                    static_cast<float>(row.melodynePitchCenterCents / 100.0))
+                : juce::jlimit(0.0f, 127.0f, note.sourceMidiCenter
+                    + static_cast<float>(row.relativePitchCents / 100.0));
+            note.drift = juce::jlimit(0.0f, 2.0f,
+                static_cast<float>(row.melodynePitchDrift));
+            note.modulation = juce::jlimit(0.0f, 2.0f,
+                static_cast<float>(row.melodynePitchModulation));
+            note.formantSemitones = juce::jlimit(-12.0f, 12.0f,
+                static_cast<float>(row.melodyneFormantCents / 100.0));
+            note.breath = juce::jlimit(0.0f, 1.0f,
+                static_cast<float>(row.melodyneSibilantBalance));
+            note.gain = juce::jlimit(0.0f, 4.0f,
+                static_cast<float>(row.melodyneAmplitude));
+            note.attackSpeed = juce::jlimit(0.05f, 20.0f,
+                static_cast<float>(row.melodyneAttackSeconds > 1.0e-6
+                    ? row.fixedDurationSeconds / row.melodyneAttackSeconds : 1.0));
+            // A sidecar stores note-level controls rather than a dense F0
+            // curve.  A neutral two-point contour keeps the source waveform's
+            // own micro-pitch intact while allowing the whole region to move.
+            note.contour.push_back({ 0.0, 0.0f, 0.0f, true });
+            note.contour.push_back({ note.durationSeconds, 0.0f, 0.0f, true });
+            clip.notes.push_back(std::move(note));
+        }
+    }
     track.clips.push_back(std::move(clip));
 
     {

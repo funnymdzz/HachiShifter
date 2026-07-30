@@ -152,6 +152,32 @@ public:
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }
+        if (arguments.size() >= 2 && arguments[0] == "--inspect-audio")
+        {
+            juce::AudioFormatManager formats;
+            formats.registerBasicFormats();
+            const auto file = juce::File(arguments[1]);
+            auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file));
+            if (reader == nullptr || reader->sampleRate <= 0.0)
+            {
+                std::cerr << "error=audio_read" << std::endl;
+                setApplicationReturnValue(2);
+            }
+            else
+            {
+                ProjectModel model;
+                model.addAudioFile(file,
+                    static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
+                const auto data = model.snapshot();
+                std::size_t notes = 0;
+                for (const auto& track : data.tracks)
+                    for (const auto& clip : track.clips) notes += clip.notes.size();
+                std::cout << "tracks=" << data.tracks.size() << '\n'
+                          << "notes=" << notes << std::endl;
+            }
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
         if (arguments.size() >= 2 && arguments[0] == "--inspect-mpd")
         {
             juce::String error;
