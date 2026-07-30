@@ -35,7 +35,7 @@ juce::var makeTool(const char* name, const char* description)
 {
     auto tool = object();
     set(tool, "name", name);
-    set(tool, "description", description);
+    set(tool, "description", juce::String::fromUTF8(description));
     set(tool, "inputSchema", permissiveSchema());
     return tool;
 }

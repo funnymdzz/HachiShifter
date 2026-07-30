@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -170,17 +171,17 @@ MainComponent::MainComponent()
     pitchAlgorithm.addItem("WORLD", 3);
     pitchAlgorithm.addItem("vslib", 4);
     pitchAlgorithm.setSelectedId(1);
-    stretchAlgorithm.addItem("Melodyne Hybrid", 1);
-    stretchAlgorithm.addItem("Variable Mel Hop", 2);
-    stretchAlgorithm.addItem("Loop", 3);
-    stretchAlgorithm.addItem("SoundTouch", 4);
-    stretchAlgorithm.setSelectedId(1);
+    refreshStretchAlgorithmItems(1);
     pitchAlgorithm.onChange = [this]
     {
         const auto id = pitchAlgorithm.getSelectedId();
+        const auto previousStretch = stretchAlgorithm.getSelectedId();
+        refreshStretchAlgorithmItems(previousStretch);
         project.setPitchAlgorithm(id == 2 ? PitchAlgorithm::nsfHifigan
                                   : id == 3 ? PitchAlgorithm::world
                                   : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5);
+        if (previousStretch != stretchAlgorithm.getSelectedId())
+            project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
     };
     stretchAlgorithm.onChange = [this]
     {
@@ -292,6 +293,8 @@ void MainComponent::refreshTexts()
     scaleCaption.setText(strings.text("base.scale"), juce::dontSendNotification);
     pitchLabel.setText(strings.text("algo.pitch"), juce::dontSendNotification);
     stretchLabel.setText(strings.text("algo.stretch"), juce::dontSendNotification);
+    pitchAlgorithm.setTooltip(strings.text("algo.pitch"));
+    stretchAlgorithm.setTooltip(strings.text("algo.stretch"));
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
 }
@@ -304,6 +307,33 @@ void MainComponent::refreshProjectControls()
     beatsEditor.setText(juce::String(data.numerator), juce::dontSendNotification);
     gridSelector.setText(data.gridDivision, juce::dontSendNotification);
     scaleSelector.setText(data.baseScale, juce::dontSendNotification);
+    if (const auto selected = std::find_if(data.tracks.begin(), data.tracks.end(),
+                                           [](const auto& track) { return track.compose; });
+        selected != data.tracks.end())
+    {
+        const auto pitchId = selected->pitchAlgorithm == PitchAlgorithm::nsfHifigan ? 2
+            : selected->pitchAlgorithm == PitchAlgorithm::world ? 3
+            : selected->pitchAlgorithm == PitchAlgorithm::vocalShifter ? 4 : 1;
+        const auto stretchId = selected->stretchAlgorithm == StretchAlgorithm::variableMelHop ? 2
+            : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
+            : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4 : 1;
+        pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
+        refreshStretchAlgorithmItems(stretchId);
+    }
+}
+
+void MainComponent::refreshStretchAlgorithmItems(int preferredId)
+{
+    const auto previous = preferredId > 0 ? preferredId : stretchAlgorithm.getSelectedId();
+    stretchAlgorithm.clear(juce::dontSendNotification);
+    stretchAlgorithm.addItem("Melodyne Hybrid", 1);
+    if (pitchAlgorithm.getSelectedId() == 2)
+        stretchAlgorithm.addItem("Variable Mel Hop", 2);
+    stretchAlgorithm.addItem("Loop", 3);
+    stretchAlgorithm.addItem("SoundTouch", 4);
+    const auto canUsePreferred = previous != 2 || pitchAlgorithm.getSelectedId() == 2;
+    stretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
+                                   juce::dontSendNotification);
 }
 
 void MainComponent::setToolButton(juce::Button& selected)
@@ -473,6 +503,16 @@ void MainComponent::resized()
     panelSplitter.setBounds(area.removeFromTop(8));
 
     auto parameterHeader = area.removeFromTop(36).reduced(4, 3);
+    auto takeParameterRight = [&parameterHeader](juce::Component& component, int width)
+    {
+        component.setBounds(parameterHeader.removeFromRight(width));
+        parameterHeader.removeFromRight(3);
+    };
+    takeParameterRight(midiButton, 72);
+    takeParameterRight(stretchAlgorithm, 124);
+    takeParameterRight(stretchLabel, 52);
+    takeParameterRight(pitchAlgorithm, 106);
+    takeParameterRight(pitchLabel, 50);
     auto takeParameter = [&parameterHeader](juce::Component& component, int width)
     {
         component.setBounds(parameterHeader.removeFromLeft(width));
@@ -491,12 +531,7 @@ void MainComponent::resized()
     takeParameter(tensionParamButton, 58);
     takeParameter(formantParamButton, 58);
     takeParameter(volumeParamButton, 58);
-    takeParameter(pitchAlgorithm, 108);
-    takeParameter(stretchAlgorithm, 128);
-    takeParameter(midiButton, 76);
     sourceEditHint.setBounds(parameterHeader.reduced(3, 0));
-    pitchLabel.setBounds({});
-    stretchLabel.setBounds({});
     pianoViewport.setBounds(area);
     if (!pianoInitialScrollSet && pianoViewport.getHeight() > 0)
     {

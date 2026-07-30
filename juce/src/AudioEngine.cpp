@@ -27,7 +27,7 @@ std::optional<std::pair<float, float>> contourAt(const NoteData& note, double lo
                            + (next.withoutVibratoCents - left.withoutVibratoCents) * amount };
 }
 
-backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip)
+backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track)
 {
     backend::Mld5FileRenderRequest request;
     request.sourceFile = clip.sourceFile;
@@ -35,6 +35,27 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip)
     request.sourceDurationSeconds = clip.sourceDurationSeconds > 1.0e-9
         ? clip.sourceDurationSeconds : clip.durationSeconds;
     request.targetDurationSeconds = clip.durationSeconds;
+    request.pitchAlgorithm = static_cast<int>(track.pitchAlgorithm);
+    request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
+    request.timeMap.push_back({ 0.0, 0.0 });
+    const auto sourceDuration = request.sourceDurationSeconds;
+    for (const auto& note : clip.notes)
+    {
+        if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
+        const auto noteTargetStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
+        const auto targetAttack = juce::jlimit(noteTargetStart, clip.durationSeconds,
+            noteTargetStart + note.consonantSeconds);
+        const auto sourceStart = clip.durationSeconds > 1.0e-9
+            ? noteTargetStart / clip.durationSeconds * sourceDuration : 0.0;
+        const auto sourceAttack = juce::jlimit(sourceStart, sourceDuration,
+            sourceStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
+        if (targetAttack > request.timeMap.back().targetSeconds + 1.0e-7
+            && sourceAttack > request.timeMap.back().sourceSeconds + 1.0e-7
+            && targetAttack < clip.durationSeconds - 1.0e-7
+            && sourceAttack < sourceDuration - 1.0e-7)
+            request.timeMap.push_back({ targetAttack, sourceAttack });
+    }
+    request.timeMap.push_back({ clip.durationSeconds, sourceDuration });
     constexpr auto framePeriodSeconds = 0.005;
     request.framePeriodMs = framePeriodSeconds * 1000.0;
     const auto frameCount = std::max(2, static_cast<int>(std::ceil(clip.durationSeconds
@@ -61,7 +82,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip)
     return request;
 }
 
-std::string renderKey(const ClipData& clip)
+std::string renderKey(const ClipData& clip, const TrackData& track)
 {
     juce::MemoryOutputStream stream;
     const auto path = clip.sourceFile.getFullPathName().toUTF8();
@@ -70,12 +91,16 @@ std::string renderKey(const ClipData& clip)
     stream.writeDouble(clip.sourceOffsetSeconds);
     stream.writeDouble(clip.sourceDurationSeconds);
     stream.writeDouble(clip.durationSeconds);
+    stream.writeInt(static_cast<int>(track.pitchAlgorithm));
+    stream.writeInt(static_cast<int>(track.stretchAlgorithm));
     for (const auto& note : clip.notes)
     {
         stream.writeDouble(note.startSeconds);
         stream.writeDouble(note.durationSeconds);
         stream.writeFloat(note.midiNote);
         stream.writeFloat(note.sourceMidiCenter);
+        stream.writeDouble(note.consonantSeconds);
+        stream.writeFloat(note.attackSpeed);
         stream.writeFloat(note.modulation);
         stream.writeFloat(note.drift);
         for (const auto& point : note.contour)
@@ -168,8 +193,16 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         auto meter = std::make_shared<std::atomic<float>>(0.0f);
         trackMeters[track.id.toStdString()] = meter;
         if (track.muted || (anySolo && !track.solo)) continue;
-        for (const auto& clip : track.clips)
+        std::vector<const ClipData*> orderedClips;
+        orderedClips.reserve(track.clips.size());
+        for (const auto& clip : track.clips) orderedClips.push_back(&clip);
+        std::stable_sort(orderedClips.begin(), orderedClips.end(), [](const auto* left, const auto* right)
         {
+            return left->startSeconds < right->startSeconds;
+        });
+        for (std::size_t clipIndex = 0; clipIndex < orderedClips.size(); ++clipIndex)
+        {
+            const auto& clip = *orderedClips[clipIndex];
             if (clip.muted || !clip.sourceFile.existsAsFile()) continue;
             const auto sourceKey = clip.sourceFile.getFullPathName().toStdString();
             auto reader = readers[sourceKey];
@@ -181,6 +214,33 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             }
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
+            const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
+            loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
+            loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
+            if (clipIndex > 0)
+            {
+                const auto& previous = *orderedClips[clipIndex - 1];
+                const auto overlap = previous.startSeconds + previous.durationSeconds - clip.startSeconds;
+                if (overlap > 1.0e-6)
+                    loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
+                        std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
+                else if (std::abs(overlap) <= 0.002
+                         && !clip.notes.empty() && clip.notes.front().connectedToPrevious)
+                    loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
+                        std::min(0.006, loaded->clip.durationSeconds * 0.5));
+            }
+            if (clipIndex + 1 < orderedClips.size())
+            {
+                const auto& next = *orderedClips[clipIndex + 1];
+                const auto overlap = clip.startSeconds + clip.durationSeconds - next.startSeconds;
+                if (overlap > 1.0e-6)
+                    loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
+                        std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
+                else if (std::abs(overlap) <= 0.002
+                         && !clip.notes.empty() && clip.notes.back().connectedToNext)
+                    loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
+                        std::min(0.006, loaded->clip.durationSeconds * 0.5));
+            }
             loaded->trackGain = track.volume;
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
             loaded->meter = meter;
@@ -191,13 +251,13 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             // shifts both F0 and formants and creates the "old/child voice" failure mode.
             if (track.compose && !clip.notes.empty())
             {
-                const auto cacheKey = renderKey(clip);
+                const auto cacheKey = renderKey(clip, track);
                 auto& state = renderCache[cacheKey];
                 if (state == nullptr) state = std::make_shared<RenderedClip>();
                 loaded->rendered = state;
                 if (!state->scheduled.exchange(true))
                 {
-                    auto request = makeRenderRequest(clip);
+                    auto request = makeRenderRequest(clip, track);
                     renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
                     {
                         if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
@@ -221,10 +281,17 @@ float AudioEngine::fadeGain(const ClipData& clip, double localSeconds)
 {
     float gain = clip.gain;
     if (clip.fadeInSeconds > 1.0e-6)
-        gain *= static_cast<float>(juce::jlimit(0.0, 1.0, localSeconds / clip.fadeInSeconds));
+    {
+        const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
+            localSeconds / clip.fadeInSeconds));
+        gain *= std::sin(juce::MathConstants<float>::halfPi * phase);
+    }
     if (clip.fadeOutSeconds > 1.0e-6)
-        gain *= static_cast<float>(juce::jlimit(0.0, 1.0,
+    {
+        const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
             (clip.durationSeconds - localSeconds) / clip.fadeOutSeconds));
+        gain *= std::sin(juce::MathConstants<float>::halfPi * phase);
+    }
     return gain;
 }
 
@@ -401,6 +468,29 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         }
     }
 
+    // A Melodyne project may contain several overlapping elements whose
+    // individual gains are valid but whose sum exceeds full scale.  Apply one
+    // linked, block-lookahead gain (fast attack, slow release) after mixing so
+    // those joins do not turn into digital crack/burst artefacts.
+    auto mixedPeak = 0.0f;
+    for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
+        mixedPeak = std::max(mixedPeak, info.buffer->getMagnitude(
+            channel, info.startSample, info.numSamples));
+    const auto targetLimiterGain = mixedPeak > 0.98f ? 0.98f / mixedPeak : 1.0f;
+    auto limiterGain = masterLimiterGain.load(std::memory_order_relaxed);
+    if (targetLimiterGain < limiterGain)
+        limiterGain = targetLimiterGain;
+    else
+    {
+        const auto release = 1.0f - std::exp(-static_cast<float>(info.numSamples)
+            / static_cast<float>(std::max(1.0, sampleRate) * 0.18));
+        limiterGain += (1.0f - limiterGain) * release;
+    }
+    masterLimiterGain.store(limiterGain, std::memory_order_relaxed);
+    if (limiterGain < 0.99999f)
+        for (int channel = 0; channel < info.buffer->getNumChannels(); ++channel)
+            info.buffer->applyGain(channel, info.startSample, info.numSamples, limiterGain);
+
     const auto nextSample = timelineSample.fetch_add(info.numSamples) + info.numSamples;
     if (static_cast<double>(nextSample) / sampleRate >= projectDurationSeconds.load())
         playing.store(false);
@@ -424,6 +514,7 @@ void AudioEngine::play()
 void AudioEngine::stop()
 {
     playing.store(false);
+    masterLimiterGain.store(1.0f, std::memory_order_relaxed);
     {
         const juce::ScopedReadLock guard(renderLock);
         for (const auto& [_, meter] : trackMeters)

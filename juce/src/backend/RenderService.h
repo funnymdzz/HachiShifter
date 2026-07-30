@@ -7,6 +7,12 @@
 
 namespace hachi::backend
 {
+struct TimeMapPoint
+{
+    double targetSeconds = 0.0;
+    double sourceSeconds = 0.0;
+};
+
 struct Mld5FileRenderRequest
 {
     juce::File sourceFile;
@@ -16,6 +22,9 @@ struct Mld5FileRenderRequest
     double framePeriodMs = 5.0;
     std::vector<float> sourceMidi;
     std::vector<float> targetMidi;
+    std::vector<TimeMapPoint> timeMap;
+    int pitchAlgorithm = 0;
+    int stretchAlgorithm = 0;
 };
 
 struct RenderedAudio

@@ -40,6 +40,7 @@ private:
     void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
     void refreshTexts();
     void refreshProjectControls();
+    void refreshStretchAlgorithmItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
     void togglePlayback();
     void openProject();

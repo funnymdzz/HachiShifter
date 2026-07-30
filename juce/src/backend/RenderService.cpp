@@ -34,7 +34,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
                                                  double sampleRate,
                                                  double framePeriodMs,
                                                  const std::vector<float>& sourceMidi,
-                                                 const std::vector<float>& targetMidi)
+                                                 const std::vector<float>& targetMidi,
+                                                 const std::vector<TimeMapPoint>& timeMap)
 {
     const auto sourceSamples = source.getNumSamples();
     const auto channels = source.getNumChannels();
@@ -49,7 +50,16 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             hasPitchEdit = true;
             break;
         }
-    if (sourceSamples == targetSamples && !hasPitchEdit) return source;
+    auto hasTimeWarp = sourceSamples != targetSamples;
+    for (const auto& point : timeMap)
+        if (targetSamples > 0 && sourceSamples > 0
+            && std::abs(point.sourceSeconds * sampleRate / sourceSamples
+                        - point.targetSeconds * sampleRate / targetSamples) > 1.0e-6)
+        {
+            hasTimeWarp = true;
+            break;
+        }
+    if (!hasTimeWarp && !hasPitchEdit) return source;
 
     // Signalsmith's phase-coherent stretcher is used as the native model-free
     // component stage.  Formant compensation is explicitly enabled: pitch and
@@ -62,30 +72,84 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
 
     const auto inputLatency = stretch.inputLatency();
     const auto outputLatency = stretch.outputLatency();
-    const auto totalInput = sourceSamples + inputLatency;
-    const auto totalOutput = targetSamples + outputLatency;
+    struct StretchChunk { int sourceStart; int sourceFrames; int targetStart; int targetFrames; };
+    std::vector<StretchChunk> chunks;
+    auto previousSource = 0;
+    auto previousTarget = 0;
+    for (std::size_t index = 1; index < timeMap.size(); ++index)
+    {
+        const auto nextSource = juce::jlimit(previousSource, sourceSamples,
+            static_cast<int>(std::llround(timeMap[index].sourceSeconds * sampleRate)));
+        const auto nextTarget = juce::jlimit(previousTarget, targetSamples,
+            static_cast<int>(std::llround(timeMap[index].targetSeconds * sampleRate)));
+        if (nextSource > previousSource && nextTarget > previousTarget)
+            chunks.push_back({ previousSource, nextSource - previousSource,
+                               previousTarget, nextTarget - previousTarget });
+        previousSource = nextSource;
+        previousTarget = nextTarget;
+    }
+    if (previousSource < sourceSamples && previousTarget < targetSamples)
+        chunks.push_back({ previousSource, sourceSamples - previousSource,
+                           previousTarget, targetSamples - previousTarget });
+    if (chunks.empty())
+        chunks.push_back({ 0, sourceSamples, 0, targetSamples });
+    else
+    {
+        auto& last = chunks.back();
+        last.sourceFrames += sourceSamples - (last.sourceStart + last.sourceFrames);
+        last.targetFrames += targetSamples - (last.targetStart + last.targetFrames);
+    }
+    const auto playbackRate = static_cast<double>(chunks.front().sourceFrames)
+        / static_cast<double>(std::max(1, chunks.front().targetFrames));
 
     std::vector<std::vector<float>> paddedInput(static_cast<std::size_t>(channels));
     std::vector<std::vector<float>> allOutput(static_cast<std::size_t>(channels));
     for (int channel = 0; channel < channels; ++channel)
     {
         auto& input = paddedInput[static_cast<std::size_t>(channel)];
-        input.resize(static_cast<std::size_t>(totalInput), 0.0f);
+        input.resize(static_cast<std::size_t>(sourceSamples + inputLatency), 0.0f);
         std::copy_n(source.getReadPointer(channel), sourceSamples, input.begin());
         allOutput[static_cast<std::size_t>(channel)].reserve(
-            static_cast<std::size_t>(totalOutput + outputLatency));
+            static_cast<std::size_t>(targetSamples + outputLatency));
+    }
+
+    // Signalsmith reads inputLatency samples ahead of its processing clock.
+    // Seed that look-ahead once, then process a stream shifted by exactly that
+    // amount and discard only outputLatency.  Including both latencies in the
+    // stretch ratio (the previous implementation) made short notes approach
+    // 1x and displaced attacks/F0 relative to the requested duration.
+    if (const auto initialPitch = pitchAt(sourceMidi, targetMidi, 0.0))
+    {
+        stretch.setTransposeSemitones(
+            juce::jlimit(-24.0f, 24.0f, initialPitch->second - initialPitch->first),
+            8'000.0f / static_cast<float>(sampleRate));
+        const auto sourceHz = 440.0f * std::pow(2.0f, (initialPitch->first - 69.0f) / 12.0f);
+        stretch.setFormantBase(juce::jlimit(45.0f, 1'200.0f, sourceHz)
+                               / static_cast<float>(sampleRate));
+    }
+    if (inputLatency > 0)
+    {
+        std::vector<const float*> seekPointers(static_cast<std::size_t>(channels));
+        for (int channel = 0; channel < channels; ++channel)
+            seekPointers[static_cast<std::size_t>(channel)] =
+                paddedInput[static_cast<std::size_t>(channel)].data();
+        stretch.seek(seekPointers.data(), inputLatency, playbackRate);
     }
 
     constexpr int blockSize = 512;
-    auto inputConsumed = 0;
     auto outputProduced = 0;
     const auto framePeriod = std::max(0.1, framePeriodMs);
-    while (inputConsumed < totalInput && outputProduced < totalOutput)
+    for (const auto& chunk : chunks)
     {
-        const auto blockInput = std::min(blockSize, totalInput - inputConsumed);
+      auto chunkInput = 0;
+      auto chunkOutput = 0;
+      while (chunkInput < chunk.sourceFrames && chunkOutput < chunk.targetFrames)
+      {
+        const auto blockInput = std::min(blockSize, chunk.sourceFrames - chunkInput);
         const auto expectedNextOutput = static_cast<int>(std::llround(
-            static_cast<double>(inputConsumed + blockInput) * totalOutput / totalInput));
-        const auto blockOutput = std::max(1, expectedNextOutput - outputProduced);
+            static_cast<double>(chunkInput + blockInput) * chunk.targetFrames / chunk.sourceFrames));
+        const auto blockOutput = std::min(chunk.targetFrames - chunkOutput,
+            std::max(1, expectedNextOutput - chunkOutput));
         const auto audibleCentre = juce::jlimit(0.0, static_cast<double>(targetSamples),
             static_cast<double>(outputProduced + blockOutput / 2 - outputLatency));
         const auto curvePosition = audibleCentre / sampleRate * 1000.0 / framePeriod;
@@ -110,7 +174,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         for (int channel = 0; channel < channels; ++channel)
         {
             inputPointers[static_cast<std::size_t>(channel)] =
-                paddedInput[static_cast<std::size_t>(channel)].data() + inputConsumed;
+                paddedInput[static_cast<std::size_t>(channel)].data() + inputLatency
+                    + chunk.sourceStart + chunkInput;
             auto& block = blockBuffers[static_cast<std::size_t>(channel)];
             block.resize(static_cast<std::size_t>(blockOutput), 0.0f);
             outputPointers[static_cast<std::size_t>(channel)] = block.data();
@@ -122,8 +187,10 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             const auto& block = blockBuffers[static_cast<std::size_t>(channel)];
             output.insert(output.end(), block.begin(), block.end());
         }
-        inputConsumed += blockInput;
+        chunkInput += blockInput;
+        chunkOutput += blockOutput;
         outputProduced += blockOutput;
+      }
     }
 
     if (outputLatency > 0)
@@ -181,6 +248,25 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     const auto outputRms = std::sqrt(outputPower / std::max(1, channels * targetSamples));
     if (sourceRms > 1.0e-7 && outputRms > 1.0e-7)
         result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8, sourceRms / outputRms)));
+
+    // Component clips are cut at analysis element boundaries, which are not
+    // guaranteed zero crossings.  Melodyne applies a compact amplitude/phase
+    // hand-off there even when no user fade is visible.  Keep this de-click
+    // shorter than a consonant so it removes the impulse without smearing it.
+    const auto edgeSamples = std::min(targetSamples / 2,
+        std::max(1, static_cast<int>(std::llround(sampleRate * 0.0025))));
+    for (int channel = 0; channel < channels; ++channel)
+    {
+        auto* samples = result.getWritePointer(channel);
+        for (int index = 0; index < edgeSamples; ++index)
+        {
+            const auto phase = static_cast<float>(index + 1)
+                / static_cast<float>(edgeSamples + 1);
+            const auto gain = std::sin(juce::MathConstants<float>::halfPi * phase);
+            samples[index] *= gain;
+            samples[targetSamples - 1 - index] *= gain;
+        }
+    }
     return result;
 }
 }
@@ -251,7 +337,7 @@ public:
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
         auto rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                                                request.framePeriodMs, request.sourceMidi,
-                                               request.targetMidi);
+                                               request.targetMidi, request.timeMap);
         RenderedAudio result { std::move(rendered), reader->sampleRate };
         if (shouldExit()) return jobHasFinished;
         juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable
