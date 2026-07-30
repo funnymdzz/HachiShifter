@@ -361,7 +361,7 @@ MainComponent::MainComponent()
         {
             setToolButton(*button);
             parameterMode = button == &breathParamButton ? ParameterMode::breath
-                : button == &tensionParamButton ? ParameterMode::drift
+                : button == &tensionParamButton ? ParameterMode::tension
                 : button == &formantParamButton ? ParameterMode::formant
                 : button == &volumeParamButton ? ParameterMode::volume
                 : ParameterMode::pitchSmooth;
@@ -523,12 +523,12 @@ void MainComponent::refreshSelectedNoteParameter()
         smoothSlider.setTextValueSuffix("%");
         value = static_cast<double>(selected.breath) * 100.0;
     }
-    else if (parameterMode == ParameterMode::drift)
+    else if (parameterMode == ParameterMode::tension)
     {
         smoothCaption.setText(strings.text("param.tension"), juce::dontSendNotification);
-        smoothSlider.setRange(0.0, 200.0, 1.0);
+        smoothSlider.setRange(-100.0, 100.0, 1.0);
         smoothSlider.setTextValueSuffix("%");
-        value = static_cast<double>(selected.drift) * 100.0;
+        value = static_cast<double>(selected.tension) * 100.0;
     }
     else if (parameterMode == ParameterMode::formant)
     {
@@ -557,8 +557,8 @@ void MainComponent::applySelectedNoteParameter()
             1.0f - static_cast<float>(value / 100.0));
     else if (parameterMode == ParameterMode::breath)
         project.setNoteBreath(selectedNoteId, static_cast<float>(value / 100.0));
-    else if (parameterMode == ParameterMode::drift)
-        project.setNoteDrift(selectedNoteId, static_cast<float>(value / 100.0));
+    else if (parameterMode == ParameterMode::tension)
+        project.setNoteTension(selectedNoteId, static_cast<float>(value / 100.0));
     else if (parameterMode == ParameterMode::formant)
         project.setNoteFormant(selectedNoteId, static_cast<float>(value));
     else

@@ -168,7 +168,7 @@ private:
     juce::String selectedClipId;
     juce::String selectedTrackId;
     juce::String selectedNoteId;
-    enum class ParameterMode { pitchSmooth, breath, drift, formant, volume };
+    enum class ParameterMode { pitchSmooth, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;
     bool smoothSliderDragging = false;

@@ -653,6 +653,25 @@ void ProjectModel::setNoteDrift(const juce::String& noteId, float drift)
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setNoteTension(const juce::String& noteId, float tension)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId)
+                    {
+                        pushUndoLocked();
+                        note.tension = juce::jlimit(-1.0f, 1.0f, tension);
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::setNoteBreath(const juce::String& noteId, float breath)
 {
     auto changed = false;
@@ -955,6 +974,7 @@ juce::ValueTree ProjectModel::toValueTree() const
                 noteTree.setProperty("sourceMidiCenter", note.sourceMidiCenter, nullptr);
                 noteTree.setProperty("modulation", note.modulation, nullptr);
                 noteTree.setProperty("drift", note.drift, nullptr);
+                noteTree.setProperty("tension", note.tension, nullptr);
                 noteTree.setProperty("breath", note.breath, nullptr);
                 noteTree.setProperty("formantSemitones", note.formantSemitones, nullptr);
                 noteTree.setProperty("gain", note.gain, nullptr);
@@ -1037,6 +1057,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
                 note.sourceMidiCenter = static_cast<float>(noteTree.getProperty("sourceMidiCenter", -1.0));
                 note.modulation = static_cast<float>(noteTree.getProperty("modulation", 1.0));
                 note.drift = static_cast<float>(noteTree.getProperty("drift", 1.0));
+                note.tension = static_cast<float>(noteTree.getProperty("tension", 0.0));
                 note.breath = static_cast<float>(noteTree.getProperty("breath", 0.0));
                 note.formantSemitones = static_cast<float>(noteTree.getProperty("formantSemitones", 0.0));
                 note.gain = static_cast<float>(noteTree.getProperty("gain", 1.0));

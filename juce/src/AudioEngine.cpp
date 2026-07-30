@@ -114,6 +114,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     request.targetMidi.resize(static_cast<std::size_t>(frameCount), 0.0f);
     request.formantSemitones.resize(static_cast<std::size_t>(frameCount), 0.0f);
     request.noteGain.resize(static_cast<std::size_t>(frameCount), 1.0f);
+    request.tension.resize(static_cast<std::size_t>(frameCount), 0.0f);
     request.breath.resize(static_cast<std::size_t>(frameCount), 0.0f);
     for (int frame = 0; frame < frameCount; ++frame)
     {
@@ -124,6 +125,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             if (local < -1.0e-9 || local > note.durationSeconds + 1.0e-9) continue;
             request.formantSemitones[static_cast<std::size_t>(frame)] = note.formantSemitones;
             request.noteGain[static_cast<std::size_t>(frame)] = note.gain;
+            request.tension[static_cast<std::size_t>(frame)] = note.tension;
             request.breath[static_cast<std::size_t>(frame)] = note.breath;
             const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, local));
             if (!cents) break;
@@ -204,6 +206,7 @@ std::string renderKey(const ClipData& clip, const TrackData& track)
         stream.writeByte(static_cast<char>(note.connectedToNext ? 1 : 0));
         stream.writeFloat(note.modulation);
         stream.writeFloat(note.drift);
+        stream.writeFloat(note.tension);
         stream.writeFloat(note.breath);
         stream.writeFloat(note.formantSemitones);
         stream.writeFloat(note.gain);

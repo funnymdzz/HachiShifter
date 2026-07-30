@@ -32,6 +32,7 @@ struct Mld5FileRenderRequest
     std::vector<float> targetMidi;
     std::vector<float> formantSemitones;
     std::vector<float> noteGain;
+    std::vector<float> tension;
     std::vector<float> breath;
     std::vector<TimeMapPoint> timeMap;
     PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;

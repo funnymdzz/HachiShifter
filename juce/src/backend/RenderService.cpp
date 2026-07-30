@@ -76,6 +76,65 @@ void applyMld5SpectralFinish(juce::AudioBuffer<float>& audio, double sampleRate,
     }
 }
 
+void applyExpressionAndTension(juce::AudioBuffer<float>& audio, double sampleRate,
+                               double framePeriodMs,
+                               const std::vector<float>& targetMidi,
+                               const std::vector<float>& noteGain,
+                               const std::vector<float>& tension,
+                               const std::vector<float>& breath)
+{
+    if (audio.getNumSamples() <= 0 || sampleRate <= 0.0) return;
+    const auto framePeriod = std::max(0.1, framePeriodMs);
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+    {
+        auto tiltLow = audio.getSample(channel, 0);
+        auto airLow = tiltLow;
+        auto smoothedTension = 0.0f;
+        const auto airCoefficient = static_cast<float>(1.0
+            - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
+        for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+        {
+            const auto curvePosition = static_cast<double>(sample) / sampleRate
+                * 1000.0 / framePeriod;
+            const auto gain = juce::jlimit(0.0f, 4.0f,
+                valueAt(noteGain, curvePosition, 1.0f));
+            const auto air = juce::jlimit(0.0f, 1.0f,
+                valueAt(breath, curvePosition, 0.0f));
+            const auto desiredTension = juce::jlimit(-1.0f, 1.0f,
+                valueAt(tension, curvePosition, 0.0f));
+            // Smooth parameter boundaries over roughly 8 ms.  A sudden
+            // spectral-tilt step at a note boundary otherwise sounds like a
+            // click even when the waveform itself is continuous.
+            const auto smoothing = static_cast<float>(1.0
+                - std::exp(-1.0 / (sampleRate * 0.008)));
+            smoothedTension += (desiredTension - smoothedTension) * smoothing;
+
+            const auto midi = valueAt(targetMidi, curvePosition, 60.0f);
+            const auto f0 = midi > 0.0f
+                ? 440.0 * std::pow(2.0, (static_cast<double>(midi) - 69.0) / 12.0)
+                : 220.0;
+            const auto splitHz = juce::jlimit(260.0, 2'400.0, f0 * 2.0);
+            const auto coefficient = static_cast<float>(1.0
+                - std::exp(-juce::MathConstants<double>::twoPi * splitHz / sampleRate));
+            const auto current = audio.getSample(channel, sample);
+            tiltLow += coefficient * (current - tiltLow);
+            airLow += airCoefficient * (current - airLow);
+            const auto tiltHigh = current - tiltLow;
+            const auto airHigh = current - airLow;
+
+            // HachiTune-style tension is a spectral tilt around approximately
+            // twice F0, not pitch drift.  Keep the low band nearly stationary
+            // and move the upper harmonic energy by at most +/-8 dB.  This is
+            // a causal one-pass filter, so it adds neither a delayed copy nor
+            // an STFT pre-echo to short consonants.
+            const auto highGain = std::pow(10.0f, smoothedTension * 8.0f / 20.0f);
+            const auto lowGain = std::pow(10.0f, -smoothedTension * 1.5f / 20.0f);
+            const auto tilted = tiltLow * lowGain + tiltHigh * highGain;
+            audio.setSample(channel, sample, (tilted + airHigh * air * 0.22f) * gain);
+        }
+    }
+}
+
 juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& source,
                                                  int targetSamples,
                                                  double sampleRate,
@@ -84,6 +143,7 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
                                                  const std::vector<float>& targetMidi,
                                                  const std::vector<float>& formantSemitones,
                                                  const std::vector<float>& noteGain,
+                                                 const std::vector<float>& tension,
                                                  const std::vector<float>& breath,
                                                  const std::vector<TimeMapPoint>& timeMap,
                                                  PitchRenderBackend pitchBackend,
@@ -117,6 +177,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         hasFormantEdit = hasFormantEdit || std::abs(value) > 1.0e-4f;
     for (const auto value : noteGain)
         hasLevelEdit = hasLevelEdit || std::abs(value - 1.0f) > 1.0e-4f;
+    for (const auto value : tension)
+        hasLevelEdit = hasLevelEdit || std::abs(value) > 1.0e-4f;
     for (const auto value : breath)
         hasLevelEdit = hasLevelEdit || value > 1.0e-4f;
     if (!hasTimeWarp && !hasPitchEdit && !hasFormantEdit && !hasLevelEdit) return source;
@@ -130,25 +192,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     if (!needsSpectralRender)
     {
         result = source;
-        for (int channel = 0; channel < channels; ++channel)
-        {
-            auto low = result.getSample(channel, 0);
-            const auto lowCoefficient = static_cast<float>(
-                1.0 - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
-            for (int sample = 0; sample < targetSamples; ++sample)
-            {
-                const auto curvePosition = static_cast<double>(sample) / sampleRate
-                    * 1000.0 / std::max(0.1, framePeriodMs);
-                const auto gain = juce::jlimit(0.0f, 4.0f,
-                    valueAt(noteGain, curvePosition, 1.0f));
-                const auto air = juce::jlimit(0.0f, 1.0f,
-                    valueAt(breath, curvePosition, 0.0f));
-                const auto current = result.getSample(channel, sample);
-                low += lowCoefficient * (current - low);
-                result.setSample(channel, sample,
-                    (current + (current - low) * air * 0.22f) * gain);
-            }
-        }
+        applyExpressionAndTension(result, sampleRate, framePeriodMs, targetMidi,
+                                  noteGain, tension, breath);
         return result;
     }
 
@@ -358,28 +403,8 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     if (needsSpectralRender && sourceRms > 1.0e-7 && outputRms > 1.0e-7)
         result.applyGain(static_cast<float>(juce::jlimit(0.55, 1.8, sourceRms / outputRms)));
 
-    for (int channel = 0; channel < channels; ++channel)
-    {
-        // Stable one-pole air shelf.  The previous first-difference boost
-        // exaggerated sample-to-sample phase errors and could turn preserved
-        // timbre into a metallic/raspy voice.
-        auto low = result.getSample(channel, 0);
-        const auto lowCoefficient = static_cast<float>(
-            1.0 - std::exp(-juce::MathConstants<double>::twoPi * 3500.0 / sampleRate));
-        for (int sample = 0; sample < targetSamples; ++sample)
-        {
-            const auto curvePosition = static_cast<double>(sample) / sampleRate
-                * 1000.0 / framePeriod;
-            const auto gain = juce::jlimit(0.0f, 4.0f,
-                valueAt(noteGain, curvePosition, 1.0f));
-            const auto air = juce::jlimit(0.0f, 1.0f,
-                valueAt(breath, curvePosition, 0.0f));
-            const auto current = result.getSample(channel, sample);
-            low += lowCoefficient * (current - low);
-            const auto highBand = current - low;
-            result.setSample(channel, sample, (current + highBand * air * 0.22f) * gain);
-        }
-    }
+    applyExpressionAndTension(result, sampleRate, framePeriodMs, targetMidi,
+                              noteGain, tension, breath);
 
     // Component clips are cut at analysis element boundaries, which are not
     // guaranteed zero crossings.  Melodyne applies a compact amplitude/phase
@@ -478,7 +503,8 @@ public:
             // high-band finish below.
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                request.formantSemitones, request.noteGain, request.breath, request.timeMap,
+                request.formantSemitones, request.noteGain, request.tension, request.breath,
+                request.timeMap,
                 request.pitchBackend, request.stretchAlgorithm);
             applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
                                     request.sourceMidi, request.targetMidi);
@@ -486,7 +512,8 @@ public:
         else
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                request.formantSemitones, request.noteGain, request.breath, request.timeMap,
+                request.formantSemitones, request.noteGain, request.tension, request.breath,
+                request.timeMap,
                 request.pitchBackend, request.stretchAlgorithm);
         const auto backend = request.pitchBackend == PitchRenderBackend::mld5
             ? juce::String("mld5-single-pass-stable-clock")

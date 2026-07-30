@@ -41,6 +41,7 @@ struct NoteData
     float sourceMidiCenter = -1.0f;
     float modulation = 1.0f;
     float drift = 1.0f;
+    float tension = 0.0f;
     float breath = 0.0f;
     float formantSemitones = 0.0f;
     float gain = 1.0f;
@@ -131,6 +132,7 @@ public:
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);
+    void setNoteTension(const juce::String& noteId, float tension);
     void setNoteBreath(const juce::String& noteId, float breath);
     void setNoteFormant(const juce::String& noteId, float semitones);
     void setNoteGain(const juce::String& noteId, float gain);
