@@ -24,9 +24,11 @@ std::optional<std::pair<float, float>> contourAt(const NoteData& note, double lo
     const auto amount = next.timeSeconds > left.timeSeconds
         ? static_cast<float>(juce::jlimit(0.0, 1.0,
             (localSeconds - left.timeSeconds) / (next.timeSeconds - left.timeSeconds))) : 0.0f;
-    return std::pair { left.relativeCents + (next.relativeCents - left.relativeCents) * amount,
-                       left.withoutVibratoCents
-                           + (next.withoutVibratoCents - left.withoutVibratoCents) * amount };
+    const auto source = left.relativeCents
+        + (next.relativeCents - left.relativeCents) * amount;
+    const auto leftTarget = renderedPitchCents(note, left);
+    const auto rightTarget = renderedPitchCents(note, next);
+    return std::pair { source, leftTarget + (rightTarget - leftTarget) * amount };
 }
 
 std::pair<float, float> panGains(float pan, bool mono)
@@ -132,8 +134,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;
             request.sourceMidi[static_cast<std::size_t>(frame)] = sourceCenter + cents->first / 100.0f;
             request.targetMidi[static_cast<std::size_t>(frame)] = note.midiNote
-                + note.drift * cents->second / 100.0f
-                + note.modulation * (cents->first - cents->second) / 100.0f;
+                + cents->second / 100.0f;
             break;
         }
     }
@@ -160,8 +161,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
         {
             const auto previousCents = contourAt(*previousNote, previousNote->durationSeconds);
             const auto previousPitch = previousNote->midiNote + (previousCents
-                ? previousNote->drift * previousCents->second / 100.0f
-                    + previousNote->modulation * (previousCents->first - previousCents->second) / 100.0f
+                ? previousCents->second / 100.0f
                 : 0.0f);
             const auto joinSeconds = std::min(0.08,
                 std::max(0.012, joinedNote.durationSeconds * 0.22));
@@ -216,6 +216,8 @@ std::string renderKey(const ClipData& clip, const TrackData& track)
             stream.writeFloat(point.relativeCents);
             stream.writeFloat(point.withoutVibratoCents);
             stream.writeByte(static_cast<char>(point.voiced ? 1 : 0));
+            stream.writeFloat(point.manualTargetCents);
+            stream.writeByte(static_cast<char>(point.hasManualTarget ? 1 : 0));
         }
     }
     return std::string(static_cast<const char*>(stream.getData()), stream.getDataSize());

@@ -88,10 +88,12 @@ private:
     juce::String draggedNote;
     float dragStartMidi = 0.0f;
     float previewMidi = 0.0f;
-    enum class DragMode { none, pitch, resizeLeft, resizeRight } dragMode = DragMode::none;
+    enum class DragMode { none, pitch, resizeLeft, resizeRight, drawPitch, linePitch } dragMode = DragMode::none;
     double dragStartSeconds = 0.0;
     double dragDurationSeconds = 0.0;
     double previewStartSeconds = 0.0;
     double previewDurationSeconds = 0.0;
+    double pitchEditAbsoluteStart = 0.0;
+    std::vector<PitchCurveEditPoint> pitchStroke;
 };
 }

@@ -153,6 +153,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
             makeTool("set_note", "Set pitch, tension, breath, formant, gain, Attack and consonant parameters / 设置全部音符参数"),
+            makeTool("set_pitch_curve", "Draw an absolute target-pitch curve without replacing source F0 / 绘制目标音高线并保留原始 F0"),
             makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
             makeTool("remove_note", "Delete a note / 删除音符"),
             makeTool("toggle_note_connection", "Connect or separate adjacent notes / 连接或分离相邻音符"),
@@ -351,6 +352,18 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         }
         return toolResult("ok");
     }
+    else if (name == "set_pitch_curve")
+    {
+        std::vector<PitchCurveEditPoint> points;
+        const auto pointValues = args.getProperty("points", {});
+        if (const auto* values = pointValues.getArray())
+            for (const auto& value : *values)
+                points.push_back({ number(value, "time_seconds"),
+                                   static_cast<float>(number(value, "midi", 60.0)) });
+        if (project.setNotePitchCurve(string(args, "note_id"), std::move(points)))
+            return toolResult("ok");
+        error = "Pitch curve needs a valid note_id and at least one point";
+    }
     else if (name == "add_note")
     {
         const auto id = project.addNote(string(args, "clip_id"), number(args, "start_seconds"),
@@ -495,6 +508,8 @@ juce::var McpServer::projectJson() const
                     set(pointValue, "relative_cents", point.relativeCents);
                     set(pointValue, "without_vibrato_cents", point.withoutVibratoCents);
                     set(pointValue, "voiced", point.voiced);
+                    set(pointValue, "manual_target_cents", point.manualTargetCents);
+                    set(pointValue, "has_manual_target", point.hasManualTarget);
                     contour.push_back(std::move(pointValue));
                 }
                 set(noteValue, "contour", array(std::move(contour)));

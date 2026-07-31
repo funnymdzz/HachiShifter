@@ -29,6 +29,14 @@ struct PitchPoint
     float relativeCents = 0.0f;
     float withoutVibratoCents = 0.0f;
     bool voiced = true;
+    float manualTargetCents = 0.0f;
+    bool hasManualTarget = false;
+};
+
+struct PitchCurveEditPoint
+{
+    double timeSeconds = 0.0;
+    float targetMidi = 60.0f;
 };
 
 struct NoteData
@@ -51,6 +59,8 @@ struct NoteData
     std::vector<PitchPoint> contour;
     std::vector<double> sibilantMarkers;
 };
+
+[[nodiscard]] float renderedPitchCents(const NoteData& note, const PitchPoint& point);
 
 struct ClipData
 {
@@ -138,6 +148,8 @@ public:
     void setNoteGain(const juce::String& noteId, float gain);
     void setNoteAttack(const juce::String& noteId, double consonantSeconds, float attackSpeed);
     void setNoteAttackSpeed(const juce::String& noteId, float attackSpeed);
+    bool setNotePitchCurve(const juce::String& noteId,
+                           std::vector<PitchCurveEditPoint> points);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,
                                        double absoluteStart, double duration, float midiNote);
     void removeNote(const juce::String& noteId);

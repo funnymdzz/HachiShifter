@@ -14,6 +14,7 @@ remains available on `main` for regression reference.
 - legacy-compatible dark piano roll using `#7F69CA`, `#CBCBFA` and `#F4C000`,
   plus the source-edit wrench mode;
 - pitch contours remain relative to the note centre when a note is dragged;
+- freehand and line target-pitch editing while retaining the source F0 contour;
 - Melodyne-compatible pitch-modulation and pitch-drift correction controls;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;

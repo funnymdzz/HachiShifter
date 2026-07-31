@@ -6,6 +6,13 @@
 
 namespace hachi
 {
+float renderedPitchCents(const NoteData& note, const PitchPoint& point)
+{
+    return point.hasManualTarget ? point.manualTargetCents
+        : note.drift * point.withoutVibratoCents
+            + note.modulation * (point.relativeCents - point.withoutVibratoCents);
+}
+
 namespace
 {
 juce::String pitchAlgorithmName(PitchAlgorithm value)
@@ -773,6 +780,128 @@ void ProjectModel::setNoteAttackSpeed(const juce::String& noteId, float attackSp
     if (changed) sendChangeMessage();
 }
 
+bool ProjectModel::setNotePitchCurve(const juce::String& noteId,
+                                     std::vector<PitchCurveEditPoint> points)
+{
+    if (points.empty()) return false;
+    std::stable_sort(points.begin(), points.end(), [](const auto& left, const auto& right)
+    {
+        return left.timeSeconds < right.timeSeconds;
+    });
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                {
+                    if (note.id != noteId) continue;
+                    for (auto& point : points)
+                    {
+                        point.timeSeconds = juce::jlimit(0.0, note.durationSeconds,
+                                                         point.timeSeconds);
+                        point.targetMidi = juce::jlimit(0.0f, 127.0f, point.targetMidi);
+                    }
+                    pushUndoLocked();
+                    changed = true;
+
+                    // User-created notes initially contain only two endpoints.
+                    // Densify them before drawing so a freehand edit has the
+                    // same 5 ms precision as imported Melodyne/FCPE contours.
+                    auto needsDensifying = note.contour.size() < 2;
+                    for (std::size_t index = 1; index < note.contour.size(); ++index)
+                        needsDensifying = needsDensifying
+                            || note.contour[index].timeSeconds
+                                - note.contour[index - 1].timeSeconds > 0.0075;
+                    if (needsDensifying)
+                    {
+                        const auto original = note.contour;
+                        const auto evaluate = [&](double time)
+                        {
+                            PitchPoint result;
+                            result.timeSeconds = time;
+                            if (original.empty()) return result;
+                            const auto right = std::lower_bound(original.begin(), original.end(), time,
+                                [](const PitchPoint& point, double value)
+                                {
+                                    return point.timeSeconds < value;
+                                });
+                            const auto rightIndex = static_cast<std::size_t>(right == original.end()
+                                ? original.size() - 1 : right - original.begin());
+                            const auto leftIndex = rightIndex > 0
+                                && original[rightIndex].timeSeconds > time ? rightIndex - 1 : rightIndex;
+                            const auto& left = original[leftIndex];
+                            const auto& next = original[rightIndex];
+                            const auto amount = next.timeSeconds > left.timeSeconds
+                                ? static_cast<float>(juce::jlimit(0.0, 1.0,
+                                    (time - left.timeSeconds)
+                                        / (next.timeSeconds - left.timeSeconds))) : 0.0f;
+                            result.relativeCents = left.relativeCents
+                                + (next.relativeCents - left.relativeCents) * amount;
+                            result.withoutVibratoCents = left.withoutVibratoCents
+                                + (next.withoutVibratoCents - left.withoutVibratoCents) * amount;
+                            result.voiced = left.voiced && next.voiced;
+                            if (left.hasManualTarget && next.hasManualTarget)
+                            {
+                                result.hasManualTarget = true;
+                                result.manualTargetCents = left.manualTargetCents
+                                    + (next.manualTargetCents - left.manualTargetCents) * amount;
+                            }
+                            return result;
+                        };
+                        note.contour.clear();
+                        for (double time = 0.0; time < note.durationSeconds; time += 0.005)
+                            note.contour.push_back(evaluate(time));
+                        note.contour.push_back(evaluate(note.durationSeconds));
+                    }
+
+                    const auto firstTime = points.front().timeSeconds;
+                    const auto lastTime = points.back().timeSeconds;
+                    const auto targetAt = [&](double time)
+                    {
+                        if (points.size() == 1) return points.front().targetMidi;
+                        const auto right = std::upper_bound(points.begin(), points.end(), time,
+                            [](double value, const PitchCurveEditPoint& point)
+                            {
+                                return value < point.timeSeconds;
+                            });
+                        if (right == points.begin()) return right->targetMidi;
+                        if (right == points.end()) return points.back().targetMidi;
+                        const auto& left = *(right - 1);
+                        const auto& next = *right;
+                        const auto amount = next.timeSeconds > left.timeSeconds
+                            ? static_cast<float>((time - left.timeSeconds)
+                                / (next.timeSeconds - left.timeSeconds)) : 0.0f;
+                        return left.targetMidi + (next.targetMidi - left.targetMidi) * amount;
+                    };
+                    if (points.size() == 1 && !note.contour.empty())
+                    {
+                        auto nearest = std::min_element(note.contour.begin(), note.contour.end(),
+                            [&](const auto& left, const auto& right)
+                            {
+                                return std::abs(left.timeSeconds - firstTime)
+                                    < std::abs(right.timeSeconds - firstTime);
+                            });
+                        nearest->manualTargetCents =
+                            (points.front().targetMidi - note.midiNote) * 100.0f;
+                        nearest->hasManualTarget = true;
+                    }
+                    else
+                        for (auto& point : note.contour)
+                            if (point.voiced && point.timeSeconds >= firstTime - 1.0e-7
+                                && point.timeSeconds <= lastTime + 1.0e-7)
+                            {
+                                point.manualTargetCents =
+                                    (targetAt(point.timeSeconds) - note.midiNote) * 100.0f;
+                                point.hasManualTarget = true;
+                            }
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+    return changed;
+}
+
 juce::String ProjectModel::addNote(const juce::String& preferredClipId,
                                    double absoluteStart, double duration, float midiNote)
 {
@@ -949,7 +1078,7 @@ juce::ValueTree ProjectModel::toValueTree() const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 3, nullptr);
+    root.setProperty("version", 4, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -1010,6 +1139,8 @@ juce::ValueTree ProjectModel::toValueTree() const
                     pointTree.setProperty("relativeCents", point.relativeCents, nullptr);
                     pointTree.setProperty("withoutVibratoCents", point.withoutVibratoCents, nullptr);
                     pointTree.setProperty("voiced", point.voiced, nullptr);
+                    pointTree.setProperty("manualTargetCents", point.manualTargetCents, nullptr);
+                    pointTree.setProperty("hasManualTarget", point.hasManualTarget, nullptr);
                     noteTree.addChild(pointTree, -1, nullptr);
                 }
                 for (const auto marker : note.sibilantMarkers)
@@ -1094,7 +1225,9 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
                         note.contour.push_back({ static_cast<double>(child.getProperty("timeSeconds", 0.0)),
                                                  relative,
                                                  static_cast<float>(child.getProperty("withoutVibratoCents", relative)),
-                                                 static_cast<bool>(child.getProperty("voiced", true)) });
+                                                 static_cast<bool>(child.getProperty("voiced", true)),
+                                                 static_cast<float>(child.getProperty("manualTargetCents", 0.0)),
+                                                 static_cast<bool>(child.getProperty("hasManualTarget", false)) });
                     }
                     else if (child.hasType("Sibilant"))
                         note.sibilantMarkers.push_back(static_cast<double>(child.getProperty("timeSeconds", 0.0)));

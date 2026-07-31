@@ -430,9 +430,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
                     const auto sourceCenter = note.sourceMidiCenter >= 0.0f
                         ? note.sourceMidiCenter : note.midiNote;
                     const auto originalPitch = sourceCenter + point.relativeCents / 100.0f;
-                    const auto pitch = note.midiNote
-                        + note.drift * point.withoutVibratoCents / 100.0f
-                        + note.modulation * (point.relativeCents - point.withoutVibratoCents) / 100.0f;
+                    const auto pitch = note.midiNote + renderedPitchCents(note, point) / 100.0f;
                     const auto py = midiToY(pitch) + rowHeight * 0.5f;
                     const auto originalY = midiToY(originalPitch) + rowHeight * 0.5f;
                     if (!originalOpen) originalContour.startNewSubPath(px, originalY);
@@ -460,11 +458,27 @@ void PianoRollComponent::paint(juce::Graphics& g)
         ++trackIndex;
     }
 
-    if (draggedNote.isNotEmpty())
+    if (draggedNote.isNotEmpty() && dragMode == DragMode::pitch)
     {
         g.setColour(Palette::noteLight.withAlpha(0.8f));
         g.drawHorizontalLine(static_cast<int>(midiToY(previewMidi) + rowHeight * 0.5f),
                              58.0f, static_cast<float>(getWidth()));
+    }
+
+    if (!pitchStroke.empty()
+        && (dragMode == DragMode::drawPitch || dragMode == DragMode::linePitch))
+    {
+        juce::Path preview;
+        for (std::size_t index = 0; index < pitchStroke.size(); ++index)
+        {
+            const auto x = timeToX(pitchEditAbsoluteStart
+                                   + pitchStroke[index].timeSeconds);
+            const auto y = midiToY(pitchStroke[index].targetMidi) + rowHeight * 0.5f;
+            if (index == 0) preview.startNewSubPath(x, y);
+            else preview.lineTo(x, y);
+        }
+        g.setColour(Palette::noteLight.withAlpha(0.96f));
+        g.strokePath(preview, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved));
     }
 
     g.setColour(juce::Colours::red.withAlpha(0.9f));
@@ -534,6 +548,18 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
                 return;
             }
             draggedNote = it->id;
+            if (!sourceEditMode && (tool == Tool::draw || tool == Tool::line))
+            {
+                dragMode = tool == Tool::draw ? DragMode::drawPitch : DragMode::linePitch;
+                pitchEditAbsoluteStart = static_cast<double>(it->bounds.getX() - 58.0f)
+                    / pixelsPerSecond;
+                const auto local = juce::jlimit(0.0, it->durationSeconds,
+                    static_cast<double>(event.position.x - it->bounds.getX()) / pixelsPerSecond);
+                pitchStroke = { { local,
+                    juce::jlimit(0.0f, 127.0f, yToMidi(event.position.y)) } };
+                repaint();
+                return;
+            }
             dragStartMidi = it->midi;
             previewMidi = dragStartMidi;
             dragStartSeconds = it->startSeconds;
@@ -577,7 +603,7 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
 
 void PianoRollComponent::mouseDoubleClick(const juce::MouseEvent& event)
 {
-    if (sourceEditMode) return;
+    if (sourceEditMode || tool == Tool::draw || tool == Tool::line) return;
     for (auto it = noteHits.rbegin(); it != noteHits.rend(); ++it)
     {
         if (!it->bounds.contains(event.position)) continue;
@@ -648,6 +674,25 @@ void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
     }
     if (draggedNote.isEmpty()) return;
     if (tool == Tool::connect) return;
+    if (dragMode == DragMode::drawPitch || dragMode == DragMode::linePitch)
+    {
+        const auto local = std::max(0.0,
+            static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond
+                - pitchEditAbsoluteStart);
+        PitchCurveEditPoint point { local,
+            juce::jlimit(0.0f, 127.0f, yToMidi(event.position.y)) };
+        if (dragMode == DragMode::linePitch)
+        {
+            if (pitchStroke.size() == 1) pitchStroke.push_back(point);
+            else pitchStroke.back() = point;
+        }
+        else if (pitchStroke.empty()
+                 || std::abs(pitchStroke.back().timeSeconds - point.timeSeconds) >= 0.001
+                 || std::abs(pitchStroke.back().targetMidi - point.targetMidi) >= 0.02f)
+            pitchStroke.push_back(point);
+        repaint();
+        return;
+    }
     if (dragMode == DragMode::pitch)
         previewMidi = juce::jlimit(0.0f, 127.0f, std::round(yToMidi(event.position.y)));
     else if (dragMode == DragMode::resizeLeft)
@@ -677,7 +722,9 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
         return;
     }
     if (draggedNote.isEmpty()) return;
-    if (dragMode == DragMode::pitch)
+    if (dragMode == DragMode::drawPitch || dragMode == DragMode::linePitch)
+        model.setNotePitchCurve(draggedNote, std::move(pitchStroke));
+    else if (dragMode == DragMode::pitch)
     {
         std::vector<juce::String> ids;
         ids.reserve(selectedNotes.size());
@@ -688,6 +735,7 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
     else
         model.resizeNote(draggedNote, previewStartSeconds, previewDurationSeconds);
     draggedNote.clear();
+    pitchStroke.clear();
     dragMode = DragMode::none;
 }
 
