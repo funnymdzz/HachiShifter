@@ -229,6 +229,8 @@ void SettingsComponent::setTexts()
     accentLabel.setText(strings.text("settings.accent"), juce::dontSendNotification);
     accentLightLabel.setText(strings.text("settings.accentLight"), juce::dontSendNotification);
     noteColourLabel.setText(strings.text("settings.noteColour"), juce::dontSendNotification);
+    theme.changeItemText(1, strings.text("settings.themeDark"));
+    theme.changeItemText(2, strings.text("settings.themeLight"));
     audioDeviceLabel.setText(strings.text("settings.audioDevice"), juce::dontSendNotification);
     sampleRateLabel.setText(strings.text("settings.sampleRate"), juce::dontSendNotification);
     bufferSizeLabel.setText(strings.text("settings.bufferSize"), juce::dontSendNotification);
@@ -238,13 +240,23 @@ void SettingsComponent::setTexts()
     hifiganPathLabel.setText(strings.text("settings.hifiganPath"), juce::dontSendNotification);
     inferenceLabel.setText(strings.text("settings.inference"), juce::dontSendNotification);
     inferenceDeviceLabel.setText(strings.text("settings.device"), juce::dontSendNotification);
+    inference.changeItemText(1, strings.text("settings.auto"));
+    inferenceDevice.changeItemText(1, strings.text("settings.auto"));
     utauResamplerLabel.setText(strings.text("settings.utauResampler"), juce::dontSendNotification);
     shortcutLabel.setText(strings.text("settings.shortcuts"), juce::dontSendNotification);
     wheelLabel.setText(strings.text("settings.wheel"), juce::dontSendNotification);
+    wheelAction.changeItemText(1, strings.text("settings.wheelZoom"));
+    wheelAction.changeItemText(2, strings.text("settings.wheelScroll"));
     spacePlayback.setButtonText(strings.text("settings.spacePlayback"));
     confirmDestructive.setButtonText(strings.text("settings.confirmDestructive"));
     melodyneComposeLabel.setText(strings.text("settings.melodyneCompose"), juce::dontSendNotification);
+    melodyneCompose.changeItemText(1, strings.text("settings.composeAsk"));
+    melodyneCompose.changeItemText(2, strings.text("settings.composeMelodic"));
+    melodyneCompose.changeItemText(3, strings.text("settings.composeAll"));
+    melodyneCompose.changeItemText(4, strings.text("settings.composeAudio"));
     melodynePitchLabel.setText(strings.text("settings.melodynePitch"), juce::dontSendNotification);
+    melodynePitchSource.changeItemText(1, strings.text("settings.pitchProject"));
+    melodynePitchSource.changeItemText(2, strings.text("settings.pitchReanalyse"));
     importedAlgorithmLabel.setText(strings.text("settings.importAlgorithm"), juce::dontSendNotification);
     importedStretchAlgorithmLabel.setText(strings.text("settings.importStretchAlgorithm"),
                                            juce::dontSendNotification);

@@ -109,6 +109,8 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.import", { "文件导入", "檔案匯入", "ファイル読込", "파일 가져오기", "File Import" } }
     ,{ "settings.language", { "语言", "語言", "言語", "언어", "Language" } }
     ,{ "settings.theme", { "颜色主题", "色彩主題", "カラーテーマ", "색상 테마", "Colour Theme" } }
+    ,{ "settings.themeDark", { "深色", "深色", "ダーク", "다크", "Dark" } }
+    ,{ "settings.themeLight", { "浅色", "淺色", "ライト", "라이트", "Light" } }
     ,{ "settings.accent", { "主色（Hex）", "主色（Hex）", "アクセント（Hex）", "강조색 (Hex)", "Accent (Hex)" } }
     ,{ "settings.accentLight", { "浅主色（Hex）", "淺主色（Hex）", "明るい主色（Hex）", "밝은 강조색 (Hex)", "Light Accent (Hex)" } }
     ,{ "settings.noteColour", { "音符色（Hex）", "音符色（Hex）", "ノート色（Hex）", "노트 색상 (Hex)", "Note Colour (Hex)" } }
@@ -117,13 +119,22 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.hifiganPath", { "HiFi-GAN 模型目录", "HiFi-GAN 模型目錄", "HiFi-GANモデルフォルダー", "HiFi-GAN 모델 폴더", "HiFi-GAN Model Directory" } }
     ,{ "settings.inference", { "推理方式", "推理方式", "推論バックエンド", "추론 백엔드", "Inference Backend" } }
     ,{ "settings.device", { "推理设备", "推理裝置", "推論デバイス", "추론 장치", "Inference Device" } }
+    ,{ "settings.auto", { "自动", "自動", "自動", "자동", "Auto" } }
     ,{ "settings.utauResampler", { "UTAU 重采样器（预留）", "UTAU 重取樣器（預留）", "UTAUリサンプラー（予約）", "UTAU 리샘플러 (예약)", "UTAU Resampler (reserved)" } }
     ,{ "settings.shortcuts", { "快捷键方案", "快速鍵配置", "ショートカット方式", "단축키 방식", "Shortcut Scheme" } }
     ,{ "settings.wheel", { "鼠标滚轮", "滑鼠滾輪", "マウスホイール", "마우스 휠", "Mouse Wheel" } }
+    ,{ "settings.wheelZoom", { "缩放", "縮放", "ズーム", "확대/축소", "Zoom" } }
+    ,{ "settings.wheelScroll", { "滚动", "捲動", "スクロール", "스크롤", "Scroll" } }
     ,{ "settings.spacePlayback", { "空格键播放/暂停", "空白鍵播放/暫停", "スペースで再生/一時停止", "스페이스바 재생/일시정지", "Space toggles playback" } }
     ,{ "settings.confirmDestructive", { "删除前确认", "刪除前確認", "削除前に確認", "삭제 전 확인", "Confirm before delete" } }
     ,{ "settings.melodyneCompose", { "Melodyne Compose 默认方式", "Melodyne Compose 預設方式", "Melodyne Composeの既定値", "Melodyne Compose 기본값", "Default Melodyne Compose" } }
+    ,{ "settings.composeAsk", { "每次询问", "每次詢問", "毎回確認", "매번 확인", "Ask Every Time" } }
+    ,{ "settings.composeMelodic", { "旋律轨道", "旋律軌道", "メロディックトラック", "멜로디 트랙", "Melodic Tracks" } }
+    ,{ "settings.composeAll", { "全部轨道", "全部軌道", "すべてのトラック", "모든 트랙", "All Tracks" } }
+    ,{ "settings.composeAudio", { "仅普通音轨", "僅一般音軌", "通常音声のみ", "일반 오디오만", "Audio Only" } }
     ,{ "settings.melodynePitch", { "Melodyne 原音高来源", "Melodyne 原音高來源", "Melodyne元ピッチの取得元", "Melodyne 원본 피치 소스", "Melodyne Source Pitch" } }
+    ,{ "settings.pitchProject", { "工程记录", "工程記錄", "プロジェクトデータ", "프로젝트 데이터", "Project Data" } }
+    ,{ "settings.pitchReanalyse", { "GAME + FCPE（无模型时使用原生分析）", "GAME + FCPE（無模型時使用原生分析）", "GAME + FCPE（モデルなしはネイティブ解析）", "GAME + FCPE (모델 미포함 시 네이티브 분석)", "GAME + FCPE (native fallback without models)" } }
     ,{ "settings.importAlgorithm", { "导入工程默认变调算法", "匯入工程預設變調演算法", "読込時の既定ピッチアルゴリズム", "가져오기 기본 피치 알고리즘", "Default Import Pitch Algorithm" } }
     ,{ "settings.importStretchAlgorithm", { "导入工程默认拉伸算法", "匯入工程預設拉伸演算法", "読込時の既定タイムストレッチ", "가져오기 기본 타임 스트레치", "Default Import Stretch Algorithm" } }
     ,{ "settings.preserveEdits", { "保留工程中的修音、Attack、音量和音色编辑", "保留工程中的修音、Attack、音量與音色編輯", "ピッチ補正・Attack・音量・音色の編集を保持", "피치 보정·Attack·음량·음색 편집 유지", "Preserve tuning, Attack, level and timbre edits" } }

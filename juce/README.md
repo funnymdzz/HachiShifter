@@ -33,6 +33,7 @@ remains available on `main` for regression reference.
 - MCP project editing, pre-render, WAV export and transport control, including
   selected-backend and render-progress inspection;
 - complete strings for zh-CN, zh-TW, ja-JP, ko-KR and en-US.
+- translated settings choices that update immediately with the selected UI language.
 
 ## Native backend
 
