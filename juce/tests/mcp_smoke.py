@@ -137,6 +137,41 @@ def main() -> int:
         stopped = json.loads(client.call("transport_stop"))
         assert abs(seek["position_seconds"] - 0.1) < 0.001
         assert playing["playing"] is True and stopped["playing"] is False
+
+        client.call(
+            "sample_settings_save",
+            {
+                "audio_path": str(source),
+                "rows": [
+                    {
+                        "name": "fixture",
+                        "region_start_seconds": 0.01,
+                        "region_end_seconds": 0.32,
+                        "alignment_seconds": 0.06,
+                        "fixed_duration_seconds": 0.04,
+                        "relative_pitch_cents": 25.0,
+                    }
+                ],
+            },
+        )
+        regions = json.loads(
+            client.call("sample_settings_read", {"audio_path": str(source)})
+        )["rows"]
+        assert len(regions) == 1 and regions[0]["name"] == "fixture"
+        oto = directory / "oto.ini"
+        client.call("oto_export", {"audio_path": str(source), "oto_path": str(oto)})
+        assert oto.exists() and "fixture" in oto.read_text(encoding="utf-8")
+        imported_oto = json.loads(
+            client.call(
+                "oto_import",
+                {
+                    "audio_path": str(source),
+                    "oto_path": str(oto),
+                    "save_sidecar": True,
+                },
+            )
+        )
+        assert len(imported_oto["rows"]) == 1
         client.close()
 
         print(
@@ -147,6 +182,7 @@ def main() -> int:
                     "export_sha256": hashlib.sha256(exported.read_bytes()).hexdigest(),
                     "export_size": exported.stat().st_size,
                     "transport": True,
+                    "sample_settings_and_oto": True,
                 },
                 separators=(",", ":"),
             )

@@ -84,6 +84,67 @@ juce::String summary(const ProjectData& project)
         + "; clips=" + juce::String(static_cast<juce::int64>(clips))
         + "; notes=" + juce::String(static_cast<juce::int64>(notes));
 }
+
+juce::var sampleRowsJson(const std::vector<SampleRegionSetting>& rows)
+{
+    std::vector<juce::var> values;
+    values.reserve(rows.size());
+    for (const auto& row : rows)
+    {
+        auto value = object();
+        set(value, "name", row.name);
+        set(value, "region_start_seconds", row.regionStartSeconds);
+        set(value, "region_end_seconds", row.regionEndSeconds);
+        set(value, "alignment_seconds", row.alignmentSeconds);
+        set(value, "fixed_duration_seconds", row.fixedDurationSeconds);
+        set(value, "relative_pitch_cents", row.relativePitchCents);
+        set(value, "melodyne_data", row.melodyneData);
+        set(value, "melodyne_pitch_center_cents", row.melodynePitchCenterCents);
+        set(value, "melodyne_original_pitch_center_cents",
+            row.melodyneOriginalPitchCenterCents);
+        set(value, "melodyne_pitch_drift", row.melodynePitchDrift);
+        set(value, "melodyne_pitch_modulation", row.melodynePitchModulation);
+        set(value, "melodyne_transition_seconds", row.melodyneTransitionSeconds);
+        set(value, "melodyne_formant_cents", row.melodyneFormantCents);
+        set(value, "melodyne_amplitude", row.melodyneAmplitude);
+        set(value, "melodyne_sibilant_balance", row.melodyneSibilantBalance);
+        set(value, "melodyne_attack_seconds", row.melodyneAttackSeconds);
+        set(value, "melodyne_decay_elongation", row.melodyneDecayElongation);
+        values.push_back(std::move(value));
+    }
+    return array(std::move(values));
+}
+
+std::vector<SampleRegionSetting> sampleRowsFromJson(const juce::var& source)
+{
+    std::vector<SampleRegionSetting> rows;
+    if (const auto* values = source.getArray())
+        for (const auto& value : *values)
+        {
+            SampleRegionSetting row;
+            row.name = string(value, "name");
+            row.regionStartSeconds = number(value, "region_start_seconds");
+            row.regionEndSeconds = number(value, "region_end_seconds", 0.5);
+            row.alignmentSeconds = number(value, "alignment_seconds");
+            row.fixedDurationSeconds = number(value, "fixed_duration_seconds");
+            row.relativePitchCents = number(value, "relative_pitch_cents");
+            row.melodyneData = static_cast<bool>(value.getProperty("melodyne_data", false));
+            row.melodynePitchCenterCents = number(value, "melodyne_pitch_center_cents");
+            row.melodyneOriginalPitchCenterCents = number(
+                value, "melodyne_original_pitch_center_cents");
+            row.melodynePitchDrift = number(value, "melodyne_pitch_drift", 1.0);
+            row.melodynePitchModulation = number(value, "melodyne_pitch_modulation", 1.0);
+            row.melodyneTransitionSeconds = number(value, "melodyne_transition_seconds");
+            row.melodyneFormantCents = number(value, "melodyne_formant_cents");
+            row.melodyneAmplitude = number(value, "melodyne_amplitude", 1.0);
+            row.melodyneSibilantBalance = number(value, "melodyne_sibilant_balance");
+            row.melodyneAttackSeconds = number(value, "melodyne_attack_seconds");
+            row.melodyneDecayElongation = number(value, "melodyne_decay_elongation");
+            if (row.regionEndSeconds > row.regionStartSeconds)
+                rows.push_back(std::move(row));
+        }
+    return rows;
+}
 }
 
 McpServer::McpServer()
@@ -173,6 +234,11 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("transport_stop", "Stop transport playback / 停止播放"),
             makeTool("transport_seek", "Seek transport to position_seconds / 跳转播放位置"),
             makeTool("transport_status", "Read playback position and render state / 读取播放位置与渲染状态"),
+            makeTool("sample_settings_read", "Read or derive audio .hjm.csv regions / 读取或生成音频 .hjm.csv 分段"),
+            makeTool("sample_settings_save", "Save audio regions to .hjm.csv / 保存音频分段到 .hjm.csv"),
+            makeTool("oto_import", "Import one audio file's regions from UTAU oto.ini / 从 UTAU oto.ini 导入单个音频分段"),
+            makeTool("oto_export", "Export one audio file's regions to UTAU oto.ini / 将单个音频分段导出为 UTAU oto.ini"),
+            makeTool("voicebank_import", "Import an UTAU voicebank and create .hjm.csv sidecars / 导入 UTAU 音源并生成 .hjm.csv"),
             makeTool("read_file", "Read a byte range as base64 / 读取任意文件内容"),
             makeTool("list_directory", "List a directory with type and size / 列出目录内容")
         }));
@@ -506,6 +572,81 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     {
         audio->setPosition(number(args, "position_seconds"));
         return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
+    else if (name == "sample_settings_read")
+    {
+        const juce::File file(string(args, "audio_path"));
+        if (!file.existsAsFile()) return toolResult("Audio file not found", true);
+        auto value = object();
+        set(value, "audio_path", file.getFullPathName());
+        set(value, "sidecar_path", SampleSettings::sidecarFor(file).getFullPathName());
+        set(value, "rows", sampleRowsJson(SampleSettings::loadOrDerive(file, project.snapshot())));
+        return toolResult(juce::JSON::toString(value, false));
+    }
+    else if (name == "sample_settings_save")
+    {
+        const juce::File file(string(args, "audio_path"));
+        if (!file.existsAsFile()) return toolResult("Audio file not found", true);
+        const auto rows = sampleRowsFromJson(args.getProperty("rows", juce::var()));
+        if (rows.empty()) return toolResult("rows must contain at least one valid region", true);
+        if (SampleSettings::save(file, rows, error))
+            return toolResult("saved=" + SampleSettings::sidecarFor(file).getFullPathName()
+                              + "; regions=" + juce::String(static_cast<juce::int64>(rows.size())));
+    }
+    else if (name == "oto_import")
+    {
+        const juce::File audioFile(string(args, "audio_path"));
+        auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(audioFile));
+        if (reader == nullptr || reader->sampleRate <= 0.0)
+            return toolResult("Audio read failed", true);
+        std::vector<SampleRegionSetting> rows;
+        const auto duration = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+        if (SampleSettings::importOto(juce::File(string(args, "oto_path")), audioFile,
+                                      duration, rows, error))
+        {
+            if (static_cast<bool>(args.getProperty("save_sidecar", true))
+                && !SampleSettings::save(audioFile, rows, error))
+                return toolResult(error, true);
+            auto value = object();
+            set(value, "sidecar_path", SampleSettings::sidecarFor(audioFile).getFullPathName());
+            set(value, "rows", sampleRowsJson(rows));
+            return toolResult(juce::JSON::toString(value, false));
+        }
+    }
+    else if (name == "oto_export")
+    {
+        const juce::File audioFile(string(args, "audio_path"));
+        auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(audioFile));
+        if (reader == nullptr || reader->sampleRate <= 0.0)
+            return toolResult("Audio read failed", true);
+        const auto rows = SampleSettings::loadOrDerive(audioFile, project.snapshot());
+        const auto duration = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
+        const juce::File otoFile(string(args, "oto_path"));
+        if (SampleSettings::exportOto(otoFile, audioFile, rows, duration, error))
+            return toolResult("saved=" + otoFile.getFullPathName()
+                              + "; regions=" + juce::String(static_cast<juce::int64>(rows.size())));
+    }
+    else if (name == "voicebank_import")
+    {
+        juce::StringArray audioFiles;
+        juce::StringArray warnings;
+        auto sidecars = 0;
+        auto regions = 0;
+        if (SampleSettings::importVoicebank(juce::File(string(args, "path")), audioFiles,
+                                            sidecars, regions, warnings))
+        {
+            auto value = object();
+            std::vector<juce::var> files;
+            for (const auto& file : audioFiles) files.emplace_back(file);
+            std::vector<juce::var> warningValues;
+            for (const auto& warning : warnings) warningValues.emplace_back(warning);
+            set(value, "audio_files", array(std::move(files)));
+            set(value, "sidecars_written", sidecars);
+            set(value, "regions_written", regions);
+            set(value, "warnings", array(std::move(warningValues)));
+            return toolResult(juce::JSON::toString(value, false));
+        }
+        error = warnings.isEmpty() ? "Voicebank import failed" : warnings.joinIntoString("\n");
     }
     else if (name == "read_file")
     {

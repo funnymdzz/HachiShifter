@@ -2,6 +2,7 @@
 
 #include "../AudioEngine.h"
 #include "../ProjectModel.h"
+#include "../SampleSettings.h"
 #include "MelodyneImporter.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <memory>

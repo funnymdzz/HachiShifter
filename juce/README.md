@@ -32,6 +32,7 @@ remains available on `main` for regression reference.
 - portable HSPX media paths with relative and recursive project-folder relinking;
 - MCP project editing, pre-render, WAV export and transport control, including
   selected-backend and render-progress inspection;
+- MCP HJM region editing, UTAU oto import/export and recursive voicebank registration;
 - complete strings for zh-CN, zh-TW, ja-JP, ko-KR and en-US.
 - translated settings choices that update immediately with the selected UI language.
 
