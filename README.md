@@ -74,13 +74,23 @@ C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行�
 
 ## 构建
 
-仓库使用 GitHub Actions 构建，不要求在本地下载 JUCE 或生成应用构建目录。
-推送到 `next` 后由 `Compile HachiShifter Next (JUCE)` 工作流生成：
+GitHub 保存上游源码，服务器每五分钟把分支和标签同步到自托管 GitLab；编译只在
+GitLab Runner 上执行，不再使用 GitHub Actions，也不要求开发设备下载 JUCE 或
+生成应用构建目录。推送到 GitHub 的 `next` 分支后，GitLab CI 会生成：
 
 - `HachiShifterNext-linux-x86_64-no-model.tar.gz`
 - `HachiShifterNext-windows-x64-no-model.zip`
 
 JUCE 依赖由 CMake FetchContent 在云端构建机获取，发布包不包含模型。
+
+GitLab 项目与最新构建：
+
+- [HachiShifter GitLab 仓库](https://35.194.110.220/funnymdzz/HachiShifter)
+- [下载 Linux x86_64 无模型构建](https://35.194.110.220/funnymdzz/HachiShifter/-/jobs/artifacts/next/download?job=build_linux)
+- [下载 Windows x64 无模型构建](https://35.194.110.220/funnymdzz/HachiShifter/-/jobs/artifacts/next/download?job=build_windows)
+
+Windows 版本由 Debian Runner 使用 Clang/LLVM、微软 MSVC 头文件和 Windows SDK
+交叉编译，产物采用 MSVC ABI 和静态 MSVC 运行库。
 
 ## 使用说明
 

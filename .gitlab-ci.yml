@@ -1,0 +1,70 @@
+stages:
+  - build
+
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "next"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - when: never
+
+default:
+  interruptible: true
+  tags:
+    - gcp-shell
+
+variables:
+  GIT_DEPTH: "1"
+  GIT_SUBMODULE_STRATEGY: none
+
+build_linux:
+  stage: build
+  tags:
+    - gcp-shell
+    - linux
+  script:
+    - rm -rf build-gitlab-linux HachiShifterNext-linux-x86_64 HachiShifterNext-linux-x86_64-no-model.tar.gz
+    - cmake -S juce -B build-gitlab-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+    - cmake --build build-gitlab-linux --target HachiShifterNext -j 2
+    - mkdir -p HachiShifterNext-linux-x86_64/models
+    - binary="$(find build-gitlab-linux -path '*_artefacts/Release/*' -type f -name 'HachiShifter*' -perm -111 | head -n 1)"
+    - test -n "$binary"
+    - install -m 755 "$binary" HachiShifterNext-linux-x86_64/HachiShifterNext
+    - install -m 644 LICENSE HachiShifterNext-linux-x86_64/LICENSE
+    - test "$(find HachiShifterNext-linux-x86_64/models -type f | wc -l)" -eq 0
+    - tar -czf HachiShifterNext-linux-x86_64-no-model.tar.gz HachiShifterNext-linux-x86_64
+    - sha256sum HachiShifterNext-linux-x86_64-no-model.tar.gz > HachiShifterNext-linux-x86_64-no-model.tar.gz.sha256
+  artifacts:
+    name: HachiShifterNext-linux-x86_64-no-model-$CI_COMMIT_SHORT_SHA
+    expire_in: 30 days
+    expose_as: Linux x86_64 model-free
+    paths:
+      - HachiShifterNext-linux-x86_64-no-model.tar.gz
+      - HachiShifterNext-linux-x86_64-no-model.tar.gz.sha256
+
+build_windows:
+  stage: build
+  tags:
+    - gcp-shell
+    - windows-cross
+  variables:
+    HACHI_XWIN_ROOT: /opt/hachishifter/xwin-msvc
+  script:
+    - rm -rf build-gitlab-windows HachiShifterNext-windows-x64 HachiShifterNext-windows-x64-no-model.zip
+    - cmake -S juce -B build-gitlab-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$CI_PROJECT_DIR/juce/cmake/windows-msvc-xwin.cmake"
+    - cmake --build build-gitlab-windows --target HachiShifterNext -j 2
+    - mkdir -p HachiShifterNext-windows-x64/models
+    - binary="$(find build-gitlab-windows -path '*_artefacts/Release/*' -type f -iname 'HachiShifter*.exe' | head -n 1)"
+    - test -n "$binary"
+    - install -m 755 "$binary" HachiShifterNext-windows-x64/HachiShifterNext.exe
+    - install -m 644 LICENSE HachiShifterNext-windows-x64/LICENSE
+    - test "$(find HachiShifterNext-windows-x64/models -type f | wc -l)" -eq 0
+    - file HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'PE32+.*x86-64'
+    - (cd HachiShifterNext-windows-x64 && zip -9 -r ../HachiShifterNext-windows-x64-no-model.zip .)
+    - sha256sum HachiShifterNext-windows-x64-no-model.zip > HachiShifterNext-windows-x64-no-model.zip.sha256
+  artifacts:
+    name: HachiShifterNext-windows-x64-no-model-$CI_COMMIT_SHORT_SHA
+    expire_in: 30 days
+    expose_as: Windows x64 model-free
+    paths:
+      - HachiShifterNext-windows-x64-no-model.zip
+      - HachiShifterNext-windows-x64-no-model.zip.sha256
