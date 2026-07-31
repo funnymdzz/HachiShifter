@@ -19,6 +19,7 @@ remains available on `main` for regression reference.
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);
+- portable HSPX media paths with relative and recursive project-folder relinking;
 - complete strings for zh-CN, zh-TW, ja-JP, ko-KR and en-US.
 
 ## Native backend

@@ -724,6 +724,8 @@ void MainComponent::openExternalFile(const juce::File& file)
     {
         juce::String error;
         if (!project.load(file, error)) showError(error);
+        else if (error.isNotEmpty())
+            showError(strings.text("warning.missingMedia") + "\n" + error);
     }
     else if (file.hasFileExtension("mid;midi"))
     {
@@ -1379,6 +1381,8 @@ void MainComponent::openProject()
             if (file == juce::File{}) return;
             juce::String error;
             if (!project.load(file, error)) showError(error);
+            else if (error.isNotEmpty())
+                showError(strings.text("warning.missingMedia") + "\n" + error);
         });
 }
 

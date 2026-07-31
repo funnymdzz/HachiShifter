@@ -163,8 +163,9 @@ public:
 
 private:
     void pushUndoLocked();
-    juce::ValueTree toValueTree() const;
-    static ProjectData fromValueTree(const juce::ValueTree& tree);
+    juce::ValueTree toValueTree(const juce::File& projectFile) const;
+    static ProjectData fromValueTree(const juce::ValueTree& tree,
+                                     const juce::File& projectFile);
     static juce::String makeId(const char* prefix);
 
     mutable juce::CriticalSection lock;

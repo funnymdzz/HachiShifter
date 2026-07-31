@@ -236,7 +236,9 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         }
         else if (file.hasFileExtension("hspx"))
         {
-            if (project.load(file, error)) return toolResult(summary(project.snapshot()));
+            if (project.load(file, error))
+                return toolResult(summary(project.snapshot())
+                    + (error.isNotEmpty() ? "; missing_media=" + error : juce::String()));
         }
         else if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
         {

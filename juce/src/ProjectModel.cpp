@@ -2,6 +2,7 @@
 #include "SampleSettings.h"
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <optional>
 
 namespace hachi
@@ -1074,11 +1075,11 @@ void ProjectModel::applySourceSettings(const juce::File& source,
     if (changed) sendChangeMessage();
 }
 
-juce::ValueTree ProjectModel::toValueTree() const
+juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 4, nullptr);
+    root.setProperty("version", 5, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -1105,6 +1106,13 @@ juce::ValueTree ProjectModel::toValueTree() const
             juce::ValueTree clipTree("Clip");
             clipTree.setProperty("id", clip.id, nullptr);
             clipTree.setProperty("sourceFile", clip.sourceFile.getFullPathName(), nullptr);
+            if (projectFile != juce::File{} && clip.sourceFile != juce::File{})
+            {
+                const auto relative = clip.sourceFile.getRelativePathFrom(
+                    projectFile.getParentDirectory());
+                if (relative.isNotEmpty() && !juce::File::isAbsolutePath(relative))
+                    clipTree.setProperty("sourceFileRelative", relative, nullptr);
+            }
             clipTree.setProperty("startSeconds", clip.startSeconds, nullptr);
             clipTree.setProperty("sourceOffsetSeconds", clip.sourceOffsetSeconds, nullptr);
             clipTree.setProperty("sourceDurationSeconds", clip.sourceDurationSeconds, nullptr);
@@ -1158,9 +1166,42 @@ juce::ValueTree ProjectModel::toValueTree() const
     return root;
 }
 
-ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
+ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
+                                        const juce::File& projectFile)
 {
     ProjectData data;
+    const auto projectDirectory = projectFile.getParentDirectory();
+    std::map<juce::String, juce::File> recursiveMedia;
+    auto indexedMedia = false;
+    const auto resolveSource = [&](const juce::ValueTree& clipTree)
+    {
+        const auto storedPath = clipTree.getProperty("sourceFile").toString();
+        juce::File source(storedPath);
+        if (source.existsAsFile()) return source;
+        const auto relative = clipTree.getProperty("sourceFileRelative").toString();
+        if (relative.isNotEmpty())
+        {
+            const auto candidate = projectDirectory.getChildFile(relative);
+            if (candidate.existsAsFile()) return candidate;
+        }
+        const auto fileName = source.getFileName();
+        if (fileName.isNotEmpty())
+        {
+            const auto besideProject = projectDirectory.getChildFile(fileName);
+            if (besideProject.existsAsFile()) return besideProject;
+            if (!indexedMedia && projectDirectory.isDirectory())
+            {
+                indexedMedia = true;
+                juce::Array<juce::File> files;
+                projectDirectory.findChildFiles(files, juce::File::findFiles, true);
+                for (const auto& file : files)
+                    recursiveMedia.try_emplace(file.getFileName().toLowerCase(), file);
+            }
+            if (const auto found = recursiveMedia.find(fileName.toLowerCase());
+                found != recursiveMedia.end()) return found->second;
+        }
+        return source;
+    };
     data.name = root.getProperty("name", "Untitled").toString();
     data.bpm = static_cast<double>(root.getProperty("bpm", 120.0));
     data.beatOriginSeconds = static_cast<double>(root.getProperty("beatOriginSeconds", 0.0));
@@ -1188,7 +1229,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
             if (!clipTree.hasType("Clip")) continue;
             ClipData clip;
             clip.id = clipTree.getProperty("id").toString();
-            clip.sourceFile = juce::File(clipTree.getProperty("sourceFile").toString());
+            clip.sourceFile = resolveSource(clipTree);
             clip.startSeconds = static_cast<double>(clipTree.getProperty("startSeconds", 0.0));
             clip.sourceOffsetSeconds = static_cast<double>(clipTree.getProperty("sourceOffsetSeconds", 0.0));
             clip.sourceDurationSeconds = static_cast<double>(clipTree.getProperty("sourceDurationSeconds", 0.0));
@@ -1243,11 +1284,12 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root)
 
 bool ProjectModel::save(const juce::File& file, juce::String& error) const
 {
+    error.clear();
     if (auto stream = file.createOutputStream())
     {
         stream->setPosition(0);
         stream->truncate();
-        toValueTree().writeToStream(*stream);
+        toValueTree(file).writeToStream(*stream);
         stream->flush();
         return true;
     }
@@ -1257,12 +1299,21 @@ bool ProjectModel::save(const juce::File& file, juce::String& error) const
 
 bool ProjectModel::load(const juce::File& file, juce::String& error)
 {
+    error.clear();
     if (auto stream = file.createInputStream())
     {
         auto tree = juce::ValueTree::readFromStream(*stream);
         if (tree.hasType("HachiShifterProject"))
         {
-            replace(fromValueTree(tree));
+            auto loaded = fromValueTree(tree, file);
+            juce::StringArray missing;
+            for (const auto& track : loaded.tracks)
+                for (const auto& clip : track.clips)
+                    if (!clip.sourceFile.existsAsFile())
+                        missing.addIfNotAlreadyThere(clip.sourceFile.getFullPathName());
+            replace(std::move(loaded));
+            if (!missing.isEmpty())
+                error = missing.joinIntoString("\n");
             return true;
         }
     }
