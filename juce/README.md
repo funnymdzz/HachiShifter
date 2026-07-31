@@ -25,6 +25,8 @@ remains available on `main` for regression reference.
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);
 - portable HSPX media paths with relative and recursive project-folder relinking;
+- MCP project editing, pre-render, WAV export and transport control, including
+  selected-backend and render-progress inspection;
 - complete strings for zh-CN, zh-TW, ja-JP, ko-KR and en-US.
 
 ## Native backend

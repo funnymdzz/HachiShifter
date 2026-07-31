@@ -523,7 +523,11 @@ public:
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
         auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(request.sourceFile));
-        if (reader == nullptr || reader->sampleRate <= 0.0) return jobHasFinished;
+        if (reader == nullptr || reader->sampleRate <= 0.0)
+        {
+            if (completion) completion({});
+            return jobHasFinished;
+        }
         const auto sourceStart = juce::jlimit<juce::int64>(0, reader->lengthInSamples,
             static_cast<juce::int64>(std::llround(request.sourceOffsetSeconds * reader->sampleRate)));
         const auto requestedSourceSamples = static_cast<juce::int64>(std::llround(
@@ -595,10 +599,11 @@ public:
             : "+melodyne-hybrid";
         RenderedAudio result { std::move(rendered), reader->sampleRate, backend };
         if (shouldExit()) return jobHasFinished;
-        juce::MessageManager::callAsync([callback = std::move(completion), result = std::move(result)]() mutable
-        {
-            if (callback) callback(std::move(result));
-        });
+        // AudioEngine publishes the completed buffer through release/acquire
+        // atomics, so this completion is thread-safe and does not need the GUI
+        // message queue.  Calling it here also lets headless MCP/CLI rendering
+        // finish while their stdin loop occupies the JUCE message thread.
+        if (completion) completion(std::move(result));
         return jobHasFinished;
     }
 

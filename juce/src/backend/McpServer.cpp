@@ -1,4 +1,5 @@
 #include "McpServer.h"
+#include <cmath>
 #include <iostream>
 
 namespace hachi::backend
@@ -85,6 +86,7 @@ juce::String summary(const ProjectData& project)
 }
 
 McpServer::McpServer()
+    : audio(std::make_unique<AudioEngine>())
 {
     formats.registerBasicFormats();
 }
@@ -163,6 +165,13 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("remove_track", "Delete a track / 删除轨道"),
             makeTool("undo", "Undo the last project edit / 撤销工程编辑"),
             makeTool("redo", "Redo the last project edit / 重做工程编辑"),
+            makeTool("render_prepare", "Pre-render the current project with its selected algorithms / 按当前所选算法预渲染工程"),
+            makeTool("render_status", "Read pre-render progress and active backends / 读取预渲染进度与实际后端"),
+            makeTool("export_wav", "Render and export the current project to WAV / 渲染并导出当前工程为 WAV"),
+            makeTool("transport_play", "Render if needed and start transport playback / 必要时预渲染并开始播放"),
+            makeTool("transport_stop", "Stop transport playback / 停止播放"),
+            makeTool("transport_seek", "Seek transport to position_seconds / 跳转播放位置"),
+            makeTool("transport_status", "Read playback position and render state / 读取播放位置与渲染状态"),
             makeTool("read_file", "Read a byte range as base64 / 读取任意文件内容"),
             makeTool("list_directory", "List a directory with type and size / 列出目录内容")
         }));
@@ -434,6 +443,56 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         const auto ok = project.redo();
         return toolResult(ok ? "ok" : "history_empty", !ok);
     }
+    else if (name == "render_prepare")
+    {
+        syncAudio();
+        if (static_cast<bool>(args.getProperty("wait", false)))
+        {
+            const auto timeout = juce::jlimit(0.1, 3600.0, number(args, "timeout_seconds", 300.0));
+            if (!waitForRender(timeout, error)) return toolResult(error, true);
+        }
+        return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
+    else if (name == "render_status" || name == "transport_status")
+    {
+        return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
+    else if (name == "export_wav")
+    {
+        syncAudio();
+        const auto timeout = juce::jlimit(0.1, 3600.0, number(args, "timeout_seconds", 300.0));
+        if (!waitForRender(timeout, error)) return toolResult(error, true);
+        const juce::File file(string(args, "path"));
+        if (file.getFullPathName().isEmpty()) return toolResult("WAV output path is empty", true);
+        if (audio->exportWav(file, error))
+        {
+            auto value = object();
+            set(value, "path", file.getFullPathName());
+            set(value, "size", file.getSize());
+            set(value, "backend", audio->activeRenderBackends());
+            return toolResult(juce::JSON::toString(value, false));
+        }
+    }
+    else if (name == "transport_play")
+    {
+        syncAudio();
+        const auto timeout = juce::jlimit(0.1, 3600.0, number(args, "timeout_seconds", 300.0));
+        if (!waitForRender(timeout, error)) return toolResult(error, true);
+        if (args.hasProperty("position_seconds"))
+            audio->setPosition(number(args, "position_seconds"));
+        audio->play();
+        return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
+    else if (name == "transport_stop")
+    {
+        audio->stop();
+        return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
+    else if (name == "transport_seek")
+    {
+        audio->setPosition(number(args, "position_seconds"));
+        return toolResult(juce::JSON::toString(transportStatusJson(), false));
+    }
     else if (name == "read_file")
     {
         const juce::File file(string(args, "path"));
@@ -561,6 +620,51 @@ juce::var McpServer::projectJson() const
     }
     set(root, "tracks", array(std::move(tracks)));
     return root;
+}
+
+juce::int64 McpServer::currentProjectFingerprint() const
+{
+    return juce::JSON::toString(projectJson(), false).hashCode64();
+}
+
+void McpServer::syncAudio()
+{
+    const auto fingerprint = currentProjectFingerprint();
+    if (audioPrepared && fingerprint == preparedFingerprint) return;
+    audio->stop();
+    audio->syncProject(project.snapshot());
+    preparedFingerprint = fingerprint;
+    audioPrepared = true;
+}
+
+bool McpServer::waitForRender(double timeoutSeconds, juce::String& error)
+{
+    const auto started = juce::Time::getMillisecondCounterHiRes();
+    while (audio->renderProgress().has_value())
+    {
+        if ((juce::Time::getMillisecondCounterHiRes() - started) * 0.001 >= timeoutSeconds)
+        {
+            error = "Pre-render timed out after " + juce::String(timeoutSeconds, 1) + " seconds";
+            return false;
+        }
+        juce::Thread::sleep(10);
+    }
+    return true;
+}
+
+juce::var McpServer::transportStatusJson() const
+{
+    auto value = object();
+    const auto fingerprint = currentProjectFingerprint();
+    const auto prepared = audioPrepared && fingerprint == preparedFingerprint;
+    const auto progress = prepared ? audio->renderProgress() : std::optional<double>();
+    set(value, "prepared", prepared);
+    set(value, "rendering", progress.has_value());
+    set(value, "render_progress", progress.has_value() ? *progress : (prepared ? 1.0 : 0.0));
+    set(value, "backend", prepared ? audio->activeRenderBackends() : juce::String());
+    set(value, "playing", audio->isPlaying());
+    set(value, "position_seconds", audio->position());
+    return value;
 }
 
 juce::var McpServer::toolResult(const juce::String& text, bool isError)
