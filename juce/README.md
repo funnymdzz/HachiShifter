@@ -15,6 +15,8 @@ remains available on `main` for regression reference.
   plus the source-edit wrench mode;
 - pitch contours remain relative to the note centre when a note is dragged;
 - freehand and line target-pitch editing while retaining the source F0 contour;
+- whole-clip stretching from either timeline handle, with note, source/target
+  pitch, consonant, sibilant and fade timing kept in sync;
 - Melodyne-compatible pitch-modulation and pitch-drift correction controls,
   including exact restoration of zero-modulation flattened notes;
 - switchable per-track pitch/stretch render routes after Melodyne import;

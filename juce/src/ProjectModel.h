@@ -135,6 +135,8 @@ public:
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
     void moveClip(const juce::String& clipId, double startSeconds);
+    void resizeClip(const juce::String& clipId, double startSeconds,
+                    double durationSeconds);
     void removeClip(const juce::String& clipId);
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);

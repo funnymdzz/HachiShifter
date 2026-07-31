@@ -517,6 +517,47 @@ void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
     sendChangeMessage();
 }
 
+void ProjectModel::resizeClip(const juce::String& clipId, double startSeconds,
+                              double durationSeconds)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    const auto oldDuration = std::max(0.01, clip.durationSeconds);
+                    const auto nextDuration = std::max(0.01, durationSeconds);
+                    const auto nextStart = std::max(0.0, startSeconds);
+                    if (std::abs(clip.startSeconds - nextStart) <= 1.0e-9
+                        && std::abs(oldDuration - nextDuration) <= 1.0e-9) return;
+                    pushUndoLocked();
+                    const auto ratio = nextDuration / oldDuration;
+                    for (auto& note : clip.notes)
+                    {
+                        note.startSeconds *= ratio;
+                        note.durationSeconds *= ratio;
+                        note.consonantSeconds *= ratio;
+                        // attackSpeed is the source-time / element-time slope.
+                        // Keep the source Attack boundary fixed while its target
+                        // position stretches with the rest of the clip.
+                        note.attackSpeed = juce::jlimit(0.05f, 20.0f,
+                            note.attackSpeed / static_cast<float>(ratio));
+                        for (auto& point : note.contour) point.timeSeconds *= ratio;
+                        for (auto& marker : note.sibilantMarkers) marker *= ratio;
+                    }
+                    clip.fadeInSeconds = std::min(nextDuration, clip.fadeInSeconds * ratio);
+                    clip.fadeOutSeconds = std::min(nextDuration, clip.fadeOutSeconds * ratio);
+                    clip.startSeconds = nextStart;
+                    clip.durationSeconds = nextDuration;
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::removeClip(const juce::String& clipId)
 {
     auto changed = false;

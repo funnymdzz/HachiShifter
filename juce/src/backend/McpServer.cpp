@@ -150,6 +150,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
             makeTool("set_track", "Set compose, mute, solo, gain, pan and render algorithms / 设置轨道及算法"),
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
+            makeTool("resize_clip", "Stretch a whole clip while preserving its source media / 整体拉伸采样并保留原始素材"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
             makeTool("set_note", "Set pitch, tension, breath, formant, gain, Attack and consonant parameters / 设置全部音符参数"),
@@ -309,6 +310,12 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     else if (name == "move_clip")
     {
         project.moveClip(string(args, "clip_id"), number(args, "start_seconds"));
+        return toolResult("ok");
+    }
+    else if (name == "resize_clip")
+    {
+        project.resizeClip(string(args, "clip_id"), number(args, "start_seconds"),
+                           number(args, "duration_seconds", 0.25));
         return toolResult("ok");
     }
     else if (name == "transpose_note")

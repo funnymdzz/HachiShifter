@@ -17,6 +17,8 @@ public:
     ~TimelineComponent() override;
 
     void paint(juce::Graphics& g) override;
+    void mouseMove(const juce::MouseEvent& event) override;
+    void mouseExit(const juce::MouseEvent& event) override;
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
@@ -38,6 +40,7 @@ private:
         juce::String id;
         juce::Rectangle<float> bounds;
         double startSeconds = 0.0;
+        double durationSeconds = 0.0;
     };
 
     ProjectModel& model;
@@ -53,7 +56,10 @@ private:
     juce::String selectedClip;
     juce::String draggedClip;
     double draggedClipStart = 0.0;
+    double draggedClipDuration = 0.0;
     double draggedClipPreviewStart = 0.0;
+    double draggedClipPreviewDuration = 0.0;
     float dragAnchorX = 0.0f;
+    enum class DragMode { none, move, resizeLeft, resizeRight } dragMode = DragMode::none;
 };
 }

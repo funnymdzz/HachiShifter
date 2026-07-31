@@ -139,11 +139,16 @@ void TimelineComponent::paint(juce::Graphics& g)
         {
             const auto displayStart = clip.id == draggedClip ? draggedClipPreviewStart
                                                               : clip.startSeconds;
+            const auto displayDuration = clip.id == draggedClip ? draggedClipPreviewDuration
+                                                                 : clip.durationSeconds;
+            const auto displayRatio = clip.durationSeconds > 1.0e-9
+                ? displayDuration / clip.durationSeconds : 1.0;
             auto bounds = juce::Rectangle<float>(timeToX(displayStart),
                                                   static_cast<float>(row.getY() + 19),
-                                                  std::max(4.0f, timeToX(clip.durationSeconds)),
+                                                  std::max(4.0f, static_cast<float>(displayDuration)
+                                                                      * pixelsPerSecond),
                                                   static_cast<float>(rowHeight - 25));
-            clipHits.push_back({ clip.id, bounds, clip.startSeconds });
+            clipHits.push_back({ clip.id, bounds, clip.startSeconds, clip.durationSeconds });
             g.setColour(track.muted || clip.muted ? Palette::clipBackground.withAlpha(0.55f)
                                                   : Palette::clipBackground);
             g.fillRect(bounds);
@@ -168,12 +173,14 @@ void TimelineComponent::paint(juce::Graphics& g)
             {
                 g.setColour(Palette::text.withAlpha(0.7f));
                 g.drawLine(bounds.getX(), bounds.getBottom(),
-                           bounds.getX() + timeToX(clip.fadeInSeconds), bounds.getY(), 1.0f);
+                           bounds.getX() + timeToX(clip.fadeInSeconds * displayRatio),
+                           bounds.getY(), 1.0f);
             }
             if (clip.fadeOutSeconds > 0.0)
             {
                 g.setColour(Palette::text.withAlpha(0.7f));
-                g.drawLine(bounds.getRight() - timeToX(clip.fadeOutSeconds), bounds.getY(),
+                g.drawLine(bounds.getRight()
+                               - timeToX(clip.fadeOutSeconds * displayRatio), bounds.getY(),
                            bounds.getRight(), bounds.getBottom(), 1.0f);
             }
             g.setColour(Palette::text);
@@ -208,6 +215,25 @@ void TimelineComponent::paint(juce::Graphics& g)
     g.drawVerticalLine(static_cast<int>(timeToX(playheadSeconds)), 0.0f, static_cast<float>(getHeight()));
 }
 
+void TimelineComponent::mouseMove(const juce::MouseEvent& event)
+{
+    for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
+        if (it->bounds.contains(event.position))
+        {
+            const auto onHandle = event.position.x <= it->bounds.getX() + 8.0f
+                || event.position.x >= it->bounds.getRight() - 8.0f;
+            setMouseCursor(onHandle ? juce::MouseCursor::LeftRightResizeCursor
+                                    : juce::MouseCursor::NormalCursor);
+            return;
+        }
+    setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+
+void TimelineComponent::mouseExit(const juce::MouseEvent&)
+{
+    if (draggedClip.isEmpty()) setMouseCursor(juce::MouseCursor::NormalCursor);
+}
+
 void TimelineComponent::mouseDown(const juce::MouseEvent& event)
 {
     for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
@@ -217,8 +243,25 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
             if (onClipSelected) onClipSelected(selectedClip);
             draggedClip = it->id;
             draggedClipStart = it->startSeconds;
+            draggedClipDuration = it->durationSeconds;
             draggedClipPreviewStart = draggedClipStart;
+            draggedClipPreviewDuration = draggedClipDuration;
             dragAnchorX = event.position.x;
+            if (event.position.x <= it->bounds.getX() + 8.0f)
+            {
+                dragMode = DragMode::resizeLeft;
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            }
+            else if (event.position.x >= it->bounds.getRight() - 8.0f)
+            {
+                dragMode = DragMode::resizeRight;
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            }
+            else
+            {
+                dragMode = DragMode::move;
+                setMouseCursor(juce::MouseCursor::DraggingHandCursor);
+            }
             repaint();
             return;
         }
@@ -231,22 +274,48 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
 void TimelineComponent::mouseDrag(const juce::MouseEvent& event)
 {
     if (draggedClip.isEmpty()) return;
-    const auto raw = std::max(0.0, draggedClipStart
-        + static_cast<double>(event.position.x - dragAnchorX) / pixelsPerSecond);
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
     const auto division = snapshot.gridDivision.contains("32") ? 8.0
         : snapshot.gridDivision.contains("16") ? 4.0
         : snapshot.gridDivision.contains("8") ? 2.0
         : snapshot.gridDivision.contains("4") ? 1.0 : 0.5;
     const auto quantum = secondsPerBeat / division;
-    draggedClipPreviewStart = std::round(raw / quantum) * quantum;
+    const auto snap = [&](double seconds)
+    {
+        return std::max(0.0, snapshot.beatOriginSeconds
+            + std::round((seconds - snapshot.beatOriginSeconds) / quantum) * quantum);
+    };
+    const auto delta = static_cast<double>(event.position.x - dragAnchorX) / pixelsPerSecond;
+    if (dragMode == DragMode::resizeLeft)
+    {
+        const auto end = draggedClipStart + draggedClipDuration;
+        draggedClipPreviewStart = juce::jlimit(0.0, end - 0.01,
+                                                snap(draggedClipStart + delta));
+        draggedClipPreviewDuration = end - draggedClipPreviewStart;
+    }
+    else if (dragMode == DragMode::resizeRight)
+    {
+        const auto end = std::max(draggedClipStart + 0.01,
+                                  snap(draggedClipStart + draggedClipDuration + delta));
+        draggedClipPreviewDuration = end - draggedClipStart;
+    }
+    else
+        draggedClipPreviewStart = snap(draggedClipStart + delta);
     repaint();
 }
 
 void TimelineComponent::mouseUp(const juce::MouseEvent&)
 {
     if (draggedClip.isNotEmpty())
-        model.moveClip(draggedClip, draggedClipPreviewStart);
+    {
+        if (dragMode == DragMode::resizeLeft || dragMode == DragMode::resizeRight)
+            model.resizeClip(draggedClip, draggedClipPreviewStart,
+                             draggedClipPreviewDuration);
+        else
+            model.moveClip(draggedClip, draggedClipPreviewStart);
+    }
     draggedClip.clear();
+    dragMode = DragMode::none;
+    setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 }
