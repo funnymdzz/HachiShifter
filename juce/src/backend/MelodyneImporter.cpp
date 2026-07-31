@@ -531,7 +531,8 @@ std::optional<std::pair<float, float>> pitchAt(const std::vector<SourcePitchPoin
 }
 
 std::optional<MelodyneImportResult> MelodyneImporter::importProject(
-    const juce::File& file, juce::String& error, Progress progress)
+    const juce::File& file, juce::String& error, Progress progress,
+    MelodyneImportOptions options)
 {
     if (progress) progress(0.01, "open");
     auto bytes = decodeGraph(file, error, progress);
@@ -560,7 +561,9 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
     collectTracks(graph, *rootTrack, trackIds, seen);
     if (trackIds.empty()) { error = "Melodyne project contains no playable tracks"; return std::nullopt; }
 
-    const auto mediaIndex = buildMediaIndex(file.getParentDirectory());
+    const auto mediaIndex = options.recursiveMediaSearch
+        ? buildMediaIndex(file.getParentDirectory())
+        : std::map<juce::String, juce::File>{};
     std::map<std::uint32_t, juce::File> resolved;
     MelodyneImportResult result;
     result.project.name = file.getFileNameWithoutExtension();

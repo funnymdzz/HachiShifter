@@ -107,9 +107,14 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     importedAlgorithm.addItem("nsf-hifigan", 2);
     importedAlgorithm.addItem("WORLD", 3);
     importedAlgorithm.addItem("vslib", 4);
+    importedStretchAlgorithm.addItem("Melodyne Hybrid", 1);
+    importedStretchAlgorithm.addItem("Variable Mel Hop", 2);
+    importedStretchAlgorithm.addItem("Loop", 3);
+    importedStretchAlgorithm.addItem("SoundTouch", 4);
     importPage.addRow(melodyneComposeLabel, melodyneCompose);
     importPage.addRow(melodynePitchLabel, melodynePitchSource);
     importPage.addRow(importedAlgorithmLabel, importedAlgorithm);
+    importPage.addRow(importedStretchAlgorithmLabel, importedStretchAlgorithm);
     importPage.addWide(preserveProjectEdits);
     importPage.addWide(locateMediaRecursively);
 
@@ -173,6 +178,8 @@ void SettingsComponent::loadValues()
     melodyneCompose.setSelectedId(properties.getIntValue("import.melodyneCompose", 1), juce::dontSendNotification);
     melodynePitchSource.setSelectedId(properties.getIntValue("import.melodynePitchSource", 1), juce::dontSendNotification);
     importedAlgorithm.setSelectedId(properties.getIntValue("import.algorithm", 1), juce::dontSendNotification);
+    importedStretchAlgorithm.setSelectedId(
+        properties.getIntValue("import.stretchAlgorithm", 1), juce::dontSendNotification);
     preserveProjectEdits.setToggleState(properties.getBoolValue("import.preserveEdits", true), juce::dontSendNotification);
     locateMediaRecursively.setToggleState(properties.getBoolValue("import.recursiveMedia", true), juce::dontSendNotification);
     refreshAudioValues();
@@ -199,6 +206,7 @@ void SettingsComponent::saveValues()
     properties.setValue("import.melodyneCompose", melodyneCompose.getSelectedId());
     properties.setValue("import.melodynePitchSource", melodynePitchSource.getSelectedId());
     properties.setValue("import.algorithm", importedAlgorithm.getSelectedId());
+    properties.setValue("import.stretchAlgorithm", importedStretchAlgorithm.getSelectedId());
     properties.setValue("import.preserveEdits", preserveProjectEdits.getToggleState());
     properties.setValue("import.recursiveMedia", locateMediaRecursively.getToggleState());
     properties.saveIfNeeded();
@@ -238,6 +246,8 @@ void SettingsComponent::setTexts()
     melodyneComposeLabel.setText(strings.text("settings.melodyneCompose"), juce::dontSendNotification);
     melodynePitchLabel.setText(strings.text("settings.melodynePitch"), juce::dontSendNotification);
     importedAlgorithmLabel.setText(strings.text("settings.importAlgorithm"), juce::dontSendNotification);
+    importedStretchAlgorithmLabel.setText(strings.text("settings.importStretchAlgorithm"),
+                                           juce::dontSendNotification);
     preserveProjectEdits.setButtonText(strings.text("settings.preserveEdits"));
     locateMediaRecursively.setButtonText(strings.text("settings.recursiveMedia"));
     applyButton.setButtonText(strings.text("dialog.apply"));

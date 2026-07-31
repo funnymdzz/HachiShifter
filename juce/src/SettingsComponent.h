@@ -75,8 +75,10 @@ private:
     juce::ComboBox shortcutPreset, wheelAction;
     juce::ToggleButton spacePlayback, confirmDestructive;
 
-    juce::Label melodyneComposeLabel, melodynePitchLabel, importedAlgorithmLabel;
-    juce::ComboBox melodyneCompose, melodynePitchSource, importedAlgorithm;
+    juce::Label melodyneComposeLabel, melodynePitchLabel, importedAlgorithmLabel,
+                importedStretchAlgorithmLabel;
+    juce::ComboBox melodyneCompose, melodynePitchSource, importedAlgorithm,
+                   importedStretchAlgorithm;
     juce::ToggleButton preserveProjectEdits, locateMediaRecursively;
 
     juce::TextButton applyButton;

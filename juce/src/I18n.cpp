@@ -123,7 +123,8 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.confirmDestructive", { "删除前确认", "刪除前確認", "削除前に確認", "삭제 전 확인", "Confirm before delete" } }
     ,{ "settings.melodyneCompose", { "Melodyne Compose 默认方式", "Melodyne Compose 預設方式", "Melodyne Composeの既定値", "Melodyne Compose 기본값", "Default Melodyne Compose" } }
     ,{ "settings.melodynePitch", { "Melodyne 原音高来源", "Melodyne 原音高來源", "Melodyne元ピッチの取得元", "Melodyne 원본 피치 소스", "Melodyne Source Pitch" } }
-    ,{ "settings.importAlgorithm", { "导入工程默认算法", "匯入工程預設演算法", "読込時の既定アルゴリズム", "가져오기 기본 알고리즘", "Default Import Algorithm" } }
+    ,{ "settings.importAlgorithm", { "导入工程默认变调算法", "匯入工程預設變調演算法", "読込時の既定ピッチアルゴリズム", "가져오기 기본 피치 알고리즘", "Default Import Pitch Algorithm" } }
+    ,{ "settings.importStretchAlgorithm", { "导入工程默认拉伸算法", "匯入工程預設拉伸演算法", "読込時の既定タイムストレッチ", "가져오기 기본 타임 스트레치", "Default Import Stretch Algorithm" } }
     ,{ "settings.preserveEdits", { "保留工程中的音符、分界、Attack、音量和音色编辑", "保留工程中的音符、分界、Attack、音量與音色編輯", "ノート・境界・Attack・音量・音色の編集を保持", "노트·경계·Attack·음량·음색 편집 유지", "Preserve notes, boundaries, Attack, level and timbre edits" } }
     ,{ "settings.recursiveMedia", { "递归查找缺失素材", "遞迴尋找遺失素材", "不足素材を再帰検索", "누락 미디어 재귀 검색", "Search recursively for missing media" } }
     ,{ "sample.alias", { "别名", "別名", "エイリアス", "별칭", "Alias" } }

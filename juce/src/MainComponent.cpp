@@ -1594,9 +1594,13 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
     progress = 0.01;
     statusLabel.setText(strings.text("status.loading"), juce::dontSendNotification);
     juce::Component::SafePointer<MainComponent> safe(this);
-    juce::Thread::launch([safe, file]
+    const auto recursiveMediaSearch = preferences == nullptr
+        || preferences->getBoolValue("import.recursiveMedia", true);
+    juce::Thread::launch([safe, file, recursiveMediaSearch]
     {
         juce::String error;
+        backend::MelodyneImportOptions options;
+        options.recursiveMediaSearch = recursiveMediaSearch;
         auto imported = backend::MelodyneImporter::importProject(file, error,
             [safe](double value, const juce::String& stage)
             {
@@ -1608,7 +1612,7 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                                                 + safe->strings.text(juce::String("mpd.stage.") + stage),
                                               juce::dontSendNotification);
                 });
-            });
+            }, options);
         juce::MessageManager::callAsync([safe, imported = std::move(imported), error]() mutable
         {
             if (safe == nullptr) return;
@@ -1631,7 +1635,23 @@ void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResul
     const auto importedPitch = algorithmId == 2 ? PitchAlgorithm::nsfHifigan
         : algorithmId == 3 ? PitchAlgorithm::world
         : algorithmId == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
-    for (auto& track : imported.project.tracks) track.pitchAlgorithm = importedPitch;
+    const auto stretchAlgorithmId = preferences != nullptr
+        ? preferences->getIntValue("import.stretchAlgorithm", 1) : 1;
+    auto importedStretch = stretchAlgorithmId == 2 ? StretchAlgorithm::variableMelHop
+        : stretchAlgorithmId == 3 ? StretchAlgorithm::loop
+        : stretchAlgorithmId == 4 ? StretchAlgorithm::soundTouch
+        : StretchAlgorithm::melodyneHybrid;
+    // Variable-mel-hop is the NSF-HiFiGAN-specific duration path.  Keep an
+    // imported project immediately renderable when another pitch backend is
+    // selected in Settings, matching the toolbar's available choices.
+    if (importedPitch != PitchAlgorithm::nsfHifigan
+        && importedStretch == StretchAlgorithm::variableMelHop)
+        importedStretch = StretchAlgorithm::melodyneHybrid;
+    for (auto& track : imported.project.tracks)
+    {
+        track.pitchAlgorithm = importedPitch;
+        track.stretchAlgorithm = importedStretch;
+    }
 
     const auto composeMode = preferences != nullptr
         ? preferences->getIntValue("import.melodyneCompose", 1) : 1;

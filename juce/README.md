@@ -21,6 +21,7 @@ remains available on `main` for regression reference.
 - Melodyne-compatible pitch-modulation and pitch-drift correction controls,
   including exact restoration of zero-modulation flattened notes;
 - switchable per-track pitch/stretch render routes after Melodyne import;
+- independently configurable default pitch and stretch routes for Melodyne imports;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);

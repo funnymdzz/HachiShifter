@@ -13,12 +13,18 @@ struct MelodyneImportResult
     juce::StringArray referencedFiles;
 };
 
+struct MelodyneImportOptions
+{
+    bool recursiveMediaSearch = true;
+};
+
 class MelodyneImporter final
 {
 public:
     using Progress = std::function<void(double, const juce::String&)>;
 
     [[nodiscard]] static std::optional<MelodyneImportResult>
-        importProject(const juce::File& file, juce::String& error, Progress progress = {});
+        importProject(const juce::File& file, juce::String& error, Progress progress = {},
+                      MelodyneImportOptions options = {});
 };
 }
