@@ -238,6 +238,7 @@ public:
                 std::size_t clips = 0;
                 std::size_t notes = 0;
                 std::size_t flatNotes = 0;
+                auto flatTargetMaximumDeviation = 0.0f;
                 auto minModulation = 2.0f;
                 auto maxModulation = 0.0f;
                 auto minAttackSpeed = std::numeric_limits<float>::max();
@@ -253,7 +254,15 @@ public:
                             maxModulation = std::max(maxModulation, note.modulation);
                             minAttackSpeed = std::min(minAttackSpeed, note.attackSpeed);
                             maxAttackSpeed = std::max(maxAttackSpeed, note.attackSpeed);
-                            if (note.modulation <= 1.0e-4f) ++flatNotes;
+                            if (note.modulation <= 1.0e-4f)
+                            {
+                                ++flatNotes;
+                                for (const auto& point : note.contour)
+                                    if (point.voiced)
+                                        flatTargetMaximumDeviation = std::max(
+                                            flatTargetMaximumDeviation,
+                                            std::abs(renderedPitchCents(note, point)));
+                            }
                         }
                 }
                 std::cout << "project=" << imported->project.name << '\n'
@@ -263,6 +272,8 @@ public:
                           << "clips=" << clips << '\n'
                           << "notes=" << notes << '\n'
                           << "flat_notes=" << flatNotes << '\n'
+                          << "flat_target_max_deviation_cents="
+                          << flatTargetMaximumDeviation << '\n'
                           << "modulation_min=" << (notes > 0 ? minModulation : 0.0f) << '\n'
                           << "modulation_max=" << (notes > 0 ? maxModulation : 0.0f) << '\n'
                           << "attack_speed_min=" << (notes > 0 ? minAttackSpeed : 0.0f) << '\n'

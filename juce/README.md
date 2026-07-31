@@ -15,7 +15,9 @@ remains available on `main` for regression reference.
   plus the source-edit wrench mode;
 - pitch contours remain relative to the note centre when a note is dragged;
 - freehand and line target-pitch editing while retaining the source F0 contour;
-- Melodyne-compatible pitch-modulation and pitch-drift correction controls;
+- Melodyne-compatible pitch-modulation and pitch-drift correction controls,
+  including exact restoration of zero-modulation flattened notes;
+- switchable per-track pitch/stretch render routes after Melodyne import;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);

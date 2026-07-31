@@ -494,6 +494,7 @@ juce::var McpServer::projectJson() const
                 set(noteValue, "midi", note.midiNote);
                 set(noteValue, "source_midi_center", note.sourceMidiCenter);
                 set(noteValue, "modulation", note.modulation);
+                set(noteValue, "flattened", note.modulation <= 1.0e-4f);
                 set(noteValue, "drift", note.drift);
                 set(noteValue, "tension", note.tension);
                 set(noteValue, "breath", note.breath);
@@ -509,6 +510,7 @@ juce::var McpServer::projectJson() const
                     set(pointValue, "time_seconds", point.timeSeconds);
                     set(pointValue, "relative_cents", point.relativeCents);
                     set(pointValue, "without_vibrato_cents", point.withoutVibratoCents);
+                    set(pointValue, "rendered_target_cents", renderedPitchCents(note, point));
                     set(pointValue, "voiced", point.voiced);
                     set(pointValue, "manual_target_cents", point.manualTargetCents);
                     set(pointValue, "has_manual_target", point.hasManualTarget);

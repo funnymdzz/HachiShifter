@@ -9,9 +9,18 @@ namespace hachi
 {
 float renderedPitchCents(const NoteData& note, const PitchPoint& point)
 {
-    return point.hasManualTarget ? point.manualTargetCents
-        : note.drift * point.withoutVibratoCents
-            + note.modulation * (point.relativeCents - point.withoutVibratoCents);
+    if (point.hasManualTarget) return point.manualTargetCents;
+
+    // Melodyne stores an exact zero for notes flattened with the pitch
+    // modulation tool.  Some analysed source points do not contain a separate
+    // pitchWithoutVibrato curve (it is byte-for-byte equal to pitchCent), so
+    // the generic drift/modulation decomposition would otherwise leave the
+    // original contour untouched.  Treat the saved zero as the authoritative
+    // flat-note edit for both display and rendering.
+    if (note.modulation <= 1.0e-4f) return 0.0f;
+
+    return note.drift * point.withoutVibratoCents
+        + note.modulation * (point.relativeCents - point.withoutVibratoCents);
 }
 
 namespace
@@ -429,14 +438,18 @@ void ProjectModel::setTrackPan(const juce::String& trackId, float pan)
 
 void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
 {
+    auto changed = false;
     {
         const juce::ScopedLock guard(lock);
-        pushUndoLocked();
         for (auto& track : project.tracks)
-            if (track.compose)
+            if (track.pitchAlgorithm != algorithm)
+            {
+                if (!changed) pushUndoLocked();
                 track.pitchAlgorithm = algorithm;
+                changed = true;
+            }
     }
-    sendChangeMessage();
+    if (changed) sendChangeMessage();
 }
 
 void ProjectModel::setTrackPitchAlgorithm(const juce::String& trackId,
@@ -459,14 +472,18 @@ void ProjectModel::setTrackPitchAlgorithm(const juce::String& trackId,
 
 void ProjectModel::setStretchAlgorithm(StretchAlgorithm algorithm)
 {
+    auto changed = false;
     {
         const juce::ScopedLock guard(lock);
-        pushUndoLocked();
         for (auto& track : project.tracks)
-            if (track.compose)
+            if (track.stretchAlgorithm != algorithm)
+            {
+                if (!changed) pushUndoLocked();
                 track.stretchAlgorithm = algorithm;
+                changed = true;
+            }
     }
-    sendChangeMessage();
+    if (changed) sendChangeMessage();
 }
 
 void ProjectModel::setTrackStretchAlgorithm(const juce::String& trackId,
