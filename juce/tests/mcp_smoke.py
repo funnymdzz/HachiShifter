@@ -91,23 +91,52 @@ def main() -> int:
             {
                 "clip_id": clip["id"],
                 "start_seconds": 0.0,
-                "duration_seconds": 0.35,
+                "duration_seconds": 0.55,
                 "midi": 60.0,
             },
         ).split("=", 1)[1]
         client.call("transpose_note", {"note_id": note_id, "semitones": 4.0})
         client.call("set_note", {"note_id": note_id, "modulation": 0.0})
+        client.call(
+            "resize_clip",
+            {"clip_id": clip["id"], "start_seconds": 0.0, "duration_seconds": 0.55},
+        )
+
+        def export_hash(name: str) -> str:
+            output = directory / f"route-{name}.wav"
+            result = json.loads(
+                client.call("export_wav", {"path": str(output), "timeout_seconds": 120.0})
+            )
+            assert result["size"] > 44
+            return hashlib.sha256(output.read_bytes()).hexdigest()
 
         route_names: list[str] = []
+        pitch_hashes: dict[str, str] = {}
         for pitch in ("mld5", "nsf-hifigan", "world", "vslib"):
-            client.call("set_track", {"track_id": track["id"], "pitch_algorithm": pitch})
+            client.call(
+                "set_track",
+                {
+                    "track_id": track["id"],
+                    "pitch_algorithm": pitch,
+                    "stretch_algorithm": "melodyne-hybrid",
+                },
+            )
             status = json.loads(
                 client.call("render_prepare", {"wait": True, "timeout_seconds": 120.0})
             )
             assert status["prepared"] and not status["rendering"]
             assert pitch in status["backend"].lower(), status
             route_names.append(status["backend"])
+            pitch_hashes[pitch] = export_hash(f"pitch-{pitch}")
+        # Route labels alone do not prove that the selected renderer reached
+        # the audio path.  A stretched, transposed fixture must produce a
+        # distinct product for every pitch backend.
+        assert len(set(pitch_hashes.values())) == len(pitch_hashes), pitch_hashes
 
+        client.call(
+            "set_track", {"track_id": track["id"], "pitch_algorithm": "nsf-hifigan"}
+        )
+        stretch_hashes: dict[str, str] = {}
         for stretch in ("melodyne-hybrid", "variable-mel-hop", "loop", "soundtouch"):
             client.call("set_track", {"track_id": track["id"], "stretch_algorithm": stretch})
             status = json.loads(
@@ -115,6 +144,8 @@ def main() -> int:
             )
             assert status["prepared"] and stretch in status["backend"].lower(), status
             route_names.append(status["backend"])
+            stretch_hashes[stretch] = export_hash(f"stretch-{stretch}")
+        assert len(set(stretch_hashes.values())) == len(stretch_hashes), stretch_hashes
 
         project = json.loads(client.call("project_snapshot"))
         note = project["tracks"][0]["clips"][0]["notes"][0]
@@ -178,6 +209,8 @@ def main() -> int:
             json.dumps(
                 {
                     "pitch_and_stretch_routes": route_names,
+                    "pitch_route_hashes": pitch_hashes,
+                    "stretch_route_hashes": stretch_hashes,
                     "flat_target_max_deviation_cents": max(targets) - min(targets),
                     "export_sha256": hashlib.sha256(exported.read_bytes()).hexdigest(),
                     "export_size": exported.stat().st_size,
