@@ -59,7 +59,7 @@ build_windows:
     - install -m 644 LICENSE HachiShifterNext-windows-x64/LICENSE
     - test "$(find HachiShifterNext-windows-x64/models -type f | wc -l)" -eq 0
     - file HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'PE32+.*x86-64'
-    - llvm-readobj --coff-resources HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'Type: MANIFEST'
+    - "llvm-readobj --coff-resources HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'Type: MANIFEST'"
     - (cd HachiShifterNext-windows-x64 && zip -9 -r ../HachiShifterNext-windows-x64-no-model.zip .)
     - sha256sum HachiShifterNext-windows-x64-no-model.zip > HachiShifterNext-windows-x64-no-model.zip.sha256
   artifacts:
