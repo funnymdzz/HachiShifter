@@ -1598,25 +1598,48 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
         || preferences->getBoolValue("import.recursiveMedia", true);
     const auto preserveProjectEdits = preferences == nullptr
         || preferences->getBoolValue("import.preserveEdits", true);
-    juce::Thread::launch([safe, file, recursiveMediaSearch, preserveProjectEdits]
+    const auto reanalyseSourcePitch = preferences != nullptr
+        && preferences->getIntValue("import.melodynePitchSource", 1) == 2;
+    juce::Thread::launch([safe, file, recursiveMediaSearch, preserveProjectEdits,
+                          reanalyseSourcePitch]
     {
         juce::String error;
         backend::MelodyneImportOptions options;
         options.recursiveMediaSearch = recursiveMediaSearch;
         options.preserveProjectEdits = preserveProjectEdits;
         auto imported = backend::MelodyneImporter::importProject(file, error,
-            [safe](double value, const juce::String& stage)
+            [safe, reanalyseSourcePitch](double value, const juce::String& stage)
             {
-                juce::MessageManager::callAsync([safe, value, stage]
+                const auto scaled = reanalyseSourcePitch ? value * 0.75 : value;
+                juce::MessageManager::callAsync([safe, scaled, stage]
                 {
                     if (safe == nullptr) return;
-                    safe->progress = value;
+                    safe->progress = scaled;
                     safe->statusLabel.setText(safe->strings.text("status.loading") + "  "
                                                 + safe->strings.text(juce::String("mpd.stage.") + stage),
                                               juce::dontSendNotification);
                 });
             }, options);
-        juce::MessageManager::callAsync([safe, imported = std::move(imported), error]() mutable
+        auto pitchReanalysed = false;
+        if (imported && reanalyseSourcePitch)
+        {
+            juce::String pitchError;
+            pitchReanalysed = backend::NativeAnalyzer::reanalyseProjectSourcePitch(
+                imported->project, pitchError, [safe](double value)
+                {
+                    juce::MessageManager::callAsync([safe, value]
+                    {
+                        if (safe == nullptr) return;
+                        safe->progress = 0.75 + value * 0.25;
+                        safe->statusLabel.setText(
+                            safe->strings.text("status.analyzing") + "  "
+                                + safe->strings.text("mpd.stage.reanalyse_pitch"),
+                            juce::dontSendNotification);
+                    });
+                });
+        }
+        juce::MessageManager::callAsync([safe, imported = std::move(imported), error,
+                                         reanalyseSourcePitch, pitchReanalysed]() mutable
         {
             if (safe == nullptr) return;
             safe->importInProgress = false;
@@ -1626,6 +1649,10 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                 safe->showError(safe->strings.text("error.mpd") + "\n" + error);
                 return;
             }
+            if (reanalyseSourcePitch)
+                safe->statusLabel.setText(safe->strings.text(
+                    pitchReanalysed ? "status.analysisComplete" : "status.analysisSkipped"),
+                    juce::dontSendNotification);
             safe->presentMelodyneComposeSelection(std::move(*imported));
         });
     });

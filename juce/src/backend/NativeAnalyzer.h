@@ -11,5 +11,7 @@ public:
     using Progress = std::function<void(double)>;
     static std::vector<NoteData> analyse(const juce::File& file, juce::String& error,
                                          Progress progress = {});
+    static bool reanalyseProjectSourcePitch(ProjectData& project, juce::String& error,
+                                            Progress progress = {});
 };
 }

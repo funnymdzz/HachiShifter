@@ -102,7 +102,7 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     melodyneCompose.addItem("All tracks", 3);
     melodyneCompose.addItem("Audio only", 4);
     melodynePitchSource.addItem("Project data", 1);
-    melodynePitchSource.addItem("GAME + FCPE", 2);
+    melodynePitchSource.addItem("GAME + FCPE / Native fallback", 2);
     importedAlgorithm.addItem("mld5", 1);
     importedAlgorithm.addItem("nsf-hifigan", 2);
     importedAlgorithm.addItem("WORLD", 3);

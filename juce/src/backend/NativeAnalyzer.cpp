@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <complex>
+#include <map>
 #include <numeric>
+#include <optional>
 
 namespace hachi::backend
 {
@@ -138,6 +140,42 @@ float median(std::vector<float> values)
     const auto middle = values.begin() + static_cast<std::ptrdiff_t>(values.size() / 2);
     std::nth_element(values.begin(), middle, values.end());
     return *middle;
+}
+
+std::optional<std::pair<float, float>> absolutePitchAt(
+    const std::vector<NoteData>& notes, double sourceSeconds)
+{
+    for (const auto& note : notes)
+    {
+        const auto local = sourceSeconds - note.startSeconds;
+        if (local < -1.0e-6 || local > note.durationSeconds + 1.0e-6
+            || note.contour.empty())
+            continue;
+        const auto right = std::lower_bound(note.contour.begin(), note.contour.end(), local,
+            [](const PitchPoint& point, double time) { return point.timeSeconds < time; });
+        const auto rightIndex = right == note.contour.end()
+            ? note.contour.size() - 1
+            : static_cast<std::size_t>(std::distance(note.contour.begin(), right));
+        const auto leftIndex = rightIndex > 0 && note.contour[rightIndex].timeSeconds > local
+            ? rightIndex - 1 : rightIndex;
+        const auto& left = note.contour[leftIndex];
+        const auto& next = note.contour[rightIndex];
+        if (!left.voiced || !next.voiced) return std::nullopt;
+        const auto amount = next.timeSeconds > left.timeSeconds
+            ? static_cast<float>(juce::jlimit(0.0, 1.0,
+                (local - left.timeSeconds) / (next.timeSeconds - left.timeSeconds)))
+            : 0.0f;
+        const auto interpolate = [amount](float first, float second)
+        {
+            return first + (second - first) * amount;
+        };
+        const auto centre = note.sourceMidiCenter * 100.0f;
+        return std::pair {
+            centre + interpolate(left.relativeCents, next.relativeCents),
+            centre + interpolate(left.withoutVibratoCents, next.withoutVibratoCents)
+        };
+    }
+    return std::nullopt;
 }
 }
 
@@ -289,5 +327,96 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
     }
     if (progress) progress(1.0);
     return notes;
+}
+
+bool NativeAnalyzer::reanalyseProjectSourcePitch(ProjectData& project, juce::String& error,
+                                                  Progress progress)
+{
+    std::map<juce::String, juce::File> files;
+    for (const auto& track : project.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.sourceFile.existsAsFile())
+                files.try_emplace(clip.sourceFile.getFullPathName(), clip.sourceFile);
+    if (files.empty())
+    {
+        error = "Source-pitch reanalysis has no readable media";
+        return false;
+    }
+
+    std::map<juce::String, std::vector<NoteData>> analyses;
+    juce::StringArray failures;
+    auto fileIndex = std::size_t(0);
+    for (const auto& [path, file] : files)
+    {
+        juce::String localError;
+        auto notes = analyse(file, localError, [&](double value)
+        {
+            if (progress)
+                progress((static_cast<double>(fileIndex) + value)
+                         / static_cast<double>(files.size()));
+        });
+        if (!notes.empty()) analyses.emplace(path, std::move(notes));
+        else failures.add(file.getFileName() + ": " + localError);
+        ++fileIndex;
+    }
+
+    auto updatedNotes = std::size_t(0);
+    for (auto& track : project.tracks)
+        for (auto& clip : track.clips)
+        {
+            const auto found = analyses.find(clip.sourceFile.getFullPathName());
+            if (found == analyses.end()) continue;
+            const auto sourceDuration = clip.sourceDurationSeconds > 1.0e-9
+                ? clip.sourceDurationSeconds : clip.durationSeconds;
+            for (auto& note : clip.notes)
+            {
+                if (note.contour.empty())
+                {
+                    for (double local = 0.0; local < note.durationSeconds; local += 0.01)
+                    {
+                        PitchPoint point;
+                        point.timeSeconds = local;
+                        note.contour.push_back(point);
+                    }
+                    PitchPoint end;
+                    end.timeSeconds = note.durationSeconds;
+                    note.contour.push_back(end);
+                }
+                std::vector<std::optional<std::pair<float, float>>> samples;
+                samples.reserve(note.contour.size());
+                std::vector<float> voicedPitch;
+                for (const auto& point : note.contour)
+                {
+                    const auto clipLocal = note.startSeconds + point.timeSeconds;
+                    const auto sourceSeconds = clip.sourceOffsetSeconds
+                        + juce::jlimit(0.0, 1.0, clipLocal / std::max(0.001, clip.durationSeconds))
+                            * sourceDuration;
+                    auto pitch = absolutePitchAt(found->second, sourceSeconds);
+                    if (pitch) voicedPitch.push_back(pitch->first);
+                    samples.push_back(pitch);
+                }
+                if (voicedPitch.size() < 2) continue;
+                const auto centreCents = median(std::move(voicedPitch));
+                note.sourceMidiCenter = juce::jlimit(0.0f, 127.0f, centreCents / 100.0f);
+                for (std::size_t index = 0; index < note.contour.size(); ++index)
+                {
+                    auto& point = note.contour[index];
+                    const auto& pitch = samples[index];
+                    point.voiced = pitch.has_value();
+                    if (!pitch) continue;
+                    point.relativeCents = pitch->first - centreCents;
+                    point.withoutVibratoCents = pitch->second - centreCents;
+                }
+                ++updatedNotes;
+            }
+        }
+    if (progress) progress(1.0);
+    if (!failures.isEmpty()) error = failures.joinIntoString("\n");
+    if (updatedNotes == 0)
+    {
+        if (error.isEmpty()) error = "Source-pitch reanalysis produced no aligned contours";
+        return false;
+    }
+    return true;
 }
 }
