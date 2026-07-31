@@ -16,6 +16,7 @@ struct MelodyneImportResult
 struct MelodyneImportOptions
 {
     bool recursiveMediaSearch = true;
+    bool preserveProjectEdits = true;
 };
 
 class MelodyneImporter final

@@ -595,6 +595,12 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
         track.muted = graph.boolean(trackId, "isMuted");
         track.solo = graph.boolean(trackId, "isSolo");
         track.volume = static_cast<float>(std::clamp(graph.number(trackId, "volume").value_or(1.0), 0.0, 4.0));
+        if (!options.preserveProjectEdits)
+        {
+            track.muted = false;
+            track.solo = false;
+            track.volume = 1.0f;
+        }
         const auto analyzer = graph.stringField(trackId, "defaultAnalyzerParameterSetIdenfier").toLowerCase();
         track.compose = analyzer.contains(".melodic");
         track.pitchAlgorithm = PitchAlgorithm::mld5;
@@ -747,6 +753,26 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             if (const auto join = graph.reference(element, "followingJoin"))
             {
                 note.connectedToNext = graph.boolean(*join, "joinsPitches");
+            }
+            if (!options.preserveProjectEdits)
+            {
+                // Keep the project arrangement and the analysed source F0,
+                // while neutralising Melodyne correction/mixer controls.  The
+                // imported clip remains immediately editable without baking
+                // the saved tuning, modulation, Attack, timbre or gain edits.
+                note.midiNote = note.sourceMidiCenter;
+                note.drift = 1.0f;
+                note.modulation = 1.0f;
+                note.formantSemitones = 0.0f;
+                note.breath = 0.0f;
+                note.gain = 1.0f;
+                note.attackSpeed = 1.0f;
+                note.connectedToPrevious = false;
+                note.connectedToNext = false;
+                clip.muted = false;
+                clip.fadeInSeconds = 0.0;
+                clip.fadeOutSeconds = 0.0;
+                clip.gain = 1.0f;
             }
             clip.notes.push_back(std::move(note));
             track.clips.push_back(std::move(clip));

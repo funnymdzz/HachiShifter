@@ -1596,11 +1596,14 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
     juce::Component::SafePointer<MainComponent> safe(this);
     const auto recursiveMediaSearch = preferences == nullptr
         || preferences->getBoolValue("import.recursiveMedia", true);
-    juce::Thread::launch([safe, file, recursiveMediaSearch]
+    const auto preserveProjectEdits = preferences == nullptr
+        || preferences->getBoolValue("import.preserveEdits", true);
+    juce::Thread::launch([safe, file, recursiveMediaSearch, preserveProjectEdits]
     {
         juce::String error;
         backend::MelodyneImportOptions options;
         options.recursiveMediaSearch = recursiveMediaSearch;
+        options.preserveProjectEdits = preserveProjectEdits;
         auto imported = backend::MelodyneImporter::importProject(file, error,
             [safe](double value, const juce::String& stage)
             {

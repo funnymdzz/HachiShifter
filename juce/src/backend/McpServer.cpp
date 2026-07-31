@@ -148,7 +148,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("project_snapshot", "Read every current track, clip, note, pitch and marker / 读取全部工程内容"),
             makeTool("import_audio", "Import an audio file at start_seconds / 导入音频"),
             makeTool("import_midi", "Import MIDI notes and tempo / 导入 MIDI"),
-            makeTool("import_melodyne", "Import Melodyne MPD edits; recursive_media controls media search / 导入 Melodyne 工程并可控制递归素材搜索"),
+            makeTool("import_melodyne", "Import Melodyne MPD edits; recursive_media and preserve_edits control import / 导入 Melodyne 工程并控制素材搜索与工程编辑"),
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
             makeTool("set_track", "Set compose, mute, solo, gain, pan and render algorithms / 设置轨道及算法"),
             makeTool("set_clip", "Set clip gain, fades and mute state / 设置采样增益、淡入淡出和静音"),
@@ -281,6 +281,8 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         MelodyneImportOptions options;
         options.recursiveMediaSearch = static_cast<bool>(
             args.getProperty("recursive_media", true));
+        options.preserveProjectEdits = static_cast<bool>(
+            args.getProperty("preserve_edits", true));
         if (auto imported = MelodyneImporter::importProject(
                 juce::File(string(args, "path")), error, {}, options))
         {
