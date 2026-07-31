@@ -71,6 +71,18 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/NativeAnalyzer.h
 )
 
+# The xwin/MSVC-ABI build links JUCE against the common-controls v6 import
+# library.  Without an embedded activation-context manifest Windows loads the
+# legacy v5 COMCTL32 first and aborts at startup with "ordinal 345 not found".
+# Keep the manifest as an explicit PE resource because the cross linker runs
+# with /manifest:no and therefore does not invoke mt.exe implicitly.
+if(WIN32)
+    target_sources(HachiShifterNext PRIVATE
+        resources/windows/HachiShifterNext.rc
+        resources/windows/HachiShifterNext.manifest
+    )
+endif()
+
 target_compile_definitions(HachiShifterNext PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:HachiShifterNext,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
