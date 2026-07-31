@@ -302,6 +302,11 @@ MainComponent::MainComponent()
     };
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
+    timeline.onClipGainRequested = [this](const juce::String& clipId)
+    {
+        selectedClipId = clipId;
+        showClipGainDialog();
+    };
     pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     pianoRoll.onNoteSelected = [this](const juce::String& noteId)
     {
@@ -1246,6 +1251,18 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(30, strings.text("file.audio"));
         menu.addItem(31, strings.text("track.toggleCompose"), selectedTrackId.isNotEmpty());
         menu.addSeparator();
+        auto selectedClipMuted = false;
+        if (selectedClipId.isNotEmpty())
+        {
+            const auto data = project.snapshot();
+            for (const auto& track : data.tracks)
+                for (const auto& clip : track.clips)
+                    if (clip.id == selectedClipId) selectedClipMuted = clip.muted;
+        }
+        menu.addItem(34, strings.text(selectedClipMuted ? "clip.unmute" : "clip.mute"),
+                     selectedClipId.isNotEmpty());
+        menu.addItem(35, strings.text("clip.gain"), selectedClipId.isNotEmpty());
+        menu.addSeparator();
         menu.addItem(32, strings.text("track.delete"), selectedTrackId.isNotEmpty());
         menu.addItem(33, strings.text("clip.delete"), selectedClipId.isNotEmpty());
     }
@@ -1294,6 +1311,18 @@ void MainComponent::menuItemSelected(int id, int)
         confirmDestructive(strings.text("clip.delete"),
             [this, clipId] { project.removeClip(clipId); });
     }
+    else if (id == 34)
+    {
+        const auto data = project.snapshot();
+        for (const auto& track : data.tracks)
+            for (const auto& clip : track.clips)
+                if (clip.id == selectedClipId)
+                {
+                    project.setClipMuted(clip.id, !clip.muted);
+                    return;
+                }
+    }
+    else if (id == 35) showClipGainDialog();
     else if (id == 40) zoomSlider.setValue(zoomSlider.getValue() * 1.25);
     else if (id == 41) zoomSlider.setValue(zoomSlider.getValue() / 1.25);
     else if (id == 42)
@@ -1344,6 +1373,45 @@ void MainComponent::showAssetManager()
     options.resizable = true;
     options.content.setOwned(new AssetManagerComponent(strings, *preferences));
     options.launchAsync();
+}
+
+void MainComponent::showClipGainDialog()
+{
+    if (selectedClipId.isEmpty()) return;
+    auto gain = 1.0f;
+    auto found = false;
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.id == selectedClipId)
+            {
+                gain = clip.gain;
+                found = true;
+            }
+    if (!found) return;
+
+    const auto gainDb = gain > 1.0e-6f ? 20.0 * std::log10(gain) : -60.0;
+    auto* dialog = new juce::AlertWindow(strings.text("clip.gain"), juce::String{},
+                                          juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("gain", juce::String(gainDb, 1), strings.text("clip.gainDb"));
+    dialog->addButton(strings.text("dialog.apply"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    const auto clipId = selectedClipId;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create([safe, dialog, clipId](int result)
+        {
+            if (safe != nullptr && result == 1)
+            {
+                const auto db = juce::jlimit(-60.0, 12.0,
+                    dialog->getTextEditorContents("gain").getDoubleValue());
+                safe->project.setClipGain(clipId, db <= -59.9 ? 0.0f
+                    : static_cast<float>(std::pow(10.0, db / 20.0)));
+            }
+            delete dialog;
+        }), false);
 }
 
 void MainComponent::confirmDestructive(const juce::String& title,

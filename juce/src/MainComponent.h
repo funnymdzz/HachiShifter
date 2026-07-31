@@ -79,6 +79,7 @@ private:
     void importOto();
     void exportOto();
     void showAssetManager();
+    void showClipGainDialog();
     void confirmDestructive(const juce::String& title, std::function<void()> action);
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);

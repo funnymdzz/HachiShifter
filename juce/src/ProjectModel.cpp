@@ -558,6 +558,71 @@ void ProjectModel::resizeClip(const juce::String& clipId, double startSeconds,
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setClipGain(const juce::String& clipId, float gain)
+{
+    const auto next = juce::jlimit(0.0f, 4.0f, gain);
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    if (std::abs(clip.gain - next) <= 1.0e-6f) return;
+                    pushUndoLocked();
+                    clip.gain = next;
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setClipFades(const juce::String& clipId, double fadeInSeconds,
+                                double fadeOutSeconds)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    const auto nextIn = juce::jlimit(0.0, clip.durationSeconds,
+                                                     fadeInSeconds);
+                    const auto nextOut = juce::jlimit(0.0, clip.durationSeconds,
+                                                      fadeOutSeconds);
+                    if (std::abs(clip.fadeInSeconds - nextIn) <= 1.0e-9
+                        && std::abs(clip.fadeOutSeconds - nextOut) <= 1.0e-9) return;
+                    pushUndoLocked();
+                    clip.fadeInSeconds = nextIn;
+                    clip.fadeOutSeconds = nextOut;
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setClipMuted(const juce::String& clipId, bool muted)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    if (clip.muted == muted) return;
+                    pushUndoLocked();
+                    clip.muted = muted;
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::removeClip(const juce::String& clipId)
 {
     auto changed = false;

@@ -149,6 +149,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("import_melodyne", "Import Melodyne MPD edits / 导入 Melodyne 工程"),
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
             makeTool("set_track", "Set compose, mute, solo, gain, pan and render algorithms / 设置轨道及算法"),
+            makeTool("set_clip", "Set clip gain, fades and mute state / 设置采样增益、淡入淡出和静音"),
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("resize_clip", "Stretch a whole clip while preserving its source media / 整体拉伸采样并保留原始素材"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
@@ -305,6 +306,29 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                 : value == "soundtouch" ? StretchAlgorithm::soundTouch
                 : StretchAlgorithm::melodyneHybrid);
         }
+        return toolResult("ok");
+    }
+    else if (name == "set_clip")
+    {
+        const auto id = string(args, "clip_id");
+        if (args.hasProperty("gain"))
+            project.setClipGain(id, static_cast<float>(number(args, "gain", 1.0)));
+        if (args.hasProperty("fade_in_seconds") || args.hasProperty("fade_out_seconds"))
+        {
+            auto fadeIn = number(args, "fade_in_seconds");
+            auto fadeOut = number(args, "fade_out_seconds");
+            const auto data = project.snapshot();
+            for (const auto& track : data.tracks)
+                for (const auto& clip : track.clips)
+                    if (clip.id == id)
+                    {
+                        if (!args.hasProperty("fade_in_seconds")) fadeIn = clip.fadeInSeconds;
+                        if (!args.hasProperty("fade_out_seconds")) fadeOut = clip.fadeOutSeconds;
+                    }
+            project.setClipFades(id, fadeIn, fadeOut);
+        }
+        if (args.hasProperty("muted"))
+            project.setClipMuted(id, static_cast<bool>(args["muted"]));
         return toolResult("ok");
     }
     else if (name == "move_clip")

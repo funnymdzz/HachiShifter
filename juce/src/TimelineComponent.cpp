@@ -143,12 +143,21 @@ void TimelineComponent::paint(juce::Graphics& g)
                                                                  : clip.durationSeconds;
             const auto displayRatio = clip.durationSeconds > 1.0e-9
                 ? displayDuration / clip.durationSeconds : 1.0;
+            auto displayFadeIn = clip.fadeInSeconds * displayRatio;
+            auto displayFadeOut = clip.fadeOutSeconds * displayRatio;
+            if (clip.id == draggedClip
+                && (dragMode == DragMode::fadeIn || dragMode == DragMode::fadeOut))
+            {
+                displayFadeIn = draggedClipPreviewFadeIn;
+                displayFadeOut = draggedClipPreviewFadeOut;
+            }
             auto bounds = juce::Rectangle<float>(timeToX(displayStart),
                                                   static_cast<float>(row.getY() + 19),
                                                   std::max(4.0f, static_cast<float>(displayDuration)
                                                                       * pixelsPerSecond),
                                                   static_cast<float>(rowHeight - 25));
-            clipHits.push_back({ clip.id, bounds, clip.startSeconds, clip.durationSeconds });
+            clipHits.push_back({ clip.id, bounds, clip.startSeconds, clip.durationSeconds,
+                                 clip.fadeInSeconds, clip.fadeOutSeconds, clip.muted });
             g.setColour(track.muted || clip.muted ? Palette::clipBackground.withAlpha(0.55f)
                                                   : Palette::clipBackground);
             g.fillRect(bounds);
@@ -162,31 +171,37 @@ void TimelineComponent::paint(juce::Graphics& g)
 
             if (const auto found = thumbnails.find(clip.sourceFile.getFullPathName().toStdString()); found != thumbnails.end())
             {
-                g.setColour(colour.brighter(0.65f).withAlpha(track.muted ? 0.25f : 0.78f));
+                g.setColour(colour.brighter(0.65f).withAlpha(
+                    track.muted || clip.muted ? 0.25f : 0.78f));
                 found->second->drawChannels(g, bounds.withTrimmedTop(17.0f).reduced(1.0f).toNearestInt(),
                                             clip.sourceOffsetSeconds,
                                             clip.sourceOffsetSeconds
                                                 + (clip.sourceDurationSeconds > 1.0e-9
                                                     ? clip.sourceDurationSeconds : clip.durationSeconds), 1.0f);
             }
-            if (clip.fadeInSeconds > 0.0)
+            const auto waveformTop = bounds.getY() + 19.0f;
+            const auto fadeInX = bounds.getX() + timeToX(displayFadeIn);
+            const auto fadeOutX = bounds.getRight() - timeToX(displayFadeOut);
+            if (displayFadeIn > 0.0)
             {
                 g.setColour(Palette::text.withAlpha(0.7f));
                 g.drawLine(bounds.getX(), bounds.getBottom(),
-                           bounds.getX() + timeToX(clip.fadeInSeconds * displayRatio),
-                           bounds.getY(), 1.0f);
+                           fadeInX, waveformTop, 1.0f);
             }
-            if (clip.fadeOutSeconds > 0.0)
+            if (displayFadeOut > 0.0)
             {
                 g.setColour(Palette::text.withAlpha(0.7f));
-                g.drawLine(bounds.getRight()
-                               - timeToX(clip.fadeOutSeconds * displayRatio), bounds.getY(),
+                g.drawLine(fadeOutX, waveformTop,
                            bounds.getRight(), bounds.getBottom(), 1.0f);
             }
+            g.setColour(colour.brighter(0.72f).withAlpha(
+                clip.id == selectedClip ? 0.95f : 0.52f));
+            g.fillEllipse(fadeInX - 3.5f, waveformTop - 3.5f, 7.0f, 7.0f);
+            g.fillEllipse(fadeOutX - 3.5f, waveformTop - 3.5f, 7.0f, 7.0f);
             g.setColour(Palette::text);
             g.setColour(Palette::panel.withAlpha(0.82f));
             g.fillRect(bounds.toNearestInt().withHeight(17));
-            g.setColour(colour.brighter(0.5f));
+            g.setColour(clip.muted ? Palette::noteFill : colour.brighter(0.5f));
             g.fillRoundedRectangle(bounds.getX() + 2.0f, bounds.getY() + 2.0f, 14.0f, 13.0f, 2.0f);
             g.setColour(Palette::panel);
             g.setFont(9.0f);
@@ -220,6 +235,24 @@ void TimelineComponent::mouseMove(const juce::MouseEvent& event)
     for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
         if (it->bounds.contains(event.position))
         {
+            const auto muteBounds = juce::Rectangle<float>(it->bounds.getX() + 2.0f,
+                it->bounds.getY() + 2.0f, 14.0f, 13.0f);
+            if (muteBounds.contains(event.position))
+            {
+                setMouseCursor(juce::MouseCursor::PointingHandCursor);
+                return;
+            }
+            const auto waveformTop = it->bounds.getY() + 19.0f;
+            const auto fadeIn = juce::Point<float>(it->bounds.getX()
+                + timeToX(it->fadeInSeconds), waveformTop);
+            const auto fadeOut = juce::Point<float>(it->bounds.getRight()
+                - timeToX(it->fadeOutSeconds), waveformTop);
+            if (event.position.getDistanceFrom(fadeIn) <= 8.0f
+                || event.position.getDistanceFrom(fadeOut) <= 8.0f)
+            {
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+                return;
+            }
             const auto onHandle = event.position.x <= it->bounds.getX() + 8.0f
                 || event.position.x >= it->bounds.getRight() - 8.0f;
             setMouseCursor(onHandle ? juce::MouseCursor::LeftRightResizeCursor
@@ -234,6 +267,24 @@ void TimelineComponent::mouseExit(const juce::MouseEvent&)
     if (draggedClip.isEmpty()) setMouseCursor(juce::MouseCursor::NormalCursor);
 }
 
+void TimelineComponent::mouseDoubleClick(const juce::MouseEvent& event)
+{
+    for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
+        if (it->bounds.contains(event.position))
+        {
+            const auto muteBounds = juce::Rectangle<float>(it->bounds.getX() + 2.0f,
+                it->bounds.getY() + 2.0f, 14.0f, 13.0f);
+            if (muteBounds.contains(event.position)) return;
+            draggedClip.clear();
+            dragMode = DragMode::none;
+            selectedClip = it->id;
+            if (onClipSelected) onClipSelected(selectedClip);
+            if (onClipGainRequested) onClipGainRequested(selectedClip);
+            repaint();
+            return;
+        }
+}
+
 void TimelineComponent::mouseDown(const juce::MouseEvent& event)
 {
     for (auto it = clipHits.rbegin(); it != clipHits.rend(); ++it)
@@ -241,13 +292,39 @@ void TimelineComponent::mouseDown(const juce::MouseEvent& event)
         {
             selectedClip = it->id;
             if (onClipSelected) onClipSelected(selectedClip);
+            const auto muteBounds = juce::Rectangle<float>(it->bounds.getX() + 2.0f,
+                it->bounds.getY() + 2.0f, 14.0f, 13.0f);
+            if (muteBounds.contains(event.position))
+            {
+                model.setClipMuted(it->id, !it->muted);
+                return;
+            }
             draggedClip = it->id;
             draggedClipStart = it->startSeconds;
             draggedClipDuration = it->durationSeconds;
             draggedClipPreviewStart = draggedClipStart;
             draggedClipPreviewDuration = draggedClipDuration;
+            draggedClipFadeIn = it->fadeInSeconds;
+            draggedClipFadeOut = it->fadeOutSeconds;
+            draggedClipPreviewFadeIn = draggedClipFadeIn;
+            draggedClipPreviewFadeOut = draggedClipFadeOut;
             dragAnchorX = event.position.x;
-            if (event.position.x <= it->bounds.getX() + 8.0f)
+            const auto waveformTop = it->bounds.getY() + 19.0f;
+            const auto fadeIn = juce::Point<float>(it->bounds.getX()
+                + timeToX(it->fadeInSeconds), waveformTop);
+            const auto fadeOut = juce::Point<float>(it->bounds.getRight()
+                - timeToX(it->fadeOutSeconds), waveformTop);
+            if (event.position.getDistanceFrom(fadeIn) <= 8.0f)
+            {
+                dragMode = DragMode::fadeIn;
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            }
+            else if (event.position.getDistanceFrom(fadeOut) <= 8.0f)
+            {
+                dragMode = DragMode::fadeOut;
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+            }
+            else if (event.position.x <= it->bounds.getX() + 8.0f)
             {
                 dragMode = DragMode::resizeLeft;
                 setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
@@ -286,7 +363,14 @@ void TimelineComponent::mouseDrag(const juce::MouseEvent& event)
             + std::round((seconds - snapshot.beatOriginSeconds) / quantum) * quantum);
     };
     const auto delta = static_cast<double>(event.position.x - dragAnchorX) / pixelsPerSecond;
-    if (dragMode == DragMode::resizeLeft)
+    if (dragMode == DragMode::fadeIn)
+        draggedClipPreviewFadeIn = juce::jlimit(0.0, draggedClipDuration,
+            static_cast<double>(event.position.x) / pixelsPerSecond - draggedClipStart);
+    else if (dragMode == DragMode::fadeOut)
+        draggedClipPreviewFadeOut = juce::jlimit(0.0, draggedClipDuration,
+            draggedClipStart + draggedClipDuration
+                - static_cast<double>(event.position.x) / pixelsPerSecond);
+    else if (dragMode == DragMode::resizeLeft)
     {
         const auto end = draggedClipStart + draggedClipDuration;
         draggedClipPreviewStart = juce::jlimit(0.0, end - 0.01,
@@ -308,7 +392,10 @@ void TimelineComponent::mouseUp(const juce::MouseEvent&)
 {
     if (draggedClip.isNotEmpty())
     {
-        if (dragMode == DragMode::resizeLeft || dragMode == DragMode::resizeRight)
+        if (dragMode == DragMode::fadeIn || dragMode == DragMode::fadeOut)
+            model.setClipFades(draggedClip, draggedClipPreviewFadeIn,
+                               draggedClipPreviewFadeOut);
+        else if (dragMode == DragMode::resizeLeft || dragMode == DragMode::resizeRight)
             model.resizeClip(draggedClip, draggedClipPreviewStart,
                              draggedClipPreviewDuration);
         else

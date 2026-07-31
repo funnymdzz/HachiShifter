@@ -137,6 +137,10 @@ public:
     void moveClip(const juce::String& clipId, double startSeconds);
     void resizeClip(const juce::String& clipId, double startSeconds,
                     double durationSeconds);
+    void setClipGain(const juce::String& clipId, float gain);
+    void setClipFades(const juce::String& clipId, double fadeInSeconds,
+                      double fadeOutSeconds);
+    void setClipMuted(const juce::String& clipId, bool muted);
     void removeClip(const juce::String& clipId);
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);

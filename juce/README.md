@@ -9,7 +9,8 @@ remains available on `main` for regression reference.
 - JUCE 8, C++20 and CMake;
 - model-free Windows and Linux packages;
 - native multi-track project model with BPM and beat-origin persistence;
-- sample-accurate multi-track transport, clip gain/pan and overlap fades;
+- sample-accurate multi-track transport, clip gain/pan and overlap fades, with
+  draggable clip-fade handles and direct clip mute/gain controls;
 - sample-rate-independent reader/resampling path;
 - legacy-compatible dark piano roll using `#7F69CA`, `#CBCBFA` and `#F4C000`,
   plus the source-edit wrench mode;

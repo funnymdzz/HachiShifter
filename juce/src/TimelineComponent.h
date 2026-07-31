@@ -19,6 +19,7 @@ public:
     void paint(juce::Graphics& g) override;
     void mouseMove(const juce::MouseEvent& event) override;
     void mouseExit(const juce::MouseEvent& event) override;
+    void mouseDoubleClick(const juce::MouseEvent& event) override;
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
@@ -28,6 +29,7 @@ public:
     [[nodiscard]] double secondsForPixel(int pixel) const;
     std::function<void(double)> onSeek;
     std::function<void(const juce::String&)> onClipSelected;
+    std::function<void(const juce::String&)> onClipGainRequested;
 
 private:
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
@@ -41,6 +43,9 @@ private:
         juce::Rectangle<float> bounds;
         double startSeconds = 0.0;
         double durationSeconds = 0.0;
+        double fadeInSeconds = 0.0;
+        double fadeOutSeconds = 0.0;
+        bool muted = false;
     };
 
     ProjectModel& model;
@@ -59,7 +64,12 @@ private:
     double draggedClipDuration = 0.0;
     double draggedClipPreviewStart = 0.0;
     double draggedClipPreviewDuration = 0.0;
+    double draggedClipFadeIn = 0.0;
+    double draggedClipFadeOut = 0.0;
+    double draggedClipPreviewFadeIn = 0.0;
+    double draggedClipPreviewFadeOut = 0.0;
     float dragAnchorX = 0.0f;
-    enum class DragMode { none, move, resizeLeft, resizeRight } dragMode = DragMode::none;
+    enum class DragMode { none, move, resizeLeft, resizeRight, fadeIn, fadeOut }
+        dragMode = DragMode::none;
 };
 }
