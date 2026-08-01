@@ -59,7 +59,10 @@ build_windows:
     - install -m 644 LICENSE HachiShifterNext-windows-x64/LICENSE
     - test "$(find HachiShifterNext-windows-x64/models -type f | wc -l)" -eq 0
     - file HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'PE32+.*x86-64'
-    - "llvm-readobj --coff-resources HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'MANIFEST'"
+    # Avoid grep -q closing LLVM's pipe early: llvm-readobj maps EPIPE to exit
+    # 74, which made an otherwise valid Windows package fail at this gate.
+    - llvm-readobj --coff-resources HachiShifterNext-windows-x64/HachiShifterNext.exe > windows-resources.txt
+    - grep -q 'MANIFEST' windows-resources.txt
     - (cd HachiShifterNext-windows-x64 && zip -9 -r ../HachiShifterNext-windows-x64-no-model.zip .)
     - sha256sum HachiShifterNext-windows-x64-no-model.zip > HachiShifterNext-windows-x64-no-model.zip.sha256
   artifacts:
