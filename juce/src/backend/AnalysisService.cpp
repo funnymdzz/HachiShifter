@@ -1,4 +1,5 @@
 #include "AnalysisService.h"
+#include "GameAnalyzer.h"
 #include <algorithm>
 #include <array>
 
@@ -144,16 +145,13 @@ AnalysisStatus AnalysisService::status(const AnalysisConfig& config)
     result.fcpeModelPath = resolveFcpePath(config, result.gameModelDirectory);
     result.gameModelReady = result.gameModelDirectory != juce::File{};
     result.fcpeModelReady = result.fcpeModelPath != juce::File{};
-#if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
-    result.onnxRuntimeReady = true;
-#else
-    result.onnxRuntimeReady = false;
-#endif
-    if (result.gameModelReady && result.fcpeModelReady && result.onnxRuntimeReady)
+    result.onnxRuntimeReady = GameAnalyzer::runtimeAvailable();
+    if (result.gameModelReady && result.onnxRuntimeReady)
     {
-        result.activeBackend = "GAME+FCPE";
+        result.activeBackend = "GAME+native-hq";
         result.message = "GAME " + juce::String(config.performanceMode ? "small" : "large")
-            + " + FCPE ready";
+            + (result.fcpeModelReady ? " ready; FCPE model ready"
+                                     : " ready; FCPE model missing");
     }
     else
     {
@@ -174,13 +172,27 @@ AnalysisResult AnalysisService::analyse(const juce::File& file,
 {
     AnalysisResult result;
     result.status = status(config);
-    // The unified entry point is deliberately in place before the inference
-    // implementation so every caller observes the selected model pack and the
-    // same fallback semantics.  HACHI_HAS_ONNX_ANALYSIS dispatch is added here
-    // by the ONNX module; NativeAnalyzer remains required by model-free builds.
+    if (result.status.gameModelReady && result.status.onnxRuntimeReady)
+    {
+        GameAnalyzer::Options options;
+        options.performanceMode = config.performanceMode;
+        options.intraOpThreads = std::max(1, juce::SystemStats::getNumCpus());
+        juce::String gameError;
+        result.notes = GameAnalyzer::analyse(file, result.status.gameModelDirectory,
+                                             options, gameError, progress);
+        if (!result.notes.empty())
+        {
+            result.status.activeBackend = "GAME+native-hq";
+            if (!result.status.fcpeModelReady)
+                result.warning = "FCPE model missing; GAME uses native-hq source F0";
+            error.clear();
+            return result;
+        }
+        result.warning = gameError;
+    }
     result.notes = NativeAnalyzer::analyse(file, error, std::move(progress));
     result.status.activeBackend = "native-hq";
-    if (result.status.gameModelReady && result.status.fcpeModelReady
+    if (result.warning.isEmpty() && result.status.gameModelReady
         && !result.status.onnxRuntimeReady)
         result.warning = result.status.message;
     return result;
@@ -201,7 +213,7 @@ bool AnalysisService::reanalyseProjectSourcePitch(ProjectData& project,
 juce::String AnalysisService::backendText(const AnalysisStatus& value)
 {
     auto text = value.activeBackend;
-    if (value.activeBackend == "GAME+FCPE")
+    if (value.activeBackend.startsWith("GAME+"))
         text << " (GAME " << (value.performanceMode ? "small" : "large") << ")";
     return text;
 }

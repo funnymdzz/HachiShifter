@@ -15,6 +15,39 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
+# GAME and FCPE use the official ONNX Runtime C++ API.  The runtime is part of
+# the application package, while the considerably larger model files remain in
+# the optional models/ directory.  Use CPU archives for deterministic portable
+# builds; provider selection is layered on without changing model I/O.
+option(HACHI_ENABLE_ONNX_ANALYSIS "Enable GAME/FCPE ONNX analysis" ON)
+if(HACHI_ENABLE_ONNX_ANALYSIS AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
+    set(HACHI_ORT_VERSION "1.22.0")
+    if(WIN32)
+        set(HACHI_ORT_ARCHIVE
+            "https://github.com/microsoft/onnxruntime/releases/download/v${HACHI_ORT_VERSION}/onnxruntime-win-x64-${HACHI_ORT_VERSION}.zip")
+        set(HACHI_ORT_LIBRARY_REL "lib/onnxruntime.lib")
+        set(HACHI_ORT_RUNTIME_REL "lib/onnxruntime.dll")
+        set(HACHI_ORT_PACKAGE_NAME "onnxruntime.dll")
+    else()
+        set(HACHI_ORT_ARCHIVE
+            "https://github.com/microsoft/onnxruntime/releases/download/v${HACHI_ORT_VERSION}/onnxruntime-linux-x64-${HACHI_ORT_VERSION}.tgz")
+        set(HACHI_ORT_LIBRARY_REL "lib/libonnxruntime.so")
+        set(HACHI_ORT_RUNTIME_REL "lib/libonnxruntime.so.${HACHI_ORT_VERSION}")
+        set(HACHI_ORT_PACKAGE_NAME "libonnxruntime.so.1")
+    endif()
+    FetchContent_Declare(onnxruntime URL "${HACHI_ORT_ARCHIVE}"
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(onnxruntime)
+    add_library(hachi_onnxruntime SHARED IMPORTED GLOBAL)
+    set_target_properties(hachi_onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_RUNTIME_REL}"
+        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include")
+    if(WIN32)
+        set_target_properties(hachi_onnxruntime PROPERTIES
+            IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_LIBRARY_REL}")
+    endif()
+endif()
+
 # WORLD is vendored so model-free builds have a genuinely independent WORLD
 # analysis/synthesis path instead of routing the WORLD selector through the
 # common phase-vocoder fallback.
@@ -71,6 +104,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/NativeAnalyzer.h
     src/backend/AnalysisService.cpp
     src/backend/AnalysisService.h
+    src/backend/GameAnalyzer.cpp
+    src/backend/GameAnalyzer.h
 )
 
 # The xwin/MSVC-ABI build links JUCE against the common-controls v6 import
@@ -110,6 +145,21 @@ target_link_libraries(HachiShifterNext PRIVATE
     juce::juce_recommended_warning_flags
     world::core
 )
+
+if(TARGET hachi_onnxruntime)
+    target_link_libraries(HachiShifterNext PRIVATE hachi_onnxruntime)
+    target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ONNX_ANALYSIS=1)
+    add_custom_command(TARGET HachiShifterNext POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_RUNTIME_REL}"
+            "$<TARGET_FILE_DIR:HachiShifterNext>/${HACHI_ORT_PACKAGE_NAME}")
+    if(UNIX AND NOT APPLE)
+        set_target_properties(HachiShifterNext PROPERTIES
+            BUILD_RPATH "$ORIGIN")
+    endif()
+else()
+    target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ONNX_ANALYSIS=0)
+endif()
 
 # UTAU voicebanks commonly store oto.ini in CP932/Shift-JIS.  iconv is part of
 # libc on Linux and a system library on macOS; Windows uses MultiByteToWideChar.

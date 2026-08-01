@@ -35,6 +35,9 @@ build_linux:
     - binary="$(find build-gitlab-linux -path '*_artefacts/Release/*' -type f -name 'HachiShifter*' -perm -111 | head -n 1)"
     - test -n "$binary"
     - install -m 755 "$binary" HachiShifterNext-linux-x86_64/HachiShifterNext
+    - runtime="$(dirname "$binary")/libonnxruntime.so.1"
+    - test -f "$runtime"
+    - install -m 755 "$runtime" HachiShifterNext-linux-x86_64/libonnxruntime.so.1
     - install -m 644 LICENSE HachiShifterNext-linux-x86_64/LICENSE
     - test "$(find HachiShifterNext-linux-x86_64/models -type f | wc -l)" -eq 0
     - tar -czf HachiShifterNext-linux-x86_64-no-model.tar.gz HachiShifterNext-linux-x86_64
@@ -62,6 +65,9 @@ build_windows:
     - binary="$(find build-gitlab-windows -path '*_artefacts/Release/*' -type f -iname 'HachiShifter*.exe' | head -n 1)"
     - test -n "$binary"
     - install -m 755 "$binary" HachiShifterNext-windows-x64/HachiShifterNext.exe
+    - runtime="$(dirname "$binary")/onnxruntime.dll"
+    - test -f "$runtime"
+    - install -m 755 "$runtime" HachiShifterNext-windows-x64/onnxruntime.dll
     - install -m 644 LICENSE HachiShifterNext-windows-x64/LICENSE
     - test "$(find HachiShifterNext-windows-x64/models -type f | wc -l)" -eq 0
     - file HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'PE32+.*x86-64'
