@@ -21,6 +21,12 @@ build_linux:
   tags:
     - gcp-shell
     - linux
+  rules:
+    - if: '$WINDOWS_ONLY == "1"'
+      when: never
+    - if: '$CI_COMMIT_MESSAGE =~ /\[windows-only\]/'
+      when: never
+    - when: on_success
   script:
     - rm -rf build-gitlab-linux HachiShifterNext-linux-x86_64 HachiShifterNext-linux-x86_64-no-model.tar.gz
     - cmake -S juce -B build-gitlab-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
