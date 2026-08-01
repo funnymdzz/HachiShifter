@@ -70,7 +70,8 @@ C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行�
   → estimator），根据模型实际输入元数据组装张量，避免把 `duration` 误传给
   boundary-to-duration；默认 large，性能模式使用 small。每个 GAME note 作为一个
   音节，note 起点即默认节奏对齐点；FCPE 读取 128-bin Slaney mel，以正确的 5 ms
-  STFT 中心补偿恢复高精度原始 F0，再映射到 GAME 音节；
+  STFT 中心补偿恢复高精度原始 F0，再映射到 GAME 音节；GAME 分段阈值采用官方
+  推理默认值 0.3、半径 2、8 步 D3PM，FCPE 长素材按带上下文的有界窗口推理；
 - JSON-RPC MCP 工程读取、导入、编辑、预渲染、WAV 导出与播放控制接口，轨道
   和采样参数可独立修改，并公开原始音高线、最终目标音高线、渲染进度及实际后端；
   MCP 同时支持 HJM 分段读写、UTAU oto 导入/导出及整套音源注册；

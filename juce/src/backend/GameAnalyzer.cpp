@@ -325,7 +325,7 @@ std::vector<GameRegion> processChunk(Sessions& sessions,
     std::unique_ptr<bool[]> timeMask(new bool[timeFrames]{});
     for (std::size_t index = 0; index < timeFrames; ++index) timeMask[index] = maskT[index];
     const auto steps = sessions.config.loop ? 8 : 1;
-    auto segmentationThreshold = 0.20f;
+    auto segmentationThreshold = 0.30f;
     int64_t radius = 2;
     int64_t language = 0;
     for (int step = 0; step < steps; ++step)
