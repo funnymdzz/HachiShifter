@@ -287,6 +287,8 @@ public:
             {
                 std::size_t clips = 0;
                 std::size_t notes = 0;
+                std::size_t mappedClips = 0;
+                std::size_t sourceTimePoints = 0;
                 std::size_t flatNotes = 0;
                 auto flatTargetMaximumDeviation = 0.0f;
                 auto minModulation = 2.0f;
@@ -297,6 +299,9 @@ public:
                 {
                     clips += track.clips.size();
                     for (const auto& clip : track.clips)
+                    {
+                        if (!clip.sourceTimeMap.empty()) ++mappedClips;
+                        sourceTimePoints += clip.sourceTimeMap.size();
                         for (const auto& note : clip.notes)
                         {
                             ++notes;
@@ -314,6 +319,7 @@ public:
                                             std::abs(renderedPitchCents(note, point)));
                             }
                         }
+                    }
                 }
                 std::cout << "project=" << imported->project.name << '\n'
                           << "bpm=" << imported->project.bpm << '\n'
@@ -321,6 +327,8 @@ public:
                           << "tracks=" << imported->project.tracks.size() << '\n'
                           << "clips=" << clips << '\n'
                           << "notes=" << notes << '\n'
+                          << "mapped_clips=" << mappedClips << '\n'
+                          << "source_time_points=" << sourceTimePoints << '\n'
                           << "flat_notes=" << flatNotes << '\n'
                           << "flat_target_max_deviation_cents="
                           << flatTargetMaximumDeviation << '\n'

@@ -69,19 +69,30 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     }
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
     const auto sourceDuration = request.sourceDurationSeconds;
-    std::vector<backend::TimeMapPoint> timeAnchors { { 0.0, 0.0 } };
-    for (const auto& note : clip.notes)
+    std::vector<backend::TimeMapPoint> timeAnchors;
+    if (!clip.sourceTimeMap.empty())
     {
-        const auto noteTargetStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
-        const auto sourceStart = clip.durationSeconds > 1.0e-9
-            ? noteTargetStart / clip.durationSeconds * sourceDuration : 0.0;
-        timeAnchors.push_back({ noteTargetStart, sourceStart });
-        if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
-        const auto targetAttack = juce::jlimit(noteTargetStart, clip.durationSeconds,
-            noteTargetStart + note.consonantSeconds);
-        const auto sourceAttack = juce::jlimit(sourceStart, sourceDuration,
-            sourceStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
-        timeAnchors.push_back({ targetAttack, sourceAttack });
+        timeAnchors.reserve(clip.sourceTimeMap.size());
+        for (const auto& point : clip.sourceTimeMap)
+            timeAnchors.push_back({ juce::jlimit(0.0, clip.durationSeconds, point.targetSeconds),
+                                    juce::jlimit(0.0, sourceDuration, point.sourceSeconds) });
+    }
+    else
+    {
+        timeAnchors.push_back({ 0.0, 0.0 });
+        for (const auto& note : clip.notes)
+        {
+            const auto noteTargetStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
+            const auto sourceStart = clip.durationSeconds > 1.0e-9
+                ? noteTargetStart / clip.durationSeconds * sourceDuration : 0.0;
+            timeAnchors.push_back({ noteTargetStart, sourceStart });
+            if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
+            const auto targetAttack = juce::jlimit(noteTargetStart, clip.durationSeconds,
+                noteTargetStart + note.consonantSeconds);
+            const auto sourceAttack = juce::jlimit(sourceStart, sourceDuration,
+                sourceStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
+            timeAnchors.push_back({ targetAttack, sourceAttack });
+        }
     }
     timeAnchors.push_back({ clip.durationSeconds, sourceDuration });
     std::stable_sort(timeAnchors.begin(), timeAnchors.end(), [](const auto& left, const auto& right)
@@ -192,6 +203,12 @@ std::string renderKey(const ClipData& clip, const TrackData& track)
     stream.writeDouble(clip.sourceOffsetSeconds);
     stream.writeDouble(clip.sourceDurationSeconds);
     stream.writeDouble(clip.durationSeconds);
+    stream.writeInt64(static_cast<juce::int64>(clip.sourceTimeMap.size()));
+    for (const auto& point : clip.sourceTimeMap)
+    {
+        stream.writeDouble(point.targetSeconds);
+        stream.writeDouble(point.sourceSeconds);
+    }
     stream.writeInt(static_cast<int>(track.pitchAlgorithm));
     stream.writeInt(static_cast<int>(track.stretchAlgorithm));
     for (const auto& note : clip.notes)

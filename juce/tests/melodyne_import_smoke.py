@@ -36,6 +36,23 @@ def main() -> int:
         ]
         assert notes, "Melodyne project contains no imported notes"
 
+        mapped_clips = 0
+        source_time_points = 0
+        for track in project["tracks"]:
+            for clip in track["clips"]:
+                time_map = clip.get("source_time_map", [])
+                if not time_map:
+                    continue
+                mapped_clips += 1
+                source_time_points += len(time_map)
+                assert len(time_map) >= 2, time_map
+                targets = [point["target_seconds"] for point in time_map]
+                sources = [point["source_seconds"] for point in time_map]
+                assert all(a < b for a, b in zip(targets, targets[1:])), time_map
+                assert all(a <= b for a, b in zip(sources, sources[1:])), time_map
+                assert targets[0] >= -1.0e-9 and targets[-1] <= clip["duration_seconds"] + 1.0e-9
+                assert sources[0] >= -1.0e-9 and sources[-1] <= clip["source_duration_seconds"] + 1.0e-9
+
         flattened = [note for note in notes if note["flattened"]]
         assert flattened, "fixture contains no imported zero-modulation note"
         maximum_flat_deviation = max(
@@ -67,6 +84,8 @@ def main() -> int:
                     "tracks": len(project["tracks"]),
                     "notes": len(notes),
                     "flattened_notes": len(flattened),
+                    "mapped_clips": mapped_clips,
+                    "source_time_points": source_time_points,
                     "flat_target_max_deviation_cents": maximum_flat_deviation,
                     "selected_routes": selected_routes,
                 },

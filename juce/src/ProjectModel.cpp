@@ -547,6 +547,12 @@ void ProjectModel::resizeClip(const juce::String& clipId, double startSeconds,
                         for (auto& point : note.contour) point.timeSeconds *= ratio;
                         for (auto& marker : note.sibilantMarkers) marker *= ratio;
                     }
+                    // The selected source range is unchanged by a timeline
+                    // stretch.  Move only the target side of the imported warp
+                    // so the original Melodyne Attack/vowel source anchors are
+                    // retained exactly.
+                    for (auto& point : clip.sourceTimeMap)
+                        point.targetSeconds *= ratio;
                     clip.fadeInSeconds = std::min(nextDuration, clip.fadeInSeconds * ratio);
                     clip.fadeOutSeconds = std::min(nextDuration, clip.fadeOutSeconds * ratio);
                     clip.startSeconds = nextStart;
@@ -1170,6 +1176,10 @@ void ProjectModel::applySourceSettings(const juce::File& source,
             clip.sourceOffsetSeconds = std::max(0.0, row.regionStartSeconds);
             clip.sourceDurationSeconds = std::max(0.001,
                 row.regionEndSeconds - row.regionStartSeconds);
+            // Source-region editing establishes a new linear mapping.  An old
+            // MPD warp refers to the previous source range and must not be
+            // silently applied to the newly selected samples.
+            clip.sourceTimeMap.clear();
             note.gain = juce::jlimit(0.0f, 4.0f,
                 static_cast<float>(row.melodyneAmplitude));
             const auto targetPerSource = clip.durationSeconds / clip.sourceDurationSeconds;
@@ -1202,7 +1212,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 5, nullptr);
+    root.setProperty("version", 6, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -1244,6 +1254,14 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
             clipTree.setProperty("fadeOutSeconds", clip.fadeOutSeconds, nullptr);
             clipTree.setProperty("gain", clip.gain, nullptr);
             clipTree.setProperty("muted", clip.muted, nullptr);
+
+            for (const auto& point : clip.sourceTimeMap)
+            {
+                juce::ValueTree pointTree("SourceTimePoint");
+                pointTree.setProperty("targetSeconds", point.targetSeconds, nullptr);
+                pointTree.setProperty("sourceSeconds", point.sourceSeconds, nullptr);
+                clipTree.addChild(pointTree, -1, nullptr);
+            }
 
             for (const auto& note : clip.notes)
             {
@@ -1364,6 +1382,13 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
 
             for (const auto noteTree : clipTree)
             {
+                if (noteTree.hasType("SourceTimePoint"))
+                {
+                    clip.sourceTimeMap.push_back({
+                        static_cast<double>(noteTree.getProperty("targetSeconds", 0.0)),
+                        static_cast<double>(noteTree.getProperty("sourceSeconds", 0.0)) });
+                    continue;
+                }
                 if (!noteTree.hasType("Note")) continue;
                 NoteData note;
                 note.id = noteTree.getProperty("id").toString();
@@ -1398,6 +1423,33 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
                 }
                 clip.notes.push_back(std::move(note));
             }
+            std::stable_sort(clip.sourceTimeMap.begin(), clip.sourceTimeMap.end(),
+                [](const auto& left, const auto& right)
+                {
+                    return left.targetSeconds < right.targetSeconds;
+                });
+            auto previousTarget = -1.0;
+            auto previousSource = -1.0;
+            std::erase_if(clip.sourceTimeMap, [&](auto& point)
+            {
+                point.targetSeconds = juce::jlimit(0.0, clip.durationSeconds,
+                                                   point.targetSeconds);
+                point.sourceSeconds = juce::jlimit(0.0,
+                    clip.sourceDurationSeconds > 0.0 ? clip.sourceDurationSeconds
+                                                     : clip.durationSeconds,
+                    point.sourceSeconds);
+                const auto invalid = !std::isfinite(point.targetSeconds)
+                    || !std::isfinite(point.sourceSeconds)
+                    || point.targetSeconds <= previousTarget + 1.0e-9
+                    || point.sourceSeconds < previousSource - 1.0e-9;
+                if (!invalid)
+                {
+                    previousTarget = point.targetSeconds;
+                    previousSource = point.sourceSeconds;
+                }
+                return invalid;
+            });
+            if (clip.sourceTimeMap.size() < 2) clip.sourceTimeMap.clear();
             track.clips.push_back(std::move(clip));
         }
         data.tracks.push_back(std::move(track));

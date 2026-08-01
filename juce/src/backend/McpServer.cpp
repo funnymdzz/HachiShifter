@@ -787,6 +787,16 @@ juce::var McpServer::projectJson() const
             set(clipValue, "fade_out_seconds", clip.fadeOutSeconds);
             set(clipValue, "gain", clip.gain);
             set(clipValue, "muted", clip.muted);
+            std::vector<juce::var> sourceTimeMap;
+            sourceTimeMap.reserve(clip.sourceTimeMap.size());
+            for (const auto& point : clip.sourceTimeMap)
+            {
+                auto pointValue = object();
+                set(pointValue, "target_seconds", point.targetSeconds);
+                set(pointValue, "source_seconds", point.sourceSeconds);
+                sourceTimeMap.push_back(std::move(pointValue));
+            }
+            set(clipValue, "source_time_map", array(std::move(sourceTimeMap)));
             std::vector<juce::var> notes;
             for (const auto& note : clip.notes)
             {

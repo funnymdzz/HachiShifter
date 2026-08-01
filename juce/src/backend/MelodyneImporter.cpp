@@ -368,6 +368,44 @@ public:
     }
     double evaluate(std::uint32_t function, double x) const
     {
+        if (className(function) == "MUBezierDataPointFunction")
+        {
+            const auto pointsRef = reference(function, "points");
+            const auto points = pointsRef ? list(*pointsRef) : std::vector<std::uint32_t>{};
+            if (points.empty()) return x;
+            const auto firstX = number(points.front(), "x").value_or(0.0);
+            if (x <= firstX || points.size() == 1)
+                return number(points.front(), "y").value_or(x);
+            for (std::size_t index = 1; index < points.size(); ++index)
+            {
+                const auto left = points[index - 1];
+                const auto right = points[index];
+                const auto x0 = number(left, "x").value_or(0.0);
+                const auto y0 = number(left, "y").value_or(x0);
+                const auto x3 = number(right, "x").value_or(x0);
+                const auto y3 = number(right, "y").value_or(y0);
+                if (x > x3) continue;
+                const auto x1 = x0 + number(left, "rightControlPointXDelta").value_or(0.0);
+                const auto y1 = y0 + number(left, "rightControlPointYDelta").value_or(0.0);
+                const auto x2 = x3 + number(right, "leftControlPointXDelta").value_or(0.0);
+                const auto y2 = y3 + number(right, "leftControlPointYDelta").value_or(0.0);
+                auto low = 0.0;
+                auto high = 1.0;
+                for (int iteration = 0; iteration < 28; ++iteration)
+                {
+                    const auto t = (low + high) * 0.5;
+                    const auto u = 1.0 - t;
+                    const auto bezierX = u * u * u * x0 + 3.0 * u * u * t * x1
+                        + 3.0 * u * t * t * x2 + t * t * t * x3;
+                    if (bezierX < x) low = t; else high = t;
+                }
+                const auto t = (low + high) * 0.5;
+                const auto u = 1.0 - t;
+                return u * u * u * y0 + 3.0 * u * u * t * y1
+                    + 3.0 * u * t * t * y2 + t * t * t * y3;
+            }
+            return number(points.back(), "y").value_or(x);
+        }
         const auto points = functionPoints(function);
         if (points.empty()) return x;
         if (points.size() == 1 || x <= points.front().first) return points.front().second;
@@ -379,6 +417,28 @@ public:
                 return points[index - 1].second + (points[index].second - points[index - 1].second) * amount;
             }
         return points.back().second;
+    }
+    std::vector<std::pair<double, double>> sampledFunctionPoints(
+        std::uint32_t function) const
+    {
+        const auto anchors = functionPoints(function);
+        if (anchors.size() < 2) return anchors;
+        // Melodyne's Bezier time warp can change slope sharply around Attack.
+        // A bounded 2 ms grid retains those changes without allowing one long
+        // element to allocate an unbounded number of project points.
+        const auto span = std::abs(anchors.back().first - anchors.front().first);
+        const auto steps = std::clamp(static_cast<std::size_t>(std::ceil(span / 0.002)),
+                                      std::size_t(2), std::size_t(2048));
+        std::vector<std::pair<double, double>> sampled;
+        sampled.reserve(steps + 1);
+        for (std::size_t index = 0; index <= steps; ++index)
+        {
+            const auto amount = static_cast<double>(index) / static_cast<double>(steps);
+            const auto target = anchors.front().first
+                + (anchors.back().first - anchors.front().first) * amount;
+            sampled.emplace_back(target, evaluate(function, target));
+        }
+        return sampled;
     }
     double inverse(std::uint32_t function, double y) const
     {
@@ -666,6 +726,46 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                     clip.fadeOutSeconds = duration - startFade;
                 }
             clip.gain = static_cast<float>(std::max(0.0, graph.number(element, "amplitudeFactor").value_or(1.0)));
+
+            // sourceTimeForElementTimeFunction is Melodyne's authoritative
+            // element-time -> source-time warp.  Keeping only mappedStart and
+            // mappedEnd turns every Attack/vowel adjustment into a linear
+            // stretch, which moves F0 away from the waveform near note tails.
+            // Preserve the original piecewise-linear control points plus exact
+            // endpoints, normalised to this clip's selected source range.
+            if (timeFunction)
+            {
+                std::vector<double> targetAnchors { 0.0, duration };
+                for (const auto& [target, sourceTime] : graph.sampledFunctionPoints(*timeFunction))
+                {
+                    juce::ignoreUnused(sourceTime);
+                    if (std::isfinite(target) && target > 0.0 && target < duration)
+                        targetAnchors.push_back(target);
+                }
+                if (const auto attack = graph.number(element, "attackDuration");
+                    attack && *attack > 0.0 && *attack < duration)
+                    targetAnchors.push_back(*attack);
+                std::sort(targetAnchors.begin(), targetAnchors.end());
+                targetAnchors.erase(std::unique(targetAnchors.begin(), targetAnchors.end(),
+                    [](double left, double right) { return std::abs(left - right) <= 1.0e-9; }),
+                    targetAnchors.end());
+                auto previousSource = -1.0;
+                for (const auto target : targetAnchors)
+                {
+                    const auto relativeSource = std::clamp(
+                        graph.evaluate(*timeFunction, target) - mappedStart,
+                        0.0, clip.sourceDurationSeconds);
+                    if (relativeSource + 1.0e-8 < previousSource) continue;
+                    if (!clip.sourceTimeMap.empty()
+                        && relativeSource <= previousSource + 1.0e-8
+                        && target < duration - 1.0e-9)
+                        continue;
+                    clip.sourceTimeMap.push_back({ target, relativeSource });
+                    previousSource = relativeSource;
+                }
+                if (clip.sourceTimeMap.size() < 2)
+                    clip.sourceTimeMap.clear();
+            }
 
             NoteData note;
             note.id = makeId("note");

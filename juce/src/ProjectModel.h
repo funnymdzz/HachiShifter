@@ -39,6 +39,18 @@ struct PitchCurveEditPoint
     float targetMidi = 60.0f;
 };
 
+// A source-time anchor imported from an external editor.  Both values are
+// relative to the beginning of the clip: targetSeconds is the position on the
+// HachiShifter timeline and sourceSeconds is the corresponding position in the
+// selected source-media range.  Keeping these anchors in the native project is
+// essential for preserving nonlinear Attack/vowel timing instead of reducing
+// every imported element to one linear duration ratio.
+struct SourceTimePoint
+{
+    double targetSeconds = 0.0;
+    double sourceSeconds = 0.0;
+};
+
 struct NoteData
 {
     juce::String id;
@@ -74,6 +86,7 @@ struct ClipData
     double fadeOutSeconds = 0.0;
     float gain = 1.0f;
     bool muted = false;
+    std::vector<SourceTimePoint> sourceTimeMap;
     std::vector<NoteData> notes;
 };
 
