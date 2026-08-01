@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "backend/McpServer.h"
 #include "backend/AnalysisService.h"
+#include "backend/FcpeAnalyzer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <algorithm>
 #include <cmath>
@@ -67,6 +68,31 @@ public:
                       << "fcpe_path=" << status.fcpeModelPath.getFullPathName() << '\n'
                       << "onnx_runtime=" << (status.onnxRuntimeReady ? 1 : 0) << '\n'
                       << "message=" << status.message << std::endl;
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
+        if (arguments.size() >= 3 && arguments[0] == "--inspect-fcpe")
+        {
+            juce::String error;
+            auto frames = backend::FcpeAnalyzer::analyse(
+                juce::File(arguments[1]), juce::File(arguments[2]),
+                std::max(1, juce::SystemStats::getNumCpus()), error);
+            std::vector<float> voiced;
+            for (const auto& frame : frames)
+                if (frame.voiced) voiced.push_back(frame.midi);
+            auto medianMidi = 0.0f;
+            if (!voiced.empty())
+            {
+                const auto middle = voiced.begin()
+                    + static_cast<std::ptrdiff_t>(voiced.size() / 2);
+                std::nth_element(voiced.begin(), middle, voiced.end());
+                medianMidi = *middle;
+            }
+            std::cout << "frames=" << frames.size() << '\n'
+                      << "voiced_frames=" << voiced.size() << '\n'
+                      << "median_midi=" << medianMidi << '\n'
+                      << "error=" << error << std::endl;
+            if (frames.empty()) setApplicationReturnValue(6);
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }

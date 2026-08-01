@@ -13,11 +13,19 @@ public:
         int intraOpThreads = 0;
     };
 
+    struct Result
+    {
+        std::vector<NoteData> notes;
+        bool fcpeUsed = false;
+        juce::String warning;
+    };
+
     static bool runtimeAvailable();
-    static std::vector<NoteData> analyse(const juce::File& audioFile,
-                                         const juce::File& modelDirectory,
-                                         const Options& options,
-                                         juce::String& error,
-                                         NativeAnalyzer::Progress progress = {});
+    static Result analyse(const juce::File& audioFile,
+                          const juce::File& modelDirectory,
+                          const juce::File& fcpeModelFile,
+                          const Options& options,
+                          juce::String& error,
+                          NativeAnalyzer::Progress progress = {});
 };
 }

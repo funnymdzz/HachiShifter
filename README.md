@@ -66,6 +66,11 @@ C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行�
   分析素材 F0；设置、CLI 与 MCP 使用相同的 large/small 模型选择、模型路径和
   推理设备配置。无模型包使用 16 kHz、5 ms 精度的 C++ 原生分析回退，并保留
   工程目标音高及其它编辑；
+- 原生 ONNX Runtime GAME 四阶段推理（encoder → segmenter → boundary-to-duration
+  → estimator），根据模型实际输入元数据组装张量，避免把 `duration` 误传给
+  boundary-to-duration；默认 large，性能模式使用 small。每个 GAME note 作为一个
+  音节，note 起点即默认节奏对齐点；FCPE 读取 128-bin Slaney mel，以正确的 5 ms
+  STFT 中心补偿恢复高精度原始 F0，再映射到 GAME 音节；
 - JSON-RPC MCP 工程读取、导入、编辑、预渲染、WAV 导出与播放控制接口，轨道
   和采样参数可独立修改，并公开原始音高线、最终目标音高线、渲染进度及实际后端；
   MCP 同时支持 HJM 分段读写、UTAU oto 导入/导出及整套音源注册；

@@ -27,6 +27,9 @@ remains available on `main` for regression reference.
 - one GAME+FCPE analysis service shared by Settings, audio import, Melodyne
   source-F0 reanalysis, CLI and MCP, with explicit large/small model discovery
   and a 16 kHz/5 ms native C++ fallback while project targets stay intact;
+- native ONNX Runtime GAME encoder/segmenter/boundary-to-duration/estimator
+  inference with metadata-driven inputs, plus FCPE 128-bin Slaney-mel F0 and
+  explicit 5 ms STFT-centre timing compensation;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);

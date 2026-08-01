@@ -1,4 +1,5 @@
 #include "GameAnalyzer.h"
+#include "FcpeAnalyzer.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <cctype>
@@ -456,6 +457,41 @@ std::optional<std::pair<float, float>> pitchAt(const std::vector<NoteData>& note
     return std::nullopt;
 }
 
+std::optional<std::pair<float, float>> pitchAt(const std::vector<FcpeFrame>& frames,
+                                                double seconds)
+{
+    if (frames.empty()) return std::nullopt;
+    const auto right = std::lower_bound(frames.begin(), frames.end(), seconds,
+        [](const FcpeFrame& frame, double time) { return frame.timeSeconds < time; });
+    const auto rightIndex = right == frames.end() ? frames.size() - 1
+        : static_cast<std::size_t>(std::distance(frames.begin(), right));
+    const auto leftIndex = rightIndex > 0 && frames[rightIndex].timeSeconds > seconds
+        ? rightIndex - 1 : rightIndex;
+    const auto& left = frames[leftIndex];
+    const auto& next = frames[rightIndex];
+    if (!left.voiced || !next.voiced) return std::nullopt;
+    const auto amount = next.timeSeconds > left.timeSeconds
+        ? static_cast<float>(juce::jlimit(0.0, 1.0,
+            (seconds - left.timeSeconds) / (next.timeSeconds - left.timeSeconds))) : 0.0f;
+    const auto absoluteMidi = left.midi + (next.midi - left.midi) * amount;
+    auto smoothMidi = 0.0f;
+    auto smoothWeight = 0.0f;
+    const auto first = leftIndex > 5 ? leftIndex - 5 : 0;
+    const auto last = std::min(frames.size() - 1, rightIndex + 5);
+    for (auto index = first; index <= last; ++index)
+        if (frames[index].voiced)
+        {
+            const auto distance = std::abs(static_cast<double>(index)
+                                            - 0.5 * (leftIndex + rightIndex));
+            const auto weight = static_cast<float>(1.0 / (1.0 + distance));
+            smoothMidi += frames[index].midi * weight;
+            smoothWeight += weight;
+        }
+    if (smoothWeight > 0.0f) smoothMidi /= smoothWeight;
+    else smoothMidi = absoluteMidi;
+    return std::pair { absoluteMidi * 100.0f, smoothMidi * 100.0f };
+}
+
 float median(std::vector<float> values, float fallback)
 {
     if (values.empty()) return fallback;
@@ -465,7 +501,8 @@ float median(std::vector<float> values, float fallback)
 }
 
 std::vector<NoteData> combineRegions(const std::vector<GameRegion>& regions,
-                                     const std::vector<NoteData>& acoustic)
+                                     const std::vector<NoteData>& acoustic,
+                                     const std::vector<FcpeFrame>& fcpe)
 {
     std::vector<NoteData> notes;
     for (const auto& region : regions)
@@ -481,8 +518,10 @@ std::vector<NoteData> combineRegions(const std::vector<GameRegion>& regions,
         std::vector<float> absolute;
         for (double local = 0.0; local < note.durationSeconds + 0.0025; local += 0.005)
         {
-            auto pitch = pitchAt(acoustic, note.startSeconds
-                + std::min(local, note.durationSeconds));
+            const auto absoluteTime = note.startSeconds
+                + std::min(local, note.durationSeconds);
+            auto pitch = fcpe.empty() ? pitchAt(acoustic, absoluteTime)
+                                      : pitchAt(fcpe, absoluteTime);
             if (pitch) absolute.push_back(pitch->first);
             pitches.push_back(pitch);
         }
@@ -542,20 +581,34 @@ bool GameAnalyzer::runtimeAvailable()
 #endif
 }
 
-std::vector<NoteData> GameAnalyzer::analyse(const juce::File& audioFile,
-                                             const juce::File& modelDirectory,
-                                             const Options& options,
-                                             juce::String& error,
-                                             NativeAnalyzer::Progress progress)
+GameAnalyzer::Result GameAnalyzer::analyse(const juce::File& audioFile,
+                                            const juce::File& modelDirectory,
+                                            const juce::File& fcpeModelFile,
+                                            const Options& options,
+                                            juce::String& error,
+                                            NativeAnalyzer::Progress progress)
 {
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
+    Result result;
     juce::String acousticError;
     auto acoustic = NativeAnalyzer::analyse(audioFile, acousticError, [&](double value)
     {
-        if (progress) progress(value * 0.35);
+        if (progress) progress(value * 0.20);
     });
+    std::vector<FcpeFrame> fcpe;
+    if (fcpeModelFile.existsAsFile())
+    {
+        juce::String fcpeError;
+        fcpe = FcpeAnalyzer::analyse(audioFile, fcpeModelFile, options.intraOpThreads,
+                                     fcpeError, [&](double value)
+        {
+            if (progress) progress(0.20 + value * 0.35);
+        });
+        if (fcpe.empty()) result.warning = fcpeError;
+        else result.fcpeUsed = true;
+    }
     auto decoded = decodeMono(audioFile, error);
-    if (decoded.mono.empty()) return {};
+    if (decoded.mono.empty()) return result;
     try
     {
         auto& shared = cache();
@@ -579,18 +632,18 @@ std::vector<NoteData> GameAnalyzer::analyse(const juce::File& audioFile,
             const auto end = std::min(waveform.size(), start + chunkSamples);
             auto chunk = processChunk(*shared.sessions, waveform, start, end);
             regions.insert(regions.end(), chunk.begin(), chunk.end());
-            if (progress) progress(0.35 + 0.60 * static_cast<double>(end)
+            if (progress) progress(0.55 + 0.40 * static_cast<double>(end)
                 / static_cast<double>(waveform.size()));
         }
         std::sort(regions.begin(), regions.end(), [](const auto& left, const auto& right)
         {
             return left.startSeconds < right.startSeconds;
         });
-        auto notes = combineRegions(regions, acoustic);
-        if (notes.empty()) error = "GAME produced no voiced syllable";
+        result.notes = combineRegions(regions, acoustic, fcpe);
+        if (result.notes.empty()) error = "GAME produced no voiced syllable";
         else error.clear();
         if (progress) progress(1.0);
-        return notes;
+        return result;
     }
     catch (const Ort::Exception& exception)
     {
@@ -600,9 +653,9 @@ std::vector<NoteData> GameAnalyzer::analyse(const juce::File& audioFile,
     {
         error = "GAME inference failed: " + juce::String(exception.what());
     }
-    return {};
+    return result;
 #else
-    juce::ignoreUnused(audioFile, modelDirectory, options, progress);
+    juce::ignoreUnused(audioFile, modelDirectory, fcpeModelFile, options, progress);
     error = "GAME ONNX analysis runtime is not included";
     return {};
 #endif
