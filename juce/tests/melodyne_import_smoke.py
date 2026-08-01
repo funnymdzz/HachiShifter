@@ -35,6 +35,14 @@ def main() -> int:
             for note in clip["notes"]
         ]
         assert notes, "Melodyne project contains no imported notes"
+        pitch_points = 0
+        unvoiced_pitch_points = 0
+        for note in notes:
+            contour = note["contour"]
+            times = [point["time_seconds"] for point in contour]
+            assert all(a < b for a, b in zip(times, times[1:])), note["id"]
+            pitch_points += len(contour)
+            unvoiced_pitch_points += sum(not point["voiced"] for point in contour)
 
         mapped_clips = 0
         source_time_points = 0
@@ -86,6 +94,8 @@ def main() -> int:
                     "flattened_notes": len(flattened),
                     "mapped_clips": mapped_clips,
                     "source_time_points": source_time_points,
+                    "pitch_points": pitch_points,
+                    "unvoiced_pitch_points": unvoiced_pitch_points,
                     "flat_target_max_deviation_cents": maximum_flat_deviation,
                     "selected_routes": selected_routes,
                 },

@@ -289,6 +289,8 @@ public:
                 std::size_t notes = 0;
                 std::size_t mappedClips = 0;
                 std::size_t sourceTimePoints = 0;
+                std::size_t pitchPoints = 0;
+                std::size_t unvoicedPitchPoints = 0;
                 std::size_t flatNotes = 0;
                 auto flatTargetMaximumDeviation = 0.0f;
                 auto minModulation = 2.0f;
@@ -309,6 +311,10 @@ public:
                             maxModulation = std::max(maxModulation, note.modulation);
                             minAttackSpeed = std::min(minAttackSpeed, note.attackSpeed);
                             maxAttackSpeed = std::max(maxAttackSpeed, note.attackSpeed);
+                            pitchPoints += note.contour.size();
+                            unvoicedPitchPoints += static_cast<std::size_t>(std::count_if(
+                                note.contour.begin(), note.contour.end(),
+                                [](const auto& point) { return !point.voiced; }));
                             if (note.modulation <= 1.0e-4f)
                             {
                                 ++flatNotes;
@@ -329,6 +335,8 @@ public:
                           << "notes=" << notes << '\n'
                           << "mapped_clips=" << mappedClips << '\n'
                           << "source_time_points=" << sourceTimePoints << '\n'
+                          << "pitch_points=" << pitchPoints << '\n'
+                          << "unvoiced_pitch_points=" << unvoicedPitchPoints << '\n'
                           << "flat_notes=" << flatNotes << '\n'
                           << "flat_target_max_deviation_cents="
                           << flatTargetMaximumDeviation << '\n'

@@ -585,8 +585,33 @@ std::optional<std::pair<float, float>> pitchAt(const std::vector<SourcePitchPoin
     if (left.silent || next.silent) return std::nullopt;
     const auto amount = next.slice > left.slice
         ? static_cast<float>(std::clamp((slice - left.slice) / (next.slice - left.slice), 0.0, 1.0)) : 0.0f;
-    return std::pair { left.raw + (next.raw - left.raw) * amount,
-                       left.smooth + (next.smooth - left.smooth) * amount };
+    const auto interpolate = [&](auto value)
+    {
+        const auto linear = value(left) + (value(next) - value(left)) * amount;
+        if (rightIndex == leftIndex) return linear;
+        const auto& before = points[leftIndex > 0 ? leftIndex - 1 : leftIndex];
+        const auto& after = points[std::min(rightIndex + 1, points.size() - 1)];
+        if (before.silent || after.silent) return linear;
+        const auto y0 = value(before);
+        const auto y1 = value(left);
+        const auto y2 = value(next);
+        const auto y3 = value(after);
+        const auto x2 = amount * amount;
+        const auto x3 = x2 * amount;
+        const auto tangent1 = 0.5f * (y2 - y0);
+        const auto tangent2 = 0.5f * (y3 - y1);
+        const auto cubic = (2.0f * x3 - 3.0f * x2 + 1.0f) * y1
+            + (x3 - 2.0f * x2 + amount) * tangent1
+            + (-2.0f * x3 + 3.0f * x2) * y2
+            + (x3 - x2) * tangent2;
+        // Catmull-Rom tangents provide a smooth derivative, while this bound
+        // prevents overshoot from inventing a pitch excursion that is absent
+        // from every persisted Melodyne analysis point.
+        return std::clamp(cubic, std::min({ y0, y1, y2, y3 }),
+                          std::max({ y0, y1, y2, y3 }));
+    };
+    return std::pair { interpolate([](const auto& point) { return point.raw; }),
+                       interpolate([](const auto& point) { return point.smooth; }) };
 }
 }
 
