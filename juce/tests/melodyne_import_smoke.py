@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import pathlib
 import sys
+import tempfile
 
 from mcp_smoke import McpClient
 
@@ -46,11 +47,13 @@ def main() -> int:
 
         mapped_clips = 0
         source_time_points = 0
+        imported_maps: list[list[dict[str, float]]] = []
         for track in project["tracks"]:
             for clip in track["clips"]:
                 time_map = clip.get("source_time_map", [])
                 if not time_map:
                     continue
+                imported_maps.append(time_map)
                 mapped_clips += 1
                 source_time_points += len(time_map)
                 assert len(time_map) >= 2, time_map
@@ -60,6 +63,21 @@ def main() -> int:
                 assert all(a <= b for a, b in zip(sources, sources[1:])), time_map
                 assert targets[0] >= -1.0e-9 and targets[-1] <= clip["duration_seconds"] + 1.0e-9
                 assert sources[0] >= -1.0e-9 and sources[-1] <= clip["source_duration_seconds"] + 1.0e-9
+
+        with tempfile.TemporaryDirectory(prefix="hachi-mpd-roundtrip-") as directory:
+            saved = pathlib.Path(directory) / "roundtrip.hspx"
+            client.call("project_save", {"path": str(saved)})
+            client.call("project_new")
+            client.call("project_open", {"path": str(saved)})
+            reloaded = json.loads(client.call("project_snapshot"))
+            reloaded_maps = [
+                clip.get("source_time_map", [])
+                for track in reloaded["tracks"]
+                for clip in track["clips"]
+                if clip.get("source_time_map", [])
+            ]
+            assert reloaded_maps == imported_maps, "source time map changed after HSPX round trip"
+            project = reloaded
 
         flattened = [note for note in notes if note["flattened"]]
         assert flattened, "fixture contains no imported zero-modulation note"
@@ -96,6 +114,7 @@ def main() -> int:
                     "source_time_points": source_time_points,
                     "pitch_points": pitch_points,
                     "unvoiced_pitch_points": unvoiced_pitch_points,
+                    "source_time_map_roundtrip": True,
                     "flat_target_max_deviation_cents": maximum_flat_deviation,
                     "selected_routes": selected_routes,
                 },
