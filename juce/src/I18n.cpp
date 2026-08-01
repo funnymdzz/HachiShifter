@@ -116,6 +116,7 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.noteColour", { "音符色（Hex）", "音符色（Hex）", "ノート色（Hex）", "노트 색상 (Hex)", "Note Colour (Hex)" } }
     ,{ "settings.gamePath", { "GAME 模型目录", "GAME 模型目錄", "GAMEモデルフォルダー", "GAME 모델 폴더", "GAME Model Directory" } }
     ,{ "settings.gameModel", { "GAME 默认模型", "GAME 預設模型", "GAME既定モデル", "GAME 기본 모델", "Default GAME Model" } }
+    ,{ "settings.fcpePath", { "FCPE 模型或目录", "FCPE 模型或目錄", "FCPEモデルまたはフォルダー", "FCPE 모델 또는 폴더", "FCPE Model or Directory" } }
     ,{ "settings.hifiganPath", { "HiFi-GAN 模型目录", "HiFi-GAN 模型目錄", "HiFi-GANモデルフォルダー", "HiFi-GAN 모델 폴더", "HiFi-GAN Model Directory" } }
     ,{ "settings.inference", { "推理方式", "推理方式", "推論バックエンド", "추론 백엔드", "Inference Backend" } }
     ,{ "settings.device", { "推理设备", "推理裝置", "推論デバイス", "추론 장치", "Inference Device" } }

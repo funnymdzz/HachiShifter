@@ -1517,25 +1517,26 @@ void MainComponent::addAnalysedAudioFile(const juce::File& file, double duration
     const auto clipId = project.addAudioFile(file, durationSeconds, startSeconds);
     const auto nativeSidecar = SampleSettings::sidecarFor(file);
     const juce::File legacySidecar(file.getFullPathName() + ".hachi.csv");
-    // HJM/OTO data is authoritative.  The native detector is only the
-    // model-free path for ordinary audio and must not overwrite those notes.
+    // HJM/OTO data is authoritative.  Acoustic analysis must not overwrite
+    // explicitly authored sample regions.
     if (!nativeSidecar.existsAsFile() && !legacySidecar.existsAsFile())
-        scheduleNativeAnalysis(file, clipId);
+        scheduleAnalysis(file, clipId);
 }
 
-void MainComponent::scheduleNativeAnalysis(const juce::File& file,
-                                           const juce::String& clipId)
+void MainComponent::scheduleAnalysis(const juce::File& file,
+                                     const juce::String& clipId)
 {
     juce::Component::SafePointer<MainComponent> safe(this);
+    const auto analysisConfig = backend::AnalysisService::configFromProperties(preferences.get());
     ++pendingNativeAnalyses;
     nativeAnalysisProgress = 0.0;
     nativeAnalysisName = file.getFileName();
     statusLabel.setText(strings.text("status.analyzing") + "  " + file.getFileName(),
                         juce::dontSendNotification);
-    std::thread([safe, file, clipId]
+    std::thread([safe, file, clipId, analysisConfig]
     {
         juce::String error;
-        auto notes = backend::NativeAnalyzer::analyse(file, error,
+        auto result = backend::AnalysisService::analyse(file, analysisConfig, error,
             [safe, name = file.getFileName()](double value)
             {
                 juce::MessageManager::callAsync([safe, name, value]
@@ -1546,14 +1547,17 @@ void MainComponent::scheduleNativeAnalysis(const juce::File& file,
                 });
             });
         juce::MessageManager::callAsync(
-            [safe, clipId, notes = std::move(notes), error]() mutable
+            [safe, clipId, result = std::move(result), error]() mutable
             {
                 if (safe == nullptr) return;
-                const auto inserted = safe->project.setClipNotesIfEmpty(clipId, std::move(notes));
+                const auto backendName = backend::AnalysisService::backendText(result.status);
+                const auto inserted = safe->project.setClipNotesIfEmpty(
+                    clipId, std::move(result.notes));
                 safe->pendingNativeAnalyses = std::max(0, safe->pendingNativeAnalyses - 1);
                 safe->nativeAnalysisProgress = inserted ? 1.0 : 0.0;
                 if (inserted)
-                    safe->statusLabel.setText(safe->strings.text("status.analysisComplete"),
+                    safe->statusLabel.setText(safe->strings.text("status.analysisComplete")
+                                                + " · " + backendName,
                                               juce::dontSendNotification);
                 else if (error.isNotEmpty())
                     safe->statusLabel.setText(safe->strings.text("status.analysisSkipped"),
@@ -1600,8 +1604,9 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
         || preferences->getBoolValue("import.preserveEdits", true);
     const auto reanalyseSourcePitch = preferences != nullptr
         && preferences->getIntValue("import.melodynePitchSource", 1) == 2;
+    const auto analysisConfig = backend::AnalysisService::configFromProperties(preferences.get());
     juce::Thread::launch([safe, file, recursiveMediaSearch, preserveProjectEdits,
-                          reanalyseSourcePitch]
+                          reanalyseSourcePitch, analysisConfig]
     {
         juce::String error;
         backend::MelodyneImportOptions options;
@@ -1621,11 +1626,12 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                 });
             }, options);
         auto pitchReanalysed = false;
+        backend::AnalysisStatus analysisStatus;
         if (imported && reanalyseSourcePitch)
         {
             juce::String pitchError;
-            pitchReanalysed = backend::NativeAnalyzer::reanalyseProjectSourcePitch(
-                imported->project, pitchError, [safe](double value)
+            pitchReanalysed = backend::AnalysisService::reanalyseProjectSourcePitch(
+                imported->project, analysisConfig, pitchError, [safe](double value)
                 {
                     juce::MessageManager::callAsync([safe, value]
                     {
@@ -1636,10 +1642,11 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                                 + safe->strings.text("mpd.stage.reanalyse_pitch"),
                             juce::dontSendNotification);
                     });
-                });
+                }, &analysisStatus);
         }
         juce::MessageManager::callAsync([safe, imported = std::move(imported), error,
-                                         reanalyseSourcePitch, pitchReanalysed]() mutable
+                                         reanalyseSourcePitch, pitchReanalysed,
+                                         analysisStatus]() mutable
         {
             if (safe == nullptr) return;
             safe->importInProgress = false;
@@ -1650,9 +1657,14 @@ void MainComponent::loadMelodyneFile(const juce::File& file)
                 return;
             }
             if (reanalyseSourcePitch)
+            {
                 safe->statusLabel.setText(safe->strings.text(
                     pitchReanalysed ? "status.analysisComplete" : "status.analysisSkipped"),
                     juce::dontSendNotification);
+                safe->statusLabel.setText(safe->statusLabel.getText() + " · "
+                    + backend::AnalysisService::backendText(analysisStatus),
+                    juce::dontSendNotification);
+            }
             safe->presentMelodyneComposeSelection(std::move(*imported));
         });
     });

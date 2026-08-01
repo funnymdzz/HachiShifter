@@ -66,9 +66,9 @@ private:
     juce::ComboBox sampleRate, bufferSize;
     juce::TextButton advancedAudio;
 
-    juce::Label gamePathLabel, gameModelLabel, hifiganPathLabel, inferenceLabel,
+    juce::Label gamePathLabel, gameModelLabel, fcpePathLabel, hifiganPathLabel, inferenceLabel,
                 inferenceDeviceLabel, utauResamplerLabel;
-    juce::TextEditor gamePath, hifiganPath, utauResamplerPath;
+    juce::TextEditor gamePath, fcpePath, hifiganPath, utauResamplerPath;
     juce::ComboBox gameModel, inference, inferenceDevice;
 
     juce::Label shortcutLabel, wheelLabel;

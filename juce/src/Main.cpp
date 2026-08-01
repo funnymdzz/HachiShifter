@@ -1,6 +1,6 @@
 #include "MainComponent.h"
 #include "backend/McpServer.h"
-#include "backend/NativeAnalyzer.h"
+#include "backend/AnalysisService.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <algorithm>
 #include <cmath>
@@ -47,6 +47,26 @@ public:
                       << "width=" << settings.getWidth() << '\n'
                       << "height=" << settings.getHeight() << std::endl;
             if (tabs != 5 || pageChildren <= 0) setApplicationReturnValue(5);
+            juce::MessageManager::callAsync([this] { quit(); });
+            return;
+        }
+        if (!arguments.isEmpty() && arguments[0] == "--inspect-analysis")
+        {
+            auto config = backend::AnalysisService::configFromEnvironment();
+            if (arguments.size() >= 2) config.gameModelDirectory = juce::File(arguments[1]);
+            if (arguments.size() >= 3) config.fcpeModelPath = juce::File(arguments[2]);
+            if (arguments.size() >= 4)
+                config.performanceMode = arguments[3].equalsIgnoreCase("small");
+            const auto status = backend::AnalysisService::status(config);
+            std::cout << "requested=" << status.requestedBackend << '\n'
+                      << "active=" << backend::AnalysisService::backendText(status) << '\n'
+                      << "game_variant=" << (status.performanceMode ? "small" : "large") << '\n'
+                      << "game_ready=" << (status.gameModelReady ? 1 : 0) << '\n'
+                      << "game_path=" << status.gameModelDirectory.getFullPathName() << '\n'
+                      << "fcpe_ready=" << (status.fcpeModelReady ? 1 : 0) << '\n'
+                      << "fcpe_path=" << status.fcpeModelPath.getFullPathName() << '\n'
+                      << "onnx_runtime=" << (status.onnxRuntimeReady ? 1 : 0) << '\n'
+                      << "message=" << status.message << std::endl;
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }
@@ -210,15 +230,18 @@ public:
                 const auto clipId = model.addAudioFile(file,
                     static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
                 juce::String analysisError;
-                auto analysed = backend::NativeAnalyzer::analyse(file, analysisError);
-                (void) model.setClipNotesIfEmpty(clipId, std::move(analysed));
+                const auto analysisConfig = backend::AnalysisService::configFromEnvironment();
+                auto analysis = backend::AnalysisService::analyse(
+                    file, analysisConfig, analysisError);
+                const auto analysisBackend = backend::AnalysisService::backendText(analysis.status);
+                (void) model.setClipNotesIfEmpty(clipId, std::move(analysis.notes));
                 const auto data = model.snapshot();
                 std::size_t notes = 0;
                 for (const auto& track : data.tracks)
                     for (const auto& clip : track.clips) notes += clip.notes.size();
                 std::cout << "tracks=" << data.tracks.size() << '\n'
                           << "notes=" << notes << '\n'
-                          << "analysis=" << (analysisError.isEmpty() ? "native" : "skipped")
+                          << "analysis=" << (analysisError.isEmpty() ? analysisBackend : "skipped")
                           << std::endl;
             }
             juce::MessageManager::callAsync([this] { quit(); });

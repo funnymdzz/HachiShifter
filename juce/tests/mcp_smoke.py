@@ -82,7 +82,11 @@ def main() -> int:
         source = directory / "fixture.wav"
         make_fixture(source)
         client = McpClient(binary)
-        client.call("import_audio", {"path": str(source)})
+        analysis_status = client.call("analysis_status")
+        assert "requested=GAME+FCPE" in analysis_status
+        assert "game_variant=large" in analysis_status
+        analysed = client.call("import_audio", {"path": str(source)})
+        assert "backend=" in analysed and "notes=" in analysed
         project = json.loads(client.call("project_snapshot"))
         track = project["tracks"][0]
         clip = track["clips"][0]
@@ -148,7 +152,11 @@ def main() -> int:
         assert len(set(stretch_hashes.values())) == len(stretch_hashes), stretch_hashes
 
         project = json.loads(client.call("project_snapshot"))
-        note = project["tracks"][0]["clips"][0]["notes"][0]
+        note = next(
+            note
+            for note in project["tracks"][0]["clips"][0]["notes"]
+            if note["id"] == note_id
+        )
         targets = [point["rendered_target_cents"] for point in note["contour"]]
         assert note["flattened"] is True
         assert max(targets) - min(targets) < 1.0e-5
@@ -216,6 +224,7 @@ def main() -> int:
                     "export_size": exported.stat().st_size,
                     "transport": True,
                     "sample_settings_and_oto": True,
+                    "analysis_status": analysis_status,
                 },
                 separators=(",", ":"),
             )

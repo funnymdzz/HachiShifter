@@ -24,8 +24,9 @@ remains available on `main` for regression reference.
 - independently configurable default pitch and stretch routes for Melodyne imports;
 - optional neutral Melodyne import that retains arrangement/source F0 while
   clearing saved tuning, Attack, level and timbre corrections;
-- optional source-F0 reanalysis for Melodyne imports, with the native C++
-  analyzer acting as the model-free fallback while project targets stay intact;
+- one GAME+FCPE analysis service shared by Settings, audio import, Melodyne
+  source-F0 reanalysis, CLI and MCP, with explicit large/small model discovery
+  and a 16 kHz/5 ms native C++ fallback while project targets stay intact;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);
@@ -45,6 +46,7 @@ services rather than restoring the removed web/Rust layers.
 
 ## Cloud build
 
-No local build is required. Pushes to `next` trigger
-`.github/workflows/compile-next-juce.yml` and create model-free Linux and Windows
-archives.
+No local build is required. GitHub is mirrored to the self-hosted GitLab and
+pushes to `next` create model-free Linux and Windows archives with GitLab CI.
+For Windows-only fixes, set `WINDOWS_ONLY=1` or include `[windows-only]` in the
+commit message so the Linux job is skipped.

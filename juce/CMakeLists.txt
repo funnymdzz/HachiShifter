@@ -69,6 +69,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/WorldRenderer.h
     src/backend/NativeAnalyzer.cpp
     src/backend/NativeAnalyzer.h
+    src/backend/AnalysisService.cpp
+    src/backend/AnalysisService.h
 )
 
 # The xwin/MSVC-ABI build links JUCE against the common-controls v6 import

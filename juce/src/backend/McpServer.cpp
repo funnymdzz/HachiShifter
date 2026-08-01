@@ -1,5 +1,5 @@
 #include "McpServer.h"
-#include "NativeAnalyzer.h"
+#include "AnalysisService.h"
 #include <cmath>
 #include <iostream>
 
@@ -51,6 +51,40 @@ double number(const juce::var& args, const char* key, double fallback = 0.0)
 juce::String string(const juce::var& args, const char* key)
 {
     return args.getProperty(key, {}).toString();
+}
+
+AnalysisConfig analysisConfig(const juce::var& args)
+{
+    auto config = AnalysisService::configFromEnvironment();
+    if (const auto path = string(args, "game_model_dir"); path.isNotEmpty())
+        config.gameModelDirectory = juce::File(path);
+    if (const auto path = string(args, "fcpe_model"); path.isNotEmpty())
+        config.fcpeModelPath = juce::File(path);
+    const auto variant = string(args, "game_model").toLowerCase();
+    if (variant.isNotEmpty()) config.performanceMode = variant == "small";
+    const auto inference = string(args, "inference").toLowerCase();
+    if (inference.isNotEmpty())
+        config.inference = inference == "cpu" ? InferenceBackend::cpu
+            : inference == "directml" ? InferenceBackend::directML
+            : inference == "cuda" ? InferenceBackend::cuda
+            : inference == "coreml" ? InferenceBackend::coreML
+            : InferenceBackend::automatic;
+    if (args.hasProperty("device_index"))
+        config.deviceIndex = static_cast<int>(number(args, "device_index", -1.0));
+    return config;
+}
+
+juce::String analysisSummary(const AnalysisStatus& status)
+{
+    return "requested=" + status.requestedBackend
+        + "; active=" + AnalysisService::backendText(status)
+        + "; game_variant=" + (status.performanceMode ? "small" : "large")
+        + "; game_ready=" + juce::String(status.gameModelReady ? 1 : 0)
+        + "; game_path=" + status.gameModelDirectory.getFullPathName()
+        + "; fcpe_ready=" + juce::String(status.fcpeModelReady ? 1 : 0)
+        + "; fcpe_path=" + status.fcpeModelPath.getFullPathName()
+        + "; onnx_runtime=" + juce::String(status.onnxRuntimeReady ? 1 : 0)
+        + "; message=" + status.message;
 }
 
 juce::String pitchAlgorithmText(PitchAlgorithm value)
@@ -209,6 +243,8 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("project_save", "Save current project as HSPX / 保存工程"),
             makeTool("project_snapshot", "Read every current track, clip, note, pitch and marker / 读取全部工程内容"),
             makeTool("import_audio", "Import an audio file at start_seconds / 导入音频"),
+            makeTool("analyse_audio", "Run configured GAME+FCPE analysis with native fallback and return actual backend / 执行 GAME+FCPE 分析并报告实际后端"),
+            makeTool("analysis_status", "Inspect GAME large/small, FCPE and inference availability / 查看 GAME、FCPE 与推理状态"),
             makeTool("import_midi", "Import MIDI notes and tempo / 导入 MIDI"),
             makeTool("import_melodyne", "Import Melodyne MPD edits; recursive_media, preserve_edits and source_pitch control import / 导入 Melodyne 工程并控制素材搜索、工程编辑与原始 F0"),
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
@@ -321,8 +357,10 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         else if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
         {
             project.clear();
-            (void) project.addAudioFile(file,
+            const auto clipId = project.addAudioFile(file,
                 static_cast<double>(reader->lengthInSamples) / reader->sampleRate);
+            auto analysis = AnalysisService::analyse(file, analysisConfig(args), error);
+            (void) project.setClipNotesIfEmpty(clipId, std::move(analysis.notes));
             return toolResult(summary(project.snapshot()));
         }
         else error = "Unsupported or unreadable file";
@@ -332,12 +370,27 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         const juce::File file(string(args, "path"));
         if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
         {
-            (void) project.addAudioFile(file,
+            const auto clipId = project.addAudioFile(file,
                 static_cast<double>(reader->lengthInSamples) / reader->sampleRate,
                 number(args, "start_seconds"));
-            return toolResult("ok");
+            auto analysis = AnalysisService::analyse(file, analysisConfig(args), error);
+            const auto backend = AnalysisService::backendText(analysis.status);
+            const auto noteCount = analysis.notes.size();
+            (void) project.setClipNotesIfEmpty(clipId, std::move(analysis.notes));
+            return toolResult("ok; backend=" + backend + "; notes="
+                + juce::String(static_cast<juce::int64>(noteCount)));
         }
         error = "Audio read failed";
+    }
+    else if (name == "analysis_status")
+        return toolResult(analysisSummary(AnalysisService::status(analysisConfig(args))));
+    else if (name == "analyse_audio")
+    {
+        const juce::File file(string(args, "path"));
+        auto analysis = AnalysisService::analyse(file, analysisConfig(args), error);
+        if (!analysis.notes.empty())
+            return toolResult(analysisSummary(analysis.status) + "; notes="
+                + juce::String(static_cast<juce::int64>(analysis.notes.size())));
     }
     else if (name == "import_midi")
     {
@@ -355,10 +408,12 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         {
             const auto sourcePitch = string(args, "source_pitch").toLowerCase();
             if (sourcePitch == "native" || sourcePitch == "reanalyze"
-                || sourcePitch == "reanalyse")
+                || sourcePitch == "reanalyse" || sourcePitch == "game+fcpe"
+                || sourcePitch == "game_fcpe")
             {
                 juce::String pitchError;
-                (void) NativeAnalyzer::reanalyseProjectSourcePitch(imported->project, pitchError);
+                (void) AnalysisService::reanalyseProjectSourcePitch(
+                    imported->project, analysisConfig(args), pitchError);
             }
             project.replace(std::move(imported->project));
             return toolResult(summary(project.snapshot()));

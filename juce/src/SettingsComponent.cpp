@@ -82,6 +82,7 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     inferenceDevice.addItem("GPU 1", 3);
     algorithmPage.addRow(gamePathLabel, gamePath);
     algorithmPage.addRow(gameModelLabel, gameModel);
+    algorithmPage.addRow(fcpePathLabel, fcpePath);
     algorithmPage.addRow(hifiganPathLabel, hifiganPath);
     algorithmPage.addRow(inferenceLabel, inference);
     algorithmPage.addRow(inferenceDeviceLabel, inferenceDevice);
@@ -167,6 +168,7 @@ void SettingsComponent::loadValues()
     gamePath.setText(properties.getValue("algorithm.gamePath"), false);
     gameModel.setSelectedId(properties.getValue("algorithm.gameModel", "large") == "small" ? 2 : 1,
                             juce::dontSendNotification);
+    fcpePath.setText(properties.getValue("algorithm.fcpePath"), false);
     hifiganPath.setText(properties.getValue("algorithm.hifiganPath"), false);
     inference.setSelectedId(properties.getIntValue("algorithm.inference", 1), juce::dontSendNotification);
     inferenceDevice.setSelectedId(properties.getIntValue("algorithm.device", 1), juce::dontSendNotification);
@@ -195,6 +197,7 @@ void SettingsComponent::saveValues()
     properties.setValue("ui.noteColour", noteColour.getText().trim());
     properties.setValue("algorithm.gamePath", gamePath.getText());
     properties.setValue("algorithm.gameModel", gameModel.getSelectedId() == 2 ? "small" : "large");
+    properties.setValue("algorithm.fcpePath", fcpePath.getText());
     properties.setValue("algorithm.hifiganPath", hifiganPath.getText());
     properties.setValue("algorithm.inference", inference.getSelectedId());
     properties.setValue("algorithm.device", inferenceDevice.getSelectedId());
@@ -237,6 +240,7 @@ void SettingsComponent::setTexts()
     advancedAudio.setButtonText(strings.text("settings.advancedAudio"));
     gamePathLabel.setText(strings.text("settings.gamePath"), juce::dontSendNotification);
     gameModelLabel.setText(strings.text("settings.gameModel"), juce::dontSendNotification);
+    fcpePathLabel.setText(strings.text("settings.fcpePath"), juce::dontSendNotification);
     hifiganPathLabel.setText(strings.text("settings.hifiganPath"), juce::dontSendNotification);
     inferenceLabel.setText(strings.text("settings.inference"), juce::dontSendNotification);
     inferenceDeviceLabel.setText(strings.text("settings.device"), juce::dontSendNotification);

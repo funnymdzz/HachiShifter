@@ -13,10 +13,14 @@ namespace hachi::backend
 {
 namespace
 {
-constexpr double analysisRate = 8'000.0;
-constexpr int hopSamples = 80;       // 10 ms
-constexpr int windowSamples = 320;   // 40 ms
-constexpr int fftOrder = 10;
+// Keep the model-free contour on the same 5 ms time base used by imported
+// Melodyne data and FCPE.  The previous 8 kHz/10 ms detector visibly lost
+// short turns and note tails before the renderer ever saw them.  16 kHz also
+// preserves enough upper harmonics to disambiguate high vocal fundamentals.
+constexpr double analysisRate = 16'000.0;
+constexpr int hopSamples = 80;       // 5 ms
+constexpr int windowSamples = 640;   // 40 ms
+constexpr int fftOrder = 11;
 constexpr int fftSize = 1 << fftOrder;
 
 struct Frame
@@ -229,23 +233,20 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
             progress(static_cast<double>(frame) / std::max(1, frameCount));
     }
 
-    // Build model-free fallback note regions.  Short unvoiced gaps stay with
-    // the same syllable; a sustained silence or stable pitch jump starts a new
-    // object.  GAME remains the preferred semantic segmenter when its model is
-    // present, while this path keeps a model-free installation editable.
+    // Build model-free fallback syllable regions.  A GAME note represents one
+    // syllable, not every stable pitch plateau, so pitch jumps remain inside a
+    // region.  Only a sustained unvoiced gap starts a new object.  GAME remains
+    // the preferred semantic segmenter when its model pack is present.
     std::vector<std::pair<int, int>> regions;
     auto begin = -1;
     auto lastVoiced = -1;
-    auto referenceMidi = 0.0f;
     for (int frame = 0; frame < frameCount; ++frame)
     {
         const auto& feature = frames[static_cast<std::size_t>(frame)];
         if (feature.voiced)
         {
             const auto gap = lastVoiced >= 0 ? frame - lastVoiced : 0;
-            const auto jump = referenceMidi > 0.0f
-                ? std::abs(feature.pitchMidi - referenceMidi) : 0.0f;
-            if (begin >= 0 && (gap > 8 || (jump > 2.5f && gap <= 2)))
+            if (begin >= 0 && gap > 16)
             {
                 regions.push_back({ begin, std::max(begin + 1, lastVoiced + 1) });
                 begin = -1;
@@ -253,17 +254,14 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
             if (begin < 0)
             {
                 begin = frame;
-                referenceMidi = feature.pitchMidi;
             }
-            else referenceMidi = referenceMidi * 0.90f + feature.pitchMidi * 0.10f;
             lastVoiced = frame;
         }
-        else if (begin >= 0 && lastVoiced >= 0 && frame - lastVoiced > 8)
+        else if (begin >= 0 && lastVoiced >= 0 && frame - lastVoiced > 16)
         {
             regions.push_back({ begin, lastVoiced + 1 });
             begin = -1;
             lastVoiced = -1;
-            referenceMidi = 0.0f;
         }
     }
     if (begin >= 0 && lastVoiced >= begin) regions.push_back({ begin, lastVoiced + 1 });
@@ -274,11 +272,11 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
         auto [voicedBegin, voicedEnd] = regions[regionIndex];
         auto startFrame = voicedBegin;
         const auto lower = regionIndex > 0 ? regions[regionIndex - 1].second : 0;
-        while (startFrame > lower && voicedBegin - startFrame < 20
+        while (startFrame > lower && voicedBegin - startFrame < 40
                && frames[static_cast<std::size_t>(startFrame - 1)].rms >= silence)
             --startFrame;
         auto endFrame = voicedEnd;
-        while (endFrame < frameCount && endFrame - voicedEnd < 8
+        while (endFrame < frameCount && endFrame - voicedEnd < 16
                && frames[static_cast<std::size_t>(endFrame)].rms >= silence)
             ++endFrame;
         if (endFrame - startFrame < 2) continue;
