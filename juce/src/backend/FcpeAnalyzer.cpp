@@ -251,69 +251,94 @@ std::vector<FcpeFrame> run(const juce::File& modelFile,
     }
     const auto inputName = shared.session->GetInputNameAllocated(0, allocator);
     const auto outputName = shared.session->GetOutputNameAllocated(0, allocator);
-    const std::array<int64_t, 3> shape { 1, static_cast<int64_t>(frames), melBands };
     const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
-    auto input = Ort::Value::CreateTensor<float>(memory, mel.data(), mel.size(),
-                                                  shape.data(), shape.size());
     const char* inputNames[] { inputName.get() };
     const char* outputNames[] { outputName.get() };
-    auto output = shared.session->Run(Ort::RunOptions{ nullptr }, inputNames, &input, 1,
-                                       outputNames, 1);
-    if (output.empty())
-    {
-        error = "FCPE returned no pitch output";
-        return {};
-    }
-    const auto info = output[0].GetTensorTypeAndShapeInfo();
-    const auto dimensions = info.GetShape();
-    if (dimensions.size() != 3 || dimensions[2] <= 0)
-    {
-        error = "FCPE output is not [batch,time,bins]";
-        return {};
-    }
-    const auto outputFrames = static_cast<std::size_t>(dimensions[1]);
-    const auto bins = static_cast<std::size_t>(dimensions[2]);
-    const auto* values = output[0].GetTensorData<float>();
     const auto centMinimum = 1'200.0 * std::log2(minimumHz / 10.0);
     const auto centMaximum = 1'200.0 * std::log2(maximumHz / 10.0);
     std::vector<FcpeFrame> result;
-    result.reserve(outputFrames);
-    for (std::size_t frame = 0; frame < outputFrames; ++frame)
+    result.reserve(frames);
+
+    // Bound inference memory on long source files.  Context is evaluated on
+    // both sides and discarded, so frames at a chunk boundary see the same
+    // temporal neighbourhood as frames in a short, single-pass analysis.
+    constexpr std::size_t coreFrames = 30'000; // five minutes
+    constexpr std::size_t contextFrames = 128; // 1.28 seconds
+    for (std::size_t coreStart = 0; coreStart < frames; coreStart += coreFrames)
     {
-        const auto* row = values + frame * bins;
-        const auto best = static_cast<std::size_t>(std::distance(
-            row, std::max_element(row, row + bins)));
-        const auto confidence = row[best];
-        FcpeFrame point;
-        // The reflected STFT window is centred half a hop after the nominal
-        // frame origin: (window/2 - leftPad) / 16 kHz = 5 ms.
-        point.timeSeconds = (static_cast<double>(frame * hop)
-            + windowSize * 0.5 - (windowSize - hop) * 0.5) / sampleRate;
-        point.confidence = confidence;
-        point.voiced = std::isfinite(confidence) && confidence > 0.05f;
-        if (point.voiced)
+        const auto coreEnd = std::min(frames, coreStart + coreFrames);
+        const auto inputStart = coreStart > contextFrames ? coreStart - contextFrames : 0;
+        const auto inputEnd = std::min(frames, coreEnd + contextFrames);
+        const auto inputFrames = inputEnd - inputStart;
+        std::vector<float> chunk(mel.begin()
+                + static_cast<std::ptrdiff_t>(inputStart * melBands),
+            mel.begin() + static_cast<std::ptrdiff_t>(inputEnd * melBands));
+        const std::array<int64_t, 3> shape {
+            1, static_cast<int64_t>(inputFrames), melBands
+        };
+        auto input = Ort::Value::CreateTensor<float>(memory, chunk.data(), chunk.size(),
+                                                      shape.data(), shape.size());
+        auto output = shared.session->Run(Ort::RunOptions{ nullptr }, inputNames, &input, 1,
+                                           outputNames, 1);
+        if (output.empty())
         {
-            const auto first = best > 4 ? best - 4 : 0;
-            const auto last = std::min(bins - 1, best + 4);
-            auto weighted = 0.0;
-            auto weight = 0.0;
-            for (auto bin = first; bin <= last; ++bin)
-            {
-                const auto cent = centMinimum + (centMaximum - centMinimum)
-                    * static_cast<double>(bin) / std::max<std::size_t>(1, bins - 1);
-                weighted += cent * row[bin];
-                weight += row[bin];
-            }
-            if (weight > 1.0e-9)
-            {
-                const auto hz = 10.0 * std::pow(2.0, weighted / weight / 1'200.0);
-                point.midi = static_cast<float>(69.0 + 12.0 * std::log2(hz / 440.0));
-            }
-            else point.voiced = false;
+            error = "FCPE returned no pitch output";
+            return {};
         }
-        result.push_back(point);
+        const auto info = output[0].GetTensorTypeAndShapeInfo();
+        const auto dimensions = info.GetShape();
+        if (dimensions.size() != 3 || dimensions[1] <= 0 || dimensions[2] <= 0)
+        {
+            error = "FCPE output is not [batch,time,bins]";
+            return {};
+        }
+        const auto outputFrames = static_cast<std::size_t>(dimensions[1]);
+        const auto bins = static_cast<std::size_t>(dimensions[2]);
+        const auto* values = output[0].GetTensorData<float>();
+        const auto keepOffset = coreStart - inputStart;
+        const auto keepCount = std::min(coreEnd - coreStart,
+            outputFrames > keepOffset ? outputFrames - keepOffset : 0);
+        for (std::size_t kept = 0; kept < keepCount; ++kept)
+        {
+            const auto globalFrame = coreStart + kept;
+            const auto* row = values + (keepOffset + kept) * bins;
+            const auto best = static_cast<std::size_t>(std::distance(
+                row, std::max_element(row, row + bins)));
+            const auto confidence = row[best];
+            FcpeFrame point;
+            // The reflected STFT window is centred half a hop after the
+            // nominal frame origin: 80 / 16 kHz = 5 ms.
+            point.timeSeconds = (static_cast<double>(globalFrame * hop)
+                + windowSize * 0.5 - (windowSize - hop) * 0.5) / sampleRate;
+            point.confidence = confidence;
+            point.voiced = std::isfinite(confidence) && confidence > 0.05f;
+            if (point.voiced)
+            {
+                const auto first = best > 4 ? best - 4 : 0;
+                const auto last = std::min(bins - 1, best + 4);
+                auto weighted = 0.0;
+                auto weight = 0.0;
+                for (auto bin = first; bin <= last; ++bin)
+                {
+                    const auto cent = centMinimum + (centMaximum - centMinimum)
+                        * static_cast<double>(bin) / std::max<std::size_t>(1, bins - 1);
+                    weighted += cent * row[bin];
+                    weight += row[bin];
+                }
+                if (weight > 1.0e-9)
+                {
+                    const auto hz = 10.0 * std::pow(2.0,
+                        weighted / weight / 1'200.0);
+                    point.midi = static_cast<float>(69.0
+                        + 12.0 * std::log2(hz / 440.0));
+                }
+                else point.voiced = false;
+            }
+            result.push_back(point);
+        }
+        if (progress) progress(0.65 + 0.35 * static_cast<double>(coreEnd)
+            / static_cast<double>(std::max<std::size_t>(1, frames)));
     }
-    if (progress) progress(1.0);
     return result;
 }
 }

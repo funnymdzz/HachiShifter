@@ -299,6 +299,8 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
             / analysisRate;
         note.sourceMidiCenter = median(pitches);
         note.midiNote = note.sourceMidiCenter;
+        auto breathEvidence = 0.0f;
+        auto breathFrames = 0;
         for (int frame = startFrame; frame < endFrame; ++frame)
         {
             const auto& current = frames[static_cast<std::size_t>(frame)];
@@ -324,8 +326,24 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
             }
             if (!current.voiced && current.highRatio > 0.12f && current.rms > silence)
                 note.sibilantMarkers.push_back(point.timeSeconds);
+            else if (!current.voiced && current.rms > silence
+                     && current.highRatio > 0.015f)
+            {
+                // Broadband unvoiced energy below the sibilant band is the
+                // characteristic /h/ or breath onset.  Preserve it as a source
+                // parameter instead of classifying it as silence.
+                const auto spectral = juce::jlimit(0.0f, 1.0f,
+                    (current.highRatio - 0.015f) / 0.085f);
+                const auto level = juce::jlimit(0.0f, 1.0f,
+                    current.rms / std::max(1.0e-6f, silence * 4.0f));
+                breathEvidence += spectral * level;
+                ++breathFrames;
+            }
             note.contour.push_back(point);
         }
+        if (breathFrames > 0)
+            note.breath = juce::jlimit(0.0f, 1.0f,
+                breathEvidence / static_cast<float>(breathFrames));
         notes.push_back(std::move(note));
     }
     if (notes.empty() && error.isEmpty())

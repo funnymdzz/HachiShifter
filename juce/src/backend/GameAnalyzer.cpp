@@ -545,12 +545,18 @@ std::vector<NoteData> combineRegions(const std::vector<GameRegion>& regions,
         }
         note.consonantSeconds = juce::jlimit(0.0, note.durationSeconds, firstVoiced);
         for (const auto& source : acoustic)
+        {
+            const auto overlapStart = std::max(note.startSeconds, source.startSeconds);
+            const auto overlapEnd = std::min(region.endSeconds,
+                source.startSeconds + source.durationSeconds);
+            if (overlapEnd > overlapStart) note.breath = std::max(note.breath, source.breath);
             for (const auto marker : source.sibilantMarkers)
             {
                 const auto absoluteMarker = source.startSeconds + marker;
                 if (absoluteMarker >= note.startSeconds && absoluteMarker <= region.endSeconds)
                     note.sibilantMarkers.push_back(absoluteMarker - note.startSeconds);
             }
+        }
         notes.push_back(std::move(note));
     }
     return notes;
@@ -625,14 +631,35 @@ GameAnalyzer::Result GameAnalyzer::analyse(const juce::File& audioFile,
         const auto samplesPerFrame = std::max<std::size_t>(1,
             static_cast<std::size_t>(std::llround(shared.sessions->config.sampleRate
                                                    * shared.sessions->config.timestep)));
-        const auto chunkSamples = maxEncoderFrames * samplesPerFrame;
+        const auto maximumSamples = maxEncoderFrames * samplesPerFrame;
+        const auto contextSamples = std::min(maximumSamples / 4,
+            static_cast<std::size_t>(std::llround(
+                shared.sessions->config.sampleRate * 2.0)));
+        const auto coreSamples = std::max<std::size_t>(samplesPerFrame,
+            maximumSamples > contextSamples * 2
+                ? maximumSamples - contextSamples * 2 : maximumSamples);
         std::vector<GameRegion> regions;
-        for (std::size_t start = 0; start < waveform.size(); start += chunkSamples)
+        for (std::size_t coreStart = 0; coreStart < waveform.size(); coreStart += coreSamples)
         {
-            const auto end = std::min(waveform.size(), start + chunkSamples);
-            auto chunk = processChunk(*shared.sessions, waveform, start, end);
-            regions.insert(regions.end(), chunk.begin(), chunk.end());
-            if (progress) progress(0.55 + 0.40 * static_cast<double>(end)
+            const auto coreEnd = std::min(waveform.size(), coreStart + coreSamples);
+            const auto inputStart = coreStart > contextSamples
+                ? coreStart - contextSamples : 0;
+            const auto inputEnd = std::min(waveform.size(), coreEnd + contextSamples);
+            auto chunk = processChunk(*shared.sessions, waveform, inputStart, inputEnd);
+            const auto coreStartSeconds = static_cast<double>(coreStart)
+                / shared.sessions->config.sampleRate;
+            const auto coreEndSeconds = static_cast<double>(coreEnd)
+                / shared.sessions->config.sampleRate;
+            // Select by centre so a syllable crossing the core boundary is
+            // emitted once, with both sides inferred from the 2 s context.
+            for (auto& region : chunk)
+            {
+                const auto centre = 0.5 * (region.startSeconds + region.endSeconds);
+                if (centre >= coreStartSeconds
+                    && (centre < coreEndSeconds || coreEnd == waveform.size()))
+                    regions.push_back(std::move(region));
+            }
+            if (progress) progress(0.55 + 0.40 * static_cast<double>(coreEnd)
                 / static_cast<double>(waveform.size()));
         }
         std::sort(regions.begin(), regions.end(), [](const auto& left, const auto& right)
