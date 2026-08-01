@@ -378,7 +378,9 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             const auto noteCount = analysis.notes.size();
             (void) project.setClipNotesIfEmpty(clipId, std::move(analysis.notes));
             return toolResult("ok; backend=" + backend + "; notes="
-                + juce::String(static_cast<juce::int64>(noteCount)));
+                + juce::String(static_cast<juce::int64>(noteCount))
+                + (analysis.warning.isNotEmpty() ? "; warning=" + analysis.warning
+                                                  : juce::String()));
         }
         error = "Audio read failed";
     }
@@ -390,7 +392,9 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         auto analysis = AnalysisService::analyse(file, analysisConfig(args), error);
         if (!analysis.notes.empty())
             return toolResult(analysisSummary(analysis.status) + "; notes="
-                + juce::String(static_cast<juce::int64>(analysis.notes.size())));
+                + juce::String(static_cast<juce::int64>(analysis.notes.size()))
+                + (analysis.warning.isNotEmpty() ? "; warning=" + analysis.warning
+                                                  : juce::String()));
     }
     else if (name == "import_midi")
     {

@@ -394,7 +394,7 @@ std::vector<GameRegion> processChunk(Sessions& sessions,
         { { "maskN", "mask_n", "note_mask" }, [&] { return tensor(maskN.get(), noteCount,
             { 1, static_cast<int64_t>(noteCount) }); } },
         { { "threshold", "estimation_threshold" }, [&]
-            { return tensor(&estimationThreshold, 1, { 1 }); } }
+            { return tensor(&estimationThreshold, 1, {}); } }
     }, estimatorNames, "GAME estimator");
     auto* scoresValue = findOutput(estimatorOutput, estimatorNames,
                                    { "scores", "score", "midi", "output" }, 0);

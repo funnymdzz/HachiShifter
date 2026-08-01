@@ -242,6 +242,7 @@ public:
                 std::cout << "tracks=" << data.tracks.size() << '\n'
                           << "notes=" << notes << '\n'
                           << "analysis=" << (analysisError.isEmpty() ? analysisBackend : "skipped")
+                          << '\n' << "analysis_warning=" << analysis.warning
                           << std::endl;
             }
             juce::MessageManager::callAsync([this] { quit(); });
