@@ -173,11 +173,16 @@ void TimelineComponent::paint(juce::Graphics& g)
             {
                 g.setColour(colour.brighter(0.65f).withAlpha(
                     track.muted || clip.muted ? 0.25f : 0.78f));
-                found->second->drawChannels(g, bounds.withTrimmedTop(17.0f).reduced(1.0f).toNearestInt(),
-                                            clip.sourceOffsetSeconds,
-                                            clip.sourceOffsetSeconds
-                                                + (clip.sourceDurationSeconds > 1.0e-9
-                                                    ? clip.sourceDurationSeconds : clip.durationSeconds), 1.0f);
+                // Keep the editor visually consistent for mono and stereo
+                // sources.  Playback still uses every source channel; only the
+                // compact waveform lane displays channel 1.
+                found->second->drawChannel(
+                    g, bounds.withTrimmedTop(17.0f).reduced(1.0f).toNearestInt(),
+                    clip.sourceOffsetSeconds,
+                    clip.sourceOffsetSeconds
+                        + (clip.sourceDurationSeconds > 1.0e-9
+                            ? clip.sourceDurationSeconds : clip.durationSeconds),
+                    0, 1.0f);
             }
             const auto waveformTop = bounds.getY() + 19.0f;
             const auto fadeInX = bounds.getX() + timeToX(displayFadeIn);

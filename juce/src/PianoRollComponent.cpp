@@ -215,10 +215,14 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
                 std::max(4.0f, static_cast<float>(sourceEditMode ? sourceLength : clip.durationSeconds)
                                       * pixelsPerSecond), waveformHeight);
             g.setColour(Palette::textMuted.withAlpha(track.muted ? 0.12f : 0.34f));
-            found->second->drawChannels(g, bounds.toNearestInt(),
-                                        sourceEditMode ? 0.0 : clip.sourceOffsetSeconds,
-                                        sourceEditMode ? sourceLength : clip.sourceOffsetSeconds + sourceLength,
-                                        1.0f);
+            // Stereo material uses one full-height editing waveform instead of
+            // JUCE's stacked per-channel lanes.  Audio playback/export remains
+            // stereo; this selects channel 1 for display only.
+            found->second->drawChannel(
+                g, bounds.toNearestInt(),
+                sourceEditMode ? 0.0 : clip.sourceOffsetSeconds,
+                sourceEditMode ? sourceLength : clip.sourceOffsetSeconds + sourceLength,
+                0, 1.0f);
             if (sourceEditMode) sourceWaveformDrawn = true;
         }
     }
