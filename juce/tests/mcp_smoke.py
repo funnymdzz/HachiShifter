@@ -131,6 +131,8 @@ def main() -> int:
             )
             assert status["prepared"] and not status["rendering"]
             assert pitch in status["backend"].lower(), status
+            if pitch == "nsf-hifigan":
+                assert "nsf-hifigan-fallback" in status["backend"].lower(), status
             route_names.append(status["backend"])
             pitch_hashes[pitch] = export_hash(f"pitch-{pitch}")
         # Route labels alone do not prove that the selected renderer reached

@@ -108,6 +108,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/GameAnalyzer.h
     src/backend/FcpeAnalyzer.cpp
     src/backend/FcpeAnalyzer.h
+    src/backend/NsfHifiganRenderer.cpp
+    src/backend/NsfHifiganRenderer.h
 )
 
 # The xwin/MSVC-ABI build links JUCE against the common-controls v6 import

@@ -35,6 +35,7 @@ struct Mld5FileRenderRequest
     std::vector<float> tension;
     std::vector<float> breath;
     std::vector<TimeMapPoint> timeMap;
+    juce::File hifiganModelDirectory;
     PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;
     int stretchAlgorithm = 0;
 };

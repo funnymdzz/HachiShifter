@@ -418,6 +418,12 @@ void MainComponent::applyPreferences()
         parseColour(preferences->getValue("ui.accent", "7F69CA"), juce::Colour(0xff7f69ca)),
         parseColour(preferences->getValue("ui.accentLight", "CBCBFA"), juce::Colour(0xffcbcbfa)),
         parseColour(preferences->getValue("ui.noteColour", "F4C000"), juce::Colour(0xfff4c000)));
+    audio.setHifiganModelDirectory(juce::File(
+        preferences->getValue("algorithm.hifiganPath")));
+    // Applying a new model path must invalidate and immediately reschedule
+    // already imported compose clips; waiting for a later edit made the
+    // settings change appear ineffective.
+    audio.syncProject(project.snapshot());
     lookAndFeel.refreshColours();
 }
 

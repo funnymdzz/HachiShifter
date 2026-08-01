@@ -21,6 +21,7 @@ public:
     void getNextAudioBlock(const juce::AudioSourceChannelInfo& bufferToFill) override;
 
     void syncProject(const ProjectData& project);
+    void setHifiganModelDirectory(const juce::File& directory);
     [[nodiscard]] std::optional<double> probeDuration(const juce::File& file);
     bool setAuditionFile(const juce::File& file);
     void clearAuditionFile();
@@ -71,6 +72,7 @@ private:
     std::vector<std::unique_ptr<LoadedClip>> loadedClips;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<float>>> trackMeters;
     std::unordered_map<std::string, std::shared_ptr<RenderedClip>> renderCache;
+    juce::File hifiganModelDirectory;
     std::shared_ptr<juce::AudioFormatReader> auditionReader;
     juce::AudioBuffer<float> auditionScratch;
     std::atomic<bool> auditionMode { false };

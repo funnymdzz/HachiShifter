@@ -43,7 +43,8 @@ std::pair<float, float> panGains(float pan, bool mono)
              pan < 0.0f ? std::sqrt(1.0f + pan) : 1.0f };
 }
 
-backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track)
+backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track,
+                                                  const juce::File& hifiganModelDirectory)
 {
     backend::Mld5FileRenderRequest request;
     request.sourceFile = clip.sourceFile;
@@ -51,6 +52,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     request.sourceDurationSeconds = clip.sourceDurationSeconds > 1.0e-9
         ? clip.sourceDurationSeconds : clip.durationSeconds;
     request.targetDurationSeconds = clip.durationSeconds;
+    request.hifiganModelDirectory = hifiganModelDirectory;
     switch (track.pitchAlgorithm)
     {
         case PitchAlgorithm::nsfHifigan:
@@ -194,7 +196,8 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     return request;
 }
 
-std::string renderKey(const ClipData& clip, const TrackData& track)
+std::string renderKey(const ClipData& clip, const TrackData& track,
+                      const juce::File& hifiganModelDirectory)
 {
     juce::MemoryOutputStream stream;
     const auto path = clip.sourceFile.getFullPathName().toUTF8();
@@ -211,6 +214,16 @@ std::string renderKey(const ClipData& clip, const TrackData& track)
     }
     stream.writeInt(static_cast<int>(track.pitchAlgorithm));
     stream.writeInt(static_cast<int>(track.stretchAlgorithm));
+    const auto modelPath = hifiganModelDirectory.getFullPathName().toUTF8();
+    stream.write(modelPath.getAddress(), modelPath.sizeInBytes());
+    const auto modelDirectory = hifiganModelDirectory.existsAsFile()
+        ? hifiganModelDirectory.getParentDirectory() : hifiganModelDirectory;
+    const auto model = modelDirectory.getChildFile("pc_nsf_hifigan.onnx");
+    const auto config = modelDirectory.getChildFile("config.json");
+    stream.writeInt64(model.getLastModificationTime().toMilliseconds());
+    stream.writeInt64(model.getSize());
+    stream.writeInt64(config.getLastModificationTime().toMilliseconds());
+    stream.writeInt64(config.getSize());
     for (const auto& note : clip.notes)
     {
         stream.writeDouble(note.startSeconds);
@@ -332,6 +345,14 @@ void AudioEngine::syncProject(const ProjectData& project)
     projectDurationSeconds.store(contentDuration);
 }
 
+void AudioEngine::setHifiganModelDirectory(const juce::File& directory)
+{
+    const juce::ScopedWriteLock guard(renderLock);
+    if (hifiganModelDirectory == directory) return;
+    hifiganModelDirectory = directory;
+    renderCache.clear();
+}
+
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
 {
     loadedClips.clear();
@@ -403,14 +424,14 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             // shifts both F0 and formants and creates the "old/child voice" failure mode.
             if (track.compose && !clip.notes.empty())
             {
-                const auto cacheKey = renderKey(clip, track);
+                const auto cacheKey = renderKey(clip, track, hifiganModelDirectory);
                 activeRenderKeys.insert(cacheKey);
                 auto& state = renderCache[cacheKey];
                 if (state == nullptr) state = std::make_shared<RenderedClip>();
                 loaded->rendered = state;
                 if (!state->scheduled.exchange(true))
                 {
-                    auto request = makeRenderRequest(clip, track);
+                    auto request = makeRenderRequest(clip, track, hifiganModelDirectory);
                     renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
                     {
                         if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)

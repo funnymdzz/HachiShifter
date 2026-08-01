@@ -1,4 +1,5 @@
 #include "RenderService.h"
+#include "NsfHifiganRenderer.h"
 #include "WorldRenderer.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <signalsmith-stretch.h>
@@ -545,6 +546,7 @@ public:
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
         juce::AudioBuffer<float> rendered;
+        auto usedNsfModel = false;
         if (request.pitchBackend == PitchRenderBackend::world)
         {
             std::vector<WorldTimeMapPoint> worldTimeMap;
@@ -582,6 +584,33 @@ public:
             applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
                                     request.sourceMidi, request.targetMidi);
         }
+        else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
+        {
+            // HiFi-GAN receives a target-time spectral envelope.  First warp
+            // the source once without changing F0, then let the neural source
+            // filter synthesize the requested target curve.  This keeps the
+            // model and the visible note/Attack clock on the same timeline.
+            const std::vector<float> noGain;
+            auto warped = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.sourceMidi,
+                request.formantSemitones, noGain, noGain, noGain, request.timeMap,
+                request.pitchBackend, request.stretchAlgorithm);
+            auto neural = NsfHifiganRenderer::render(warped, reader->sampleRate,
+                request.framePeriodMs, request.targetMidi, request.hifiganModelDirectory);
+            if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
+            {
+                rendered = std::move(neural.buffer);
+                usedNsfModel = true;
+                applyExpressionAndTension(rendered, reader->sampleRate,
+                    request.framePeriodMs, request.targetMidi, request.noteGain,
+                    request.tension, request.breath);
+            }
+            else
+                rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                    request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                    request.formantSemitones, request.noteGain, request.tension, request.breath,
+                    request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+        }
         else
             rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
                 request.framePeriodMs, request.sourceMidi, request.targetMidi,
@@ -590,7 +619,9 @@ public:
                 request.pitchBackend, request.stretchAlgorithm);
         auto backend = request.pitchBackend == PitchRenderBackend::mld5
             ? juce::String("mld5-single-pass-stable-clock")
-            : request.pitchBackend == PitchRenderBackend::nsfHifigan ? juce::String("nsf-hifigan")
+            : request.pitchBackend == PitchRenderBackend::nsfHifigan
+                ? (usedNsfModel ? juce::String("nsf-hifigan-onnx")
+                                : juce::String("nsf-hifigan-fallback"))
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop"
