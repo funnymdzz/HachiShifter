@@ -214,7 +214,12 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
     }
     const auto peak = *std::max_element(rmsValues.begin(), rmsValues.end());
     const auto floor = percentile(rmsValues, 0.20);
-    const auto silence = std::max({ 0.0007f, floor * 2.5f, peak * 0.012f });
+    // A tightly trimmed syllable may contain no silent frame at all.  In that
+    // case the 20th percentile is essentially the signal itself and using
+    // floor*2.5 rejects every frame.  Cap the adaptive noise estimate to a
+    // fraction of the peak while retaining the absolute quiet floor.
+    const auto adaptiveNoise = std::min(floor * 2.5f, peak * 0.20f);
+    const auto silence = std::max({ 0.0007f, adaptiveNoise, peak * 0.012f });
     juce::dsp::FFT fft(fftOrder);
     std::vector<std::complex<float>> input(static_cast<std::size_t>(fftSize));
     std::vector<std::complex<float>> spectrum(static_cast<std::size_t>(fftSize));
@@ -323,6 +328,8 @@ std::vector<NoteData> NativeAnalyzer::analyse(const juce::File& file, juce::Stri
         }
         notes.push_back(std::move(note));
     }
+    if (notes.empty() && error.isEmpty())
+        error = "Audio analysis found no voiced syllable";
     if (progress) progress(1.0);
     return notes;
 }

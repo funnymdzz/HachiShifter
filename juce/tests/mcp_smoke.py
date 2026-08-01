@@ -87,6 +87,7 @@ def main() -> int:
         assert "game_variant=large" in analysis_status
         analysed = client.call("import_audio", {"path": str(source)})
         assert "backend=" in analysed and "notes=" in analysed
+        assert "notes=0" not in analysed, analysed
         project = json.loads(client.call("project_snapshot"))
         track = project["tracks"][0]
         clip = track["clips"][0]
