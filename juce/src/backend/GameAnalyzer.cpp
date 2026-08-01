@@ -261,9 +261,10 @@ std::vector<int64_t> shapeOf(const Ort::Value& value)
 
 struct Sessions
 {
-    Sessions(const juce::File& directory, int threads)
+    Sessions(const juce::File& directory, const GameAnalyzer::Options& requested)
         : config(loadConfig(directory, configError)),
-          options(makeOptions(threads)),
+          options(makeOrtSessionOptions({ requested.inference, requested.deviceIndex,
+                                          requested.intraOpThreads }, activeInference)),
           encoder(environment(), ortPath(directory.getChildFile("encoder.onnx")).c_str(), options),
           segmenter(environment(), ortPath(directory.getChildFile("segmenter.onnx")).c_str(), options),
           estimator(environment(), ortPath(directory.getChildFile("estimator.onnx")).c_str(), options),
@@ -272,16 +273,9 @@ struct Sessions
         if (configError.isNotEmpty()) throw std::runtime_error(configError.toStdString());
     }
 
-    static Ort::SessionOptions makeOptions(int threads)
-    {
-        Ort::SessionOptions result;
-        result.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        if (threads > 0) result.SetIntraOpNumThreads(threads);
-        return result;
-    }
-
     juce::String configError;
     GameConfig config;
+    juce::String activeInference { "cpu" };
     Ort::SessionOptions options;
     Ort::Session encoder, segmenter, estimator, bd2dur;
 };
@@ -567,6 +561,8 @@ struct SessionCache
     std::mutex mutex;
     juce::String path;
     int threads = 0;
+    InferenceBackend inference = InferenceBackend::automatic;
+    int deviceIndex = -1;
     std::unique_ptr<Sessions> sessions;
 };
 
@@ -605,11 +601,14 @@ GameAnalyzer::Result GameAnalyzer::analyse(const juce::File& audioFile,
     if (fcpeModelFile.existsAsFile())
     {
         juce::String fcpeError;
-        fcpe = FcpeAnalyzer::analyse(audioFile, fcpeModelFile, options.intraOpThreads,
-                                     fcpeError, [&](double value)
+        juce::String fcpeInference;
+        fcpe = FcpeAnalyzer::analyse(audioFile, fcpeModelFile,
+                                     { options.inference, options.deviceIndex,
+                                       options.intraOpThreads }, fcpeError, [&](double value)
         {
             if (progress) progress(0.20 + value * 0.35);
-        });
+        }, &fcpeInference);
+        if (fcpeInference.isNotEmpty()) result.activeInference = fcpeInference;
         if (fcpe.empty()) result.warning = fcpeError;
         else result.fcpeUsed = true;
     }
@@ -620,12 +619,18 @@ GameAnalyzer::Result GameAnalyzer::analyse(const juce::File& audioFile,
         auto& shared = cache();
         std::scoped_lock lock(shared.mutex);
         const auto path = modelDirectory.getFullPathName();
-        if (shared.sessions == nullptr || shared.path != path || shared.threads != options.intraOpThreads)
+        if (shared.sessions == nullptr || shared.path != path
+            || shared.threads != options.intraOpThreads
+            || shared.inference != options.inference
+            || shared.deviceIndex != options.deviceIndex)
         {
-            shared.sessions = std::make_unique<Sessions>(modelDirectory, options.intraOpThreads);
+            shared.sessions = std::make_unique<Sessions>(modelDirectory, options);
             shared.path = path;
             shared.threads = options.intraOpThreads;
+            shared.inference = options.inference;
+            shared.deviceIndex = options.deviceIndex;
         }
+        result.activeInference = shared.sessions->activeInference;
         auto waveform = resampleLinear(decoded.mono, decoded.sampleRate,
                                        shared.sessions->config.sampleRate);
         const auto samplesPerFrame = std::max<std::size_t>(1,

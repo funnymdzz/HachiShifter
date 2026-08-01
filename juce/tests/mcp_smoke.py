@@ -85,6 +85,13 @@ def main() -> int:
         analysis_status = client.call("analysis_status")
         assert "requested=GAME+FCPE" in analysis_status
         assert "game_variant=large" in analysis_status
+        assert "inference_requested=auto" in analysis_status
+        assert "inference_active=cpu" in analysis_status
+        unsupported_status = client.call(
+            "analysis_status", {"inference": "cuda", "device_index": 3}
+        )
+        assert "inference_requested=cuda" in unsupported_status
+        assert "inference_active=cpu" in unsupported_status
         analysed = client.call("import_audio", {"path": str(source)})
         assert "backend=" in analysed and "notes=" in analysed
         assert "notes=0" not in analysed, analysed

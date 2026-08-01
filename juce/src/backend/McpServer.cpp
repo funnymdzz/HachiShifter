@@ -84,6 +84,8 @@ juce::String analysisSummary(const AnalysisStatus& status)
         + "; fcpe_ready=" + juce::String(status.fcpeModelReady ? 1 : 0)
         + "; fcpe_path=" + status.fcpeModelPath.getFullPathName()
         + "; onnx_runtime=" + juce::String(status.onnxRuntimeReady ? 1 : 0)
+        + "; inference_requested=" + status.requestedInference
+        + "; inference_active=" + status.activeInference
         + "; message=" + status.message;
 }
 

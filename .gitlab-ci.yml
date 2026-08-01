@@ -29,7 +29,8 @@ build_linux:
     - when: on_success
   script:
     - rm -rf build-gitlab-linux HachiShifterNext-linux-x86_64 HachiShifterNext-linux-x86_64-no-model.tar.gz
-    - cmake -S juce -B build-gitlab-linux -G Ninja -DCMAKE_BUILD_TYPE=Release
+    - mkdir -p "$HOME/.cache/hachishifter-fetch/linux"
+    - cmake -S juce -B build-gitlab-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$HOME/.cache/hachishifter-fetch/linux"
     - cmake --build build-gitlab-linux --target HachiShifterNext -j 2
     - mkdir -p HachiShifterNext-linux-x86_64/models
     - binary="$(find build-gitlab-linux -path '*_artefacts/Release/*' -type f -name 'HachiShifter*' -perm -111 | head -n 1)"
@@ -59,7 +60,8 @@ build_windows:
     HACHI_XWIN_ROOT: /opt/hachishifter/xwin-msvc
   script:
     - rm -rf build-gitlab-windows HachiShifterNext-windows-x64 HachiShifterNext-windows-x64-no-model.zip
-    - cmake -S juce -B build-gitlab-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$CI_PROJECT_DIR/juce/cmake/windows-msvc-xwin.cmake"
+    - mkdir -p "$HOME/.cache/hachishifter-fetch/windows"
+    - cmake -S juce -B build-gitlab-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$HOME/.cache/hachishifter-fetch/windows" -DCMAKE_TOOLCHAIN_FILE="$CI_PROJECT_DIR/juce/cmake/windows-msvc-xwin.cmake"
     - cmake --build build-gitlab-windows --target HachiShifterNext -j 2
     - mkdir -p HachiShifterNext-windows-x64/models
     - binary="$(find build-gitlab-windows -path '*_artefacts/Release/*' -type f -iname 'HachiShifter*.exe' | head -n 1)"
@@ -68,6 +70,12 @@ build_windows:
     - runtime="$(dirname "$binary")/onnxruntime.dll"
     - test -f "$runtime"
     - install -m 755 "$runtime" HachiShifterNext-windows-x64/onnxruntime.dll
+    - providers="$(dirname "$binary")/onnxruntime_providers_shared.dll"
+    - directml="$(dirname "$binary")/DirectML.dll"
+    - test -f "$providers"
+    - test -f "$directml"
+    - install -m 755 "$providers" HachiShifterNext-windows-x64/onnxruntime_providers_shared.dll
+    - install -m 755 "$directml" HachiShifterNext-windows-x64/DirectML.dll
     - install -m 644 LICENSE HachiShifterNext-windows-x64/LICENSE
     - test "$(find HachiShifterNext-windows-x64/models -type f | wc -l)" -eq 0
     - file HachiShifterNext-windows-x64/HachiShifterNext.exe | grep -q 'PE32+.*x86-64'

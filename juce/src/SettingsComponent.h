@@ -20,6 +20,10 @@ public:
     ~SettingsComponent() override;
     void resized() override;
     [[nodiscard]] int diagnosticTabCount() const { return tabs.getNumTabs(); }
+    [[nodiscard]] int diagnosticInferenceDeviceCount() const
+    {
+        return inferenceDevice.getNumItems();
+    }
     [[nodiscard]] int diagnosticCurrentPageChildCount() const
     {
         if (const auto* page = tabs.getCurrentContentComponent())

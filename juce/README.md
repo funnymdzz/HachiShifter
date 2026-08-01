@@ -30,6 +30,8 @@ remains available on `main` for regression reference.
 - native ONNX Runtime GAME encoder/segmenter/boundary-to-duration/estimator
   inference with metadata-driven inputs, plus FCPE 128-bin Slaney-mel F0 and
   explicit 5 ms STFT-centre timing compensation;
+- shared ONNX execution settings for GAME, FCPE and NSF-HiFiGAN, with selectable
+  GPU 0-7 and DirectML runtime packaging on Windows;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
 - native project save/load (`.hspx`);

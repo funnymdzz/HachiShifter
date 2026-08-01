@@ -216,6 +216,9 @@ struct Cache
     std::mutex mutex;
     juce::String path;
     int threads = 0;
+    InferenceBackend inference = InferenceBackend::automatic;
+    int deviceIndex = -1;
+    juce::String activeInference { "cpu" };
     std::unique_ptr<Ort::Session> session;
 };
 
@@ -227,22 +230,27 @@ Cache& cache()
 
 std::vector<FcpeFrame> run(const juce::File& modelFile,
                            std::vector<float> mel, std::size_t frames,
-                           int threads, juce::String& error,
-                           NativeAnalyzer::Progress progress)
+                           const OrtExecutionConfig& execution, juce::String& error,
+                           NativeAnalyzer::Progress progress,
+                           juce::String* activeInference)
 {
     auto& shared = cache();
     std::scoped_lock lock(shared.mutex);
     const auto path = modelFile.getFullPathName();
-    if (shared.session == nullptr || shared.path != path || shared.threads != threads)
+    if (shared.session == nullptr || shared.path != path
+        || shared.threads != execution.intraOpThreads
+        || shared.inference != execution.requested
+        || shared.deviceIndex != execution.deviceIndex)
     {
-        Ort::SessionOptions options;
-        options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        if (threads > 0) options.SetIntraOpNumThreads(threads);
+        auto options = makeOrtSessionOptions(execution, shared.activeInference);
         shared.session = std::make_unique<Ort::Session>(environment(),
             ortPath(modelFile).c_str(), options);
         shared.path = path;
-        shared.threads = threads;
+        shared.threads = execution.intraOpThreads;
+        shared.inference = execution.requested;
+        shared.deviceIndex = execution.deviceIndex;
     }
+    if (activeInference != nullptr) *activeInference = shared.activeInference;
     Ort::AllocatorWithDefaultOptions allocator;
     if (shared.session->GetInputCount() != 1 || shared.session->GetOutputCount() < 1)
     {
@@ -346,9 +354,10 @@ std::vector<FcpeFrame> run(const juce::File& modelFile,
 
 std::vector<FcpeFrame> FcpeAnalyzer::analyse(const juce::File& audioFile,
                                               const juce::File& modelFile,
-                                              int intraOpThreads,
+                                              const OrtExecutionConfig& execution,
                                               juce::String& error,
-                                              NativeAnalyzer::Progress progress)
+                                              NativeAnalyzer::Progress progress,
+                                              juce::String* activeInference)
 {
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
     try
@@ -363,7 +372,7 @@ std::vector<FcpeFrame> FcpeAnalyzer::analyse(const juce::File& audioFile,
         }
         auto [mel, frames] = buildMel(waveform, progress);
         auto result = run(modelFile, std::move(mel), frames,
-                          intraOpThreads, error, progress);
+                          execution, error, progress, activeInference);
         if (result.empty() && error.isEmpty()) error = "FCPE produced no F0 frames";
         return result;
     }
@@ -377,7 +386,7 @@ std::vector<FcpeFrame> FcpeAnalyzer::analyse(const juce::File& audioFile,
     }
     return {};
 #else
-    juce::ignoreUnused(audioFile, modelFile, intraOpThreads, progress);
+    juce::ignoreUnused(audioFile, modelFile, execution, progress, activeInference);
     error = "FCPE ONNX analysis runtime is not included";
     return {};
 #endif

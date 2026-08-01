@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Mld5Renderer.h"
+#include "OrtExecution.h"
 #include <juce_events/juce_events.h>
 #include <functional>
 #include <memory>
@@ -36,6 +37,7 @@ struct Mld5FileRenderRequest
     std::vector<float> breath;
     std::vector<TimeMapPoint> timeMap;
     juce::File hifiganModelDirectory;
+    OrtExecutionConfig inference;
     PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;
     int stretchAlgorithm = 0;
 };

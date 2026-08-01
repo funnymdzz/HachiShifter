@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NativeAnalyzer.h"
+#include "OrtExecution.h"
 
 namespace hachi::backend
 {
@@ -11,12 +12,15 @@ public:
     {
         bool performanceMode = false;
         int intraOpThreads = 0;
+        InferenceBackend inference = InferenceBackend::automatic;
+        int deviceIndex = -1;
     };
 
     struct Result
     {
         std::vector<NoteData> notes;
         bool fcpeUsed = false;
+        juce::String activeInference { "cpu" };
         juce::String warning;
     };
 

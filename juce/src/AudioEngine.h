@@ -22,6 +22,7 @@ public:
 
     void syncProject(const ProjectData& project);
     void setHifiganModelDirectory(const juce::File& directory);
+    void setInferenceConfiguration(backend::InferenceBackend inference, int deviceIndex);
     [[nodiscard]] std::optional<double> probeDuration(const juce::File& file);
     bool setAuditionFile(const juce::File& file);
     void clearAuditionFile();
@@ -73,6 +74,7 @@ private:
     std::unordered_map<std::string, std::shared_ptr<std::atomic<float>>> trackMeters;
     std::unordered_map<std::string, std::shared_ptr<RenderedClip>> renderCache;
     juce::File hifiganModelDirectory;
+    backend::OrtExecutionConfig inferenceConfiguration;
     std::shared_ptr<juce::AudioFormatReader> auditionReader;
     juce::AudioBuffer<float> auditionScratch;
     std::atomic<bool> auditionMode { false };

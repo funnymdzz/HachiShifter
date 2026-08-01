@@ -184,6 +184,8 @@ AnalysisStatus AnalysisService::status(const AnalysisConfig& config)
 {
     AnalysisStatus result;
     result.performanceMode = config.performanceMode;
+    result.requestedInference = inferenceBackendName(config.inference);
+    result.activeInference = inferenceBackendName(resolvedInferenceBackend(config.inference));
     result.gameModelDirectory = resolveGameDirectory(config);
     result.fcpeModelPath = resolveFcpePath(config, result.gameModelDirectory);
     result.gameModelReady = result.gameModelDirectory != juce::File{};
@@ -194,7 +196,8 @@ AnalysisStatus AnalysisService::status(const AnalysisConfig& config)
         result.activeBackend = result.fcpeModelReady ? "GAME+FCPE" : "GAME+native-hq";
         result.message = "GAME " + juce::String(config.performanceMode ? "small" : "large")
             + (result.fcpeModelReady ? " ready; FCPE model ready"
-                                     : " ready; FCPE model missing");
+                                     : " ready; FCPE model missing")
+            + "; inference=" + result.activeInference;
     }
     else
     {
@@ -204,6 +207,9 @@ AnalysisStatus AnalysisService::status(const AnalysisConfig& config)
         if (!result.fcpeModelReady) missing.add("FCPE model");
         if (!result.onnxRuntimeReady) missing.add("ONNX analysis runtime");
         result.message = "native-hq fallback; missing: " + missing.joinIntoString(", ");
+        if (config.inference != resolvedInferenceBackend(config.inference))
+            result.message << "; requested " << result.requestedInference
+                           << " is not packaged, using CPU";
     }
     return result;
 }
@@ -220,6 +226,8 @@ AnalysisResult AnalysisService::analyse(const juce::File& file,
         GameAnalyzer::Options options;
         options.performanceMode = config.performanceMode;
         options.intraOpThreads = std::max(1, juce::SystemStats::getNumCpus());
+        options.inference = config.inference;
+        options.deviceIndex = config.deviceIndex;
         juce::String gameError;
         auto game = GameAnalyzer::analyse(file, result.status.gameModelDirectory,
                                           result.status.fcpeModelPath,
@@ -228,6 +236,7 @@ AnalysisResult AnalysisService::analyse(const juce::File& file,
         if (!result.notes.empty())
         {
             result.status.activeBackend = game.fcpeUsed ? "GAME+FCPE" : "GAME+native-hq";
+            result.status.activeInference = game.activeInference;
             result.warning = game.warning;
             if (!game.fcpeUsed && !result.status.fcpeModelReady)
                 result.warning = "FCPE model missing; GAME uses native-hq source F0";
@@ -345,7 +354,8 @@ juce::String AnalysisService::backendText(const AnalysisStatus& value)
 {
     auto text = value.activeBackend;
     if (value.activeBackend.startsWith("GAME+"))
-        text << " (GAME " << (value.performanceMode ? "small" : "large") << ")";
+        text << " (GAME " << (value.performanceMode ? "small" : "large")
+             << ", " << value.activeInference << ")";
     return text;
 }
 }

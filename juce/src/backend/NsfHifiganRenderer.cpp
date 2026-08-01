@@ -289,26 +289,39 @@ Ort::Env& environment()
     return value;
 }
 
-std::shared_ptr<Ort::Session> session(const juce::File& model)
+struct SessionEntry
+{
+    std::shared_ptr<Ort::Session> model;
+    std::shared_ptr<std::mutex> runMutex;
+    juce::String activeInference;
+};
+
+SessionEntry session(const juce::File& model, const OrtExecutionConfig& execution)
 {
     static std::mutex mutex;
-    static std::unordered_map<std::string, std::shared_ptr<Ort::Session>> sessions;
+    static std::unordered_map<std::string, SessionEntry> sessions;
     std::scoped_lock lock(mutex);
     const auto key = (model.getFullPathName() + "#"
         + juce::String(model.getLastModificationTime().toMilliseconds()) + "#"
-        + juce::String(model.getSize())).toStdString();
+        + juce::String(model.getSize()) + "#"
+        + inferenceBackendName(execution.requested) + "#"
+        + juce::String(execution.deviceIndex) + "#"
+        + juce::String(execution.intraOpThreads)).toStdString();
     if (const auto found = sessions.find(key); found != sessions.end())
         return found->second;
-    Ort::SessionOptions options;
-    options.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-    options.SetIntraOpNumThreads(std::max(1, juce::SystemStats::getNumCpus() - 1));
-    auto value = std::make_shared<Ort::Session>(environment(), ortPath(model).c_str(), options);
+    SessionEntry value;
+    auto options = makeOrtSessionOptions(execution, value.activeInference);
+    value.model = std::make_shared<Ort::Session>(
+        environment(), ortPath(model).c_str(), options);
+    if (value.activeInference.startsWith("directml"))
+        value.runMutex = std::make_shared<std::mutex>();
     sessions[key] = value;
     return value;
 }
 
 std::vector<float> infer(Ort::Session& model, const Config& config,
-                         const MelData& mel, const std::vector<float>& f0)
+                         const MelData& mel, const std::vector<float>& f0,
+                         std::mutex* runMutex)
 {
     Ort::AllocatorWithDefaultOptions allocator;
     if (model.GetInputCount() < 2 || model.GetOutputCount() < 1
@@ -347,8 +360,10 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
         auto f0Tensor = Ort::Value::CreateTensor<float>(memory, f0Chunk.data(), f0Chunk.size(),
                                                          f0Shape.data(), f0Shape.size());
         std::array<Ort::Value, 2> inputs { std::move(melTensor), std::move(f0Tensor) };
-        auto rendered = model.Run(Ort::RunOptions{ nullptr }, inputNames, inputs.data(), inputs.size(),
-                                  outputNames, 1);
+        std::unique_lock<std::mutex> runLock;
+        if (runMutex != nullptr) runLock = std::unique_lock<std::mutex>(*runMutex);
+        auto rendered = model.Run(Ort::RunOptions{ nullptr }, inputNames, inputs.data(),
+                                  inputs.size(), outputNames, 1);
         if (rendered.empty()) return {};
         const auto info = rendered[0].GetTensorTypeAndShapeInfo();
         const auto count = info.GetElementCount();
@@ -372,7 +387,8 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
 
 NsfHifiganRenderResult NsfHifiganRenderer::render(
     const juce::AudioBuffer<float>& source, double sampleRate, double framePeriodMs,
-    const std::vector<float>& targetMidi, const juce::File& configuredModelDirectory)
+    const std::vector<float>& targetMidi, const juce::File& configuredModelDirectory,
+    const OrtExecutionConfig& execution)
 {
     NsfHifiganRenderResult result;
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
@@ -387,8 +403,9 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         result.modelFile = files->onnx;
         auto config = readConfig(files->config, result.error);
         if (!config) return result;
-        auto ortSession = session(files->onnx);
-        if (ortSession == nullptr)
+        auto ortSession = session(files->onnx, execution);
+        result.activeInference = ortSession.activeInference;
+        if (ortSession.model == nullptr)
         {
             result.error = "NSF-HiFiGAN ONNX session could not be created";
             return result;
@@ -422,7 +439,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
                 f0[frame] = midiToHz(curveAt(targetMidi,
                     seconds * 1000.0 / framePeriod));
             }
-            auto modelOutput = infer(*ortSession, *config, mel, f0);
+            auto modelOutput = infer(*ortSession.model, *config, mel, f0,
+                                     ortSession.runMutex.get());
             if (modelOutput.empty())
             {
                 result.error = "NSF-HiFiGAN ONNX returned empty audio";
@@ -457,7 +475,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
     }
 #else
     juce::ignoreUnused(source, sampleRate, framePeriodMs, targetMidi,
-                       configuredModelDirectory);
+                       configuredModelDirectory, execution);
     result.error = "NSF-HiFiGAN ONNX runtime is not included";
 #endif
     return result;

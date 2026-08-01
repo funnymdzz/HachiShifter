@@ -44,7 +44,8 @@ std::pair<float, float> panGains(float pan, bool mono)
 }
 
 backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track,
-                                                  const juce::File& hifiganModelDirectory)
+                                                  const juce::File& hifiganModelDirectory,
+                                                  const backend::OrtExecutionConfig& inference)
 {
     backend::Mld5FileRenderRequest request;
     request.sourceFile = clip.sourceFile;
@@ -53,6 +54,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
         ? clip.sourceDurationSeconds : clip.durationSeconds;
     request.targetDurationSeconds = clip.durationSeconds;
     request.hifiganModelDirectory = hifiganModelDirectory;
+    request.inference = inference;
     switch (track.pitchAlgorithm)
     {
         case PitchAlgorithm::nsfHifigan:
@@ -197,7 +199,8 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
 }
 
 std::string renderKey(const ClipData& clip, const TrackData& track,
-                      const juce::File& hifiganModelDirectory)
+                      const juce::File& hifiganModelDirectory,
+                      const backend::OrtExecutionConfig& inference)
 {
     juce::MemoryOutputStream stream;
     const auto path = clip.sourceFile.getFullPathName().toUTF8();
@@ -224,6 +227,9 @@ std::string renderKey(const ClipData& clip, const TrackData& track,
     stream.writeInt64(model.getSize());
     stream.writeInt64(config.getLastModificationTime().toMilliseconds());
     stream.writeInt64(config.getSize());
+    stream.writeInt(static_cast<int>(inference.requested));
+    stream.writeInt(inference.deviceIndex);
+    stream.writeInt(inference.intraOpThreads);
     for (const auto& note : clip.notes)
     {
         stream.writeDouble(note.startSeconds);
@@ -353,6 +359,20 @@ void AudioEngine::setHifiganModelDirectory(const juce::File& directory)
     renderCache.clear();
 }
 
+void AudioEngine::setInferenceConfiguration(backend::InferenceBackend inference, int deviceIndex)
+{
+    const backend::OrtExecutionConfig next {
+        inference, deviceIndex, std::max(1, juce::SystemStats::getNumCpus() - 1)
+    };
+    const juce::ScopedWriteLock guard(renderLock);
+    if (inferenceConfiguration.requested == next.requested
+        && inferenceConfiguration.deviceIndex == next.deviceIndex
+        && inferenceConfiguration.intraOpThreads == next.intraOpThreads)
+        return;
+    inferenceConfiguration = next;
+    renderCache.clear();
+}
+
 void AudioEngine::rebuildLoadedClips(const ProjectData& project)
 {
     loadedClips.clear();
@@ -424,14 +444,16 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             // shifts both F0 and formants and creates the "old/child voice" failure mode.
             if (track.compose && !clip.notes.empty())
             {
-                const auto cacheKey = renderKey(clip, track, hifiganModelDirectory);
+                const auto cacheKey = renderKey(
+                    clip, track, hifiganModelDirectory, inferenceConfiguration);
                 activeRenderKeys.insert(cacheKey);
                 auto& state = renderCache[cacheKey];
                 if (state == nullptr) state = std::make_shared<RenderedClip>();
                 loaded->rendered = state;
                 if (!state->scheduled.exchange(true))
                 {
-                    auto request = makeRenderRequest(clip, track, hifiganModelDirectory);
+                    auto request = makeRenderRequest(
+                        clip, track, hifiganModelDirectory, inferenceConfiguration);
                     renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
                     {
                         if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)

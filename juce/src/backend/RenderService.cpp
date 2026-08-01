@@ -547,6 +547,7 @@ public:
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
         juce::AudioBuffer<float> rendered;
         auto usedNsfModel = false;
+        juce::String nsfInference;
         if (request.pitchBackend == PitchRenderBackend::world)
         {
             std::vector<WorldTimeMapPoint> worldTimeMap;
@@ -596,11 +597,13 @@ public:
                 request.formantSemitones, noGain, noGain, noGain, request.timeMap,
                 request.pitchBackend, request.stretchAlgorithm);
             auto neural = NsfHifiganRenderer::render(warped, reader->sampleRate,
-                request.framePeriodMs, request.targetMidi, request.hifiganModelDirectory);
+                request.framePeriodMs, request.targetMidi, request.hifiganModelDirectory,
+                request.inference);
             if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
             {
                 rendered = std::move(neural.buffer);
                 usedNsfModel = true;
+                nsfInference = neural.activeInference;
                 applyExpressionAndTension(rendered, reader->sampleRate,
                     request.framePeriodMs, request.targetMidi, request.noteGain,
                     request.tension, request.breath);
@@ -624,6 +627,7 @@ public:
                                 : juce::String("nsf-hifigan-fallback"))
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
+        if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";
         backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop"
             : request.stretchAlgorithm == 2 ? "+loop"
             : request.stretchAlgorithm == 3 ? "+soundtouch"

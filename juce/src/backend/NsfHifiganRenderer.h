@@ -1,5 +1,6 @@
 #pragma once
 
+#include "OrtExecution.h"
 #include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_core/juce_core.h>
 #include <vector>
@@ -11,6 +12,7 @@ struct NsfHifiganRenderResult
     juce::AudioBuffer<float> buffer;
     juce::String error;
     juce::File modelFile;
+    juce::String activeInference { "cpu" };
     bool usedModel = false;
 };
 
@@ -22,6 +24,7 @@ public:
         double sampleRate,
         double framePeriodMs,
         const std::vector<float>& targetMidi,
-        const juce::File& configuredModelDirectory);
+        const juce::File& configuredModelDirectory,
+        const OrtExecutionConfig& execution);
 };
 }

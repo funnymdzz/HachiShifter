@@ -1,6 +1,7 @@
 #pragma once
 
 #include "NativeAnalyzer.h"
+#include "OrtExecution.h"
 
 namespace hachi::backend
 {
@@ -17,8 +18,9 @@ class FcpeAnalyzer final
 public:
     static std::vector<FcpeFrame> analyse(const juce::File& audioFile,
                                           const juce::File& modelFile,
-                                          int intraOpThreads,
+                                          const OrtExecutionConfig& execution,
                                           juce::String& error,
-                                          NativeAnalyzer::Progress progress = {});
+                                          NativeAnalyzer::Progress progress = {},
+                                          juce::String* activeInference = nullptr);
 };
 }

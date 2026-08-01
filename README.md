@@ -49,6 +49,9 @@ C++ 实现。耗时渲染通过 JUCE `ThreadPool` 按设备 CPU 核心数并行�
   竖线，并支持 UTAU `oto.ini` 读取/导出；
 - 文件菜单原生设置窗口：界面语言与配色、音频设备、GAME/FCPE/HiFi-GAN
   模型目录和推理设备、操作方式、工程导入默认项及 UTAU 重采样器预留项；
+  Windows 包含 DirectML 执行提供程序，可选择 GPU 0 至 GPU 7，GAME、FCPE 和
+  NSF-HiFiGAN 共用所选设备；状态栏、CLI 与 MCP 会报告实际使用的 provider，
+  未随当前平台打包的 CUDA/CoreML 选择会明确回落到 CPU；
 - 音频设备状态跨启动保存；操作设置可控制空格播放以及编辑器滚轮缩放/滚动；
 - 可注册音频并拖放到时间线或钢琴卷帘的素材管理器；
 - 素材管理器可递归导入 UTAU 音源库，以 UTF-8 或 CP932/Shift-JIS 读取

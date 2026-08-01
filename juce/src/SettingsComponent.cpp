@@ -78,8 +78,14 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     inference.addItem("CUDA", 4);
     inference.addItem("CoreML", 5);
     inferenceDevice.addItem("Auto", 1);
-    inferenceDevice.addItem("GPU 0", 2);
-    inferenceDevice.addItem("GPU 1", 3);
+    for (int device = 0; device < 8; ++device)
+        inferenceDevice.addItem("GPU " + juce::String(device), device + 2);
+    const auto refreshInferenceDevice = [this]
+    {
+        const auto selected = inference.getSelectedId();
+        inferenceDevice.setEnabled(selected == 3 || selected == 4);
+    };
+    inference.onChange = refreshInferenceDevice;
     algorithmPage.addRow(gamePathLabel, gamePath);
     algorithmPage.addRow(gameModelLabel, gameModel);
     algorithmPage.addRow(fcpePathLabel, fcpePath);
@@ -132,6 +138,7 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     // tab click, making the settings dialog appear completely empty.
     tabs.setCurrentTabIndex(0, false);
     loadValues();
+    refreshInferenceDevice();
     setTexts();
     applyButton.onClick = [this]
     {

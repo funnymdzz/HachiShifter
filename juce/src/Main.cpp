@@ -43,11 +43,14 @@ public:
             settings.resized();
             const auto tabs = settings.diagnosticTabCount();
             const auto pageChildren = settings.diagnosticCurrentPageChildCount();
+            const auto inferenceDevices = settings.diagnosticInferenceDeviceCount();
             std::cout << "tabs=" << tabs << '\n'
                       << "page_children=" << pageChildren << '\n'
+                      << "inference_devices=" << inferenceDevices << '\n'
                       << "width=" << settings.getWidth() << '\n'
                       << "height=" << settings.getHeight() << std::endl;
-            if (tabs != 5 || pageChildren <= 0) setApplicationReturnValue(5);
+            if (tabs != 5 || pageChildren <= 0 || inferenceDevices != 9)
+                setApplicationReturnValue(5);
             juce::MessageManager::callAsync([this] { quit(); });
             return;
         }
@@ -67,6 +70,8 @@ public:
                       << "fcpe_ready=" << (status.fcpeModelReady ? 1 : 0) << '\n'
                       << "fcpe_path=" << status.fcpeModelPath.getFullPathName() << '\n'
                       << "onnx_runtime=" << (status.onnxRuntimeReady ? 1 : 0) << '\n'
+                      << "inference_requested=" << status.requestedInference << '\n'
+                      << "inference_active=" << status.activeInference << '\n'
                       << "message=" << status.message << std::endl;
             juce::MessageManager::callAsync([this] { quit(); });
             return;
@@ -76,7 +81,8 @@ public:
             juce::String error;
             auto frames = backend::FcpeAnalyzer::analyse(
                 juce::File(arguments[1]), juce::File(arguments[2]),
-                std::max(1, juce::SystemStats::getNumCpus()), error);
+                { backend::InferenceBackend::cpu, -1,
+                  std::max(1, juce::SystemStats::getNumCpus()) }, error);
             std::vector<float> voiced;
             for (const auto& frame : frames)
                 if (frame.voiced) voiced.push_back(frame.midi);

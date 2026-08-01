@@ -15,33 +15,47 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(JUCE)
 
-# GAME and FCPE use the official ONNX Runtime C++ API.  The runtime is part of
+# GAME, FCPE and NSF-HiFiGAN use the official ONNX Runtime C++ API.  The runtime is part of
 # the application package, while the considerably larger model files remain in
-# the optional models/ directory.  Use CPU archives for deterministic portable
-# builds; provider selection is layered on without changing model I/O.
-option(HACHI_ENABLE_ONNX_ANALYSIS "Enable GAME/FCPE ONNX analysis" ON)
+# the optional models/ directory.  Linux packages use CPU inference; Windows
+# packages include the official DirectML provider and retain CPU fallback.
+option(HACHI_ENABLE_ONNX_ANALYSIS "Enable GAME/FCPE/NSF-HiFiGAN ONNX inference" ON)
 if(HACHI_ENABLE_ONNX_ANALYSIS AND (WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux"))
     set(HACHI_ORT_VERSION "1.22.0")
     if(WIN32)
         set(HACHI_ORT_ARCHIVE
-            "https://github.com/microsoft/onnxruntime/releases/download/v${HACHI_ORT_VERSION}/onnxruntime-win-x64-${HACHI_ORT_VERSION}.zip")
-        set(HACHI_ORT_LIBRARY_REL "lib/onnxruntime.lib")
-        set(HACHI_ORT_RUNTIME_REL "lib/onnxruntime.dll")
+            "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/${HACHI_ORT_VERSION}")
+        set(HACHI_ORT_HASH "SHA256=29f9872d786236b79aa83f94482f3a17c14297e4833768d6d0ed4883ee732e60")
+        set(HACHI_ORT_INCLUDE_REL "build/native/include")
+        set(HACHI_ORT_LIBRARY_REL "runtimes/win-x64/native/onnxruntime.lib")
+        set(HACHI_ORT_RUNTIME_REL "runtimes/win-x64/native/onnxruntime.dll")
         set(HACHI_ORT_PACKAGE_NAME "onnxruntime.dll")
+        FetchContent_Declare(directml_runtime
+            URL "https://www.nuget.org/api/v2/package/Microsoft.AI.DirectML/1.15.4"
+            URL_HASH "SHA256=4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        FetchContent_MakeAvailable(directml_runtime)
     else()
         set(HACHI_ORT_ARCHIVE
             "https://github.com/microsoft/onnxruntime/releases/download/v${HACHI_ORT_VERSION}/onnxruntime-linux-x64-${HACHI_ORT_VERSION}.tgz")
+        set(HACHI_ORT_HASH "")
+        set(HACHI_ORT_INCLUDE_REL "include")
         set(HACHI_ORT_LIBRARY_REL "lib/libonnxruntime.so")
         set(HACHI_ORT_RUNTIME_REL "lib/libonnxruntime.so.${HACHI_ORT_VERSION}")
         set(HACHI_ORT_PACKAGE_NAME "libonnxruntime.so.1")
     endif()
-    FetchContent_Declare(onnxruntime URL "${HACHI_ORT_ARCHIVE}"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    if(HACHI_ORT_HASH)
+        FetchContent_Declare(onnxruntime URL "${HACHI_ORT_ARCHIVE}"
+            URL_HASH "${HACHI_ORT_HASH}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    else()
+        FetchContent_Declare(onnxruntime URL "${HACHI_ORT_ARCHIVE}"
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    endif()
     FetchContent_MakeAvailable(onnxruntime)
     add_library(hachi_onnxruntime SHARED IMPORTED GLOBAL)
     set_target_properties(hachi_onnxruntime PROPERTIES
         IMPORTED_LOCATION "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_RUNTIME_REL}"
-        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/include")
+        INTERFACE_INCLUDE_DIRECTORIES "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_INCLUDE_REL}")
     if(WIN32)
         set_target_properties(hachi_onnxruntime PROPERTIES
             IMPORTED_IMPLIB "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_LIBRARY_REL}")
@@ -110,6 +124,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/FcpeAnalyzer.h
     src/backend/NsfHifiganRenderer.cpp
     src/backend/NsfHifiganRenderer.h
+    src/backend/OrtExecution.cpp
+    src/backend/OrtExecution.h
 )
 
 # The xwin/MSVC-ABI build links JUCE against the common-controls v6 import
@@ -153,16 +169,31 @@ target_link_libraries(HachiShifterNext PRIVATE
 if(TARGET hachi_onnxruntime)
     target_link_libraries(HachiShifterNext PRIVATE hachi_onnxruntime)
     target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ONNX_ANALYSIS=1)
+    if(WIN32)
+        target_include_directories(HachiShifterNext PRIVATE "${directml_runtime_SOURCE_DIR}/include")
+        target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ORT_DML=1)
+    else()
+        target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ORT_DML=0)
+    endif()
     add_custom_command(TARGET HachiShifterNext POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${onnxruntime_SOURCE_DIR}/${HACHI_ORT_RUNTIME_REL}"
             "$<TARGET_FILE_DIR:HachiShifterNext>/${HACHI_ORT_PACKAGE_NAME}")
+    if(WIN32)
+        add_custom_command(TARGET HachiShifterNext POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${onnxruntime_SOURCE_DIR}/runtimes/win-x64/native/onnxruntime_providers_shared.dll"
+                "$<TARGET_FILE_DIR:HachiShifterNext>/onnxruntime_providers_shared.dll"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${directml_runtime_SOURCE_DIR}/bin/x64-win/DirectML.dll"
+                "$<TARGET_FILE_DIR:HachiShifterNext>/DirectML.dll")
+    endif()
     if(UNIX AND NOT APPLE)
         set_target_properties(HachiShifterNext PROPERTIES
             BUILD_RPATH "$ORIGIN")
     endif()
 else()
-    target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ONNX_ANALYSIS=0)
+    target_compile_definitions(HachiShifterNext PRIVATE HACHI_HAS_ONNX_ANALYSIS=0 HACHI_HAS_ORT_DML=0)
 endif()
 
 # UTAU voicebanks commonly store oto.ini in CP932/Shift-JIS.  iconv is part of

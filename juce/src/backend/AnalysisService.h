@@ -1,19 +1,11 @@
 #pragma once
 
 #include "NativeAnalyzer.h"
+#include "OrtExecution.h"
 #include <juce_data_structures/juce_data_structures.h>
 
 namespace hachi::backend
 {
-enum class InferenceBackend
-{
-    automatic,
-    cpu,
-    directML,
-    cuda,
-    coreML
-};
-
 struct AnalysisConfig
 {
     juce::File gameModelDirectory;
@@ -33,6 +25,8 @@ struct AnalysisStatus
     bool fcpeModelReady = false;
     bool onnxRuntimeReady = false;
     bool performanceMode = false;
+    juce::String requestedInference { "auto" };
+    juce::String activeInference { "cpu" };
     juce::String message;
 };
 

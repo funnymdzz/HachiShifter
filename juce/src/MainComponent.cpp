@@ -420,6 +420,8 @@ void MainComponent::applyPreferences()
         parseColour(preferences->getValue("ui.noteColour", "F4C000"), juce::Colour(0xfff4c000)));
     audio.setHifiganModelDirectory(juce::File(
         preferences->getValue("algorithm.hifiganPath")));
+    const auto analysisConfig = backend::AnalysisService::configFromProperties(preferences.get());
+    audio.setInferenceConfiguration(analysisConfig.inference, analysisConfig.deviceIndex);
     // Applying a new model path must invalidate and immediately reschedule
     // already imported compose clips; waiting for a later edit made the
     // settings change appear ineffective.
