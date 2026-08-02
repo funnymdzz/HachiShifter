@@ -23,11 +23,28 @@ build_linux:
     - linux
   rules:
     - if: '$WINDOWS_ONLY == "1"'
-      when: never
+      variables:
+        REUSE_LINUX_ARTIFACT: "1"
     - if: '$CI_COMMIT_MESSAGE =~ /\[windows-only\]/'
-      when: never
+      variables:
+        REUSE_LINUX_ARTIFACT: "1"
     - when: on_success
   script:
+    # A successful Windows-only pipeline becomes GitLab's latest successful
+    # ref pipeline.  If it omits build_linux entirely, the stable
+    # jobs/artifacts/next URL starts returning 404 even though the previous
+    # Linux package is valid.  Republish that package without compiling it.
+    - |
+      if [ "${REUSE_LINUX_ARTIFACT:-0}" = "1" ]; then
+        previous_url="$CI_SERVER_URL/$CI_PROJECT_PATH/-/jobs/artifacts/$CI_COMMIT_REF_NAME/download?job=build_linux"
+        curl --fail --location --insecure "$previous_url" -o previous-linux-artifacts.zip
+        unzip -q previous-linux-artifacts.zip
+        test -f HachiShifterNext-linux-x86_64-no-model.tar.gz
+        test -f HachiShifterNext-linux-x86_64-no-model.tar.gz.sha256
+        sha256sum -c HachiShifterNext-linux-x86_64-no-model.tar.gz.sha256
+        echo "Reused the previous Linux package; no Linux compilation was run."
+        exit 0
+      fi
     - rm -rf build-gitlab-linux HachiShifterNext-linux-x86_64 HachiShifterNext-linux-x86_64-no-model.tar.gz
     - mkdir -p "$HOME/.cache/hachishifter-fetch/linux"
     - cmake -S juce -B build-gitlab-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$HOME/.cache/hachishifter-fetch/linux"
