@@ -251,6 +251,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("import_midi", "Import MIDI notes and tempo / 导入 MIDI"),
             makeTool("import_melodyne", "Import Melodyne MPD edits; recursive_media, preserve_edits and source_pitch control import / 导入 Melodyne 工程并控制素材搜索、工程编辑与原始 F0"),
             makeTool("set_tempo", "Set BPM and time signature / 设置速度与拍号"),
+            makeTool("add_track", "Create an empty melodic or audio track / 新建空旋律或普通音轨"),
             makeTool("set_track", "Set compose, mute, solo, gain, pan and render algorithms / 设置轨道及算法"),
             makeTool("set_clip", "Set clip gain, fades and mute state / 设置采样增益、淡入淡出和静音"),
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
@@ -433,9 +434,16 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                          static_cast<int>(number(args, "denominator", 4.0)));
         return toolResult("ok");
     }
+    else if (name == "add_track")
+    {
+        const auto compose = static_cast<bool>(args.getProperty("compose", true));
+        const auto id = project.addTrack(string(args, "name"), compose);
+        return toolResult("track_id=" + id);
+    }
     else if (name == "set_track")
     {
         const auto id = string(args, "track_id");
+        if (args.hasProperty("name")) project.setTrackName(id, string(args, "name"));
         if (args.hasProperty("compose")) project.setTrackCompose(id, static_cast<bool>(args["compose"]));
         if (args.hasProperty("muted")) project.setTrackMuted(id, static_cast<bool>(args["muted"]));
         if (args.hasProperty("solo")) project.setTrackSolo(id, static_cast<bool>(args["solo"]));

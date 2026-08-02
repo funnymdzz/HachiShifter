@@ -98,6 +98,36 @@ def main() -> int:
         project = json.loads(client.call("project_snapshot"))
         track = project["tracks"][0]
         clip = track["clips"][0]
+        empty_track_id = client.call(
+            "add_track", {"name": "Guide", "compose": False}
+        ).split("=", 1)[1]
+        client.call(
+            "set_track",
+            {"track_id": empty_track_id, "name": "Guide Renamed", "compose": True},
+        )
+        with_empty_track = json.loads(client.call("project_snapshot"))
+        empty_track = next(
+            value for value in with_empty_track["tracks"] if value["id"] == empty_track_id
+        )
+        assert empty_track["name"] == "Guide Renamed", empty_track
+        assert empty_track["compose"] is True and not empty_track["clips"], empty_track
+        client.call("remove_track", {"track_id": empty_track_id})
+
+        duplicated_clip_id = client.call(
+            "duplicate_clip",
+            {"clip_id": clip["id"], "start_seconds": 1.25, "track_id": track["id"]},
+        ).split("=", 1)[1]
+        duplicated_project = json.loads(client.call("project_snapshot"))
+        duplicated = next(
+            value
+            for value in duplicated_project["tracks"][0]["clips"]
+            if value["id"] == duplicated_clip_id
+        )
+        assert abs(duplicated["start_seconds"] - 1.25) < 1.0e-9, duplicated
+        assert {note["id"] for note in duplicated["notes"]}.isdisjoint(
+            {note["id"] for note in clip["notes"]}
+        )
+        client.call("remove_clip", {"clip_id": duplicated_clip_id})
         # Asset-manager/timeline drops can target an existing track.  The MCP
         # route exercises the same ProjectModel insertion path without a GUI:
         # no extra track is created and the requested timeline position is

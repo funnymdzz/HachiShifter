@@ -81,6 +81,7 @@ private:
     void exportOto();
     void showAssetManager();
     void showClipGainDialog();
+    void showRenameTrackDialog();
     void copySelectedClip();
     void pasteCopiedClip();
     void duplicateSelectedClip();

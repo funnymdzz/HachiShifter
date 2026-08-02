@@ -139,6 +139,8 @@ public:
     [[nodiscard]] juce::String addAudioFile(const juce::File& file, double durationSeconds,
                                             double startSeconds = 0.0,
                                             const juce::String& targetTrackId = {});
+    [[nodiscard]] juce::String addTrack(const juce::String& name, bool compose = true);
+    void setTrackName(const juce::String& trackId, const juce::String& name);
     bool setClipNotesIfEmpty(const juce::String& clipId, std::vector<NoteData> notes);
     bool addMidiFile(const juce::File& file, juce::String& error);
     void setTempo(double bpm, int numerator, int denominator = 4);

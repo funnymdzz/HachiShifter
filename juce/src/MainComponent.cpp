@@ -1354,7 +1354,11 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
     }
     else if (index == 2)
     {
+        menu.addItem(36, strings.text("track.addCompose"));
+        menu.addItem(37, strings.text("track.addAudio"));
         menu.addItem(30, strings.text("file.audio"));
+        menu.addSeparator();
+        menu.addItem(38, strings.text("track.rename"), selectedTrackId.isNotEmpty());
         menu.addItem(31, strings.text("track.toggleCompose"), selectedTrackId.isNotEmpty());
         menu.addSeparator();
         auto selectedClipMuted = false;
@@ -1401,6 +1405,16 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 23) copySelectedClip();
     else if (id == 24) pasteCopiedClip();
     else if (id == 25) duplicateSelectedClip();
+    else if (id == 36 || id == 37)
+    {
+        const auto compose = id == 36;
+        selectedTrackId = project.addTrack(
+            strings.text(compose ? "track.compose" : "track.audio"), compose);
+        trackList.setSelectedTrack(selectedTrackId);
+        refreshProjectControls();
+        menuItemsChanged();
+    }
+    else if (id == 38) showRenameTrackDialog();
     else if (id == 31)
     {
         const auto data = project.snapshot();
@@ -1519,6 +1533,36 @@ void MainComponent::showClipGainDialog()
                 safe->project.setClipGain(clipId, db <= -59.9 ? 0.0f
                     : static_cast<float>(std::pow(10.0, db / 20.0)));
             }
+            delete dialog;
+        }), false);
+}
+
+void MainComponent::showRenameTrackDialog()
+{
+    if (selectedTrackId.isEmpty()) return;
+    auto currentName = juce::String{};
+    for (const auto& track : project.snapshot().tracks)
+        if (track.id == selectedTrackId)
+        {
+            currentName = track.name;
+            break;
+        }
+    if (currentName.isEmpty()) return;
+    auto* dialog = new juce::AlertWindow(strings.text("track.rename"), juce::String{},
+                                          juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("name", currentName, strings.text("track.name"));
+    dialog->addButton(strings.text("dialog.apply"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    const auto trackId = selectedTrackId;
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create([safe, dialog, trackId](int result)
+        {
+            if (safe != nullptr && result == 1)
+                safe->project.setTrackName(trackId,
+                    dialog->getTextEditorContents("name"));
             delete dialog;
         }), false);
 }

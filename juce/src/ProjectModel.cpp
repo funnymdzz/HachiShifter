@@ -248,6 +248,53 @@ juce::String ProjectModel::addAudioFile(const juce::File& file, double durationS
     return clipId;
 }
 
+juce::String ProjectModel::addTrack(const juce::String& requestedName, bool compose)
+{
+    juce::String id;
+    {
+        const juce::ScopedLock guard(lock);
+        pushUndoLocked();
+        TrackData track;
+        track.id = makeId("track");
+        track.name = requestedName.trim().substring(0, 80);
+        if (track.name.isEmpty())
+            track.name = compose ? "Melodic Track" : "Audio Track";
+        track.compose = compose;
+        // A new track follows the currently established project workflow,
+        // rather than unexpectedly returning to mld5 after the user has
+        // selected NSF/WORLD or a different stretch engine.
+        if (!project.tracks.empty())
+        {
+            track.pitchAlgorithm = project.tracks.back().pitchAlgorithm;
+            track.stretchAlgorithm = project.tracks.back().stretchAlgorithm;
+        }
+        id = track.id;
+        project.tracks.push_back(std::move(track));
+    }
+    sendChangeMessage();
+    return id;
+}
+
+void ProjectModel::setTrackName(const juce::String& trackId,
+                                const juce::String& requestedName)
+{
+    const auto name = requestedName.trim().substring(0, 80);
+    if (name.isEmpty()) return;
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.name != name)
+            {
+                pushUndoLocked();
+                track.name = name;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
 bool ProjectModel::setClipNotesIfEmpty(const juce::String& clipId,
                                        std::vector<NoteData> notes)
 {
