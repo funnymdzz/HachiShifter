@@ -825,10 +825,12 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 graph.number(element, "sibilantBalance").value_or(0.0), 0.0, 1.0));
             note.attackSpeed = static_cast<float>(std::max(1.0e-6,
                 graph.number(element, "sourceTimeForElementTimeFunctionAttackSlope").value_or(1.0)));
-            const auto robustFields = { "robustPitchCurve", "robustPitchCurveEnabled",
-                "useRobustPitchCurve", "usesRobustPitchCurve", "isRobustPitchCurveEnabled" };
+            const auto robustFields = { "robustPitchCurve", "robustPitchCurveSwitch",
+                "robustPitchCurveEnabled", "useRobustPitchCurve",
+                "usesRobustPitchCurve", "isRobustPitchCurveEnabled" };
             note.robustPitchCurve = graph.booleanAlias(element, robustFields)
                 || graph.booleanAlias(item, robustFields)
+                || graph.booleanAlias(source, robustFields)
                 || graph.booleanAlias(description, robustFields);
             if (const auto parameterSet = graph.reference(description, "analyzerParameterSet"))
                 note.robustPitchCurve = note.robustPitchCurve

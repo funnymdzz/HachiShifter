@@ -36,9 +36,9 @@ struct Mld5FileRenderRequest
     std::vector<float> noteGain;
     std::vector<float> tension;
     std::vector<float> breath;
-    // 1.0 selects the reconstructed Robust Pitch Curve path for this frame.
-    // It is deliberately a curve rather than a global flag: one source can
-    // contain both normal and robust notes.
+    // Zero disables Robust Pitch Curve.  A positive value selects it and also
+    // identifies the owning note, preventing filtering across note boundaries.
+    // External callers may use 1.0 for one continuous robust region.
     std::vector<float> robustPitchCurve;
     std::vector<TimeMapPoint> timeMap;
     juce::File hifiganModelDirectory;

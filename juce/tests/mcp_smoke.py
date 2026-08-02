@@ -140,6 +140,18 @@ def main() -> int:
             if note["id"] == note_id
         )
         assert edited_note["robust_pitch_curve"] is True
+        robust_project = directory / "robust-roundtrip.hspx"
+        client.call("project_save", {"path": str(robust_project)})
+        client.call("project_new")
+        client.call("project_open", {"path": str(robust_project)})
+        roundtrip_note = next(
+            note
+            for item_track in json.loads(client.call("project_snapshot"))["tracks"]
+            for item_clip in item_track["clips"]
+            for note in item_clip["notes"]
+            if note["id"] == note_id
+        )
+        assert roundtrip_note["robust_pitch_curve"] is True
         client.call(
             "resize_clip",
             {"clip_id": clip["id"], "start_seconds": 0.0, "duration_seconds": 0.55},
@@ -264,6 +276,7 @@ def main() -> int:
                     "export_sha256": hashlib.sha256(exported.read_bytes()).hexdigest(),
                     "export_size": exported.stat().st_size,
                     "transport": True,
+                    "robust_pitch_curve_roundtrip": True,
                     "sample_settings_and_oto": True,
                     "analysis_status": analysis_status,
                 },

@@ -36,6 +36,7 @@ def main() -> int:
             for note in clip["notes"]
         ]
         assert notes, "Melodyne project contains no imported notes"
+        imported_robust_flags = [note["robust_pitch_curve"] for note in notes]
         pitch_points = 0
         unvoiced_pitch_points = 0
         for note in notes:
@@ -70,6 +71,16 @@ def main() -> int:
             client.call("project_new")
             client.call("project_open", {"path": str(saved)})
             reloaded = json.loads(client.call("project_snapshot"))
+            reloaded_robust_flags = [
+                note["robust_pitch_curve"]
+                for track in reloaded["tracks"]
+                for clip in track["clips"]
+                for note in clip["notes"]
+            ]
+            assert reloaded_robust_flags == imported_robust_flags, (
+                imported_robust_flags,
+                reloaded_robust_flags,
+            )
             reloaded_maps = [
                 clip.get("source_time_map", [])
                 for track in reloaded["tracks"]
@@ -114,6 +125,8 @@ def main() -> int:
                     "source_time_points": source_time_points,
                     "pitch_points": pitch_points,
                     "unvoiced_pitch_points": unvoiced_pitch_points,
+                    "robust_pitch_curve_notes": sum(imported_robust_flags),
+                    "robust_pitch_curve_roundtrip": True,
                     "source_time_map_roundtrip": True,
                     "flat_target_max_deviation_cents": maximum_flat_deviation,
                     "selected_routes": selected_routes,

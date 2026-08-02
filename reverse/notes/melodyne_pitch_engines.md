@@ -24,17 +24,29 @@ Confirmed binary identifiers include:
 - `_vibratoQuality`, `_portamentoQuality`, `_pitchQualityWeight`
 
 The control belongs to the Detection Audio Source Inspector rather than the
-ordinary pitch-correction tool.  This places the switch before note rendering:
-it chooses a consolidated detector/source curve.  Slope, deflection, vibrato
-quality and portamento quality remain separate features, so a robust curve must
-reject isolated harmonic/octave choices without flattening genuine transitions.
+ordinary pitch-correction tool.  Ghidra confirms the complete call chain:
+
+- `0x180eb4160` — `MDDetectionAudioSourceInspector_handleSwitchRobustPitchCurve`;
+- `0x181aafb50` — `MUAudioSource_setRobustPitchCurve`;
+- the setter is accepted only for analyser kind `1`;
+- it change-notifies a boolean stored at detection source offset `+0x1ac`.
+
+These names, a plate comment and bookmark category `MLD5_ROBUST_PITCH` are
+persisted in `/home/ubuntu/hjs/reverse/melodyne5/melodyne-re.gpr`.  This places
+the switch before note rendering: it chooses a consolidated detector/source
+curve.  Slope, deflection, vibrato quality and portamento quality remain
+separate features, so a robust curve must reject isolated harmonic/octave
+choices without flattening genuine transitions.
 
 HachiShifter adapts the source-level setting to a note-level flag.  The `mld5`
-render request carries a frame mask and applies a zero-lag robust estimator to
-the source-to-target correction: local median/MAD clipping followed by symmetric
-slope bounds.  Unvoiced frames and disabled notes are untouched.  MPD import
-checks the setting on element, principal item, source description and analyser
-parameter set; HSPX stores it per note.
+render request carries a note-region mask and applies a zero-lag robust
+estimator to source F0: local median/MAD context folds convincing harmonic
+octave errors, while only isolated non-harmonic spikes are interpolated.  The
+original target-minus-source edit is then reapplied exactly.  Note boundaries,
+ordinary vibrato/portamento, unvoiced frames
+and disabled notes are untouched.  MPD import checks `robustPitchCurveSwitch`
+and aliases on element, principal item, detection audio source, source
+description and analyser parameter set; HSPX stores it per note.
 
 ## Melodyne 3.2: pitch, formant and time model
 
@@ -58,3 +70,35 @@ clock (72 ms analysis / 7.5 ms periodic step at nominal rate), while retaining
 HachiShifter's single-pass latency correction, source time map and unvoiced
 protection.  Further named Ghidra findings should be appended here instead of
 being left only in a transient terminal log.
+
+### Persisted function evidence
+
+The following names, comments and bookmarks are now saved in
+`reverse/ghidra/Melodyne.gpr`:
+
+- `0x00420440` — `MDPlayAlgorithm_setPitchRatio`: stores a float at object
+  offset `+0x5c`; neutral reset writes exactly `1.0`;
+- `0x004204b0` — `MDPlayAlgorithm_setFormantRatio`: separate float at `+0x60`;
+- `0x00441400` — `MDMelodyNote_findNoteAverages`: quality/energy-weighted
+  source-note statistics and original pitch centre;
+- `0x00441e70` — `MDMelodyNote_findFinalPitchPosition`: iterative weighted
+  centre refinement, up to 21 iterations;
+- `0x0043cbc0`, `0x0043cc30`, `0x0043cca0`: separate pitch, amplitude and
+  formant transition values;
+- `0x0043cd10`, `0x0043cd80`: separate local and wide curve-alignment rates;
+- `0x0043cdf0` — per-note `wantsPitchTransition`;
+- `0x00442490` — transition decision checks approximately 20 ms around the
+  boundary and rejects a transition when that region contains an unvoiced
+  frame;
+- `0x0049f8d0` — analyser settings store `shouldAdaptPitchTransition` at
+  `+0x36`, maximum transition slope at `+0x50`, and forward/backward handle
+  ratios/limits at `+0x74..+0x80`.
+
+Accordingly, the independent `mld3` route now feeds multiplicative pitch and
+formant ratios to the renderer rather than reusing the `mld5` component-cent
+control.  Pitch-induced envelope motion is compensated first, then the saved
+formant ratio is applied independently; this is what keeps a neutral formant
+ratio from acquiring a child/elder timbre after transposition.  It keeps the
+M3-specific periodic clock and the existing explicit
+note connection mask: transitions are synthesized only for connected notes,
+while unvoiced intervals remain disconnected.

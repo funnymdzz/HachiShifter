@@ -140,16 +140,21 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     for (int frame = 0; frame < frameCount; ++frame)
     {
         const auto time = std::min(clip.durationSeconds, static_cast<double>(frame) * framePeriodSeconds);
-        for (const auto& note : clip.notes)
+        for (std::size_t noteIndex = 0; noteIndex < clip.notes.size(); ++noteIndex)
         {
+            const auto& note = clip.notes[noteIndex];
             const auto local = time - note.startSeconds;
             if (local < -1.0e-9 || local > note.durationSeconds + 1.0e-9) continue;
             request.formantSemitones[static_cast<std::size_t>(frame)] = note.formantSemitones;
             request.noteGain[static_cast<std::size_t>(frame)] = note.gain;
             request.tension[static_cast<std::size_t>(frame)] = note.tension;
             request.breath[static_cast<std::size_t>(frame)] = note.breath;
+            // Keep adjacent robust notes as separate detector regions.  A
+            // boolean mask alone lets a slope limiter bridge two valid notes
+            // at a hard musical interval and mistakes it for an F0 outlier.
+            // Zero remains disabled; positive values identify the owning note.
             request.robustPitchCurve[static_cast<std::size_t>(frame)] =
-                note.robustPitchCurve ? 1.0f : 0.0f;
+                note.robustPitchCurve ? static_cast<float>(noteIndex + 1) : 0.0f;
             const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, local));
             if (!cents) break;
             const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;

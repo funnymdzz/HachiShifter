@@ -57,11 +57,11 @@ float median(std::vector<float>& values)
     return result;
 }
 
-// Reconstructed Robust Pitch Curve stage.  The binary handler selects a
-// detector/source pitch representation before note rendering; slope and
-// deflection quality are kept as separate features.  At render time we mirror
-// that design by robustifying only the requested source-to-target correction,
-// retaining genuine portamento while rejecting isolated octave/harmonic jumps.
+// Reconstructed Robust Pitch Curve stage.  The binary handler changes a flag
+// on the detection audio source (boolean at source+0x1ac), before note edits
+// are rendered.  Robustify source F0, then reapply the original target-source
+// edit exactly.  Filtering the edit delta instead would leave an octave error
+// present in both curves untouched and would alter saved tuning decisions.
 void applyRobustPitchCurve(std::vector<float>& sourceMidi,
                            std::vector<float>& targetMidi,
                            const std::vector<float>& enabled)
@@ -69,15 +69,23 @@ void applyRobustPitchCurve(std::vector<float>& sourceMidi,
     const auto count = std::min({ sourceMidi.size(), targetMidi.size(), enabled.size() });
     if (count < 3) return;
     std::vector<float> originalDelta(count, 0.0f);
-    std::vector<float> filteredDelta(count, 0.0f);
+    std::vector<float> filteredSource(sourceMidi.begin(), sourceMidi.begin()
+                                      + static_cast<std::ptrdiff_t>(count));
     for (std::size_t index = 0; index < count; ++index)
         if (sourceMidi[index] > 0.0f && targetMidi[index] > 0.0f)
             originalDelta[index] = targetMidi[index] - sourceMidi[index];
 
+    const auto sameRegion = [&](std::size_t left, std::size_t right)
+    {
+        return enabled[left] >= 0.5f && enabled[right] >= 0.5f
+            && std::abs(enabled[left] - enabled[right]) < 0.25f
+            && sourceMidi[left] > 0.0f && sourceMidi[right] > 0.0f
+            && targetMidi[left] > 0.0f && targetMidi[right] > 0.0f;
+    };
+
     constexpr std::ptrdiff_t radius = 4; // 45 ms at the native 5 ms frame grid
     for (std::size_t index = 0; index < count; ++index)
     {
-        filteredDelta[index] = originalDelta[index];
         if (enabled[index] < 0.5f || sourceMidi[index] <= 0.0f || targetMidi[index] <= 0.0f)
             continue;
         std::vector<float> neighbours;
@@ -86,36 +94,45 @@ void applyRobustPitchCurve(std::vector<float>& sourceMidi,
         const auto last = std::min<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(count) - 1,
             static_cast<std::ptrdiff_t>(index) + radius);
         for (auto cursor = first; cursor <= last; ++cursor)
-            if (enabled[static_cast<std::size_t>(cursor)] >= 0.5f
-                && sourceMidi[static_cast<std::size_t>(cursor)] > 0.0f
-                && targetMidi[static_cast<std::size_t>(cursor)] > 0.0f)
-                neighbours.push_back(originalDelta[static_cast<std::size_t>(cursor)]);
+            if (sameRegion(index, static_cast<std::size_t>(cursor)))
+                neighbours.push_back(sourceMidi[static_cast<std::size_t>(cursor)]);
         if (neighbours.size() < 3) continue;
         auto centreValues = neighbours;
         const auto centre = median(centreValues);
         for (auto& value : neighbours) value = std::abs(value - centre);
         const auto deviation = median(neighbours);
-        const auto limit = std::max(0.18f, deviation * 3.5f);
-        const auto residual = originalDelta[index] - centre;
-        filteredDelta[index] = centre + juce::jlimit(-limit, limit, residual);
+        const auto residual = sourceMidi[index] - centre;
+        // Harmonic tracking mistakes usually land near an integer octave.
+        // Fold only a convincing octave candidate; preserve ordinary vibrato,
+        // bends and portamento instead of median-filtering the entire note.
+        const auto octave = std::round(residual / 12.0f);
+        const auto folded = residual - octave * 12.0f;
+        if (std::abs(octave) >= 1.0f && std::abs(folded) <= std::max(0.45f, deviation * 4.0f))
+            filteredSource[index] = centre + folded;
+        else
+        {
+            const auto limit = std::max(1.35f, deviation * 6.0f);
+            if (std::abs(residual) > limit)
+                filteredSource[index] = centre + juce::jlimit(-limit, limit, residual);
+        }
     }
 
-    // A forward/backward bounded pass rejects one-frame deflections without
-    // adding the timing lag of a conventional low-pass filter.
-    constexpr float maxStep = 0.32f;
-    for (std::size_t index = 1; index < count; ++index)
-        if (enabled[index] >= 0.5f && enabled[index - 1] >= 0.5f)
-            filteredDelta[index] = filteredDelta[index - 1]
-                + juce::jlimit(-maxStep, maxStep,
-                    filteredDelta[index] - filteredDelta[index - 1]);
-    for (std::size_t index = count - 1; index-- > 0;)
-        if (enabled[index] >= 0.5f && enabled[index + 1] >= 0.5f)
-            filteredDelta[index] = filteredDelta[index + 1]
-                + juce::jlimit(-maxStep, maxStep,
-                    filteredDelta[index] - filteredDelta[index + 1]);
+    // Repair a non-harmonic one-frame spike only when both neighbours agree.
+    // A global slope limit would also reshape legitimate glissando/vibrato.
+    for (std::size_t index = 1; index + 1 < count; ++index)
+        if (sameRegion(index, index - 1) && sameRegion(index, index + 1)
+            && std::abs(filteredSource[index - 1] - filteredSource[index + 1]) < 0.7f)
+        {
+            const auto expected = (filteredSource[index - 1] + filteredSource[index + 1]) * 0.5f;
+            if (std::abs(filteredSource[index] - expected) > 1.35f)
+                filteredSource[index] = expected;
+        }
     for (std::size_t index = 0; index < count; ++index)
         if (enabled[index] >= 0.5f && sourceMidi[index] > 0.0f && targetMidi[index] > 0.0f)
-            targetMidi[index] = sourceMidi[index] + filteredDelta[index];
+        {
+            sourceMidi[index] = filteredSource[index];
+            targetMidi[index] = filteredSource[index] + originalDelta[index];
+        }
 }
 
 void applyMld5SpectralFinish(juce::AudioBuffer<float>& audio, double sampleRate,
@@ -338,7 +355,11 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
     else
         stretch.presetDefault(channels, static_cast<float>(sampleRate), false);
-    stretch.setFormantSemitones(valueAt(formantSemitones, 0.0, 0.0f), true);
+    const auto initialFormant = valueAt(formantSemitones, 0.0, 0.0f);
+    if (pitchBackend == PitchRenderBackend::mld3)
+        stretch.setFormantFactor(std::exp2(initialFormant / 12.0f), true);
+    else
+        stretch.setFormantSemitones(initialFormant, true);
     stretch.setFormantBase(200.0f / static_cast<float>(sampleRate));
 
     const auto inputLatency = stretch.inputLatency();
@@ -388,9 +409,16 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
     // 1x and displaced attacks/F0 relative to the requested duration.
     if (const auto initialPitch = pitchAt(sourceMidi, targetMidi, 0.0))
     {
-        stretch.setTransposeSemitones(
-            juce::jlimit(-24.0f, 24.0f, initialPitch->second - initialPitch->first),
-            8'000.0f / static_cast<float>(sampleRate));
+        const auto semitones = juce::jlimit(-24.0f, 24.0f,
+            initialPitch->second - initialPitch->first);
+        if (pitchBackend == PitchRenderBackend::mld3)
+            // Melodyne 3 exposes this parameter as an explicit multiplicative
+            // _setPitchRatio rather than the later component-cent interface.
+            stretch.setTransposeFactor(std::exp2(semitones / 12.0f),
+                                       8'000.0f / static_cast<float>(sampleRate));
+        else
+            stretch.setTransposeSemitones(semitones,
+                                          8'000.0f / static_cast<float>(sampleRate));
         const auto sourceHz = 440.0f * std::pow(2.0f, (initialPitch->first - 69.0f) / 12.0f);
         stretch.setFormantBase(juce::jlimit(45.0f, 1'200.0f, sourceHz)
                                / static_cast<float>(sampleRate));
@@ -438,7 +466,12 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         if (pitch)
         {
             const auto semitones = juce::jlimit(-24.0f, 24.0f, pitch->second - pitch->first);
-            stretch.setTransposeSemitones(semitones, 8'000.0f / static_cast<float>(sampleRate));
+            if (pitchBackend == PitchRenderBackend::mld3)
+                stretch.setTransposeFactor(std::exp2(semitones / 12.0f),
+                                           8'000.0f / static_cast<float>(sampleRate));
+            else
+                stretch.setTransposeSemitones(semitones,
+                                              8'000.0f / static_cast<float>(sampleRate));
             const auto sourceHz = 440.0f * std::pow(2.0f, (pitch->first - 69.0f) / 12.0f);
             stretch.setFormantBase(juce::jlimit(45.0f, 1'200.0f, sourceHz)
                                    / static_cast<float>(sampleRate));
@@ -448,7 +481,15 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
             // Unvoiced, breath and sibilant regions keep their original spectrum.
             stretch.setTransposeSemitones(0.0f);
         }
-        stretch.setFormantSemitones(valueAt(formantSemitones, curvePosition, 0.0f), true);
+        const auto formant = valueAt(formantSemitones, curvePosition, 0.0f);
+        if (pitchBackend == PitchRenderBackend::mld3)
+            // The M3 binary keeps _setFormantRatio independent from pitch.
+            // Compensate the pitch move first, then apply this independent
+            // ratio; disabling compensation would reintroduce child/elder
+            // vocal-tract shifts even when the stored ratio is neutral.
+            stretch.setFormantFactor(std::exp2(formant / 12.0f), true);
+        else
+            stretch.setFormantSemitones(formant, true);
 
         std::vector<const float*> inputPointers(static_cast<std::size_t>(channels));
         std::vector<std::vector<float>> blockBuffers(static_cast<std::size_t>(channels));
