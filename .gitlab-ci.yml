@@ -59,10 +59,10 @@ build_windows:
   variables:
     HACHI_XWIN_ROOT: /opt/hachishifter/xwin-msvc
   script:
-    - rm -rf build-gitlab-windows HachiShifterNext-windows-x64 HachiShifterNext-windows-x64-no-model.zip
+    - rm -rf build-gitlab-windows HachiShifterNext-windows-x64 HachiShifterNext-windows-x64-no-model.zip windows-configure.log windows-build.log
     - mkdir -p "$HOME/.cache/hachishifter-fetch/windows"
-    - cmake -S juce -B build-gitlab-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$HOME/.cache/hachishifter-fetch/windows" -DCMAKE_TOOLCHAIN_FILE="$CI_PROJECT_DIR/juce/cmake/windows-msvc-xwin.cmake"
-    - cmake --build build-gitlab-windows --target HachiShifterNext -j 2
+    - cmake -S juce -B build-gitlab-windows -G Ninja -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_BASE_DIR="$HOME/.cache/hachishifter-fetch/windows" -DCMAKE_TOOLCHAIN_FILE="$CI_PROJECT_DIR/juce/cmake/windows-msvc-xwin.cmake" 2>&1 | tee windows-configure.log
+    - cmake --build build-gitlab-windows --target HachiShifterNext -j 2 2>&1 | tee windows-build.log
     - mkdir -p HachiShifterNext-windows-x64/models
     - binary="$(find build-gitlab-windows -path '*_artefacts/Release/*' -type f -iname 'HachiShifter*.exe' | head -n 1)"
     - test -n "$binary"
@@ -86,9 +86,12 @@ build_windows:
     - (cd HachiShifterNext-windows-x64 && zip -9 -r ../HachiShifterNext-windows-x64-no-model.zip .)
     - sha256sum HachiShifterNext-windows-x64-no-model.zip > HachiShifterNext-windows-x64-no-model.zip.sha256
   artifacts:
+    when: always
     name: HachiShifterNext-windows-x64-no-model-$CI_COMMIT_SHORT_SHA
     expire_in: 30 days
     expose_as: Windows x64 model-free
     paths:
       - HachiShifterNext-windows-x64-no-model.zip
       - HachiShifterNext-windows-x64-no-model.zip.sha256
+      - windows-configure.log
+      - windows-build.log
