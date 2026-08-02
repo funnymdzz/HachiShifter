@@ -35,6 +35,13 @@ TrackListComponent::~TrackListComponent()
     model.removeChangeListener(this);
 }
 
+void TrackListComponent::setSelectedTrack(const juce::String& trackId)
+{
+    if (selectedTrack == trackId) return;
+    selectedTrack = trackId;
+    repaint();
+}
+
 void TrackListComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     snapshot = model.snapshot();

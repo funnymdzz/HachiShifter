@@ -85,6 +85,7 @@ private:
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);
     void focusClip(const juce::String& clipId);
+    void focusNote(const juce::String& noteId);
     void setSourceEditMode(bool enabled);
     void showError(const juce::String& message);
 

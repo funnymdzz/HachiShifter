@@ -310,8 +310,7 @@ MainComponent::MainComponent()
     pianoRoll.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     pianoRoll.onNoteSelected = [this](const juce::String& noteId)
     {
-        selectedNoteId = noteId;
-        refreshSelectedNoteParameter();
+        focusNote(noteId);
     };
     trackList.peakProvider = [this](const juce::String& trackId) { return audio.trackPeak(trackId); };
     trackList.onTrackSelected = [this](const juce::String& trackId)
@@ -1089,24 +1088,49 @@ void MainComponent::focusClip(const juce::String& clipId)
 {
     selectedClipId = clipId;
     pianoRoll.setFocusedClip(clipId);
-    if (!sourceEditActive) return;
-    if (clipId.isEmpty())
-    {
-        audio.clearAuditionFile();
-        return;
-    }
     const auto data = project.snapshot();
+    const ClipData* selectedClip = nullptr;
     for (const auto& track : data.tracks)
         for (const auto& clip : track.clips)
             if (clip.id == clipId)
             {
-                audio.setAuditionFile(clip.sourceFile);
-                pianoViewport.setViewPosition(std::max(0, pianoRoll.pixelForSeconds(clip.sourceOffsetSeconds)
-                                                          - pianoViewport.getViewWidth() / 4),
-                                                  pianoViewport.getViewPositionY());
-                loadSampleSettings();
-                return;
+                selectedClip = &clip;
+                selectedTrackId = track.id;
+                trackList.setSelectedTrack(track.id);
+                refreshProjectControls();
+                break;
             }
+
+    if (!sourceEditActive) return;
+    if (selectedClip == nullptr)
+    {
+        audio.clearAuditionFile();
+        return;
+    }
+    audio.setAuditionFile(selectedClip->sourceFile);
+    pianoViewport.setViewPosition(std::max(0,
+        pianoRoll.pixelForSeconds(selectedClip->sourceOffsetSeconds)
+            - pianoViewport.getViewWidth() / 4), pianoViewport.getViewPositionY());
+    loadSampleSettings();
+}
+
+void MainComponent::focusNote(const juce::String& noteId)
+{
+    selectedNoteId = noteId;
+    if (noteId.isNotEmpty())
+    {
+        const auto data = project.snapshot();
+        for (const auto& track : data.tracks)
+            for (const auto& clip : track.clips)
+                if (std::any_of(clip.notes.begin(), clip.notes.end(),
+                    [&noteId](const auto& note) { return note.id == noteId; }))
+                {
+                    focusClip(clip.id);
+                    refreshSelectedNoteParameter();
+                    return;
+                }
+    }
+    refreshSelectedNoteParameter();
 }
 
 void MainComponent::loadSampleSettings()
