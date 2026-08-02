@@ -650,6 +650,13 @@ void MainComponent::togglePlayback()
         audio.stop();
         return;
     }
+    juce::String deviceError;
+    if (!audio.ensureOutputDevice(deviceError))
+    {
+        playWhenRenderReady = false;
+        showError(strings.text("settings.noAudioDevice") + "\n" + deviceError);
+        return;
+    }
     if (!sourceEditActive && audio.renderProgress())
     {
         playWhenRenderReady = true;
@@ -997,7 +1004,9 @@ void MainComponent::timerCallback()
             if (playWhenRenderReady)
             {
                 playWhenRenderReady = false;
-                audio.play();
+                juce::String deviceError;
+                if (audio.ensureOutputDevice(deviceError)) audio.play();
+                else showError(strings.text("settings.noAudioDevice") + "\n" + deviceError);
             }
         }
     }

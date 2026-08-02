@@ -274,6 +274,33 @@ AudioEngine::~AudioEngine()
     deviceManager.removeAudioCallback(&sourcePlayer);
 }
 
+bool AudioEngine::ensureOutputDevice(juce::String& error)
+{
+    const auto hasOutput = [this]
+    {
+        const auto* device = deviceManager.getCurrentAudioDevice();
+        return device != nullptr
+            && device->getActiveOutputChannels().countNumberOfSetBits() > 0;
+    };
+    if (hasOutput())
+    {
+        error.clear();
+        return true;
+    }
+    // A driver may appear after startup (USB interface connected, Bluetooth
+    // endpoint enabled, or Windows device service restarted).  Retry here so
+    // Play does not enter a false playing state with no callback to advance
+    // the transport.
+    error = deviceManager.initialiseWithDefaultDevices(0, 2);
+    if (hasOutput())
+    {
+        error.clear();
+        return true;
+    }
+    if (error.isEmpty()) error = "No audio output device is available";
+    return false;
+}
+
 void AudioEngine::restoreDeviceState(juce::PropertiesFile& properties)
 {
     const auto saved = properties.getValue("audio.deviceState");
