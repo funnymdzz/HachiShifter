@@ -112,6 +112,11 @@ int PianoRollComponent::pixelForSeconds(double seconds) const
     return static_cast<int>(std::round(timeToX(seconds)));
 }
 
+double PianoRollComponent::secondsForPixel(int pixel) const
+{
+    return std::max(0.0, static_cast<double>(pixel - 58) / pixelsPerSecond);
+}
+
 float PianoRollComponent::timeToX(double seconds) const
 {
     return 58.0f + static_cast<float>(seconds) * pixelsPerSecond;

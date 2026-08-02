@@ -132,7 +132,8 @@ public:
     [[nodiscard]] bool canRedo() const;
 
     [[nodiscard]] juce::String addAudioFile(const juce::File& file, double durationSeconds,
-                                            double startSeconds = 0.0);
+                                            double startSeconds = 0.0,
+                                            const juce::String& targetTrackId = {});
     bool setClipNotesIfEmpty(const juce::String& clipId, std::vector<NoteData> notes);
     bool addMidiFile(const juce::File& file, juce::String& error);
     void setTempo(double bpm, int numerator, int denominator = 4);

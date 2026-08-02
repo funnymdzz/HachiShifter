@@ -374,7 +374,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         {
             const auto clipId = project.addAudioFile(file,
                 static_cast<double>(reader->lengthInSamples) / reader->sampleRate,
-                number(args, "start_seconds"));
+                number(args, "start_seconds"), string(args, "track_id"));
             auto analysis = AnalysisService::analyse(file, analysisConfig(args), error);
             const auto backend = AnalysisService::backendText(analysis.status);
             const auto noteCount = analysis.notes.size();

@@ -66,7 +66,8 @@ private:
     void exportMixdown();
     void importAudio();
     void addAnalysedAudioFile(const juce::File& file, double durationSeconds,
-                              double startSeconds = 0.0);
+                              double startSeconds = 0.0,
+                              const juce::String& targetTrackId = {});
     void scheduleAnalysis(const juce::File& file, const juce::String& clipId);
     void importMidi();
     void importMelodyne();

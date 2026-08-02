@@ -27,6 +27,7 @@ public:
     void setTool(Tool nextTool);
     void selectAllNotes();
     [[nodiscard]] int pixelForSeconds(double seconds) const;
+    [[nodiscard]] double secondsForPixel(int pixel) const;
     void paint(juce::Graphics& g) override;
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDoubleClick(const juce::MouseEvent& event) override;

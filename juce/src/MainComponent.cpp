@@ -753,16 +753,31 @@ void MainComponent::openExternalFile(const juce::File& file)
 void MainComponent::filesDropped(const juce::StringArray& files, int x, int y)
 {
     auto dropSeconds = audio.position();
+    juce::String targetTrackId;
     if (timelineViewport.getBounds().contains(x, y))
+    {
         dropSeconds = timeline.secondsForPixel(x - timelineViewport.getX()
                                                + timelineViewport.getViewPositionX());
+        targetTrackId = timeline.trackIdForPixel(y - timelineViewport.getY()
+                                                 + timelineViewport.getViewPositionY());
+    }
+    else if (pianoViewport.getBounds().contains(x, y))
+    {
+        dropSeconds = pianoRoll.secondsForPixel(x - pianoViewport.getX()
+                                                + pianoViewport.getViewPositionX());
+        targetTrackId = selectedTrackId;
+    }
+    auto nextDropSeconds = dropSeconds;
     for (const auto& path : files)
     {
         const juce::File file(path);
         if (file.hasFileExtension("wav;flac;aif;aiff;mp3;ogg"))
         {
             if (const auto duration = audio.probeDuration(file))
-                addAnalysedAudioFile(file, *duration, dropSeconds);
+            {
+                addAnalysedAudioFile(file, *duration, nextDropSeconds, targetTrackId);
+                if (targetTrackId.isNotEmpty()) nextDropSeconds += *duration;
+            }
         }
         else
             openExternalFile(file);
@@ -1520,9 +1535,10 @@ void MainComponent::importAudio()
 }
 
 void MainComponent::addAnalysedAudioFile(const juce::File& file, double durationSeconds,
-                                         double startSeconds)
+                                         double startSeconds,
+                                         const juce::String& targetTrackId)
 {
-    const auto clipId = project.addAudioFile(file, durationSeconds, startSeconds);
+    const auto clipId = project.addAudioFile(file, durationSeconds, startSeconds, targetTrackId);
     const auto nativeSidecar = SampleSettings::sidecarFor(file);
     const juce::File legacySidecar(file.getFullPathName() + ".hachi.csv");
     // HJM/OTO data is authoritative.  Acoustic analysis must not overwrite

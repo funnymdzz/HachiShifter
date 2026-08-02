@@ -155,12 +155,9 @@ juce::String ProjectModel::makeId(const char* prefix)
 }
 
 juce::String ProjectModel::addAudioFile(const juce::File& file, double durationSeconds,
-                                        double startSeconds)
+                                        double startSeconds,
+                                        const juce::String& targetTrackId)
 {
-    TrackData track;
-    track.id = makeId("track");
-    track.name = file.getFileNameWithoutExtension();
-
     ClipData clip;
     clip.id = makeId("clip");
     clip.sourceFile = file;
@@ -223,12 +220,25 @@ juce::String ProjectModel::addAudioFile(const juce::File& file, double durationS
         }
     }
     const auto clipId = clip.id;
-    track.clips.push_back(std::move(clip));
 
     {
         const juce::ScopedLock guard(lock);
         pushUndoLocked();
-        project.tracks.push_back(std::move(track));
+        const auto target = std::find_if(project.tracks.begin(), project.tracks.end(),
+            [&targetTrackId](const auto& track)
+            {
+                return targetTrackId.isNotEmpty() && track.id == targetTrackId;
+            });
+        if (target != project.tracks.end())
+            target->clips.push_back(std::move(clip));
+        else
+        {
+            TrackData track;
+            track.id = makeId("track");
+            track.name = file.getFileNameWithoutExtension();
+            track.clips.push_back(std::move(clip));
+            project.tracks.push_back(std::move(track));
+        }
         if (project.name == "Untitled")
             project.name = file.getFileNameWithoutExtension();
     }

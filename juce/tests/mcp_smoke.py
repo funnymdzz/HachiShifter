@@ -98,6 +98,26 @@ def main() -> int:
         project = json.loads(client.call("project_snapshot"))
         track = project["tracks"][0]
         clip = track["clips"][0]
+        # Asset-manager/timeline drops can target an existing track.  The MCP
+        # route exercises the same ProjectModel insertion path without a GUI:
+        # no extra track is created and the requested timeline position is
+        # preserved.
+        client.call(
+            "import_audio",
+            {
+                "path": str(source),
+                "start_seconds": 0.75,
+                "track_id": track["id"],
+            },
+        )
+        targeted = json.loads(client.call("project_snapshot"))
+        assert len(targeted["tracks"]) == 1, targeted
+        assert len(targeted["tracks"][0]["clips"]) == 2, targeted
+        inserted = next(
+            value for value in targeted["tracks"][0]["clips"] if value["id"] != clip["id"]
+        )
+        assert abs(inserted["start_seconds"] - 0.75) < 1.0e-9, inserted
+        client.call("remove_clip", {"clip_id": inserted["id"]})
         note_id = client.call(
             "add_note",
             {

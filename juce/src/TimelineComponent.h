@@ -27,6 +27,7 @@ public:
     void setPlayheadSeconds(double seconds);
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     [[nodiscard]] double secondsForPixel(int pixel) const;
+    [[nodiscard]] juce::String trackIdForPixel(int pixel) const;
     std::function<void(double)> onSeek;
     std::function<void(const juce::String&)> onClipSelected;
     std::function<void(const juce::String&)> onClipGainRequested;

@@ -43,6 +43,14 @@ double TimelineComponent::secondsForPixel(int pixel) const
     return std::max(0.0, static_cast<double>(pixel) / pixelsPerSecond);
 }
 
+juce::String TimelineComponent::trackIdForPixel(int pixel) const
+{
+    if (pixel < rulerHeight) return {};
+    const auto index = (pixel - rulerHeight) / rowHeight;
+    return index >= 0 && index < static_cast<int>(snapshot.tracks.size())
+        ? snapshot.tracks[static_cast<std::size_t>(index)].id : juce::String{};
+}
+
 void TimelineComponent::setPixelsPerSecond(float value)
 {
     pixelsPerSecond = juce::jlimit(40.0f, 600.0f, value);
