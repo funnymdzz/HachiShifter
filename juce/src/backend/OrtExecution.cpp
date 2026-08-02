@@ -1,7 +1,5 @@
 #include "OrtExecution.h"
 
-#include <algorithm>
-
 #if defined(HACHI_HAS_ORT_DML) && HACHI_HAS_ORT_DML
 #include <dml_provider_factory.h>
 #endif
@@ -55,7 +53,7 @@ Ort::SessionOptions makeOrtSessionOptions(const OrtExecutionConfig& config,
         // adapters, which was the cause of the former GPU import crash.
         options.SetExecutionMode(ExecutionMode::ORT_SEQUENTIAL);
         options.DisableMemPattern();
-        const auto device = std::max(0, config.deviceIndex);
+        const auto device = config.deviceIndex < 0 ? 0 : config.deviceIndex;
         Ort::ThrowOnError(OrtSessionOptionsAppendExecutionProvider_DML(options, device));
         activeBackend << ":gpu" << device;
 #endif
