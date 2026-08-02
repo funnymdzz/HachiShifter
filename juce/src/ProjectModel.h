@@ -154,6 +154,9 @@ public:
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
     void moveClip(const juce::String& clipId, double startSeconds);
+    [[nodiscard]] juce::String duplicateClip(const juce::String& clipId,
+                                             double startSeconds = -1.0,
+                                             const juce::String& targetTrackId = {});
     void resizeClip(const juce::String& clipId, double startSeconds,
                     double durationSeconds);
     void setClipGain(const juce::String& clipId, float gain);

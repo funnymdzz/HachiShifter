@@ -529,6 +529,70 @@ void ProjectModel::moveClip(const juce::String& clipId, double startSeconds)
     sendChangeMessage();
 }
 
+juce::String ProjectModel::duplicateClip(const juce::String& clipId,
+                                         double startSeconds,
+                                         const juce::String& targetTrackId)
+{
+    juce::String insertedId;
+    {
+        const juce::ScopedLock guard(lock);
+        auto sourceTrackIndex = project.tracks.size();
+        ClipData copy;
+        auto found = false;
+        for (std::size_t trackIndex = 0; trackIndex < project.tracks.size() && !found;
+             ++trackIndex)
+            for (const auto& clip : project.tracks[trackIndex].clips)
+                if (clip.id == clipId)
+                {
+                    sourceTrackIndex = trackIndex;
+                    copy = clip;
+                    found = true;
+                    break;
+                }
+        if (!found || sourceTrackIndex >= project.tracks.size()) return {};
+
+        auto destinationTrackIndex = sourceTrackIndex;
+        if (targetTrackId.isNotEmpty())
+            for (std::size_t trackIndex = 0; trackIndex < project.tracks.size(); ++trackIndex)
+                if (project.tracks[trackIndex].id == targetTrackId)
+                {
+                    destinationTrackIndex = trackIndex;
+                    break;
+                }
+
+        pushUndoLocked();
+        copy.id = makeId("clip");
+        copy.startSeconds = startSeconds >= 0.0
+            ? startSeconds : copy.startSeconds + copy.durationSeconds;
+        copy.startSeconds = std::max(0.0, copy.startSeconds);
+        for (auto& note : copy.notes) note.id = makeId("note");
+
+        // Connection flags at the outer edges describe neighbouring notes in
+        // the original timeline.  Preserve joins inside the copied clip, but
+        // do not accidentally glide into unrelated material at its new place.
+        if (!copy.notes.empty())
+        {
+            const auto first = std::min_element(copy.notes.begin(), copy.notes.end(),
+                [](const auto& left, const auto& right)
+                {
+                    return left.startSeconds < right.startSeconds;
+                });
+            const auto last = std::max_element(copy.notes.begin(), copy.notes.end(),
+                [](const auto& left, const auto& right)
+                {
+                    return left.startSeconds + left.durationSeconds
+                        < right.startSeconds + right.durationSeconds;
+                });
+            first->connectedToPrevious = false;
+            last->connectedToNext = false;
+        }
+        insertedId = copy.id;
+        project.tracks[destinationTrackIndex].clips.push_back(std::move(copy));
+    }
+    sendChangeMessage();
+    return insertedId;
+}
+
 void ProjectModel::resizeClip(const juce::String& clipId, double startSeconds,
                               double durationSeconds)
 {

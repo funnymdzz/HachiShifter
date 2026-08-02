@@ -720,18 +720,27 @@ public:
         }
         else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
         {
-            // HiFi-GAN receives a target-time spectral envelope.  First warp
-            // the source once without changing F0, then let the neural source
-            // filter synthesize the requested target curve.  This keeps the
-            // model and the visible note/Attack clock on the same timeline.
+            // HiFi-GAN receives a target-time spectral envelope.  The normal
+            // route keeps the established nonlinear Attack/time-map warp, but
+            // does not apply a second formant operation before Mel extraction.
+            // The NSF-only variable-hop route instead joins target-length Mel
+            // frames directly from the original PCM and then decodes once.
             const std::vector<float> noGain;
-            auto warped = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                request.framePeriodMs, request.sourceMidi, request.sourceMidi,
-                request.formantSemitones, noGain, noGain, noGain, request.timeMap,
-                request.pitchBackend, request.stretchAlgorithm);
+            const std::vector<float> noFormant;
+            const auto variableHopMel = request.stretchAlgorithm == 1;
+            std::vector<NsfHifiganTimeMapPoint> neuralTimeMap;
+            neuralTimeMap.reserve(request.timeMap.size());
+            for (const auto& point : request.timeMap)
+                neuralTimeMap.push_back({ point.targetSeconds, point.sourceSeconds });
+            auto warped = variableHopMel ? source
+                : renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                    request.framePeriodMs, request.sourceMidi, request.sourceMidi,
+                    noFormant, noGain, noGain, noGain, request.timeMap,
+                    request.pitchBackend, 0);
             auto neural = NsfHifiganRenderer::render(warped, reader->sampleRate,
-                request.framePeriodMs, request.targetMidi, request.hifiganModelDirectory,
-                request.inference);
+                targetSamples, request.framePeriodMs, request.targetMidi,
+                request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,
+                request.inference, variableHopMel);
             if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
             {
                 rendered = std::move(neural.buffer);

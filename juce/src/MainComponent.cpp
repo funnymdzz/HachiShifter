@@ -256,6 +256,8 @@ MainComponent::MainComponent()
             else
                 project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
         }
+        refreshSelectedNoteParameter();
+        resized();
     };
     stretchAlgorithm.onChange = [this]
     {
@@ -483,6 +485,7 @@ void MainComponent::refreshTexts()
     stretchLabel.setText(strings.text("algo.stretch"), juce::dontSendNotification);
     pitchAlgorithm.setTooltip(strings.text("algo.pitch"));
     stretchAlgorithm.setTooltip(strings.text("algo.stretch"));
+    refreshStretchAlgorithmItems(stretchAlgorithm.getSelectedId());
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
     sampleAliasLabel.setText(strings.text("sample.alias"), juce::dontSendNotification);
@@ -523,6 +526,7 @@ void MainComponent::refreshProjectControls()
         pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
         refreshStretchAlgorithmItems(stretchId);
     }
+    refreshSelectedNoteParameter();
 }
 
 void MainComponent::refreshSelectedNoteParameter()
@@ -599,7 +603,11 @@ void MainComponent::refreshSelectedNoteParameter()
     robustPitchCurveButton.setToggleState(found && selected.robustPitchCurve,
                                            juce::dontSendNotification);
     updatingRobustPitchCurve = false;
-    robustPitchCurveButton.setEnabled(found);
+    const auto showRobust = pitchAlgorithm.getSelectedId() == 1;
+    const auto visibilityChanged = robustPitchCurveButton.isVisible() != showRobust;
+    robustPitchCurveButton.setVisible(showRobust);
+    robustPitchCurveButton.setEnabled(found && showRobust);
+    if (visibilityChanged) resized();
 }
 
 void MainComponent::applySelectedNoteParameter()
@@ -629,11 +637,11 @@ void MainComponent::refreshStretchAlgorithmItems(int preferredId)
 {
     const auto previous = preferredId > 0 ? preferredId : stretchAlgorithm.getSelectedId();
     stretchAlgorithm.clear(juce::dontSendNotification);
-    stretchAlgorithm.addItem("Melodyne Hybrid", 1);
+    stretchAlgorithm.addItem(strings.text("algo.stretch.melodyneHybrid"), 1);
     if (pitchAlgorithm.getSelectedId() == 2)
-        stretchAlgorithm.addItem("Variable Mel Hop", 2);
-    stretchAlgorithm.addItem("Loop", 3);
-    stretchAlgorithm.addItem("SoundTouch", 4);
+        stretchAlgorithm.addItem(strings.text("algo.stretch.nsfVariableMel"), 2);
+    stretchAlgorithm.addItem(strings.text("algo.stretch.loop"), 3);
+    stretchAlgorithm.addItem(strings.text("algo.stretch.soundTouch"), 4);
     const auto canUsePreferred = previous != 2 || pitchAlgorithm.getSelectedId() == 2;
     stretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
                                    juce::dontSendNotification);
@@ -717,6 +725,24 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'A')
     {
         pianoRoll.selectAllNotes();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'C'
+        && selectedClipId.isNotEmpty())
+    {
+        copySelectedClip();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'V'
+        && copiedClipId.isNotEmpty())
+    {
+        pasteCopiedClip();
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'D'
+        && selectedClipId.isNotEmpty())
+    {
+        duplicateSelectedClip();
         return true;
     }
     if (key == juce::KeyPress::spaceKey
@@ -882,7 +908,8 @@ void MainComponent::resized()
     takeParameter(tensionParamButton, 50);
     takeParameter(formantParamButton, 50);
     takeParameter(volumeParamButton, 50);
-    takeParameter(robustPitchCurveButton, 74);
+    if (robustPitchCurveButton.isVisible())
+        takeParameter(robustPitchCurveButton, 74);
     sourceEditHint.setBounds(parameterHeader.reduced(3, 0));
     auto sampleBar = area.removeFromTop(sampleEditorHeight).reduced(4, 3);
     auto setSampleVisible = [this](bool visible)
@@ -1320,6 +1347,10 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(21, strings.text("edit.redo"), project.canRedo());
         menu.addSeparator();
         menu.addItem(22, strings.text("edit.selectAll"));
+        menu.addSeparator();
+        menu.addItem(23, strings.text("edit.copyClip"), selectedClipId.isNotEmpty());
+        menu.addItem(24, strings.text("edit.pasteClip"), copiedClipId.isNotEmpty());
+        menu.addItem(25, strings.text("edit.duplicateClip"), selectedClipId.isNotEmpty());
     }
     else if (index == 2)
     {
@@ -1367,6 +1398,9 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 20) project.undo();
     else if (id == 21) project.redo();
     else if (id == 22) pianoRoll.selectAllNotes();
+    else if (id == 23) copySelectedClip();
+    else if (id == 24) pasteCopiedClip();
+    else if (id == 25) duplicateSelectedClip();
     else if (id == 31)
     {
         const auto data = project.snapshot();
@@ -1487,6 +1521,62 @@ void MainComponent::showClipGainDialog()
             }
             delete dialog;
         }), false);
+}
+
+void MainComponent::copySelectedClip()
+{
+    if (selectedClipId.isEmpty()) return;
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.id == selectedClipId)
+            {
+                copiedClipId = clip.id;
+                selectedTrackId = track.id;
+                statusLabel.setText(strings.text("status.clipCopied"),
+                                    juce::dontSendNotification);
+                menuItemsChanged();
+                return;
+            }
+}
+
+void MainComponent::pasteCopiedClip()
+{
+    if (copiedClipId.isEmpty()) return;
+    auto pasteSeconds = std::max(0.0, audio.position());
+    const auto data = project.snapshot();
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            if (clip.id == copiedClipId && pasteSeconds <= clip.startSeconds + 1.0e-6)
+                pasteSeconds = clip.startSeconds + clip.durationSeconds;
+    const auto inserted = project.duplicateClip(copiedClipId, pasteSeconds,
+                                                selectedTrackId);
+    if (inserted.isNotEmpty())
+    {
+        focusClip(inserted);
+        statusLabel.setText(strings.text("status.clipPasted"),
+                            juce::dontSendNotification);
+    }
+    else
+    {
+        copiedClipId.clear();
+        menuItemsChanged();
+    }
+}
+
+void MainComponent::duplicateSelectedClip()
+{
+    if (selectedClipId.isEmpty()) return;
+    const auto inserted = project.duplicateClip(selectedClipId, -1.0,
+                                                selectedTrackId);
+    if (inserted.isNotEmpty())
+    {
+        copiedClipId = selectedClipId;
+        focusClip(inserted);
+        statusLabel.setText(strings.text("status.clipPasted"),
+                            juce::dontSendNotification);
+        menuItemsChanged();
+    }
 }
 
 void MainComponent::confirmDestructive(const juce::String& title,

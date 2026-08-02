@@ -81,6 +81,9 @@ private:
     void exportOto();
     void showAssetManager();
     void showClipGainDialog();
+    void copySelectedClip();
+    void pasteCopiedClip();
+    void duplicateSelectedClip();
     void confirmDestructive(const juce::String& title, std::function<void()> action);
     void loadMelodyneFile(const juce::File& file);
     void presentMelodyneComposeSelection(backend::MelodyneImportResult imported);
@@ -174,6 +177,7 @@ private:
     juce::String selectedClipId;
     juce::String selectedTrackId;
     juce::String selectedNoteId;
+    juce::String copiedClipId;
     enum class ParameterMode { pitchSmooth, pitchDrift, attackSpeed, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;

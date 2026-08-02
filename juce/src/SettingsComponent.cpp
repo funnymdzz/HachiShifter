@@ -115,10 +115,11 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     importedAlgorithm.addItem("WORLD", 3);
     importedAlgorithm.addItem("vslib", 4);
     importedAlgorithm.addItem("mld3", 5);
-    importedStretchAlgorithm.addItem("Melodyne Hybrid", 1);
-    importedStretchAlgorithm.addItem("Variable Mel Hop", 2);
-    importedStretchAlgorithm.addItem("Loop", 3);
-    importedStretchAlgorithm.addItem("SoundTouch", 4);
+    refreshImportedStretchItems(1);
+    importedAlgorithm.onChange = [this]
+    {
+        refreshImportedStretchItems(importedStretchAlgorithm.getSelectedId());
+    };
     importPage.addRow(melodyneComposeLabel, melodyneCompose);
     importPage.addRow(melodynePitchLabel, melodynePitchSource);
     importPage.addRow(importedAlgorithmLabel, importedAlgorithm);
@@ -188,8 +189,7 @@ void SettingsComponent::loadValues()
     melodyneCompose.setSelectedId(properties.getIntValue("import.melodyneCompose", 1), juce::dontSendNotification);
     melodynePitchSource.setSelectedId(properties.getIntValue("import.melodynePitchSource", 1), juce::dontSendNotification);
     importedAlgorithm.setSelectedId(properties.getIntValue("import.algorithm", 1), juce::dontSendNotification);
-    importedStretchAlgorithm.setSelectedId(
-        properties.getIntValue("import.stretchAlgorithm", 1), juce::dontSendNotification);
+    refreshImportedStretchItems(properties.getIntValue("import.stretchAlgorithm", 1));
     preserveProjectEdits.setToggleState(properties.getBoolValue("import.preserveEdits", true), juce::dontSendNotification);
     locateMediaRecursively.setToggleState(properties.getBoolValue("import.recursiveMedia", true), juce::dontSendNotification);
     refreshAudioValues();
@@ -272,9 +272,25 @@ void SettingsComponent::setTexts()
     importedAlgorithmLabel.setText(strings.text("settings.importAlgorithm"), juce::dontSendNotification);
     importedStretchAlgorithmLabel.setText(strings.text("settings.importStretchAlgorithm"),
                                            juce::dontSendNotification);
+    refreshImportedStretchItems(importedStretchAlgorithm.getSelectedId());
     preserveProjectEdits.setButtonText(strings.text("settings.preserveEdits"));
     locateMediaRecursively.setButtonText(strings.text("settings.recursiveMedia"));
     applyButton.setButtonText(strings.text("dialog.apply"));
+}
+
+void SettingsComponent::refreshImportedStretchItems(int preferredId)
+{
+    const auto previous = preferredId > 0 ? preferredId
+                                           : importedStretchAlgorithm.getSelectedId();
+    importedStretchAlgorithm.clear(juce::dontSendNotification);
+    importedStretchAlgorithm.addItem(strings.text("algo.stretch.melodyneHybrid"), 1);
+    if (importedAlgorithm.getSelectedId() == 2)
+        importedStretchAlgorithm.addItem(strings.text("algo.stretch.nsfVariableMel"), 2);
+    importedStretchAlgorithm.addItem(strings.text("algo.stretch.loop"), 3);
+    importedStretchAlgorithm.addItem(strings.text("algo.stretch.soundTouch"), 4);
+    const auto canUsePreferred = previous != 2 || importedAlgorithm.getSelectedId() == 2;
+    importedStretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
+                                             juce::dontSendNotification);
 }
 
 void SettingsComponent::resized()

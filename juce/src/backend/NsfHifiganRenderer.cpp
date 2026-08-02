@@ -54,6 +54,18 @@ float curveAt(const std::vector<float>& curve, double position)
     return aVoiced ? a + (b - a) * amount : 0.0f;
 }
 
+float scalarCurveAt(const std::vector<float>& curve, double position, float fallback = 0.0f)
+{
+    if (curve.empty() || !std::isfinite(position) || position < 0.0) return fallback;
+    const auto left = static_cast<std::size_t>(std::floor(position));
+    if (left >= curve.size()) return fallback;
+    const auto right = std::min(left + 1, curve.size() - 1);
+    const auto amount = static_cast<float>(position - static_cast<double>(left));
+    const auto a = curve[left];
+    const auto b = curve[right];
+    return std::isfinite(a) && std::isfinite(b) ? a + (b - a) * amount : fallback;
+}
+
 float midiToHz(float midi)
 {
     return std::isfinite(midi) && midi > 0.0f
@@ -141,14 +153,37 @@ std::vector<float> resample(const float* input, int samples, int inputRate, int 
     const auto ratio = static_cast<double>(outputRate) / inputRate;
     const auto outputSamples = std::max(1, static_cast<int>(std::llround(samples * ratio)));
     std::vector<float> output(static_cast<std::size_t>(outputSamples));
+    // Linear resampling noticeably tilts a vocal spectral envelope whenever a
+    // model pack uses a rate different from the project.  That error is then
+    // interpreted by the neural source/filter decoder as a smaller vocal
+    // tract (the reported child-like colour).  A compact band-limited Lanczos
+    // conversion keeps the Mel envelope stable without another DSP library.
+    constexpr int radius = 12;
+    const auto cutoff = std::min(1.0, ratio);
+    const auto sinc = [](double x)
+    {
+        if (std::abs(x) < 1.0e-10) return 1.0;
+        const auto angle = juce::MathConstants<double>::pi * x;
+        return std::sin(angle) / angle;
+    };
     for (int index = 0; index < outputSamples; ++index)
     {
         const auto position = static_cast<double>(index) / ratio;
-        const auto left = juce::jlimit(0, samples - 1, static_cast<int>(std::floor(position)));
-        const auto right = std::min(samples - 1, left + 1);
-        const auto amount = static_cast<float>(position - std::floor(position));
-        output[static_cast<std::size_t>(index)] = input[left]
-            + (input[right] - input[left]) * amount;
+        const auto centre = static_cast<int>(std::floor(position));
+        auto value = 0.0;
+        auto weightSum = 0.0;
+        for (int tap = centre - radius + 1; tap <= centre + radius; ++tap)
+        {
+            const auto distance = position - static_cast<double>(tap);
+            if (std::abs(distance) >= radius) continue;
+            const auto weight = cutoff * sinc(distance * cutoff)
+                * sinc(distance / static_cast<double>(radius));
+            const auto sourceIndex = juce::jlimit(0, samples - 1, tap);
+            value += static_cast<double>(input[sourceIndex]) * weight;
+            weightSum += weight;
+        }
+        output[static_cast<std::size_t>(index)] = static_cast<float>(
+            std::abs(weightSum) > 1.0e-12 ? value / weightSum : 0.0);
     }
     return output;
 }
@@ -219,13 +254,15 @@ struct MelData
     std::size_t frames = 0;
 };
 
-MelData buildMel(const std::vector<float>& waveform, const Config& config)
+MelData buildMelWithHop(const std::vector<float>& waveform, const Config& config,
+                        int analysisHop)
 {
     if (waveform.empty()) return {};
+    analysisHop = std::max(1, analysisHop);
     const auto leftPad = static_cast<std::size_t>(std::max(0,
-        (config.windowSize - config.hop) / 2));
+        (config.windowSize - analysisHop) / 2));
     const auto rightPad = static_cast<std::size_t>(std::max(0,
-        (config.windowSize - config.hop + 1) / 2));
+        (config.windowSize - analysisHop + 1) / 2));
     std::vector<float> padded(leftPad + waveform.size() + rightPad);
     for (std::size_t index = 0; index < padded.size(); ++index)
         padded[index] = waveform[reflectIndex(static_cast<std::ptrdiff_t>(index)
@@ -234,7 +271,7 @@ MelData buildMel(const std::vector<float>& waveform, const Config& config)
         return { std::vector<float>(static_cast<std::size_t>(config.melBands),
                                     std::log(1.0e-9f)), 1 };
     const auto frames = 1 + (padded.size() - static_cast<std::size_t>(config.windowSize))
-        / static_cast<std::size_t>(config.hop);
+        / static_cast<std::size_t>(analysisHop);
     const auto frequencies = config.fftSize / 2 + 1;
     const auto weights = filterbank(config);
     std::vector<float> window(static_cast<std::size_t>(config.windowSize));
@@ -254,7 +291,7 @@ MelData buildMel(const std::vector<float>& waveform, const Config& config)
         std::fill(input.begin(), input.end(), std::complex<float>{});
         for (int index = 0; index < config.windowSize; ++index)
             input[static_cast<std::size_t>(index)] = {
-                padded[frame * static_cast<std::size_t>(config.hop)
+                padded[frame * static_cast<std::size_t>(analysisHop)
                     + static_cast<std::size_t>(index)] * window[static_cast<std::size_t>(index)], 0.0f
             };
         fft.perform(input.data(), spectrum.data(), false);
@@ -273,6 +310,164 @@ MelData buildMel(const std::vector<float>& waveform, const Config& config)
         }
     }
     return { std::move(mel), frames };
+}
+
+MelData interpolateMelTime(const MelData& source, int melBands,
+                           std::size_t targetFrames)
+{
+    if (source.frames == 0 || targetFrames == 0 || melBands <= 0) return {};
+    if (source.frames == targetFrames) return source;
+    MelData result;
+    result.frames = targetFrames;
+    result.values.resize(static_cast<std::size_t>(melBands) * targetFrames);
+    const auto scale = targetFrames <= 1 ? 0.0
+        : static_cast<double>(source.frames - 1) / static_cast<double>(targetFrames - 1);
+    for (int band = 0; band < melBands; ++band)
+        for (std::size_t frame = 0; frame < targetFrames; ++frame)
+        {
+            const auto sourcePosition = static_cast<double>(frame) * scale;
+            const auto left = std::min(source.frames - 1,
+                static_cast<std::size_t>(std::floor(sourcePosition)));
+            const auto right = std::min(source.frames - 1, left + 1);
+            const auto amount = static_cast<float>(sourcePosition - std::floor(sourcePosition));
+            const auto row = static_cast<std::size_t>(band) * source.frames;
+            result.values[static_cast<std::size_t>(band) * targetFrames + frame]
+                = source.values[row + left]
+                + (source.values[row + right] - source.values[row + left]) * amount;
+        }
+    return result;
+}
+
+MelData spliceMelToTimeMap(const MelData& source, int melBands,
+                           std::size_t targetFrames, double targetHopSeconds,
+                           double sourceHopSeconds,
+                           const std::vector<NsfHifiganTimeMapPoint>& timeMap)
+{
+    if (timeMap.size() < 2 || source.frames == 0 || targetFrames == 0
+        || targetHopSeconds <= 0.0 || sourceHopSeconds <= 0.0)
+        return interpolateMelTime(source, melBands, targetFrames);
+    MelData result;
+    result.frames = targetFrames;
+    result.values.resize(static_cast<std::size_t>(melBands) * targetFrames);
+    std::size_t segment = 0;
+    for (std::size_t frame = 0; frame < targetFrames; ++frame)
+    {
+        const auto targetSeconds = static_cast<double>(frame) * targetHopSeconds;
+        while (segment + 1 < timeMap.size()
+               && targetSeconds > timeMap[segment + 1].targetSeconds)
+            ++segment;
+        const auto rightIndex = std::min(segment + 1, timeMap.size() - 1);
+        const auto& leftPoint = timeMap[std::min(segment, timeMap.size() - 1)];
+        const auto& rightPoint = timeMap[rightIndex];
+        const auto duration = rightPoint.targetSeconds - leftPoint.targetSeconds;
+        const auto amount = duration > 1.0e-9
+            ? juce::jlimit(0.0, 1.0,
+                (targetSeconds - leftPoint.targetSeconds) / duration)
+            : 0.0;
+        const auto sourceSeconds = leftPoint.sourceSeconds
+            + (rightPoint.sourceSeconds - leftPoint.sourceSeconds) * amount;
+        const auto sourcePosition = juce::jlimit(0.0,
+            static_cast<double>(source.frames - 1), sourceSeconds / sourceHopSeconds);
+        const auto sourceLeft = static_cast<std::size_t>(std::floor(sourcePosition));
+        const auto sourceRight = std::min(source.frames - 1, sourceLeft + 1);
+        const auto sourceAmount = static_cast<float>(sourcePosition - std::floor(sourcePosition));
+        for (int band = 0; band < melBands; ++band)
+        {
+            const auto row = static_cast<std::size_t>(band) * source.frames;
+            result.values[static_cast<std::size_t>(band) * targetFrames + frame]
+                = source.values[row + sourceLeft]
+                + (source.values[row + sourceRight] - source.values[row + sourceLeft])
+                    * sourceAmount;
+        }
+    }
+    return result;
+}
+
+void shiftMelFormants(MelData& mel, const Config& config,
+                      const std::vector<float>& formantSemitones,
+                      double framePeriodMs)
+{
+    if (mel.frames == 0 || formantSemitones.empty()) return;
+    const auto melMinimum = hzToMel(std::max(0.0f, config.minimumHz));
+    const auto melMaximum = hzToMel(std::max(config.minimumHz + 1.0f, config.maximumHz));
+    const auto melRange = std::max(1.0e-9f, melMaximum - melMinimum);
+    const auto bands = static_cast<float>(config.melBands);
+    const auto silence = std::log(1.0e-9f);
+    std::vector<float> centres(static_cast<std::size_t>(config.melBands));
+    std::vector<float> column(static_cast<std::size_t>(config.melBands));
+    for (int band = 0; band < config.melBands; ++band)
+        centres[static_cast<std::size_t>(band)] = melToHz(melMinimum
+            + (static_cast<float>(band) + 1.0f) * melRange / (bands + 1.0f));
+    const auto hopSeconds = static_cast<double>(config.hop) / config.sampleRate;
+    const auto curvePeriod = std::max(0.1, framePeriodMs);
+    for (std::size_t frame = 0; frame < mel.frames; ++frame)
+    {
+        const auto shift = scalarCurveAt(formantSemitones,
+            static_cast<double>(frame) * hopSeconds * 1000.0 / curvePeriod);
+        if (!std::isfinite(shift) || std::abs(shift) < 5.0e-4f) continue;
+        const auto ratio = std::exp2(shift / 12.0f);
+        if (!std::isfinite(ratio) || ratio <= 0.0f) continue;
+        for (int band = 0; band < config.melBands; ++band)
+            column[static_cast<std::size_t>(band)] = mel.values[
+                static_cast<std::size_t>(band) * mel.frames + frame];
+        for (int band = 0; band < config.melBands; ++band)
+        {
+            const auto sourceHz = centres[static_cast<std::size_t>(band)] / ratio;
+            const auto sourceBin = (hzToMel(std::max(0.0f, sourceHz)) - melMinimum)
+                / melRange * (bands + 1.0f) - 1.0f;
+            const auto left = static_cast<int>(std::floor(sourceBin));
+            auto value = silence;
+            if (left >= 0 && left < config.melBands)
+            {
+                if (left == config.melBands - 1)
+                    value = column[static_cast<std::size_t>(left)];
+                else
+                {
+                    const auto amount = juce::jlimit(0.0f, 1.0f,
+                        sourceBin - static_cast<float>(left));
+                    value = column[static_cast<std::size_t>(left)]
+                        + (column[static_cast<std::size_t>(left + 1)]
+                           - column[static_cast<std::size_t>(left)]) * amount;
+                }
+            }
+            mel.values[static_cast<std::size_t>(band) * mel.frames + frame] = value;
+        }
+    }
+}
+
+void conditionNeuralBoundary(float* samples, int count, double sampleRate)
+{
+    if (samples == nullptr || count <= 0 || sampleRate <= 0.0) return;
+    // Neural segments can carry a small DC step even when their Mel/F0 inputs
+    // are continuous.  Remove it before the clip enters the project mixer.
+    const auto pole = static_cast<float>(std::exp(
+        -juce::MathConstants<double>::twoPi * 22.0 / sampleRate));
+    auto previousInput = samples[0];
+    auto previousOutput = 0.0f;
+    for (int index = 0; index < count; ++index)
+    {
+        const auto input = samples[index];
+        const auto output = input - previousInput + pole * previousOutput;
+        samples[index] = std::isfinite(output) ? output : 0.0f;
+        previousInput = input;
+        previousOutput = samples[index];
+    }
+    // Clip boundaries are not guaranteed to coincide with a decoder source
+    // phase.  A 3 ms equal-power guard suppresses that isolated discontinuity
+    // without smearing attacks or creating an audible long crossfade.
+    const auto fade = std::min(count / 2, std::max(1,
+        static_cast<int>(std::llround(sampleRate * 0.003))));
+    for (int index = 0; index < fade; ++index)
+    {
+        const auto phase = (static_cast<double>(index) + 1.0)
+            / (static_cast<double>(fade) + 1.0);
+        const auto gainIn = static_cast<float>(std::sin(
+            juce::MathConstants<double>::halfPi * phase));
+        const auto gainOut = static_cast<float>(std::sin(
+            juce::MathConstants<double>::halfPi * (1.0 - phase)));
+        samples[index] *= gainIn;
+        samples[count - 1 - index] *= gainOut;
+    }
 }
 
 #if JUCE_WINDOWS
@@ -335,7 +530,7 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
     const char* outputNames[] { outputName.get() };
     const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     constexpr std::size_t coreFrames = 4'096;
-    constexpr std::size_t contextFrames = 16;
+    constexpr std::size_t contextFrames = 32;
     std::vector<float> output(mel.frames * static_cast<std::size_t>(config.hop));
     for (std::size_t coreStart = 0; coreStart < mel.frames; coreStart += coreFrames)
     {
@@ -386,9 +581,12 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
 #endif
 
 NsfHifiganRenderResult NsfHifiganRenderer::render(
-    const juce::AudioBuffer<float>& source, double sampleRate, double framePeriodMs,
-    const std::vector<float>& targetMidi, const juce::File& configuredModelDirectory,
-    const OrtExecutionConfig& execution)
+    const juce::AudioBuffer<float>& source, double sampleRate, int targetSamples,
+    double framePeriodMs, const std::vector<float>& targetMidi,
+    const std::vector<float>& formantSemitones,
+    const std::vector<NsfHifiganTimeMapPoint>& timeMap,
+    const juce::File& configuredModelDirectory,
+    const OrtExecutionConfig& execution, bool variableHopMel)
 {
     NsfHifiganRenderResult result;
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
@@ -411,56 +609,101 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             return result;
         }
         const auto channels = source.getNumChannels();
-        const auto samples = source.getNumSamples();
-        if (channels <= 0 || samples <= 0 || sampleRate <= 0.0)
+        const auto sourceSamples = source.getNumSamples();
+        if (channels <= 0 || sourceSamples <= 0 || targetSamples <= 0 || sampleRate <= 0.0)
         {
             result.error = "NSF-HiFiGAN received empty audio";
             return result;
         }
-        result.buffer.setSize(channels, samples);
+        result.buffer.setSize(channels, targetSamples);
         result.buffer.clear();
+        // The public NSF model is mono.  Running two independent decoder
+        // phases for stereo material creates a wide, chorus-like edge and can
+        // click when the clip is mixed.  Analyse one deterministic downmix and
+        // duplicate the rendered vocal to retain the project's channel count.
+        std::vector<float> mono(static_cast<std::size_t>(sourceSamples));
         for (int channel = 0; channel < channels; ++channel)
         {
-            const auto modelInput = resample(source.getReadPointer(channel), samples,
-                static_cast<int>(std::llround(sampleRate)), config->sampleRate);
-            const auto mel = buildMel(modelInput, *config);
-            if (mel.frames == 0)
-            {
-                result.error = "NSF-HiFiGAN mel extraction returned no frames";
-                result.buffer.setSize(0, 0);
-                return result;
-            }
-            std::vector<float> f0(mel.frames);
-            const auto hopSeconds = static_cast<double>(config->hop) / config->sampleRate;
-            const auto framePeriod = std::max(0.1, framePeriodMs);
-            for (std::size_t frame = 0; frame < mel.frames; ++frame)
-            {
-                const auto seconds = static_cast<double>(frame) * hopSeconds;
-                f0[frame] = midiToHz(curveAt(targetMidi,
-                    seconds * 1000.0 / framePeriod));
-            }
-            auto modelOutput = infer(*ortSession.model, *config, mel, f0,
-                                     ortSession.runMutex.get());
-            if (modelOutput.empty())
-            {
-                result.error = "NSF-HiFiGAN ONNX returned empty audio";
-                result.buffer.setSize(0, 0);
-                return result;
-            }
-            const auto output = resample(modelOutput.data(), static_cast<int>(modelOutput.size()),
-                                          config->sampleRate,
-                                          static_cast<int>(std::llround(sampleRate)));
-            const auto wanted = static_cast<std::size_t>(samples);
-            const auto maximumNaturalShortfall = static_cast<std::size_t>(std::ceil(
-                static_cast<double>(config->hop) * sampleRate / config->sampleRate)) + 2;
-            if (output.size() + maximumNaturalShortfall < wanted)
-            {
-                result.error = "NSF-HiFiGAN ONNX returned short audio";
-                result.buffer.setSize(0, 0);
-                return result;
-            }
+            const auto* input = source.getReadPointer(channel);
+            for (int sample = 0; sample < sourceSamples; ++sample)
+                mono[static_cast<std::size_t>(sample)] += input[sample]
+                    / static_cast<float>(channels);
+        }
+        const auto modelInput = resample(mono.data(), sourceSamples,
+            static_cast<int>(std::llround(sampleRate)), config->sampleRate);
+        const auto targetModelSamples = std::max<std::size_t>(1,
+            static_cast<std::size_t>(std::llround(static_cast<double>(targetSamples)
+                * config->sampleRate / sampleRate)));
+        const auto targetFrames = std::max<std::size_t>(1,
+            (targetModelSamples + static_cast<std::size_t>(config->hop) - 1)
+                / static_cast<std::size_t>(config->hop));
+        auto analysisHop = config->hop;
+        if (variableHopMel)
+        {
+            const auto playbackRate = static_cast<double>(modelInput.size())
+                / static_cast<double>(targetModelSamples);
+            const auto safeRatio = juce::jlimit(0.72, 1.40,
+                std::max(1.0e-6, playbackRate));
+            analysisHop = std::max(1, static_cast<int>(std::llround(
+                static_cast<double>(config->hop) * safeRatio)));
+        }
+        auto mel = buildMelWithHop(modelInput, *config, analysisHop);
+        if (mel.frames == 0)
+        {
+            result.error = "NSF-HiFiGAN mel extraction returned no frames";
+            result.buffer.setSize(0, 0);
+            return result;
+        }
+        // The decoder always advances by its training hop.  Variable analysis
+        // hop performs most of the stretch before the Mel frames are joined;
+        // this small exact-frame interpolation only removes rounding drift.
+        mel = variableHopMel
+            ? spliceMelToTimeMap(mel, config->melBands, targetFrames,
+                static_cast<double>(config->hop) / config->sampleRate,
+                static_cast<double>(analysisHop) / config->sampleRate, timeMap)
+            : interpolateMelTime(mel, config->melBands, targetFrames);
+        shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
+        std::vector<float> f0(mel.frames);
+        const auto hopSeconds = static_cast<double>(config->hop) / config->sampleRate;
+        const auto framePeriod = std::max(0.1, framePeriodMs);
+        for (std::size_t frame = 0; frame < mel.frames; ++frame)
+        {
+            const auto seconds = static_cast<double>(frame) * hopSeconds;
+            f0[frame] = midiToHz(curveAt(targetMidi,
+                seconds * 1000.0 / framePeriod));
+        }
+        auto modelOutput = infer(*ortSession.model, *config, mel, f0,
+                                 ortSession.runMutex.get());
+        if (modelOutput.empty())
+        {
+            result.error = "NSF-HiFiGAN ONNX returned empty audio";
+            result.buffer.setSize(0, 0);
+            return result;
+        }
+        const auto output = resample(modelOutput.data(), static_cast<int>(modelOutput.size()),
+                                      config->sampleRate,
+                                      static_cast<int>(std::llround(sampleRate)));
+        const auto wanted = static_cast<std::size_t>(targetSamples);
+        const auto maximumNaturalShortfall = static_cast<std::size_t>(std::ceil(
+            static_cast<double>(config->hop) * sampleRate / config->sampleRate)) + 2;
+        if (output.size() + maximumNaturalShortfall < wanted)
+        {
+            result.error = "NSF-HiFiGAN ONNX returned short audio";
+            result.buffer.setSize(0, 0);
+            return result;
+        }
+        for (int channel = 0; channel < channels; ++channel)
+        {
             auto* destination = result.buffer.getWritePointer(channel);
-            std::copy_n(output.begin(), std::min(output.size(), wanted), destination);
+            const auto copied = std::min(output.size(), wanted);
+            std::copy_n(output.begin(), copied, destination);
+            if (copied < wanted)
+            {
+                const auto hold = copied > 0 ? destination[copied - 1] : 0.0f;
+                std::fill(destination + static_cast<std::ptrdiff_t>(copied),
+                          destination + static_cast<std::ptrdiff_t>(wanted), hold);
+            }
+            conditionNeuralBoundary(destination, targetSamples, sampleRate);
         }
         result.usedModel = true;
         return result;
@@ -474,8 +717,9 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         result.error = "NSF-HiFiGAN render failed: " + juce::String(exception.what());
     }
 #else
-    juce::ignoreUnused(source, sampleRate, framePeriodMs, targetMidi,
-                       configuredModelDirectory, execution);
+    juce::ignoreUnused(source, sampleRate, targetSamples, framePeriodMs, targetMidi,
+                       formantSemitones, timeMap, configuredModelDirectory, execution,
+                       variableHopMel);
     result.error = "NSF-HiFiGAN ONNX runtime is not included";
 #endif
     return result;

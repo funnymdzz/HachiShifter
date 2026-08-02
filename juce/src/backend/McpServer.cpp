@@ -255,6 +255,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("set_clip", "Set clip gain, fades and mute state / 设置采样增益、淡入淡出和静音"),
             makeTool("move_clip", "Move a clip on the timeline / 移动采样"),
             makeTool("resize_clip", "Stretch a whole clip while preserving its source media / 整体拉伸采样并保留原始素材"),
+            makeTool("duplicate_clip", "Deep-copy a clip and its notes to a timeline position / 深度复制采样及其音符到指定位置"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
             makeTool("set_note", "Set pitch, Robust Pitch Curve, tension, breath, formant, gain, Attack and consonant parameters / 设置稳健音高线及全部音符参数"),
@@ -493,6 +494,14 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         project.resizeClip(string(args, "clip_id"), number(args, "start_seconds"),
                            number(args, "duration_seconds", 0.25));
         return toolResult("ok");
+    }
+    else if (name == "duplicate_clip")
+    {
+        const auto id = project.duplicateClip(string(args, "clip_id"),
+            args.hasProperty("start_seconds") ? number(args, "start_seconds") : -1.0,
+            string(args, "track_id"));
+        return id.isNotEmpty() ? toolResult("clip_id=" + id)
+                               : toolResult("Clip not found", true);
     }
     else if (name == "transpose_note")
     {

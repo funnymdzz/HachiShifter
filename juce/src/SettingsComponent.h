@@ -50,6 +50,7 @@ private:
     void refreshAudioValues();
     void applyAudioValues();
     void openAdvancedAudioPanel();
+    void refreshImportedStretchItems(int preferredId = 0);
 
     I18n& strings;
     juce::AudioDeviceManager& devices;

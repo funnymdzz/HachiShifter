@@ -7,6 +7,12 @@
 
 namespace hachi::backend
 {
+struct NsfHifiganTimeMapPoint
+{
+    double targetSeconds = 0.0;
+    double sourceSeconds = 0.0;
+};
+
 struct NsfHifiganRenderResult
 {
     juce::AudioBuffer<float> buffer;
@@ -22,9 +28,13 @@ public:
     static NsfHifiganRenderResult render(
         const juce::AudioBuffer<float>& source,
         double sampleRate,
+        int targetSamples,
         double framePeriodMs,
         const std::vector<float>& targetMidi,
+        const std::vector<float>& formantSemitones,
+        const std::vector<NsfHifiganTimeMapPoint>& timeMap,
         const juce::File& configuredModelDirectory,
-        const OrtExecutionConfig& execution);
+        const OrtExecutionConfig& execution,
+        bool variableHopMel);
 };
 }
