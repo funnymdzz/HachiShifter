@@ -30,6 +30,7 @@ juce::String pitchAlgorithmName(PitchAlgorithm value)
     switch (value)
     {
         case PitchAlgorithm::mld5: return "mld5";
+        case PitchAlgorithm::mld3: return "mld3";
         case PitchAlgorithm::nsfHifigan: return "nsf-hifigan";
         case PitchAlgorithm::world: return "world";
         case PitchAlgorithm::vocalShifter: return "vslib";
@@ -40,6 +41,7 @@ juce::String pitchAlgorithmName(PitchAlgorithm value)
 PitchAlgorithm parsePitchAlgorithm(const juce::String& value)
 {
     if (value == "nsf-hifigan") return PitchAlgorithm::nsfHifigan;
+    if (value == "mld3") return PitchAlgorithm::mld3;
     if (value == "world") return PitchAlgorithm::world;
     if (value == "vslib") return PitchAlgorithm::vocalShifter;
     return PitchAlgorithm::mld5;
@@ -920,6 +922,25 @@ void ProjectModel::setNoteAttackSpeed(const juce::String& noteId, float attackSp
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setNoteRobustPitchCurve(const juce::String& noteId, bool enabled)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (note.id == noteId && note.robustPitchCurve != enabled)
+                    {
+                        pushUndoLocked();
+                        note.robustPitchCurve = enabled;
+                        changed = true;
+                        break;
+                    }
+    }
+    if (changed) sendChangeMessage();
+}
+
 bool ProjectModel::setNotePitchCurve(const juce::String& noteId,
                                      std::vector<PitchCurveEditPoint> points)
 {
@@ -1222,7 +1243,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 6, nullptr);
+    root.setProperty("version", 7, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -1289,6 +1310,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
                 noteTree.setProperty("formantSemitones", note.formantSemitones, nullptr);
                 noteTree.setProperty("gain", note.gain, nullptr);
                 noteTree.setProperty("attackSpeed", note.attackSpeed, nullptr);
+                noteTree.setProperty("robustPitchCurve", note.robustPitchCurve, nullptr);
                 noteTree.setProperty("connectedToPrevious", note.connectedToPrevious, nullptr);
                 noteTree.setProperty("connectedToNext", note.connectedToNext, nullptr);
                 for (const auto& point : note.contour)
@@ -1414,6 +1436,8 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
                 note.formantSemitones = static_cast<float>(noteTree.getProperty("formantSemitones", 0.0));
                 note.gain = static_cast<float>(noteTree.getProperty("gain", 1.0));
                 note.attackSpeed = static_cast<float>(noteTree.getProperty("attackSpeed", 1.0));
+                note.robustPitchCurve = static_cast<bool>(
+                    noteTree.getProperty("robustPitchCurve", false));
                 note.connectedToPrevious = static_cast<bool>(noteTree.getProperty("connectedToPrevious", false));
                 note.connectedToNext = static_cast<bool>(noteTree.getProperty("connectedToNext", false));
                 for (const auto child : noteTree)

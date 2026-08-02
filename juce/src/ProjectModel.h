@@ -10,6 +10,7 @@ struct SampleRegionSetting;
 enum class PitchAlgorithm
 {
     mld5,
+    mld3,
     nsfHifigan,
     world,
     vocalShifter
@@ -66,6 +67,10 @@ struct NoteData
     float formantSemitones = 0.0f;
     float gain = 1.0f;
     float attackSpeed = 1.0f;
+    // Melodyne's Robust Pitch Curve is stored by the detector/source.  Hachi
+    // exposes the same behaviour per note so difficult notes can opt in
+    // without changing the rest of the source analysis.
+    bool robustPitchCurve = false;
     bool connectedToPrevious = false;
     bool connectedToNext = false;
     std::vector<PitchPoint> contour;
@@ -168,6 +173,7 @@ public:
     void setNoteGain(const juce::String& noteId, float gain);
     void setNoteAttack(const juce::String& noteId, double consonantSeconds, float attackSpeed);
     void setNoteAttackSpeed(const juce::String& noteId, float attackSpeed);
+    void setNoteRobustPitchCurve(const juce::String& noteId, bool enabled);
     bool setNotePitchCurve(const juce::String& noteId,
                            std::vector<PitchCurveEditPoint> points);
     [[nodiscard]] juce::String addNote(const juce::String& preferredClipId,

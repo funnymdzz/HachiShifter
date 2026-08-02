@@ -94,6 +94,7 @@ juce::String pitchAlgorithmText(PitchAlgorithm value)
     if (value == PitchAlgorithm::nsfHifigan) return "nsf-hifigan";
     if (value == PitchAlgorithm::world) return "world";
     if (value == PitchAlgorithm::vocalShifter) return "vslib";
+    if (value == PitchAlgorithm::mld3) return "mld3";
     return "mld5";
 }
 
@@ -256,7 +257,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("resize_clip", "Stretch a whole clip while preserving its source media / 整体拉伸采样并保留原始素材"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
-            makeTool("set_note", "Set pitch, tension, breath, formant, gain, Attack and consonant parameters / 设置全部音符参数"),
+            makeTool("set_note", "Set pitch, Robust Pitch Curve, tension, breath, formant, gain, Attack and consonant parameters / 设置稳健音高线及全部音符参数"),
             makeTool("set_pitch_curve", "Draw an absolute target-pitch curve without replacing source F0 / 绘制目标音高线并保留原始 F0"),
             makeTool("add_note", "Create a note in a clip / 在采样中创建音符"),
             makeTool("remove_note", "Delete a note / 删除音符"),
@@ -445,7 +446,8 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             project.setTrackPitchAlgorithm(id,
                 value == "nsf-hifigan" ? PitchAlgorithm::nsfHifigan
                 : value == "world" ? PitchAlgorithm::world
-                : value == "vslib" ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5);
+                : value == "vslib" ? PitchAlgorithm::vocalShifter
+                : value == "mld3" ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5);
         }
         if (args.hasProperty("stretch_algorithm"))
         {
@@ -518,6 +520,9 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             project.setNoteFormant(id, static_cast<float>(number(args, "formant_semitones")));
         if (args.hasProperty("gain"))
             project.setNoteGain(id, static_cast<float>(number(args, "gain", 1.0)));
+        if (args.hasProperty("robust_pitch_curve"))
+            project.setNoteRobustPitchCurve(id,
+                static_cast<bool>(args["robust_pitch_curve"]));
         if (args.hasProperty("consonant_seconds") || args.hasProperty("attack_speed"))
         {
             auto consonant = number(args, "consonant_seconds", 0.04);
@@ -817,6 +822,7 @@ juce::var McpServer::projectJson() const
                 set(noteValue, "formant_semitones", note.formantSemitones);
                 set(noteValue, "gain", note.gain);
                 set(noteValue, "attack_speed", note.attackSpeed);
+                set(noteValue, "robust_pitch_curve", note.robustPitchCurve);
                 set(noteValue, "connected_previous", note.connectedToPrevious);
                 set(noteValue, "connected_next", note.connectedToNext);
                 std::vector<juce::var> contour;

@@ -11,9 +11,10 @@ namespace hachi::backend
 enum class PitchRenderBackend
 {
     mld5 = 0,
-    nsfHifigan = 1,
-    world = 2,
-    vslib = 3
+    mld3 = 1,
+    nsfHifigan = 2,
+    world = 3,
+    vslib = 4
 };
 
 struct TimeMapPoint
@@ -35,6 +36,10 @@ struct Mld5FileRenderRequest
     std::vector<float> noteGain;
     std::vector<float> tension;
     std::vector<float> breath;
+    // 1.0 selects the reconstructed Robust Pitch Curve path for this frame.
+    // It is deliberately a curve rather than a global flag: one source can
+    // contain both normal and robust notes.
+    std::vector<float> robustPitchCurve;
     std::vector<TimeMapPoint> timeMap;
     juce::File hifiganModelDirectory;
     OrtExecutionConfig inference;

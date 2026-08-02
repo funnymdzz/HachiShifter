@@ -43,6 +43,81 @@ float valueAt(const std::vector<float>& curve, double position, float fallback)
     return std::isfinite(a) && std::isfinite(b) ? a + (b - a) * amount : fallback;
 }
 
+float median(std::vector<float>& values)
+{
+    if (values.empty()) return 0.0f;
+    const auto middle = values.begin() + static_cast<std::ptrdiff_t>(values.size() / 2);
+    std::nth_element(values.begin(), middle, values.end());
+    auto result = *middle;
+    if ((values.size() & 1u) == 0u)
+    {
+        const auto lower = std::max_element(values.begin(), middle);
+        result = (result + *lower) * 0.5f;
+    }
+    return result;
+}
+
+// Reconstructed Robust Pitch Curve stage.  The binary handler selects a
+// detector/source pitch representation before note rendering; slope and
+// deflection quality are kept as separate features.  At render time we mirror
+// that design by robustifying only the requested source-to-target correction,
+// retaining genuine portamento while rejecting isolated octave/harmonic jumps.
+void applyRobustPitchCurve(std::vector<float>& sourceMidi,
+                           std::vector<float>& targetMidi,
+                           const std::vector<float>& enabled)
+{
+    const auto count = std::min({ sourceMidi.size(), targetMidi.size(), enabled.size() });
+    if (count < 3) return;
+    std::vector<float> originalDelta(count, 0.0f);
+    std::vector<float> filteredDelta(count, 0.0f);
+    for (std::size_t index = 0; index < count; ++index)
+        if (sourceMidi[index] > 0.0f && targetMidi[index] > 0.0f)
+            originalDelta[index] = targetMidi[index] - sourceMidi[index];
+
+    constexpr std::ptrdiff_t radius = 4; // 45 ms at the native 5 ms frame grid
+    for (std::size_t index = 0; index < count; ++index)
+    {
+        filteredDelta[index] = originalDelta[index];
+        if (enabled[index] < 0.5f || sourceMidi[index] <= 0.0f || targetMidi[index] <= 0.0f)
+            continue;
+        std::vector<float> neighbours;
+        const auto first = std::max<std::ptrdiff_t>(0,
+            static_cast<std::ptrdiff_t>(index) - radius);
+        const auto last = std::min<std::ptrdiff_t>(static_cast<std::ptrdiff_t>(count) - 1,
+            static_cast<std::ptrdiff_t>(index) + radius);
+        for (auto cursor = first; cursor <= last; ++cursor)
+            if (enabled[static_cast<std::size_t>(cursor)] >= 0.5f
+                && sourceMidi[static_cast<std::size_t>(cursor)] > 0.0f
+                && targetMidi[static_cast<std::size_t>(cursor)] > 0.0f)
+                neighbours.push_back(originalDelta[static_cast<std::size_t>(cursor)]);
+        if (neighbours.size() < 3) continue;
+        auto centreValues = neighbours;
+        const auto centre = median(centreValues);
+        for (auto& value : neighbours) value = std::abs(value - centre);
+        const auto deviation = median(neighbours);
+        const auto limit = std::max(0.18f, deviation * 3.5f);
+        const auto residual = originalDelta[index] - centre;
+        filteredDelta[index] = centre + juce::jlimit(-limit, limit, residual);
+    }
+
+    // A forward/backward bounded pass rejects one-frame deflections without
+    // adding the timing lag of a conventional low-pass filter.
+    constexpr float maxStep = 0.32f;
+    for (std::size_t index = 1; index < count; ++index)
+        if (enabled[index] >= 0.5f && enabled[index - 1] >= 0.5f)
+            filteredDelta[index] = filteredDelta[index - 1]
+                + juce::jlimit(-maxStep, maxStep,
+                    filteredDelta[index] - filteredDelta[index - 1]);
+    for (std::size_t index = count - 1; index-- > 0;)
+        if (enabled[index] >= 0.5f && enabled[index + 1] >= 0.5f)
+            filteredDelta[index] = filteredDelta[index + 1]
+                + juce::jlimit(-maxStep, maxStep,
+                    filteredDelta[index] - filteredDelta[index + 1]);
+    for (std::size_t index = 0; index < count; ++index)
+        if (enabled[index] >= 0.5f && sourceMidi[index] > 0.0f && targetMidi[index] > 0.0f)
+            targetMidi[index] = sourceMidi[index] + filteredDelta[index];
+}
+
 void applyMld5SpectralFinish(juce::AudioBuffer<float>& audio, double sampleRate,
                              double framePeriodMs,
                              const std::vector<float>& sourceMidi,
@@ -252,6 +327,13 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         stretch.configure(channels,
             std::max(512, static_cast<int>(std::llround(sampleRate * 0.055))),
             std::max(96, static_cast<int>(std::llround(sampleRate * 0.012))), false);
+    else if (pitchBackend == PitchRenderBackend::mld3)
+        // Melodyne 3's editor exposes pitch/formant ratios and explicit note
+        // transition adaptation.  Its older renderer uses a coarser periodic
+        // clock than the later component engine.
+        stretch.configure(channels,
+            std::max(1'024, static_cast<int>(std::llround(sampleRate * 0.072))),
+            std::max(96, static_cast<int>(std::llround(sampleRate * 0.0075))), false);
     else if (stableVocalClock)
         stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
     else
@@ -545,6 +627,9 @@ public:
 
         const auto targetSamples = std::max(1, static_cast<int>(std::llround(
             std::max(0.001, request.targetDurationSeconds) * reader->sampleRate)));
+        if (request.pitchBackend == PitchRenderBackend::mld5)
+            applyRobustPitchCurve(request.sourceMidi, request.targetMidi,
+                                  request.robustPitchCurve);
         juce::AudioBuffer<float> rendered;
         auto usedNsfModel = false;
         juce::String nsfInference;
@@ -585,6 +670,13 @@ public:
             applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
                                     request.sourceMidi, request.targetMidi);
         }
+        else if (request.pitchBackend == PitchRenderBackend::mld3)
+        {
+            rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                request.formantSemitones, request.noteGain, request.tension, request.breath,
+                request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+        }
         else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
         {
             // HiFi-GAN receives a target-time spectral envelope.  First warp
@@ -622,6 +714,8 @@ public:
                 request.pitchBackend, request.stretchAlgorithm);
         auto backend = request.pitchBackend == PitchRenderBackend::mld5
             ? juce::String("mld5-single-pass-stable-clock")
+            : request.pitchBackend == PitchRenderBackend::mld3
+                ? juce::String("mld3-period-transition-clock")
             : request.pitchBackend == PitchRenderBackend::nsfHifigan
                 ? (usedNsfModel ? juce::String("nsf-hifigan-onnx")
                                 : juce::String("nsf-hifigan-fallback"))

@@ -51,6 +51,8 @@ const std::unordered_map<std::string, Row> strings {
     { "param.tension",   { "张力", "張力", "テンション", "텐션", "Tension" } },
     { "param.formant",   { "共振峰", "共振峰", "フォルマント", "포먼트", "Formant" } },
     { "param.volume",    { "音量", "音量", "音量", "음량", "Volume" } },
+    { "param.robustPitchCurveShort", { "稳健线", "穩健線", "ロバスト", "강건선", "Robust" } },
+    { "param.robustPitchCurve", { "稳健音高线（仅当前音符）", "穩健音高線（僅目前音符）", "ロバストピッチカーブ（現在のノートのみ）", "강건한 피치 곡선 (현재 음표만)", "Robust Pitch Curve (current note only)" } },
     { "beats.bar",       { "每小节", "每小節", "拍子", "마디 박자", "Beats" } },
     { "grid",            { "网格", "網格", "グリッド", "그리드", "Grid" } },
     { "base.scale",      { "基准调", "基準調", "基準キー", "기준 키", "Key" } },

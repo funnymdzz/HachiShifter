@@ -94,7 +94,7 @@ def main() -> int:
 
         track_id = project["tracks"][0]["id"]
         selected_routes: list[tuple[str, str]] = []
-        for pitch in ("mld5", "nsf-hifigan", "world", "vslib"):
+        for pitch in ("mld5", "mld3", "nsf-hifigan", "world", "vslib"):
             client.call(
                 "set_track", {"track_id": track_id, "pitch_algorithm": pitch}
             )

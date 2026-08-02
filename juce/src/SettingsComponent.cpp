@@ -114,6 +114,7 @@ SettingsComponent::SettingsComponent(I18n& stringsToUse,
     importedAlgorithm.addItem("nsf-hifigan", 2);
     importedAlgorithm.addItem("WORLD", 3);
     importedAlgorithm.addItem("vslib", 4);
+    importedAlgorithm.addItem("mld3", 5);
     importedStretchAlgorithm.addItem("Melodyne Hybrid", 1);
     importedStretchAlgorithm.addItem("Variable Mel Hop", 2);
     importedStretchAlgorithm.addItem("Loop", 3);

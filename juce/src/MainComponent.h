@@ -122,6 +122,7 @@ private:
     juce::TextButton tensionParamButton;
     juce::TextButton formantParamButton;
     juce::TextButton volumeParamButton;
+    juce::ToggleButton robustPitchCurveButton;
     juce::TextButton midiButton;
     juce::ComboBox pitchAlgorithm;
     juce::ComboBox stretchAlgorithm;
@@ -176,6 +177,7 @@ private:
     enum class ParameterMode { pitchSmooth, pitchDrift, attackSpeed, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;
+    bool updatingRobustPitchCurve = false;
     bool smoothSliderDragging = false;
     bool draggingPanelSplitter = false;
     int panelSplitterDragScreenY = 0;

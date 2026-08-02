@@ -43,3 +43,7 @@ Thumbs.db
 *.pth
 *.pt
 *.ckpt
+
+# Persistent local reverse-engineering databases (notes/scripts stay tracked)
+/reverse/ghidra/
+__pycache__/

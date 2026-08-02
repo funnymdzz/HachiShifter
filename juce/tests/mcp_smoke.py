@@ -128,7 +128,18 @@ def main() -> int:
             },
         ).split("=", 1)[1]
         client.call("transpose_note", {"note_id": note_id, "semitones": 4.0})
-        client.call("set_note", {"note_id": note_id, "modulation": 0.0})
+        client.call(
+            "set_note",
+            {"note_id": note_id, "modulation": 0.0, "robust_pitch_curve": True},
+        )
+        edited_note = next(
+            note
+            for item_track in json.loads(client.call("project_snapshot"))["tracks"]
+            for item_clip in item_track["clips"]
+            for note in item_clip["notes"]
+            if note["id"] == note_id
+        )
+        assert edited_note["robust_pitch_curve"] is True
         client.call(
             "resize_clip",
             {"clip_id": clip["id"], "start_seconds": 0.0, "duration_seconds": 0.55},
@@ -144,7 +155,7 @@ def main() -> int:
 
         route_names: list[str] = []
         pitch_hashes: dict[str, str] = {}
-        for pitch in ("mld5", "nsf-hifigan", "world", "vslib"):
+        for pitch in ("mld5", "mld3", "nsf-hifigan", "world", "vslib"):
             client.call(
                 "set_track",
                 {

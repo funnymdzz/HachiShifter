@@ -60,6 +60,9 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
         case PitchAlgorithm::nsfHifigan:
             request.pitchBackend = backend::PitchRenderBackend::nsfHifigan;
             break;
+        case PitchAlgorithm::mld3:
+            request.pitchBackend = backend::PitchRenderBackend::mld3;
+            break;
         case PitchAlgorithm::world:
             request.pitchBackend = backend::PitchRenderBackend::world;
             break;
@@ -133,6 +136,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     request.noteGain.resize(static_cast<std::size_t>(frameCount), 1.0f);
     request.tension.resize(static_cast<std::size_t>(frameCount), 0.0f);
     request.breath.resize(static_cast<std::size_t>(frameCount), 0.0f);
+    request.robustPitchCurve.resize(static_cast<std::size_t>(frameCount), 0.0f);
     for (int frame = 0; frame < frameCount; ++frame)
     {
         const auto time = std::min(clip.durationSeconds, static_cast<double>(frame) * framePeriodSeconds);
@@ -144,6 +148,8 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             request.noteGain[static_cast<std::size_t>(frame)] = note.gain;
             request.tension[static_cast<std::size_t>(frame)] = note.tension;
             request.breath[static_cast<std::size_t>(frame)] = note.breath;
+            request.robustPitchCurve[static_cast<std::size_t>(frame)] =
+                note.robustPitchCurve ? 1.0f : 0.0f;
             const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, local));
             if (!cents) break;
             const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;
@@ -238,6 +244,7 @@ std::string renderKey(const ClipData& clip, const TrackData& track,
         stream.writeFloat(note.sourceMidiCenter);
         stream.writeDouble(note.consonantSeconds);
         stream.writeFloat(note.attackSpeed);
+        stream.writeByte(static_cast<char>(note.robustPitchCurve ? 1 : 0));
         stream.writeByte(static_cast<char>(note.connectedToPrevious ? 1 : 0));
         stream.writeByte(static_cast<char>(note.connectedToNext ? 1 : 0));
         stream.writeFloat(note.modulation);

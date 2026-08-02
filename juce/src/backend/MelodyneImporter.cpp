@@ -304,6 +304,13 @@ public:
         const auto item = value(id, field);
         return item && item->kind == RawValue::Kind::boolean && item->boolean;
     }
+    bool booleanAlias(std::uint32_t id,
+                      std::initializer_list<const char*> fields) const
+    {
+        for (const auto* field : fields)
+            if (boolean(id, field)) return true;
+        return false;
+    }
     std::vector<std::uint32_t> list(std::uint32_t id) const
     {
         std::vector<std::uint32_t> output;
@@ -818,6 +825,14 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 graph.number(element, "sibilantBalance").value_or(0.0), 0.0, 1.0));
             note.attackSpeed = static_cast<float>(std::max(1.0e-6,
                 graph.number(element, "sourceTimeForElementTimeFunctionAttackSlope").value_or(1.0)));
+            const auto robustFields = { "robustPitchCurve", "robustPitchCurveEnabled",
+                "useRobustPitchCurve", "usesRobustPitchCurve", "isRobustPitchCurveEnabled" };
+            note.robustPitchCurve = graph.booleanAlias(element, robustFields)
+                || graph.booleanAlias(item, robustFields)
+                || graph.booleanAlias(description, robustFields);
+            if (const auto parameterSet = graph.reference(description, "analyzerParameterSet"))
+                note.robustPitchCurve = note.robustPitchCurve
+                    || graph.booleanAlias(*parameterSet, robustFields);
             note.connectedToPrevious = connectedPrevious.contains(element);
 
             std::vector<SourcePitchPoint> propertyPoints;

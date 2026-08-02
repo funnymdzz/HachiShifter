@@ -108,6 +108,7 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&parameterTitle),
                              static_cast<juce::Component*>(&smoothCaption),
                              static_cast<juce::Component*>(&smoothSlider),
+                             static_cast<juce::Component*>(&robustPitchCurveButton),
                              static_cast<juce::Component*>(&zoomSlider),
                              static_cast<juce::Component*>(&progressBar),
                              static_cast<juce::Component*>(&trackViewport),
@@ -225,6 +226,7 @@ MainComponent::MainComponent()
     pitchAlgorithm.addItem("nsf-hifigan", 2);
     pitchAlgorithm.addItem("WORLD", 3);
     pitchAlgorithm.addItem("vslib", 4);
+    pitchAlgorithm.addItem("mld3", 5);
     pitchAlgorithm.setSelectedId(1);
     refreshStretchAlgorithmItems(1);
     pitchAlgorithm.onChange = [this]
@@ -234,7 +236,8 @@ MainComponent::MainComponent()
         refreshStretchAlgorithmItems(previousStretch);
         const auto algorithm = id == 2 ? PitchAlgorithm::nsfHifigan
             : id == 3 ? PitchAlgorithm::world
-            : id == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
+            : id == 4 ? PitchAlgorithm::vocalShifter
+            : id == 5 ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5;
         const auto data = project.snapshot();
         const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
@@ -288,6 +291,13 @@ MainComponent::MainComponent()
         smoothSliderDragging = false;
         if (selectedNoteId.isNotEmpty() && smoothSlider.isEnabled())
             applySelectedNoteParameter();
+    };
+    robustPitchCurveButton.onClick = [this]
+    {
+        if (updatingRobustPitchCurve || selectedNoteId.isEmpty()
+            || !robustPitchCurveButton.isEnabled()) return;
+        project.setNoteRobustPitchCurve(selectedNoteId,
+            robustPitchCurveButton.getToggleState());
     };
 
     zoomSlider.setRange(40.0, 600.0, 1.0);
@@ -461,6 +471,8 @@ void MainComponent::refreshTexts()
     tensionParamButton.setButtonText(strings.text("param.tension"));
     formantParamButton.setButtonText(strings.text("param.formant"));
     volumeParamButton.setButtonText(strings.text("param.volume"));
+    robustPitchCurveButton.setButtonText(strings.text("param.robustPitchCurveShort"));
+    robustPitchCurveButton.setTooltip(strings.text("param.robustPitchCurve"));
     midiButton.setButtonText(strings.text("file.midi"));
     bpmCaption.setText("BPM", juce::dontSendNotification);
     beatsCaption.setText(strings.text("beats.bar"), juce::dontSendNotification);
@@ -503,7 +515,8 @@ void MainComponent::refreshProjectControls()
     {
         const auto pitchId = selected->pitchAlgorithm == PitchAlgorithm::nsfHifigan ? 2
             : selected->pitchAlgorithm == PitchAlgorithm::world ? 3
-            : selected->pitchAlgorithm == PitchAlgorithm::vocalShifter ? 4 : 1;
+            : selected->pitchAlgorithm == PitchAlgorithm::vocalShifter ? 4
+            : selected->pitchAlgorithm == PitchAlgorithm::mld3 ? 5 : 1;
         const auto stretchId = selected->stretchAlgorithm == StretchAlgorithm::variableMelHop ? 2
             : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
             : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4 : 1;
@@ -582,6 +595,11 @@ void MainComponent::refreshSelectedNoteParameter()
     smoothSlider.setValue(value, juce::dontSendNotification);
     updatingSmoothSlider = false;
     smoothSlider.setEnabled(found);
+    updatingRobustPitchCurve = true;
+    robustPitchCurveButton.setToggleState(found && selected.robustPitchCurve,
+                                           juce::dontSendNotification);
+    updatingRobustPitchCurve = false;
+    robustPitchCurveButton.setEnabled(found);
 }
 
 void MainComponent::applySelectedNoteParameter()
@@ -849,21 +867,22 @@ void MainComponent::resized()
         component.setBounds(parameterHeader.removeFromLeft(width));
         parameterHeader.removeFromLeft(3);
     };
-    takeParameter(parameterTitle, 82);
+    takeParameter(parameterTitle, 70);
     takeParameter(noteEditButton, 27);
     takeParameter(drawButton, 27);
     takeParameter(lineButton, 27);
     takeParameter(wrenchButton, 27);
     takeParameter(connectButton, 27);
     takeParameter(smoothCaption, 42);
-    takeParameter(smoothSlider, 112);
-    takeParameter(pitchParamButton, 58);
-    takeParameter(driftParamButton, 58);
-    takeParameter(attackParamButton, 58);
-    takeParameter(breathParamButton, 58);
-    takeParameter(tensionParamButton, 58);
-    takeParameter(formantParamButton, 58);
-    takeParameter(volumeParamButton, 58);
+    takeParameter(smoothSlider, 98);
+    takeParameter(pitchParamButton, 50);
+    takeParameter(driftParamButton, 50);
+    takeParameter(attackParamButton, 50);
+    takeParameter(breathParamButton, 50);
+    takeParameter(tensionParamButton, 50);
+    takeParameter(formantParamButton, 50);
+    takeParameter(volumeParamButton, 50);
+    takeParameter(robustPitchCurveButton, 74);
     sourceEditHint.setBounds(parameterHeader.reduced(3, 0));
     auto sampleBar = area.removeFromTop(sampleEditorHeight).reduced(4, 3);
     auto setSampleVisible = [this](bool visible)
@@ -1733,7 +1752,8 @@ void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResul
         ? preferences->getIntValue("import.algorithm", 1) : 1;
     const auto importedPitch = algorithmId == 2 ? PitchAlgorithm::nsfHifigan
         : algorithmId == 3 ? PitchAlgorithm::world
-        : algorithmId == 4 ? PitchAlgorithm::vocalShifter : PitchAlgorithm::mld5;
+        : algorithmId == 4 ? PitchAlgorithm::vocalShifter
+        : algorithmId == 5 ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5;
     const auto stretchAlgorithmId = preferences != nullptr
         ? preferences->getIntValue("import.stretchAlgorithm", 1) : 1;
     auto importedStretch = stretchAlgorithmId == 2 ? StretchAlgorithm::variableMelHop
