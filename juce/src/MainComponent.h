@@ -43,6 +43,7 @@ public:
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
     void openExternalFile(const juce::File& file);
+    void requestClose(std::function<void()> approved);
     bool keyPressed(const juce::KeyPress& key) override;
     bool isInterestedInFileDrag(const juce::StringArray& files) override;
     void filesDropped(const juce::StringArray& files, int x, int y) override;
@@ -61,8 +62,15 @@ private:
     void refreshStretchAlgorithmItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
     void togglePlayback();
+    void newProject();
     void openProject();
-    void saveProject();
+    void loadProjectFile(const juce::File& file);
+    void saveProject(std::function<void(bool)> completion = {});
+    void saveProjectAs(std::function<void(bool)> completion = {});
+    bool saveProjectTo(const juce::File& file);
+    void performWithUnsavedCheck(std::function<void()> action);
+    void addRecentProject(const juce::File& file);
+    void restoreRecentProjects();
     void exportMixdown();
     void importAudio();
     void addAnalysedAudioFile(const juce::File& file, double durationSeconds,
@@ -184,6 +192,9 @@ private:
     juce::String selectedNoteId;
     juce::String copiedClipId;
     std::vector<NoteData> copiedNotes;
+    juce::File currentProjectFile;
+    juce::StringArray recentProjectPaths;
+    std::uint64_t savedProjectRevision = 0;
     enum class ParameterMode { pitchSmooth, pitchDrift, attackSpeed, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;

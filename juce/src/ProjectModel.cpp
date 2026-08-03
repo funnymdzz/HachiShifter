@@ -88,12 +88,19 @@ ProjectData ProjectModel::snapshot() const
     return project;
 }
 
+std::uint64_t ProjectModel::revisionNumber() const
+{
+    const juce::ScopedLock guard(lock);
+    return revision;
+}
+
 void ProjectModel::pushUndoLocked()
 {
     undoHistory.push_back(project);
     if (undoHistory.size() > maxHistory)
         undoHistory.erase(undoHistory.begin());
     redoHistory.clear();
+    ++revision;
 }
 
 void ProjectModel::replace(ProjectData replacement)
@@ -120,6 +127,7 @@ bool ProjectModel::undo()
         if (redoHistory.size() > maxHistory) redoHistory.erase(redoHistory.begin());
         project = std::move(undoHistory.back());
         undoHistory.pop_back();
+        ++revision;
     }
     sendChangeMessage();
     return true;
@@ -134,6 +142,7 @@ bool ProjectModel::redo()
         if (undoHistory.size() > maxHistory) undoHistory.erase(undoHistory.begin());
         project = std::move(redoHistory.back());
         redoHistory.pop_back();
+        ++revision;
     }
     sendChangeMessage();
     return true;

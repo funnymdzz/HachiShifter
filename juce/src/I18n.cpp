@@ -11,6 +11,9 @@ const std::unordered_map<std::string, Row> strings {
     { "app.title",       { "HachiShifter Next", "HachiShifter Next", "HachiShifter Next", "HachiShifter Next", "HachiShifter Next" } },
     { "file.open",       { "打开工程", "開啟工程", "プロジェクトを開く", "프로젝트 열기", "Open Project" } },
     { "file.save",       { "保存工程", "儲存工程", "プロジェクトを保存", "프로젝트 저장", "Save Project" } },
+    { "file.saveAs",     { "工程另存为…", "工程另存新檔…", "プロジェクトを別名で保存…", "프로젝트 다른 이름으로 저장…", "Save Project As…" } },
+    { "file.recent",     { "最近工程", "最近工程", "最近使ったプロジェクト", "최근 프로젝트", "Recent Projects" } },
+    { "file.recentEmpty", { "没有最近工程", "沒有最近工程", "最近のプロジェクトはありません", "최근 프로젝트 없음", "No Recent Projects" } },
     { "file.export",     { "导出 WAV", "匯出 WAV", "WAVを書き出す", "WAV 내보내기", "Export WAV" } },
     { "file.audio",      { "导入音频", "匯入音訊", "オーディオを読み込む", "오디오 가져오기", "Import Audio" } },
     { "file.melodyne",   { "导入 Melodyne", "匯入 Melodyne", "Melodyneを読み込む", "Melodyne 가져오기", "Import Melodyne" } },
@@ -102,6 +105,8 @@ const std::unordered_map<std::string, Row> strings {
     { "status.notesCopied", { "已复制音符", "已複製音符", "ノートをコピーしました", "음표를 복사했습니다", "Notes copied" } },
     { "status.notesCut", { "已剪切音符", "已剪下音符", "ノートを切り取りました", "음표를 잘라냈습니다", "Notes cut" } },
     { "status.notesPasted", { "已粘贴音符", "已貼上音符", "ノートを貼り付けました", "음표를 붙여넣었습니다", "Notes pasted" } },
+    { "status.projectOpened", { "已打开工程", "已開啟工程", "プロジェクトを開きました", "프로젝트를 열었습니다", "Project opened" } },
+    { "status.projectSaved", { "已保存工程", "已儲存工程", "プロジェクトを保存しました", "프로젝트를 저장했습니다", "Project saved" } },
     { "status.midiPending", { "MIDI 导入器将在下一阶段接入", "MIDI 匯入器將於下一階段接入", "MIDIインポーターは次段階で接続します", "MIDI 가져오기는 다음 단계에서 연결됩니다", "MIDI importer will be connected in the next stage" } },
     { "status.noTracks", { "导入音频或工程以开始", "匯入音訊或工程以開始", "音声またはプロジェクトを読み込んでください", "오디오 또는 프로젝트를 가져오세요", "Import audio or a project to begin" } },
     { "edit.source",     { "原始采样编辑：此模式不允许拉伸", "原始取樣編輯：此模式不允許拉伸", "元サンプル編集：このモードではストレッチできません", "원본 샘플 편집: 이 모드에서는 늘이기를 사용할 수 없습니다", "Original sample edit: stretching is disabled" } },
@@ -124,6 +129,10 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "dialog.delete", { "删除", "刪除", "削除", "삭제", "Delete" } }
     ,{ "dialog.destructiveMessage", { "此操作会删除所选内容，是否继续？", "此操作會刪除所選內容，是否繼續？", "選択した内容を削除します。続行しますか？", "선택한 내용을 삭제합니다. 계속할까요?", "The selected content will be deleted. Continue?" } }
     ,{ "dialog.apply", { "应用", "套用", "適用", "적용", "Apply" } }
+    ,{ "dialog.save", { "保存", "儲存", "保存", "저장", "Save" } }
+    ,{ "dialog.discard", { "放弃更改", "放棄變更", "変更を破棄", "변경 내용 버리기", "Discard Changes" } }
+    ,{ "dialog.unsavedTitle", { "工程尚未保存", "工程尚未儲存", "プロジェクトは未保存です", "프로젝트가 저장되지 않음", "Unsaved Project" } }
+    ,{ "dialog.unsavedMessage", { "是否先保存当前工程的更改？", "是否先儲存目前工程的變更？", "現在のプロジェクトの変更を保存しますか？", "현재 프로젝트 변경 내용을 저장할까요?", "Save changes to the current project first?" } }
     ,{ "settings.title", { "设置", "設定", "設定", "설정", "Settings" } }
     ,{ "settings.interface", { "界面", "介面", "インターフェース", "인터페이스", "Interface" } }
     ,{ "settings.audio", { "音频", "音訊", "オーディオ", "오디오", "Audio" } }

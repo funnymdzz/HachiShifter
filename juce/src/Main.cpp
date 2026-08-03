@@ -368,7 +368,15 @@ public:
         cliAudioEngine.reset();
     }
 
-    void systemRequestedQuit() override { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (mainWindow != nullptr)
+        {
+            mainWindow->requestClose([this] { quit(); });
+            return;
+        }
+        quit();
+    }
 
 private:
     class MainWindow final : public juce::DocumentWindow
@@ -394,6 +402,14 @@ private:
         {
             if (auto* component = dynamic_cast<MainComponent*>(getContentComponent()))
                 component->openExternalFile(file);
+        }
+
+        void requestClose(std::function<void()> approved)
+        {
+            if (auto* component = dynamic_cast<MainComponent*>(getContentComponent()))
+                component->requestClose(std::move(approved));
+            else if (approved)
+                approved();
         }
     };
 

@@ -62,6 +62,8 @@ MainComponent::MainComponent()
     options.osxLibrarySubFolder = "Application Support";
     options.storageFormat = juce::PropertiesFile::storeAsXML;
     preferences = std::make_unique<juce::PropertiesFile>(options);
+    restoreRecentProjects();
+    savedProjectRevision = project.revisionNumber();
     audio.restoreDeviceState(*preferences);
     applyPreferences();
     setLookAndFeel(&lookAndFeel);
@@ -760,6 +762,11 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         togglePlayback();
         return true;
     }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'N')
+    {
+        newProject();
+        return true;
+    }
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'O')
     {
         openProject();
@@ -767,7 +774,8 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
     }
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'S')
     {
-        saveProject();
+        if (key.getModifiers().isShiftDown()) saveProjectAs();
+        else saveProject();
         return true;
     }
     if (key.getKeyCode() == juce::KeyPress::homeKey)
@@ -792,12 +800,7 @@ void MainComponent::openExternalFile(const juce::File& file)
     if (file.hasFileExtension("mpd"))
         loadMelodyneFile(file);
     else if (file.hasFileExtension("hspx"))
-    {
-        juce::String error;
-        if (!project.load(file, error)) showError(error);
-        else if (error.isNotEmpty())
-            showError(strings.text("warning.missingMedia") + "\n" + error);
-    }
+        performWithUnsavedCheck([this, file] { loadProjectFile(file); });
     else if (file.hasFileExtension("mid;midi"))
     {
         juce::String error;
@@ -1338,6 +1341,19 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(1, strings.text("file.new"));
         menu.addItem(2, strings.text("file.open"));
         menu.addItem(3, strings.text("file.save"));
+        menu.addItem(11, strings.text("file.saveAs"));
+        juce::PopupMenu recent;
+        for (int recentIndex = 0; recentIndex < recentProjectPaths.size(); ++recentIndex)
+        {
+            const juce::File file(recentProjectPaths[recentIndex]);
+            recent.addItem(1'000 + recentIndex,
+                file.getFileNameWithoutExtension() + "  —  "
+                    + file.getParentDirectory().getFullPathName(),
+                file.existsAsFile());
+        }
+        if (recentProjectPaths.isEmpty())
+            recent.addItem(999, strings.text("file.recentEmpty"), false);
+        menu.addSubMenu(strings.text("file.recent"), recent);
         menu.addItem(8, strings.text("file.export"));
         menu.addSeparator();
         menu.addItem(4, strings.text("file.audio"));
@@ -1409,16 +1425,22 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
 
 void MainComponent::menuItemSelected(int id, int)
 {
-    if (id == 1) project.clear();
+    if (id == 1) newProject();
     else if (id == 2) openProject();
     else if (id == 3) saveProject();
+    else if (id == 11) saveProjectAs();
     else if (id == 8) exportMixdown();
     else if (id == 4 || id == 30) importAudio();
     else if (id == 5) importMelodyne();
     else if (id == 6) importMidi();
     else if (id == 9) showSettings();
     else if (id == 10) showAssetManager();
-    else if (id == 7) juce::JUCEApplication::getInstance()->systemRequestedQuit();
+    else if (id == 7) requestClose([] { juce::JUCEApplication::getInstance()->quit(); });
+    else if (id >= 1'000 && id < 1'000 + recentProjectPaths.size())
+    {
+        const juce::File file(recentProjectPaths[id - 1'000]);
+        performWithUnsavedCheck([this, file] { loadProjectFile(file); });
+    }
     else if (id == 20) project.undo();
     else if (id == 21) project.redo();
     else if (id == 22) pianoRoll.selectAllNotes();
@@ -1785,6 +1807,26 @@ void MainComponent::confirmDestructive(const juce::String& title,
             }), false);
 }
 
+void MainComponent::newProject()
+{
+    performWithUnsavedCheck([this]
+    {
+        audio.stop();
+        audio.setPosition(0.0);
+        project.clear();
+        currentProjectFile = {};
+        savedProjectRevision = project.revisionNumber();
+        selectedTrackId.clear();
+        selectedClipId.clear();
+        selectedNoteId.clear();
+        copiedClipId.clear();
+        copiedNotes.clear();
+        pianoRoll.clearNoteSelection();
+        pianoRoll.setFocusedClip({});
+        statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
+    });
+}
+
 void MainComponent::openProject()
 {
     chooser = std::make_unique<juce::FileChooser>(strings.text("file.open"), juce::File{}, "*.hspx");
@@ -1793,28 +1835,139 @@ void MainComponent::openProject()
         {
             const auto file = selected.getResult();
             if (file == juce::File{}) return;
-            juce::String error;
-            if (!project.load(file, error)) showError(error);
-            else if (error.isNotEmpty())
-                showError(strings.text("warning.missingMedia") + "\n" + error);
+            performWithUnsavedCheck([this, file] { loadProjectFile(file); });
         });
 }
 
-void MainComponent::saveProject()
+void MainComponent::loadProjectFile(const juce::File& file)
 {
-    chooser = std::make_unique<juce::FileChooser>(strings.text("file.save"),
-                                                   juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-                                                       .getChildFile(project.snapshot().name + ".hspx"),
+    juce::String error;
+    if (!project.load(file, error))
+    {
+        showError(error);
+        return;
+    }
+    currentProjectFile = file;
+    savedProjectRevision = project.revisionNumber();
+    addRecentProject(file);
+    statusLabel.setText(strings.text("status.projectOpened") + "  " + file.getFileName(),
+                        juce::dontSendNotification);
+    if (error.isNotEmpty())
+        showError(strings.text("warning.missingMedia") + "\n" + error);
+}
+
+void MainComponent::saveProject(std::function<void(bool)> completion)
+{
+    if (currentProjectFile != juce::File{})
+    {
+        const auto saved = saveProjectTo(currentProjectFile);
+        if (completion) completion(saved);
+        return;
+    }
+    saveProjectAs(std::move(completion));
+}
+
+void MainComponent::saveProjectAs(std::function<void(bool)> completion)
+{
+    const auto initial = currentProjectFile != juce::File{} ? currentProjectFile
+        : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
+            .getChildFile(project.snapshot().name + ".hspx");
+    chooser = std::make_unique<juce::FileChooser>(strings.text("file.saveAs"),
+                                                   initial,
                                                    "*.hspx");
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
-        [this](const juce::FileChooser& selected)
+        [this, completion = std::move(completion)](const juce::FileChooser& selected) mutable
         {
             auto file = selected.getResult();
-            if (file == juce::File{}) return;
+            if (file == juce::File{})
+            {
+                if (completion) completion(false);
+                return;
+            }
             if (!file.hasFileExtension("hspx")) file = file.withFileExtension("hspx");
-            juce::String error;
-            if (!project.save(file, error)) showError(error);
+            const auto saved = saveProjectTo(file);
+            if (completion) completion(saved);
         });
+}
+
+bool MainComponent::saveProjectTo(const juce::File& file)
+{
+    juce::String error;
+    if (!project.save(file, error))
+    {
+        showError(error);
+        return false;
+    }
+    currentProjectFile = file;
+    savedProjectRevision = project.revisionNumber();
+    addRecentProject(file);
+    statusLabel.setText(strings.text("status.projectSaved") + "  " + file.getFileName(),
+                        juce::dontSendNotification);
+    return true;
+}
+
+void MainComponent::performWithUnsavedCheck(std::function<void()> action)
+{
+    if (project.revisionNumber() == savedProjectRevision)
+    {
+        if (action) action();
+        return;
+    }
+    auto* dialog = new juce::AlertWindow(strings.text("dialog.unsavedTitle"),
+        strings.text("dialog.unsavedMessage"), juce::MessageBoxIconType::WarningIcon);
+    dialog->addButton(strings.text("dialog.save"), 1);
+    dialog->addButton(strings.text("dialog.discard"), 2);
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create(
+            [safe, dialog, action = std::move(action)](int result) mutable
+            {
+                if (safe != nullptr && result == 1)
+                    safe->saveProject([safe, action = std::move(action)](bool saved) mutable
+                    {
+                        if (safe != nullptr && saved && action) action();
+                    });
+                else if (safe != nullptr && result == 2 && action)
+                    action();
+                delete dialog;
+            }), false);
+}
+
+void MainComponent::requestClose(std::function<void()> approved)
+{
+    performWithUnsavedCheck(std::move(approved));
+}
+
+void MainComponent::restoreRecentProjects()
+{
+    recentProjectPaths.clear();
+    if (preferences == nullptr) return;
+    juce::StringArray stored;
+    stored.addLines(preferences->getValue("files.recentProjects"));
+    for (const auto& path : stored)
+    {
+        const juce::File file(path);
+        if (file.existsAsFile() && !recentProjectPaths.contains(file.getFullPathName()))
+            recentProjectPaths.add(file.getFullPathName());
+        if (recentProjectPaths.size() >= 8) break;
+    }
+}
+
+void MainComponent::addRecentProject(const juce::File& file)
+{
+    if (file == juce::File{}) return;
+    const auto path = file.getFullPathName();
+    recentProjectPaths.removeString(path, true);
+    recentProjectPaths.insert(0, path);
+    while (recentProjectPaths.size() > 8) recentProjectPaths.remove(8);
+    if (preferences != nullptr)
+    {
+        preferences->setValue("files.recentProjects", recentProjectPaths.joinIntoString("\n"));
+        preferences->saveIfNeeded();
+    }
+    menuItemsChanged();
 }
 
 void MainComponent::exportMixdown()

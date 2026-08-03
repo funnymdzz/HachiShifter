@@ -2,6 +2,7 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <cstdint>
 #include <vector>
 
 namespace hachi
@@ -129,6 +130,7 @@ public:
     ProjectModel();
 
     [[nodiscard]] ProjectData snapshot() const;
+    [[nodiscard]] std::uint64_t revisionNumber() const;
     void replace(ProjectData replacement);
     void clear();
     bool undo();
@@ -212,6 +214,7 @@ private:
     ProjectData project;
     std::vector<ProjectData> undoHistory;
     std::vector<ProjectData> redoHistory;
+    std::uint64_t revision = 0;
     // Keep large Melodyne projects bounded: snapshots are full native project
     // states, so a short history is preferable to unbounded contour copies.
     static constexpr std::size_t maxHistory = 24;
