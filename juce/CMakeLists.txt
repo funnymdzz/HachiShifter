@@ -69,6 +69,13 @@ set(WORLD_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(WORLD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/world EXCLUDE_FROM_ALL)
 
+# LLSM2 is integrated as its speech-model algorithm library only; none of the
+# moresampler command-line frontend is built or packaged.
+add_subdirectory(third_party/ciglet EXCLUDE_FROM_ALL)
+add_subdirectory(third_party/libllsm2 EXCLUDE_FROM_ALL)
+target_compile_definitions(ciglet PUBLIC FP_TYPE=float)
+target_compile_definitions(llsm PUBLIC FP_TYPE=float)
+
 juce_add_gui_app(HachiShifterNext
     PRODUCT_NAME "HachiShifter Next"
     COMPANY_NAME "funnymdzz"
@@ -124,6 +131,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/FcpeAnalyzer.h
     src/backend/NsfHifiganRenderer.cpp
     src/backend/NsfHifiganRenderer.h
+    src/backend/Llsm2Renderer.cpp
+    src/backend/Llsm2Renderer.h
     src/backend/OrtExecution.cpp
     src/backend/OrtExecution.h
 )
@@ -164,6 +173,7 @@ target_link_libraries(HachiShifterNext PRIVATE
     juce::juce_recommended_lto_flags
     juce::juce_recommended_warning_flags
     world::core
+    llsm
 )
 
 if(TARGET hachi_onnxruntime)

@@ -105,6 +105,7 @@ juce::String pitchAlgorithmText(PitchAlgorithm value)
     if (value == PitchAlgorithm::world) return "world";
     if (value == PitchAlgorithm::vocalShifter) return "vslib";
     if (value == PitchAlgorithm::mld3) return "mld3";
+    if (value == PitchAlgorithm::llsm2) return "llsm2";
     return "mld5";
 }
 
@@ -468,7 +469,8 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                 value == "nsf-hifigan" ? PitchAlgorithm::nsfHifigan
                 : value == "world" ? PitchAlgorithm::world
                 : value == "vslib" ? PitchAlgorithm::vocalShifter
-                : value == "mld3" ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5);
+                : value == "mld3" ? PitchAlgorithm::mld3
+                : value == "llsm2" ? PitchAlgorithm::llsm2 : PitchAlgorithm::mld5);
         }
         if (args.hasProperty("stretch_algorithm"))
         {
@@ -868,6 +870,7 @@ juce::var McpServer::projectJson() const
             {
                 auto noteValue = object();
                 set(noteValue, "id", note.id);
+                set(noteValue, "label", note.label);
                 set(noteValue, "start_seconds", note.startSeconds);
                 set(noteValue, "duration_seconds", note.durationSeconds);
                 set(noteValue, "consonant_seconds", note.consonantSeconds);

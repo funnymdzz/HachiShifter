@@ -229,6 +229,7 @@ MainComponent::MainComponent()
     pitchAlgorithm.addItem("WORLD", 3);
     pitchAlgorithm.addItem("vslib", 4);
     pitchAlgorithm.addItem("mld3", 5);
+    pitchAlgorithm.addItem("llsm2", 6);
     pitchAlgorithm.setSelectedId(1);
     refreshStretchAlgorithmItems(1);
     pitchAlgorithm.onChange = [this]
@@ -239,7 +240,8 @@ MainComponent::MainComponent()
         const auto algorithm = id == 2 ? PitchAlgorithm::nsfHifigan
             : id == 3 ? PitchAlgorithm::world
             : id == 4 ? PitchAlgorithm::vocalShifter
-            : id == 5 ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5;
+            : id == 5 ? PitchAlgorithm::mld3
+            : id == 6 ? PitchAlgorithm::llsm2 : PitchAlgorithm::mld5;
         const auto data = project.snapshot();
         const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
@@ -330,6 +332,7 @@ MainComponent::MainComponent()
     trackList.onTrackSelected = [this](const juce::String& trackId)
     {
         selectedTrackId = trackId;
+        pianoRoll.setFocusedTrack(trackId);
         refreshProjectControls();
     };
 
@@ -435,6 +438,7 @@ void MainComponent::applyPreferences()
         preferences->getValue("algorithm.hifiganPath")));
     const auto analysisConfig = backend::AnalysisService::configFromProperties(preferences.get());
     audio.setInferenceConfiguration(analysisConfig.inference, analysisConfig.deviceIndex);
+    pianoRoll.setShowNoteLabels(preferences->getBoolValue("ui.showNoteLabels", false));
     // Applying a new model path must invalidate and immediately reschedule
     // already imported compose clips; waiting for a later edit made the
     // settings change appear ineffective.
@@ -521,7 +525,8 @@ void MainComponent::refreshProjectControls()
         const auto pitchId = selected->pitchAlgorithm == PitchAlgorithm::nsfHifigan ? 2
             : selected->pitchAlgorithm == PitchAlgorithm::world ? 3
             : selected->pitchAlgorithm == PitchAlgorithm::vocalShifter ? 4
-            : selected->pitchAlgorithm == PitchAlgorithm::mld3 ? 5 : 1;
+            : selected->pitchAlgorithm == PitchAlgorithm::mld3 ? 5
+            : selected->pitchAlgorithm == PitchAlgorithm::llsm2 ? 6 : 1;
         const auto stretchId = selected->stretchAlgorithm == StretchAlgorithm::variableMelHop ? 2
             : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
             : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4 : 1;
@@ -993,6 +998,14 @@ void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
         const auto trackExists = std::any_of(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track) { return track.id == selectedTrackId; });
         if (!trackExists) selectedTrackId.clear();
+        if (selectedTrackId.isEmpty())
+        {
+            const auto firstCompose = std::find_if(data.tracks.begin(), data.tracks.end(),
+                [](const auto& track) { return track.compose; });
+            if (firstCompose != data.tracks.end()) selectedTrackId = firstCompose->id;
+        }
+        trackList.setSelectedTrack(selectedTrackId);
+        pianoRoll.setFocusedTrack(selectedTrackId);
         auto clipExists = false;
         for (const auto& track : data.tracks)
             clipExists = clipExists || std::any_of(track.clips.begin(), track.clips.end(),
@@ -1163,6 +1176,7 @@ void MainComponent::focusClip(const juce::String& clipId)
                 selectedClip = &clip;
                 selectedTrackId = track.id;
                 trackList.setSelectedTrack(track.id);
+                pianoRoll.setFocusedTrack(track.id);
                 refreshProjectControls();
                 break;
             }
@@ -2177,7 +2191,8 @@ void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResul
     const auto importedPitch = algorithmId == 2 ? PitchAlgorithm::nsfHifigan
         : algorithmId == 3 ? PitchAlgorithm::world
         : algorithmId == 4 ? PitchAlgorithm::vocalShifter
-        : algorithmId == 5 ? PitchAlgorithm::mld3 : PitchAlgorithm::mld5;
+        : algorithmId == 5 ? PitchAlgorithm::mld3
+        : algorithmId == 6 ? PitchAlgorithm::llsm2 : PitchAlgorithm::mld5;
     const auto stretchAlgorithmId = preferences != nullptr
         ? preferences->getIntValue("import.stretchAlgorithm", 1) : 1;
     auto importedStretch = stretchAlgorithmId == 2 ? StretchAlgorithm::variableMelHop

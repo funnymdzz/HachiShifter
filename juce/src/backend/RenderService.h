@@ -14,7 +14,8 @@ enum class PitchRenderBackend
     mld3 = 1,
     nsfHifigan = 2,
     world = 3,
-    vslib = 4
+    vslib = 4,
+    llsm2 = 5
 };
 
 struct TimeMapPoint

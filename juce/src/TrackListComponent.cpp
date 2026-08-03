@@ -14,6 +14,7 @@ juce::String algorithmLabel(const TrackData& track)
         : track.pitchAlgorithm == PitchAlgorithm::world ? juce::String("WORLD")
         : track.pitchAlgorithm == PitchAlgorithm::vocalShifter ? juce::String("vslib")
         : track.pitchAlgorithm == PitchAlgorithm::mld3 ? juce::String("mld3")
+        : track.pitchAlgorithm == PitchAlgorithm::llsm2 ? juce::String("llsm2")
         : juce::String("mld5");
     const auto stretch = track.stretchAlgorithm == StretchAlgorithm::variableMelHop
         ? juce::String("variable-mel-hop")

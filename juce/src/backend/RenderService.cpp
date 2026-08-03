@@ -1,5 +1,6 @@
 #include "RenderService.h"
 #include "NsfHifiganRenderer.h"
+#include "Llsm2Renderer.h"
 #include "WorldRenderer.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <signalsmith-stretch.h>
@@ -351,6 +352,12 @@ juce::AudioBuffer<float> renderFormantPreserved(const juce::AudioBuffer<float>& 
         stretch.configure(channels,
             std::max(1'024, static_cast<int>(std::llround(sampleRate * 0.072))),
             std::max(96, static_cast<int>(std::llround(sampleRate * 0.0075))), false);
+    else if (pitchBackend == PitchRenderBackend::llsm2)
+        // Used only if libllsm2 rejects an exceptional input.  Keep its
+        // fallback route distinct from every other selectable algorithm.
+        stretch.configure(channels,
+            std::max(1'024, static_cast<int>(std::llround(sampleRate * 0.096))),
+            std::max(128, static_cast<int>(std::llround(sampleRate * 0.010))), false);
     else if (stableVocalClock)
         stretch.presetCheaper(channels, static_cast<float>(sampleRate), false);
     else
@@ -718,6 +725,24 @@ public:
                 request.formantSemitones, request.noteGain, request.tension, request.breath,
                 request.timeMap, request.pitchBackend, request.stretchAlgorithm);
         }
+        else if (request.pitchBackend == PitchRenderBackend::llsm2)
+        {
+            // Direct LLSM2 layer-0/layer-1 analysis and synthesis.  The vocal
+            // tract envelope, glottal source phase, harmonic component and
+            // noise component stay separate while time and F0 are remapped.
+            rendered = Llsm2Renderer::render(source, targetSamples, reader->sampleRate,
+                request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                request.formantSemitones, request.tension, request.timeMap);
+            if (rendered.getNumSamples() == targetSamples)
+                applyExpressionAndTension(rendered, reader->sampleRate,
+                    request.framePeriodMs, request.targetMidi, request.noteGain,
+                    {}, request.breath);
+            else
+                rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                    request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                    request.formantSemitones, request.noteGain, request.tension, request.breath,
+                    request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+        }
         else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
         {
             // Both neural routes extract the spectral envelope directly from
@@ -762,6 +787,8 @@ public:
             : request.pitchBackend == PitchRenderBackend::nsfHifigan
                 ? (usedNsfModel ? juce::String("nsf-hifigan-onnx")
                                 : juce::String("nsf-hifigan-fallback"))
+            : request.pitchBackend == PitchRenderBackend::llsm2
+                ? juce::String("llsm2-direct")
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";

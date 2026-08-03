@@ -171,6 +171,7 @@ public:
                     : backendName == "world" ? backend::PitchRenderBackend::world
                     : backendName.contains("vslib") ? backend::PitchRenderBackend::vslib
                     : backendName == "mld3" ? backend::PitchRenderBackend::mld3
+                    : backendName == "llsm2" ? backend::PitchRenderBackend::llsm2
                     : backend::PitchRenderBackend::mld5;
             }
             const auto tension = arguments.size() >= 10 ? arguments[9].getFloatValue() : 0.0f;

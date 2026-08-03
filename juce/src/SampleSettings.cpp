@@ -196,7 +196,8 @@ std::vector<SampleRegionSetting> SampleSettings::loadOrDerive(const juce::File& 
         const auto ratio = item.clip->durationSeconds > 1.0e-9
             ? item.clip->sourceDurationSeconds / item.clip->durationSeconds : 1.0;
         SampleRegionSetting row;
-        row.name = "note " + juce::String(index + 1);
+        row.name = item.note->label.isNotEmpty()
+            ? item.note->label : "note " + juce::String(index + 1);
         row.regionStartSeconds = std::max(0.0, item.sourceStart);
         row.regionEndSeconds = std::max(row.regionStartSeconds + 0.001,
             row.regionStartSeconds + item.note->durationSeconds * ratio);

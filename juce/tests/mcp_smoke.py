@@ -242,7 +242,7 @@ def main() -> int:
 
         route_names: list[str] = []
         pitch_hashes: dict[str, str] = {}
-        for pitch in ("mld5", "mld3", "nsf-hifigan", "world", "vslib"):
+        for pitch in ("mld5", "mld3", "nsf-hifigan", "world", "vslib", "llsm2"):
             client.call(
                 "set_track",
                 {

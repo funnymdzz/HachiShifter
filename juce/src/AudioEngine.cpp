@@ -69,6 +69,9 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
         case PitchAlgorithm::vocalShifter:
             request.pitchBackend = backend::PitchRenderBackend::vslib;
             break;
+        case PitchAlgorithm::llsm2:
+            request.pitchBackend = backend::PitchRenderBackend::llsm2;
+            break;
         case PitchAlgorithm::mld5:
         default:
             request.pitchBackend = backend::PitchRenderBackend::mld5;

@@ -151,6 +151,7 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.accent", { "主色（Hex）", "主色（Hex）", "アクセント（Hex）", "강조색 (Hex)", "Accent (Hex)" } }
     ,{ "settings.accentLight", { "浅主色（Hex）", "淺主色（Hex）", "明るい主色（Hex）", "밝은 강조색 (Hex)", "Light Accent (Hex)" } }
     ,{ "settings.noteColour", { "音符色（Hex）", "音符色（Hex）", "ノート色（Hex）", "노트 색상 (Hex)", "Note Colour (Hex)" } }
+    ,{ "settings.showNoteLabels", { "显示已标注的发音/别名", "顯示已標註的發音/別名", "注釈済みの発音・別名を表示", "표시된 발음/별칭 표시", "Show annotated pronunciation/alias" } }
     ,{ "settings.gamePath", { "GAME 模型目录", "GAME 模型目錄", "GAMEモデルフォルダー", "GAME 모델 폴더", "GAME Model Directory" } }
     ,{ "settings.gameModel", { "GAME 默认模型", "GAME 預設模型", "GAME既定モデル", "GAME 기본 모델", "Default GAME Model" } }
     ,{ "settings.fcpePath", { "FCPE 模型或目录", "FCPE 模型或目錄", "FCPEモデルまたはフォルダー", "FCPE 모델 또는 폴더", "FCPE Model or Directory" } }

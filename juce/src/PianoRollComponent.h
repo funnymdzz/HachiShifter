@@ -22,6 +22,8 @@ public:
     void setPixelsPerSecond(float value);
     void setSourceEditMode(bool enabled);
     void setFocusedClip(const juce::String& clipId);
+    void setFocusedTrack(const juce::String& trackId);
+    void setShowNoteLabels(bool enabled);
     void setSampleRegions(const std::vector<SampleRegionSetting>& regions, int activeRegion);
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
@@ -49,6 +51,7 @@ private:
         float midi = 60.0f;
         double startSeconds = 0.0;
         double durationSeconds = 0.0;
+        double clipStartSeconds = 0.0;
     };
 
     enum class RegionHandle { none, start, fixedEnd, alignment, end };
@@ -84,20 +87,28 @@ private:
     int highestMidi = 96;
     int lowestMidi = 24;
     bool sourceEditMode = false;
+    bool showNoteLabels = false;
     Tool tool = Tool::note;
     juce::String focusedClip;
+    juce::String focusedTrack;
     double playheadSeconds = 0.0;
     juce::String selectedNote;
     std::unordered_set<std::string> selectedNotes;
     juce::String draggedNote;
     float dragStartMidi = 0.0f;
     float previewMidi = 0.0f;
-    enum class DragMode { none, pitch, resizeLeft, resizeRight, drawPitch, linePitch } dragMode = DragMode::none;
+    float dragStartY = 0.0f;
+    bool finePitchDrag = false;
+    enum class DragMode { none, pitch, resizeLeft, resizeRight, drawPitch, linePitch, marquee } dragMode = DragMode::none;
     double dragStartSeconds = 0.0;
     double dragDurationSeconds = 0.0;
+    double dragClipStartSeconds = 0.0;
     double previewStartSeconds = 0.0;
     double previewDurationSeconds = 0.0;
     double pitchEditAbsoluteStart = 0.0;
     std::vector<PitchCurveEditPoint> pitchStroke;
+    juce::Point<float> marqueeStart;
+    juce::Point<float> marqueeCurrent;
+    bool marqueeAddsToSelection = false;
 };
 }

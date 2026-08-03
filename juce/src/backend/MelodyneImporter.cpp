@@ -801,6 +801,9 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
 
             NoteData note;
             note.id = makeId("note");
+            note.label = graph.stringField(element, "label");
+            if (note.label.isEmpty()) note.label = graph.stringField(element, "noteName");
+            if (note.label.isEmpty()) note.label = graph.stringField(item, "label");
             note.startSeconds = 0.0;
             note.durationSeconds = duration;
             note.consonantSeconds = std::clamp(graph.number(element, "attackDuration").value_or(0.0), 0.0, duration);

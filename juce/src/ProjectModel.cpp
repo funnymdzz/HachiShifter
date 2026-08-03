@@ -34,6 +34,7 @@ juce::String pitchAlgorithmName(PitchAlgorithm value)
         case PitchAlgorithm::nsfHifigan: return "nsf-hifigan";
         case PitchAlgorithm::world: return "world";
         case PitchAlgorithm::vocalShifter: return "vslib";
+        case PitchAlgorithm::llsm2: return "llsm2";
     }
     return "mld5";
 }
@@ -44,6 +45,7 @@ PitchAlgorithm parsePitchAlgorithm(const juce::String& value)
     if (value == "mld3") return PitchAlgorithm::mld3;
     if (value == "world") return PitchAlgorithm::world;
     if (value == "vslib") return PitchAlgorithm::vocalShifter;
+    if (value == "llsm2") return PitchAlgorithm::llsm2;
     return PitchAlgorithm::mld5;
 }
 
@@ -1058,6 +1060,110 @@ void ProjectModel::resizeNote(const juce::String& noteId, double newStart, doubl
     if (changed) sendChangeMessage();
 }
 
+juce::String ProjectModel::splitNote(const juce::String& noteId, double localSeconds)
+{
+    juce::String createdId;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+        {
+            for (auto& clip : track.clips)
+            {
+                for (std::size_t noteIndex = 0; noteIndex < clip.notes.size(); ++noteIndex)
+                {
+                    if (clip.notes[noteIndex].id != noteId) continue;
+                    const auto original = clip.notes[noteIndex];
+                    const auto split = juce::jlimit(0.01,
+                        std::max(0.01, original.durationSeconds - 0.01), localSeconds);
+                    if (split <= 0.0099 || split >= original.durationSeconds - 0.0099)
+                        return {};
+
+                    const auto evaluate = [&](double time)
+                    {
+                        PitchPoint result;
+                        result.timeSeconds = time;
+                        if (original.contour.empty()) return result;
+                        const auto right = std::lower_bound(original.contour.begin(),
+                            original.contour.end(), time,
+                            [](const PitchPoint& point, double value)
+                            {
+                                return point.timeSeconds < value;
+                            });
+                        const auto rightIndex = static_cast<std::size_t>(right == original.contour.end()
+                            ? original.contour.size() - 1 : right - original.contour.begin());
+                        const auto leftIndex = rightIndex > 0
+                            && original.contour[rightIndex].timeSeconds > time
+                                ? rightIndex - 1 : rightIndex;
+                        const auto& left = original.contour[leftIndex];
+                        const auto& next = original.contour[rightIndex];
+                        const auto amount = next.timeSeconds > left.timeSeconds
+                            ? static_cast<float>(juce::jlimit(0.0, 1.0,
+                                (time - left.timeSeconds)
+                                    / (next.timeSeconds - left.timeSeconds))) : 0.0f;
+                        result.relativeCents = left.relativeCents
+                            + (next.relativeCents - left.relativeCents) * amount;
+                        result.withoutVibratoCents = left.withoutVibratoCents
+                            + (next.withoutVibratoCents - left.withoutVibratoCents) * amount;
+                        result.voiced = left.voiced && next.voiced;
+                        result.manualTargetCents = left.manualTargetCents
+                            + (next.manualTargetCents - left.manualTargetCents) * amount;
+                        result.hasManualTarget = left.hasManualTarget && next.hasManualTarget;
+                        return result;
+                    };
+
+                    auto left = original;
+                    auto right = original;
+                    left.durationSeconds = split;
+                    left.consonantSeconds = std::min(original.consonantSeconds, split);
+                    left.connectedToNext = false;
+                    right.id = makeId("note");
+                    createdId = right.id;
+                    right.startSeconds = original.startSeconds + split;
+                    right.durationSeconds = original.durationSeconds - split;
+                    right.consonantSeconds = original.consonantSeconds > split
+                        ? original.consonantSeconds - split : 0.0;
+                    right.connectedToPrevious = false;
+
+                    left.contour.clear();
+                    right.contour.clear();
+                    for (const auto& point : original.contour)
+                    {
+                        if (point.timeSeconds < split - 1.0e-8)
+                            left.contour.push_back(point);
+                        if (point.timeSeconds > split + 1.0e-8)
+                        {
+                            auto shifted = point;
+                            shifted.timeSeconds -= split;
+                            right.contour.push_back(shifted);
+                        }
+                    }
+                    auto boundary = evaluate(split);
+                    boundary.timeSeconds = split;
+                    left.contour.push_back(boundary);
+                    boundary.timeSeconds = 0.0;
+                    right.contour.insert(right.contour.begin(), boundary);
+
+                    left.sibilantMarkers.clear();
+                    right.sibilantMarkers.clear();
+                    for (const auto marker : original.sibilantMarkers)
+                        if (marker <= split) left.sibilantMarkers.push_back(marker);
+                        else right.sibilantMarkers.push_back(marker - split);
+
+                    pushUndoLocked();
+                    clip.notes[noteIndex] = std::move(left);
+                    clip.notes.insert(clip.notes.begin()
+                        + static_cast<std::ptrdiff_t>(noteIndex + 1), std::move(right));
+                    break;
+                }
+                if (createdId.isNotEmpty()) break;
+            }
+            if (createdId.isNotEmpty()) break;
+        }
+    }
+    if (createdId.isNotEmpty()) sendChangeMessage();
+    return createdId;
+}
+
 void ProjectModel::setNoteModulation(const juce::String& noteId, float modulation)
 {
     auto changed = false;
@@ -1497,6 +1603,7 @@ void ProjectModel::applySourceSettings(const juce::File& source,
             auto& clip = *entries[index].clip;
             auto& note = *entries[index].note;
             const auto& row = rows[index];
+            note.label = row.name.trim();
             clip.sourceOffsetSeconds = std::max(0.0, row.regionStartSeconds);
             clip.sourceDurationSeconds = std::max(0.001,
                 row.regionEndSeconds - row.regionStartSeconds);
@@ -1536,7 +1643,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
 {
     const auto data = snapshot();
     juce::ValueTree root("HachiShifterProject");
-    root.setProperty("version", 7, nullptr);
+    root.setProperty("version", 8, nullptr);
     root.setProperty("name", data.name, nullptr);
     root.setProperty("bpm", data.bpm, nullptr);
     root.setProperty("beatOriginSeconds", data.beatOriginSeconds, nullptr);
@@ -1591,6 +1698,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
             {
                 juce::ValueTree noteTree("Note");
                 noteTree.setProperty("id", note.id, nullptr);
+                noteTree.setProperty("label", note.label, nullptr);
                 noteTree.setProperty("startSeconds", note.startSeconds, nullptr);
                 noteTree.setProperty("durationSeconds", note.durationSeconds, nullptr);
                 noteTree.setProperty("consonantSeconds", note.consonantSeconds, nullptr);
@@ -1717,6 +1825,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
                 if (!noteTree.hasType("Note")) continue;
                 NoteData note;
                 note.id = noteTree.getProperty("id").toString();
+                note.label = noteTree.getProperty("label").toString();
                 note.startSeconds = static_cast<double>(noteTree.getProperty("startSeconds", 0.0));
                 note.durationSeconds = static_cast<double>(noteTree.getProperty("durationSeconds", 0.25));
                 note.consonantSeconds = static_cast<double>(noteTree.getProperty("consonantSeconds", 0.04));

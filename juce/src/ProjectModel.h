@@ -14,7 +14,8 @@ enum class PitchAlgorithm
     mld3,
     nsfHifigan,
     world,
-    vocalShifter
+    vocalShifter,
+    llsm2
 };
 
 enum class StretchAlgorithm
@@ -56,6 +57,7 @@ struct SourceTimePoint
 struct NoteData
 {
     juce::String id;
+    juce::String label;
     double startSeconds = 0.0;
     double durationSeconds = 0.25;
     double consonantSeconds = 0.04;
@@ -181,6 +183,8 @@ public:
         const std::vector<juce::String>& noteIds, const juce::String& targetClipId,
         double absoluteStartSeconds);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
+    [[nodiscard]] juce::String splitNote(const juce::String& noteId,
+                                         double localSeconds);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);
     void setNoteTension(const juce::String& noteId, float tension);

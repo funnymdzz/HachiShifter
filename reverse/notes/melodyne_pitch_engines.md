@@ -102,3 +102,36 @@ ratio from acquiring a child/elder timbre after transposition.  It keeps the
 M3-specific periodic clock and the existing explicit
 note connection mask: transitions are synthesized only for connected notes,
 while unvoiced intervals remain disconnected.
+
+### Melodyne 3 editor representation evidence (2026-08-03)
+
+The melodic editor does not route every gesture through one note rectangle.
+RTTI and vtables identify separate representations for note body, note
+separator, time handle, pitch transition, formant, amplitude transition,
+assignment, back handle and quantization.  The common visual/event slots are
+shared, while construction and retained state remain type-specific.
+
+- `0x004a8210` is persisted as `MDEditorNoteRep_initializeState`;
+- it initializes six independent retained child-representation slots at
+  `+0x98..+0xa8` and `+0xd4`, plus auxiliary state at `+0xcc`;
+- `0x004a82b0` is persisted as
+  `MDEditorNoteRep_releaseChildRepresentations` and releases those children
+  independently before base cleanup;
+- bookmark category `MLD3_EDITOR` marks this object layout.
+
+The HachiShifter melodic editor follows this separation: body dragging,
+left/right time handles, consonant boundary alignment, pitch drawing,
+connection/split gestures and selection marquee have independent hit regions
+and state.  This also prevents a time-handle drag from being interpreted as a
+pitch edit when compact or overlapping blobs are displayed.
+
+## Direct LLSM2 integration
+
+The selectable `llsm2` route integrates the libllsm2 speech-model library,
+not the moresampler command-line frontend.  The renderer analyses source PCM
+into harmonic/noise layer 0, derives the layer-1 glottal/vocal-tract
+representation, interpolates source frames through the clip source-time map,
+sets target F0 on the native 5 ms curve, applies formant/tension edits to the
+vocal-tract envelope, propagates phase and synthesizes once.  Unvoiced frames
+remain unvoiced and the LLSM harmonic/noise decomposition is retained across
+time stretching and pitch shifting.

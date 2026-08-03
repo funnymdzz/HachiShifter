@@ -48,6 +48,19 @@ void PianoRollComponent::setFocusedClip(const juce::String& clipId)
     repaint();
 }
 
+void PianoRollComponent::setFocusedTrack(const juce::String& trackId)
+{
+    focusedTrack = trackId;
+    repaint();
+}
+
+void PianoRollComponent::setShowNoteLabels(bool enabled)
+{
+    if (showNoteLabels == enabled) return;
+    showNoteLabels = enabled;
+    repaint();
+}
+
 void PianoRollComponent::setSampleRegions(const std::vector<SampleRegionSetting>& regions,
                                           int activeRegion)
 {
@@ -77,6 +90,7 @@ void PianoRollComponent::selectAllNotes()
     for (const auto& track : snapshot.tracks)
     {
         if (!track.compose && !sourceEditMode) continue;
+        if (!sourceEditMode && focusedTrack.isNotEmpty() && track.id != focusedTrack) continue;
         for (const auto& clip : track.clips)
         {
             // Wrench mode edits one source instance.  Drawing every project
@@ -218,6 +232,7 @@ void PianoRollComponent::drawClipWaveforms(juce::Graphics& g)
     for (const auto& track : snapshot.tracks)
     {
         if (!track.compose && !sourceEditMode) continue;
+        if (!sourceEditMode && focusedTrack.isNotEmpty() && track.id != focusedTrack) continue;
         for (const auto& clip : track.clips)
         {
             if (sourceEditMode && clip.id != focusedClip)
@@ -397,10 +412,64 @@ void PianoRollComponent::paint(juce::Graphics& g)
         Palette::accentLight, Palette::accent, Palette::noteFill,
         juce::Colour(0xff45b8aa), juce::Colour(0xffad7ad6)
     };
+    struct PositionedNote
+    {
+        juce::String id;
+        int midiRow = 0;
+        double start = 0.0;
+        double end = 0.0;
+    };
+    std::vector<PositionedNote> visibleNotes;
+    for (const auto& track : snapshot.tracks)
+    {
+        if (!track.compose && !sourceEditMode) continue;
+        if (!sourceEditMode && focusedTrack.isNotEmpty() && track.id != focusedTrack) continue;
+        for (const auto& clip : track.clips)
+        {
+            if (sourceEditMode && clip.id != focusedClip) continue;
+            const auto sourceScale = sourceEditMode && clip.durationSeconds > 1.0e-9
+                ? (clip.sourceDurationSeconds > 1.0e-9 ? clip.sourceDurationSeconds : clip.durationSeconds)
+                    / clip.durationSeconds : 1.0;
+            for (const auto& note : clip.notes)
+            {
+                const auto start = sourceEditMode
+                    ? clip.sourceOffsetSeconds + note.startSeconds * sourceScale
+                    : clip.startSeconds + note.startSeconds;
+                visibleNotes.push_back({ note.id, static_cast<int>(std::lround(note.midiNote)),
+                                         start, start + note.durationSeconds * sourceScale });
+            }
+        }
+    }
+    std::stable_sort(visibleNotes.begin(), visibleNotes.end(), [](const auto& left, const auto& right)
+    {
+        if (left.midiRow != right.midiRow) return left.midiRow < right.midiRow;
+        if (std::abs(left.start - right.start) > 1.0e-9) return left.start < right.start;
+        return left.end < right.end;
+    });
+    std::unordered_map<std::string, int> noteLanes;
+    std::unordered_map<int, std::vector<double>> laneEnds;
+    std::unordered_map<int, int> laneCounts;
+    for (const auto& positioned : visibleNotes)
+    {
+        auto& ends = laneEnds[positioned.midiRow];
+        auto lane = 0;
+        while (lane < static_cast<int>(ends.size())
+               && ends[static_cast<std::size_t>(lane)] > positioned.start + 1.0e-7)
+            ++lane;
+        if (lane == static_cast<int>(ends.size())) ends.push_back(positioned.end);
+        else ends[static_cast<std::size_t>(lane)] = positioned.end;
+        noteLanes[positioned.id.toStdString()] = lane;
+        laneCounts[positioned.midiRow] = std::max(laneCounts[positioned.midiRow], lane + 1);
+    }
     std::size_t trackIndex = 0;
     for (const auto& track : snapshot.tracks)
     {
         if (!track.compose && !sourceEditMode) { ++trackIndex; continue; }
+        if (!sourceEditMode && focusedTrack.isNotEmpty() && track.id != focusedTrack)
+        {
+            ++trackIndex;
+            continue;
+        }
         const auto originalColour = contourColours[trackIndex % contourColours.size()];
         for (const auto& clip : track.clips)
         {
@@ -418,8 +487,14 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 const auto y = midiToY(note.midiNote);
                 const auto width = std::max(5.0f, static_cast<float>(note.durationSeconds * sourceScale)
                                                      * pixelsPerSecond);
-                const auto bounds = juce::Rectangle<float>(x, y + 2.0f, width, rowHeight - 4.0f);
-                noteHits.push_back({ note.id, bounds, note.midiNote, note.startSeconds, note.durationSeconds });
+                const auto midiRow = static_cast<int>(std::lround(note.midiNote));
+                const auto laneCount = std::max(1, laneCounts[midiRow]);
+                const auto lane = noteLanes[note.id.toStdString()];
+                const auto laneHeight = std::max(4.0f, (rowHeight - 4.0f) / laneCount);
+                const auto bounds = juce::Rectangle<float>(x, y + 2.0f + lane * laneHeight,
+                    width, std::max(3.0f, laneHeight - 1.0f));
+                noteHits.push_back({ note.id, bounds, note.midiNote, note.startSeconds,
+                                     note.durationSeconds, clip.startSeconds });
 
                 g.setColour(Palette::noteFill.darker(0.18f));
                 g.fillRoundedRectangle(bounds, 4.0f);
@@ -433,6 +508,14 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 {
                     g.setColour(Palette::text.withAlpha(0.95f));
                     g.drawRoundedRectangle(bounds.reduced(1.0f), 3.0f, 1.8f);
+                }
+
+                if (showNoteLabels && note.label.isNotEmpty() && bounds.getWidth() >= 18.0f)
+                {
+                    g.setColour(Palette::text.withAlpha(0.86f));
+                    g.setFont(std::min(11.0f, std::max(8.0f, bounds.getHeight() - 2.0f)));
+                    g.drawFittedText(note.label, bounds.toNearestInt().reduced(4, 0),
+                                     juce::Justification::centredLeft, 1);
                 }
 
                 g.setColour(Palette::textMuted.withAlpha(0.55f));
@@ -518,6 +601,15 @@ void PianoRollComponent::paint(juce::Graphics& g)
         g.strokePath(preview, juce::PathStrokeType(2.2f, juce::PathStrokeType::curved));
     }
 
+    if (dragMode == DragMode::marquee)
+    {
+        const auto selection = juce::Rectangle<float>(marqueeStart, marqueeCurrent);
+        g.setColour(Palette::accent.withAlpha(0.12f));
+        g.fillRect(selection);
+        g.setColour(Palette::accentLight.withAlpha(0.92f));
+        g.drawRect(selection, 1.0f);
+    }
+
     g.setColour(juce::Colours::red.withAlpha(0.9f));
     g.drawVerticalLine(static_cast<int>(timeToX(playheadSeconds)), 0.0f, static_cast<float>(getHeight()));
     drawKeyboard();
@@ -569,6 +661,10 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
                     selectedNote = selectedNotes.empty() ? juce::String()
                         : juce::String::fromUTF8(selectedNotes.begin()->c_str());
             }
+            else if (event.mods.isShiftDown())
+            {
+                selectedNotes.insert(id);
+            }
             else
             {
                 if (!selectedNotes.contains(id))
@@ -599,8 +695,11 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             }
             dragStartMidi = it->midi;
             previewMidi = dragStartMidi;
+            dragStartY = event.position.y;
+            finePitchDrag = event.mods.isAltDown();
             dragStartSeconds = it->startSeconds;
             dragDurationSeconds = it->durationSeconds;
+            dragClipStartSeconds = it->clipStartSeconds;
             previewStartSeconds = dragStartSeconds;
             previewDurationSeconds = dragDurationSeconds;
             if (!sourceEditMode && event.position.x <= it->bounds.getX() + 6.0f)
@@ -612,10 +711,6 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             repaint();
             return;
         }
-    selectedNote.clear();
-    selectedNotes.clear();
-    if (onNoteSelected) onNoteSelected({});
-    repaint();
     if ((tool == Tool::draw || tool == Tool::line) && !sourceEditMode)
     {
         const auto rawSeconds = std::max(0.0,
@@ -634,6 +729,20 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
         }
         return;
     }
+    marqueeAddsToSelection = event.mods.isShiftDown() || event.mods.isCommandDown();
+    if (!marqueeAddsToSelection)
+    {
+        selectedNote.clear();
+        selectedNotes.clear();
+        if (onNoteSelected) onNoteSelected({});
+    }
+    if (!sourceEditMode && tool == Tool::note)
+    {
+        marqueeStart = event.position;
+        marqueeCurrent = event.position;
+        dragMode = DragMode::marquee;
+    }
+    repaint();
     if (onSeek)
         onSeek(std::max(0.0, static_cast<double>(event.position.x - 58.0f) / pixelsPerSecond));
 }
@@ -651,14 +760,35 @@ void PianoRollComponent::mouseDoubleClick(const juce::MouseEvent& event)
                     {
                         draggedNote.clear();
                         dragMode = DragMode::none;
+                        const auto local = juce::jlimit(0.0, note.durationSeconds,
+                            static_cast<double>(event.position.x - it->bounds.getX())
+                                / pixelsPerSecond);
+                        if (tool == Tool::connect)
+                        {
+                            const auto created = model.splitNote(note.id, local);
+                            if (created.isNotEmpty())
+                            {
+                                selectedNote = created;
+                                selectedNotes.clear();
+                                selectedNotes.insert(created.toStdString());
+                                if (onNoteSelected) onNoteSelected(created);
+                            }
+                            return;
+                        }
                         const auto noteStart = clip.startSeconds + note.startSeconds;
                         const auto boundary = noteStart + note.consonantSeconds;
-                        const auto step = gridSeconds();
-                        const auto quantized = snapshot.beatOriginSeconds
-                            + std::round((boundary - snapshot.beatOriginSeconds) / step) * step;
-                        model.setNoteAttack(note.id,
-                            juce::jlimit(0.0, note.durationSeconds, quantized - noteStart),
-                            note.attackSpeed);
+                        const auto boundaryX = timeToX(boundary);
+                        if (std::abs(event.position.x - boundaryX) <= 7.0f)
+                        {
+                            const auto step = gridSeconds();
+                            const auto quantized = snapshot.beatOriginSeconds
+                                + std::round((boundary - snapshot.beatOriginSeconds) / step) * step;
+                            model.setNoteAttack(note.id,
+                                juce::jlimit(0.0, note.durationSeconds, quantized - noteStart),
+                                note.attackSpeed);
+                        }
+                        else
+                            model.transposeNotes({ note.id }, std::round(note.midiNote) - note.midiNote);
                         return;
                     }
         return;
@@ -709,6 +839,12 @@ void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
         repaint();
         return;
     }
+    if (dragMode == DragMode::marquee)
+    {
+        marqueeCurrent = event.position;
+        repaint();
+        return;
+    }
     if (draggedNote.isEmpty()) return;
     if (tool == Tool::connect) return;
     if (dragMode == DragMode::drawPitch || dragMode == DragMode::linePitch)
@@ -731,17 +867,38 @@ void PianoRollComponent::mouseDrag(const juce::MouseEvent& event)
         return;
     }
     if (dragMode == DragMode::pitch)
-        previewMidi = juce::jlimit(0.0f, 127.0f, std::round(yToMidi(event.position.y)));
+    {
+        finePitchDrag = finePitchDrag || event.mods.isAltDown();
+        previewMidi = finePitchDrag
+            ? juce::jlimit(0.0f, 127.0f,
+                dragStartMidi - (event.position.y - dragStartY) / rowHeight)
+            : juce::jlimit(0.0f, 127.0f, std::round(yToMidi(event.position.y)));
+    }
     else if (dragMode == DragMode::resizeLeft)
     {
         const auto end = dragStartSeconds + dragDurationSeconds;
-        previewStartSeconds = juce::jlimit(0.0, end - 0.01,
-            dragStartSeconds + static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond);
+        auto next = dragStartSeconds
+            + static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond;
+        if (!event.mods.isAltDown())
+        {
+            const auto absolute = dragClipStartSeconds + next;
+            next = snapshot.beatOriginSeconds
+                + std::round((absolute - snapshot.beatOriginSeconds) / gridSeconds()) * gridSeconds()
+                - dragClipStartSeconds;
+        }
+        previewStartSeconds = juce::jlimit(0.0, end - 0.01, next);
         previewDurationSeconds = end - previewStartSeconds;
     }
     else if (dragMode == DragMode::resizeRight)
-        previewDurationSeconds = std::max(0.01, dragDurationSeconds
-            + static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond);
+    {
+        auto end = dragClipStartSeconds + dragStartSeconds + dragDurationSeconds
+            + static_cast<double>(event.getDistanceFromDragStartX()) / pixelsPerSecond;
+        if (!event.mods.isAltDown())
+            end = snapshot.beatOriginSeconds
+                + std::round((end - snapshot.beatOriginSeconds) / gridSeconds()) * gridSeconds();
+        previewDurationSeconds = std::max(0.01,
+            end - dragClipStartSeconds - dragStartSeconds);
+    }
     repaint();
 }
 
@@ -758,6 +915,19 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
         setMouseCursor(juce::MouseCursor::NormalCursor);
         return;
     }
+    if (dragMode == DragMode::marquee)
+    {
+        const auto selection = juce::Rectangle<float>(marqueeStart, marqueeCurrent);
+        if (!marqueeAddsToSelection) selectedNotes.clear();
+        for (const auto& hit : noteHits)
+            if (selection.intersects(hit.bounds)) selectedNotes.insert(hit.id.toStdString());
+        selectedNote = selectedNotes.empty() ? juce::String()
+            : juce::String::fromUTF8(selectedNotes.begin()->c_str());
+        dragMode = DragMode::none;
+        if (onNoteSelected) onNoteSelected(selectedNote);
+        repaint();
+        return;
+    }
     if (draggedNote.isEmpty()) return;
     if (dragMode == DragMode::drawPitch || dragMode == DragMode::linePitch)
         model.setNotePitchCurve(draggedNote, std::move(pitchStroke));
@@ -772,6 +942,7 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent&)
     else
         model.resizeNote(draggedNote, previewStartSeconds, previewDurationSeconds);
     draggedNote.clear();
+    finePitchDrag = false;
     pitchStroke.clear();
     dragMode = DragMode::none;
 }

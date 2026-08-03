@@ -29,17 +29,32 @@ SOFTWARE.
    License: MIT
    https://github.com/Signalsmith-Audio/signalsmith-stretch
 
-2. VocalShifter Library (vslib)
+2. libllsm2
+   Copyright (c) 2017-2020 Kanru Hua and respective contributors.
+   License: GNU General Public License version 3 or later.
+   Source and complete license text are included under
+   juce/third_party/libllsm2.
+
+   Builds that link the selectable LLSM2 algorithm are distributed under the
+   GNU GPL v3-or-later terms applicable to that combined build.  The original
+   HachiShifter source files retain their MIT notices.
+
+3. ciglet
+   Copyright (c) 2016-2019 Kanru Hua.
+   License: BSD 3-Clause; the full notice is retained at the beginning of the
+   vendored source files under juce/third_party/ciglet.
+
+4. VocalShifter Library (vslib)
    Copyright (c) あっきー (Ackie Sound)
    License: Free for personal development software
    https://ackiesound.ifdef.jp/
 
-3. WORLD - High-quality speech analysis, manipulation and synthesis system
+5. WORLD - High-quality speech analysis, manipulation and synthesis system
    Copyright (C) 2010 M. Morise
    License: Modified BSD (3-Clause)
    https://github.com/mmorise/World
 
-4. Portions of code derived from OpenVPI project
+6. Portions of code derived from OpenVPI project
    Copyright (C) 2023 Team OpenVPI
    License: MIT
    https://github.com/openvpi/SingingVocoders
