@@ -169,6 +169,9 @@ public:
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);
     void transposeNotes(const std::vector<juce::String>& noteIds, float semitones);
+    void setNotesMidi(const std::vector<juce::String>& noteIds, float midiNote);
+    void averageNotesMidi(const std::vector<juce::String>& noteIds);
+    void quantizeNotesMidi(const std::vector<juce::String>& noteIds, float stepSemitones = 1.0f);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);

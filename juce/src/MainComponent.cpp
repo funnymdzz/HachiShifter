@@ -1347,6 +1347,13 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(21, strings.text("edit.redo"), project.canRedo());
         menu.addSeparator();
         menu.addItem(22, strings.text("edit.selectAll"));
+        menu.addItem(26, strings.text("edit.deselect"));
+        menu.addSeparator();
+        const auto hasNotes = !pianoRoll.selectedNoteIds().empty();
+        menu.addItem(27, strings.text("edit.transposeCents"), hasNotes);
+        menu.addItem(28, strings.text("edit.setPitch"), hasNotes);
+        menu.addItem(29, strings.text("edit.averagePitch"), hasNotes);
+        menu.addItem(19, strings.text("edit.quantizePitch"), hasNotes);
         menu.addSeparator();
         menu.addItem(23, strings.text("edit.copyClip"), selectedClipId.isNotEmpty());
         menu.addItem(24, strings.text("edit.pasteClip"), copiedClipId.isNotEmpty());
@@ -1402,6 +1409,11 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 20) project.undo();
     else if (id == 21) project.redo();
     else if (id == 22) pianoRoll.selectAllNotes();
+    else if (id == 26) pianoRoll.clearNoteSelection();
+    else if (id == 27) showTransposeNotesDialog();
+    else if (id == 28) showSetNotesPitchDialog();
+    else if (id == 29) project.averageNotesMidi(pianoRoll.selectedNoteIds());
+    else if (id == 19) project.quantizeNotesMidi(pianoRoll.selectedNoteIds());
     else if (id == 23) copySelectedClip();
     else if (id == 24) pasteCopiedClip();
     else if (id == 25) duplicateSelectedClip();
@@ -1563,6 +1575,65 @@ void MainComponent::showRenameTrackDialog()
             if (safe != nullptr && result == 1)
                 safe->project.setTrackName(trackId,
                     dialog->getTextEditorContents("name"));
+            delete dialog;
+        }), false);
+}
+
+void MainComponent::showTransposeNotesDialog()
+{
+    const auto noteIds = pianoRoll.selectedNoteIds();
+    if (noteIds.empty()) return;
+    auto* dialog = new juce::AlertWindow(strings.text("edit.transposeCents"), juce::String{},
+                                          juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("cents", "0", strings.text("edit.cents"));
+    dialog->addButton(strings.text("dialog.apply"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create([safe, dialog, noteIds](int result)
+        {
+            if (safe != nullptr && result == 1)
+            {
+                const auto cents = juce::jlimit(-4'800.0, 4'800.0,
+                    dialog->getTextEditorContents("cents").getDoubleValue());
+                safe->project.transposeNotes(noteIds, static_cast<float>(cents / 100.0));
+            }
+            delete dialog;
+        }), false);
+}
+
+void MainComponent::showSetNotesPitchDialog()
+{
+    const auto noteIds = pianoRoll.selectedNoteIds();
+    if (noteIds.empty()) return;
+    auto initial = 60.0f;
+    auto found = false;
+    for (const auto& track : project.snapshot().tracks)
+        for (const auto& clip : track.clips)
+            for (const auto& note : clip.notes)
+                if (std::find(noteIds.begin(), noteIds.end(), note.id) != noteIds.end())
+                {
+                    initial = note.midiNote;
+                    found = true;
+                    break;
+                }
+    if (!found) return;
+    auto* dialog = new juce::AlertWindow(strings.text("edit.setPitch"), juce::String{},
+                                          juce::MessageBoxIconType::NoIcon);
+    dialog->addTextEditor("midi", juce::String(initial, 2), strings.text("edit.midiNote"));
+    dialog->addButton(strings.text("dialog.apply"), 1,
+                      juce::KeyPress(juce::KeyPress::returnKey));
+    dialog->addButton(strings.text("dialog.cancel"), 0,
+                      juce::KeyPress(juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainComponent> safe(this);
+    dialog->enterModalState(true,
+        juce::ModalCallbackFunction::create([safe, dialog, noteIds](int result)
+        {
+            if (safe != nullptr && result == 1)
+                safe->project.setNotesMidi(noteIds, static_cast<float>(
+                    dialog->getTextEditorContents("midi").getDoubleValue()));
             delete dialog;
         }), false);
 }

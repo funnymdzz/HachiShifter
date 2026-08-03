@@ -92,6 +92,24 @@ void PianoRollComponent::selectAllNotes()
     repaint();
 }
 
+void PianoRollComponent::clearNoteSelection()
+{
+    selectedNote.clear();
+    selectedNotes.clear();
+    if (onNoteSelected) onNoteSelected({});
+    repaint();
+}
+
+std::vector<juce::String> PianoRollComponent::selectedNoteIds() const
+{
+    std::vector<juce::String> result;
+    result.reserve(selectedNotes.size() + (selectedNote.isNotEmpty() ? 1u : 0u));
+    for (const auto& id : selectedNotes)
+        result.push_back(juce::String::fromUTF8(id.c_str()));
+    if (result.empty() && selectedNote.isNotEmpty()) result.push_back(selectedNote);
+    return result;
+}
+
 double PianoRollComponent::gridSeconds() const
 {
     auto text = snapshot.gridDivision.trim().toLowerCase();

@@ -53,6 +53,16 @@ juce::String string(const juce::var& args, const char* key)
     return args.getProperty(key, {}).toString();
 }
 
+std::vector<juce::String> strings(const juce::var& args, const char* key)
+{
+    std::vector<juce::String> result;
+    const auto source = args.getProperty(key, {});
+    if (const auto* values = source.getArray())
+        for (const auto& value : *values)
+            if (const auto text = value.toString(); text.isNotEmpty()) result.push_back(text);
+    return result;
+}
+
 AnalysisConfig analysisConfig(const juce::var& args)
 {
     auto config = AnalysisService::configFromEnvironment();
@@ -258,6 +268,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("resize_clip", "Stretch a whole clip while preserving its source media / 整体拉伸采样并保留原始素材"),
             makeTool("duplicate_clip", "Deep-copy a clip and its notes to a timeline position / 深度复制采样及其音符到指定位置"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
+            makeTool("edit_notes_pitch", "Batch transpose, set, average or quantize note pitches / 批量移调、设置、平均或量化音符"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
             makeTool("set_note", "Set pitch, Robust Pitch Curve, tension, breath, formant, gain, Attack and consonant parameters / 设置稳健音高线及全部音符参数"),
             makeTool("set_pitch_curve", "Draw an absolute target-pitch curve without replacing source F0 / 绘制目标音高线并保留原始 F0"),
@@ -514,6 +525,24 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     else if (name == "transpose_note")
     {
         project.transposeNote(string(args, "note_id"), static_cast<float>(number(args, "semitones")));
+        return toolResult("ok");
+    }
+    else if (name == "edit_notes_pitch")
+    {
+        auto ids = strings(args, "note_ids");
+        if (ids.empty())
+            if (const auto id = string(args, "note_id"); id.isNotEmpty()) ids.push_back(id);
+        const auto action = string(args, "action").toLowerCase();
+        if (action == "set")
+            project.setNotesMidi(ids, static_cast<float>(number(args, "midi", 60.0)));
+        else if (action == "average")
+            project.averageNotesMidi(ids);
+        else if (action == "quantize")
+            project.quantizeNotesMidi(ids,
+                static_cast<float>(number(args, "step_semitones", 1.0)));
+        else
+            project.transposeNotes(ids,
+                static_cast<float>(number(args, "cents") / 100.0));
         return toolResult("ok");
     }
     else if (name == "resize_note")

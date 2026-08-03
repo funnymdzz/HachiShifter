@@ -26,6 +26,8 @@ public:
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
     void selectAllNotes();
+    void clearNoteSelection();
+    [[nodiscard]] std::vector<juce::String> selectedNoteIds() const;
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     [[nodiscard]] double secondsForPixel(int pixel) const;
     void paint(juce::Graphics& g) override;

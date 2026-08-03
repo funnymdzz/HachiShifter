@@ -159,6 +159,22 @@ def main() -> int:
         ).split("=", 1)[1]
         client.call("transpose_note", {"note_id": note_id, "semitones": 4.0})
         client.call(
+            "edit_notes_pitch",
+            {"note_ids": [note_id], "action": "set", "midi": 64.25},
+        )
+        batch_note = next(
+            note
+            for item_track in json.loads(client.call("project_snapshot"))["tracks"]
+            for item_clip in item_track["clips"]
+            for note in item_clip["notes"]
+            if note["id"] == note_id
+        )
+        assert abs(batch_note["midi"] - 64.25) < 1.0e-6, batch_note
+        client.call(
+            "edit_notes_pitch",
+            {"note_ids": [note_id], "action": "quantize", "step_semitones": 1.0},
+        )
+        client.call(
             "set_note",
             {"note_id": note_id, "modulation": 0.0, "robust_pitch_curve": True},
         )

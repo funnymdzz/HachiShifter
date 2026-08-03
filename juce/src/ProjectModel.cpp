@@ -817,6 +817,85 @@ void ProjectModel::transposeNotes(const std::vector<juce::String>& noteIds, floa
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setNotesMidi(const std::vector<juce::String>& noteIds, float midiNote)
+{
+    const auto target = juce::jlimit(0.0f, 127.0f, midiNote);
+    const auto includes = [&](const juce::String& id)
+    {
+        return std::find(noteIds.begin(), noteIds.end(), id) != noteIds.end();
+    };
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (const auto& track : project.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    changed = changed || (includes(note.id)
+                        && std::abs(note.midiNote - target) > 1.0e-6f);
+        if (!changed) return;
+        pushUndoLocked();
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (includes(note.id)) note.midiNote = target;
+    }
+    sendChangeMessage();
+}
+
+void ProjectModel::averageNotesMidi(const std::vector<juce::String>& noteIds)
+{
+    const auto includes = [&](const juce::String& id)
+    {
+        return std::find(noteIds.begin(), noteIds.end(), id) != noteIds.end();
+    };
+    auto sum = 0.0;
+    auto count = 0;
+    {
+        const juce::ScopedLock guard(lock);
+        for (const auto& track : project.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    if (includes(note.id))
+                    {
+                        sum += note.midiNote;
+                        ++count;
+                    }
+    }
+    if (count > 0) setNotesMidi(noteIds, static_cast<float>(sum / count));
+}
+
+void ProjectModel::quantizeNotesMidi(const std::vector<juce::String>& noteIds,
+                                     float stepSemitones)
+{
+    const auto step = juce::jlimit(0.01f, 12.0f, stepSemitones);
+    const auto includes = [&](const juce::String& id)
+    {
+        return std::find(noteIds.begin(), noteIds.end(), id) != noteIds.end();
+    };
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (const auto& track : project.tracks)
+            for (const auto& clip : track.clips)
+                for (const auto& note : clip.notes)
+                    if (includes(note.id))
+                    {
+                        const auto target = juce::jlimit(0.0f, 127.0f,
+                            std::round(note.midiNote / step) * step);
+                        changed = changed || std::abs(note.midiNote - target) > 1.0e-6f;
+                    }
+        if (!changed) return;
+        pushUndoLocked();
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                for (auto& note : clip.notes)
+                    if (includes(note.id))
+                        note.midiNote = juce::jlimit(0.0f, 127.0f,
+                            std::round(note.midiNote / step) * step);
+    }
+    sendChangeMessage();
+}
+
 void ProjectModel::resizeNote(const juce::String& noteId, double newStart, double newDuration)
 {
     auto changed = false;

@@ -82,6 +82,8 @@ private:
     void showAssetManager();
     void showClipGainDialog();
     void showRenameTrackDialog();
+    void showTransposeNotesDialog();
+    void showSetNotesPitchDialog();
     void copySelectedClip();
     void pasteCopiedClip();
     void duplicateSelectedClip();
