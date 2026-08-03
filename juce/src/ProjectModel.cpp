@@ -908,14 +908,11 @@ std::vector<juce::String> ProjectModel::insertNotes(
             for (auto& clip : track.clips)
                 if (clip.id == clipId)
                 {
-                    auto groupEnd = 0.0;
-                    for (const auto& note : noteTemplates)
-                        groupEnd = std::max(groupEnd,
-                            note.startSeconds + note.durationSeconds);
-                    if (groupEnd <= 0.0 || clip.durationSeconds <= 0.0) return inserted;
-                    const auto maximumOrigin = std::max(0.0,
-                        clip.durationSeconds - groupEnd);
-                    const auto localOrigin = juce::jlimit(0.0, maximumOrigin,
+                    if (clip.durationSeconds <= 0.0) return inserted;
+                    // Preserve the requested playhead position.  Notes that
+                    // reach the target clip edge are cropped below instead of
+                    // shifting the whole pasted phrase earlier.
+                    const auto localOrigin = juce::jlimit(0.0, clip.durationSeconds,
                         absoluteStartSeconds - clip.startSeconds);
                     std::vector<NoteData> candidates;
                     candidates.reserve(noteTemplates.size());
