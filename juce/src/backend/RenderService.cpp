@@ -720,24 +720,17 @@ public:
         }
         else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
         {
-            // HiFi-GAN receives a target-time spectral envelope.  The normal
-            // route keeps the established nonlinear Attack/time-map warp, but
-            // does not apply a second formant operation before Mel extraction.
-            // The NSF-only variable-hop route instead joins target-length Mel
-            // frames directly from the original PCM and then decodes once.
-            const std::vector<float> noGain;
-            const std::vector<float> noFormant;
+            // Both neural routes extract the spectral envelope directly from
+            // original PCM.  This avoids a preliminary time-domain stretch
+            // changing the vocal tract before the vocoder sees it.  Standard
+            // mode maps fixed-hop Mel frames; the NSF-exclusive mode extracts
+            // per-segment variable-hop Mel, joins it, then decodes once.
             const auto variableHopMel = request.stretchAlgorithm == 1;
             std::vector<NsfHifiganTimeMapPoint> neuralTimeMap;
             neuralTimeMap.reserve(request.timeMap.size());
             for (const auto& point : request.timeMap)
                 neuralTimeMap.push_back({ point.targetSeconds, point.sourceSeconds });
-            auto warped = variableHopMel ? source
-                : renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                    request.framePeriodMs, request.sourceMidi, request.sourceMidi,
-                    noFormant, noGain, noGain, noGain, request.timeMap,
-                    request.pitchBackend, 0);
-            auto neural = NsfHifiganRenderer::render(warped, reader->sampleRate,
+            auto neural = NsfHifiganRenderer::render(source, reader->sampleRate,
                 targetSamples, request.framePeriodMs, request.targetMidi,
                 request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,
                 request.inference, variableHopMel);
@@ -772,7 +765,7 @@ public:
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";
-        backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop"
+        backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop-splice-first"
             : request.stretchAlgorithm == 2 ? "+loop"
             : request.stretchAlgorithm == 3 ? "+soundtouch"
             : "+melodyne-hybrid";

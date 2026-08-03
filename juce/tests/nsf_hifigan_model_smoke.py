@@ -54,12 +54,14 @@ def audio_metrics(path: pathlib.Path) -> dict[str, float | int]:
         ),
         default=0.0,
     )
+    jumps = [abs(values[index] - values[index - 1]) for index in range(1, len(values))]
     return {
         "peak": peak,
         "frames": frames,
         "channels": channels,
         "dc": dc,
         "edge_jump": edge_jump,
+        "maximum_jump": max(jumps, default=0.0),
         "first": abs(values[0]) if values else 0.0,
         "last": abs(values[-1]) if values else 0.0,
     }
@@ -152,6 +154,7 @@ def main() -> int:
             assert values["dc"] < 0.02, (route, values)
             assert values["first"] < 0.08 and values["last"] < 0.08, (route, values)
             assert values["edge_jump"] < 0.45, (route, values)
+            assert values["maximum_jump"] < 0.82, (route, values)
         assert hashlib.sha256(standard_output.read_bytes()).digest() != hashlib.sha256(
             variable_output.read_bytes()
         ).digest()

@@ -259,10 +259,21 @@ MelData buildMelWithHop(const std::vector<float>& waveform, const Config& config
 {
     if (waveform.empty()) return {};
     analysisHop = std::max(1, analysisHop);
-    const auto leftPad = static_cast<std::size_t>(std::max(0,
+    auto leftPad = static_cast<std::size_t>(std::max(0,
         (config.windowSize - analysisHop) / 2));
-    const auto rightPad = static_cast<std::size_t>(std::max(0,
+    auto rightPad = static_cast<std::size_t>(std::max(0,
         (config.windowSize - analysisHop + 1) / 2));
+    // A consonant/Attack segment can be shorter than one model hop.  The
+    // training-style padding then still needs to provide a complete FFT
+    // window; returning a synthetic silent Mel frame here caused a hard
+    // spectral step at the consonant/vowel boundary.
+    const auto paddedSamples = leftPad + waveform.size() + rightPad;
+    if (paddedSamples < static_cast<std::size_t>(config.windowSize))
+    {
+        const auto missing = static_cast<std::size_t>(config.windowSize) - paddedSamples;
+        leftPad += missing / 2;
+        rightPad += missing - missing / 2;
+    }
     std::vector<float> padded(leftPad + waveform.size() + rightPad);
     for (std::size_t index = 0; index < padded.size(); ++index)
         padded[index] = waveform[reflectIndex(static_cast<std::ptrdiff_t>(index)
@@ -383,6 +394,157 @@ MelData spliceMelToTimeMap(const MelData& source, int melBands,
     return result;
 }
 
+MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
+                                   const Config& config,
+                                   std::size_t targetFrames,
+                                   const std::vector<NsfHifiganTimeMapPoint>& timeMap)
+{
+    const auto sourceMel = buildMelWithHop(waveform, config, config.hop);
+    const auto targetHopSeconds = static_cast<double>(config.hop) / config.sampleRate;
+    const auto sourceHopSeconds = targetHopSeconds;
+    auto result = spliceMelToTimeMap(sourceMel, config.melBands, targetFrames,
+                                     targetHopSeconds, sourceHopSeconds, timeMap);
+    if (timeMap.size() < 2 || targetFrames == 0 || waveform.empty()) return result;
+
+    std::vector<std::size_t> joins;
+    auto renderedSegments = 0;
+    for (std::size_t index = 0; index + 1 < timeMap.size(); ++index)
+    {
+        const auto& left = timeMap[index];
+        const auto& right = timeMap[index + 1];
+        const auto targetDuration = right.targetSeconds - left.targetSeconds;
+        const auto sourceDuration = right.sourceSeconds - left.sourceSeconds;
+        if (!(targetDuration > 1.0e-7 && sourceDuration > 1.0e-7)) continue;
+
+        const auto targetBegin = std::min(targetFrames - 1,
+            static_cast<std::size_t>(std::max<juce::int64>(0,
+                static_cast<juce::int64>(std::llround(left.targetSeconds
+                    / targetHopSeconds)))));
+        const auto targetEnd = std::min(targetFrames,
+            std::max(targetBegin + 1,
+                static_cast<std::size_t>(std::max<juce::int64>(0,
+                    static_cast<juce::int64>(std::llround(right.targetSeconds
+                        / targetHopSeconds))))));
+        const auto segmentFrames = targetEnd - targetBegin;
+        if (segmentFrames == 0) continue;
+
+        const auto sourceBegin = std::min(waveform.size() - 1,
+            static_cast<std::size_t>(std::max<juce::int64>(0,
+                static_cast<juce::int64>(std::llround(left.sourceSeconds
+                    * config.sampleRate)))));
+        const auto sourceEnd = std::min(waveform.size(),
+            std::max(sourceBegin + 1,
+                static_cast<std::size_t>(std::max<juce::int64>(0,
+                    static_cast<juce::int64>(std::llround(right.sourceSeconds
+                        * config.sampleRate))))));
+        if (sourceEnd <= sourceBegin) continue;
+
+        std::vector<float> segment(waveform.begin()
+                + static_cast<std::ptrdiff_t>(sourceBegin),
+            waveform.begin() + static_cast<std::ptrdiff_t>(sourceEnd));
+        // This is the NSF-exclusive order requested by the editor: each
+        // source-time segment is analysed using the hop that directly yields
+        // its target duration, all target Mel segments are joined, and the
+        // neural decoder runs once afterwards.
+        const auto exactHop = static_cast<double>(segment.size())
+            / static_cast<double>(segmentFrames);
+        const auto minimumHop = std::max(1, config.hop / 4);
+        const auto maximumHop = std::max(minimumHop, config.hop * 4);
+        const auto analysisHop = juce::jlimit(minimumHop, maximumHop,
+            static_cast<int>(std::llround(exactHop)));
+        auto segmentMel = buildMelWithHop(segment, config, analysisHop);
+        segmentMel = interpolateMelTime(segmentMel, config.melBands, segmentFrames);
+        if (segmentMel.frames != segmentFrames) continue;
+
+        for (int band = 0; band < config.melBands; ++band)
+            std::copy_n(segmentMel.values.begin() + static_cast<std::ptrdiff_t>(
+                            static_cast<std::size_t>(band) * segmentFrames),
+                        segmentFrames,
+                        result.values.begin() + static_cast<std::ptrdiff_t>(
+                            static_cast<std::size_t>(band) * targetFrames + targetBegin));
+        if (targetBegin > 0 && targetBegin < targetFrames) joins.push_back(targetBegin);
+        ++renderedSegments;
+    }
+    if (renderedSegments == 0) return result;
+
+    // A hop-rate change must not become an instantaneous spectral jump.  Blend
+    // only the two Mel frames touching each join so the Attack stays sharp and
+    // the decoder does not turn the boundary into a pop.
+    for (const auto join : joins)
+        for (int band = 0; band < config.melBands; ++band)
+        {
+            const auto row = static_cast<std::size_t>(band) * targetFrames;
+            const auto before = result.values[row + join - 1];
+            const auto after = result.values[row + join];
+            result.values[row + join - 1] = before * 0.78f + after * 0.22f;
+            result.values[row + join] = before * 0.22f + after * 0.78f;
+        }
+    return result;
+}
+
+std::vector<float> stableMonoInput(const juce::AudioBuffer<float>& source)
+{
+    const auto channels = source.getNumChannels();
+    const auto samples = source.getNumSamples();
+    std::vector<float> mono(static_cast<std::size_t>(std::max(0, samples)));
+    if (channels <= 0 || samples <= 0) return mono;
+    if (channels == 1)
+    {
+        std::copy_n(source.getReadPointer(0), samples, mono.begin());
+        return mono;
+    }
+
+    const auto* left = source.getReadPointer(0);
+    const auto* right = source.getReadPointer(1);
+    auto leftPower = 0.0;
+    auto rightPower = 0.0;
+    auto crossPower = 0.0;
+    for (int sample = 0; sample < samples; ++sample)
+    {
+        leftPower += static_cast<double>(left[sample]) * left[sample];
+        rightPower += static_cast<double>(right[sample]) * right[sample];
+        crossPower += static_cast<double>(left[sample]) * right[sample];
+    }
+    const auto denominator = std::sqrt(leftPower * rightPower);
+    const auto correlation = denominator > 1.0e-12 ? crossPower / denominator : 1.0;
+    if (correlation >= 0.35)
+        for (int sample = 0; sample < samples; ++sample)
+            mono[static_cast<std::size_t>(sample)] = 0.5f * (left[sample] + right[sample]);
+    else
+    {
+        // Phase-widened stereo vocals can lose their low/mid spectral envelope
+        // when averaged, which the decoder presents as a smaller/child-like
+        // vocal tract.  Use the more energetic intact channel in that case.
+        const auto* selected = leftPower >= rightPower ? left : right;
+        std::copy_n(selected, samples, mono.begin());
+    }
+    return mono;
+}
+
+void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
+                         std::size_t contextFrames)
+{
+    if (mel.frames == 0 || f0.size() != mel.frames || melBands <= 0
+        || contextFrames == 0) return;
+    const auto originalFrames = mel.frames;
+    MelData padded;
+    padded.frames = originalFrames + contextFrames * 2;
+    padded.values.resize(static_cast<std::size_t>(melBands) * padded.frames);
+    std::vector<float> paddedF0(padded.frames);
+    for (std::size_t frame = 0; frame < padded.frames; ++frame)
+    {
+        const auto sourceFrame = reflectIndex(
+            static_cast<std::ptrdiff_t>(frame) - static_cast<std::ptrdiff_t>(contextFrames),
+            originalFrames);
+        paddedF0[frame] = f0[sourceFrame];
+        for (int band = 0; band < melBands; ++band)
+            padded.values[static_cast<std::size_t>(band) * padded.frames + frame]
+                = mel.values[static_cast<std::size_t>(band) * originalFrames + sourceFrame];
+    }
+    mel = std::move(padded);
+    f0 = std::move(paddedF0);
+}
+
 void shiftMelFormants(MelData& mel, const Config& config,
                       const std::vector<float>& formantSemitones,
                       double framePeriodMs)
@@ -451,6 +613,15 @@ void conditionNeuralBoundary(float* samples, int count, double sampleRate)
         samples[index] = std::isfinite(output) ? output : 0.0f;
         previousInput = input;
         previousOutput = samples[index];
+    }
+    // Repair isolated decoder impulses while leaving genuine multi-sample
+    // consonant attacks untouched.
+    for (int index = 1; index + 1 < count; ++index)
+    {
+        const auto expected = 0.5f * (samples[index - 1] + samples[index + 1]);
+        if (std::abs(samples[index] - expected) > 0.58f
+            && std::abs(samples[index + 1] - samples[index - 1]) < 0.22f)
+            samples[index] = expected;
     }
     // Clip boundaries are not guaranteed to coincide with a decoder source
     // phase.  A 3 ms equal-power guard suppresses that isolated discontinuity
@@ -531,8 +702,11 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
     const auto memory = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     constexpr std::size_t coreFrames = 4'096;
     constexpr std::size_t contextFrames = 32;
+    constexpr std::size_t overlapFrames = 16;
+    constexpr std::size_t stepFrames = coreFrames - overlapFrames;
     std::vector<float> output(mel.frames * static_cast<std::size_t>(config.hop));
-    for (std::size_t coreStart = 0; coreStart < mel.frames; coreStart += coreFrames)
+    std::vector<float> weight(output.size());
+    for (std::size_t coreStart = 0; coreStart < mel.frames; coreStart += stepFrames)
     {
         const auto coreEnd = std::min(mel.frames, coreStart + coreFrames);
         const auto inputStart = coreStart > contextFrames ? coreStart - contextFrames : 0;
@@ -571,10 +745,33 @@ std::vector<float> infer(Ort::Session& model, const Config& config,
         // model/output shape as a render failure so the established fallback
         // remains audible for the complete clip.
         if (available != wanted) return {};
-        std::copy_n(values + static_cast<std::ptrdiff_t>(crop), available,
-                    output.begin() + static_cast<std::ptrdiff_t>(
-                        coreStart * static_cast<std::size_t>(config.hop)));
+        const auto overlapSamples = overlapFrames * static_cast<std::size_t>(config.hop);
+        const auto outputOffset = coreStart * static_cast<std::size_t>(config.hop);
+        for (std::size_t sample = 0; sample < available; ++sample)
+        {
+            auto blend = 1.0f;
+            if (coreStart > 0 && sample < overlapSamples)
+            {
+                const auto phase = (static_cast<double>(sample) + 0.5)
+                    / static_cast<double>(overlapSamples);
+                blend *= static_cast<float>(std::sin(
+                    juce::MathConstants<double>::halfPi * phase));
+            }
+            if (coreEnd < mel.frames && available - sample <= overlapSamples)
+            {
+                const auto phase = (static_cast<double>(available - sample) - 0.5)
+                    / static_cast<double>(overlapSamples);
+                blend *= static_cast<float>(std::sin(
+                    juce::MathConstants<double>::halfPi * phase));
+            }
+            const auto destination = outputOffset + sample;
+            output[destination] += values[crop + sample] * blend;
+            weight[destination] += blend;
+        }
+        if (coreEnd == mel.frames) break;
     }
+    for (std::size_t sample = 0; sample < output.size(); ++sample)
+        if (weight[sample] > 1.0e-8f) output[sample] /= weight[sample];
     return output;
 }
 }
@@ -617,18 +814,9 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         }
         result.buffer.setSize(channels, targetSamples);
         result.buffer.clear();
-        // The public NSF model is mono.  Running two independent decoder
-        // phases for stereo material creates a wide, chorus-like edge and can
-        // click when the clip is mixed.  Analyse one deterministic downmix and
-        // duplicate the rendered vocal to retain the project's channel count.
-        std::vector<float> mono(static_cast<std::size_t>(sourceSamples));
-        for (int channel = 0; channel < channels; ++channel)
-        {
-            const auto* input = source.getReadPointer(channel);
-            for (int sample = 0; sample < sourceSamples; ++sample)
-                mono[static_cast<std::size_t>(sample)] += input[sample]
-                    / static_cast<float>(channels);
-        }
+        // The public NSF model is mono.  Use a correlation-aware fold-down so
+        // phase-widened stereo material keeps its vocal-tract envelope.
+        auto mono = stableMonoInput(source);
         const auto modelInput = resample(mono.data(), sourceSamples,
             static_cast<int>(std::llround(sampleRate)), config->sampleRate);
         const auto targetModelSamples = std::max<std::size_t>(1,
@@ -637,31 +825,18 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         const auto targetFrames = std::max<std::size_t>(1,
             (targetModelSamples + static_cast<std::size_t>(config->hop) - 1)
                 / static_cast<std::size_t>(config->hop));
-        auto analysisHop = config->hop;
-        if (variableHopMel)
-        {
-            const auto playbackRate = static_cast<double>(modelInput.size())
-                / static_cast<double>(targetModelSamples);
-            const auto safeRatio = juce::jlimit(0.72, 1.40,
-                std::max(1.0e-6, playbackRate));
-            analysisHop = std::max(1, static_cast<int>(std::llround(
-                static_cast<double>(config->hop) * safeRatio)));
-        }
-        auto mel = buildMelWithHop(modelInput, *config, analysisHop);
+        auto mel = variableHopMel
+            ? buildVariableHopSplicedMel(modelInput, *config, targetFrames, timeMap)
+            : spliceMelToTimeMap(buildMelWithHop(modelInput, *config, config->hop),
+                config->melBands, targetFrames,
+                static_cast<double>(config->hop) / config->sampleRate,
+                static_cast<double>(config->hop) / config->sampleRate, timeMap);
         if (mel.frames == 0)
         {
             result.error = "NSF-HiFiGAN mel extraction returned no frames";
             result.buffer.setSize(0, 0);
             return result;
         }
-        // The decoder always advances by its training hop.  Variable analysis
-        // hop performs most of the stretch before the Mel frames are joined;
-        // this small exact-frame interpolation only removes rounding drift.
-        mel = variableHopMel
-            ? spliceMelToTimeMap(mel, config->melBands, targetFrames,
-                static_cast<double>(config->hop) / config->sampleRate,
-                static_cast<double>(analysisHop) / config->sampleRate, timeMap)
-            : interpolateMelTime(mel, config->melBands, targetFrames);
         shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
         std::vector<float> f0(mel.frames);
         const auto hopSeconds = static_cast<double>(config->hop) / config->sampleRate;
@@ -672,6 +847,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             f0[frame] = midiToHz(curveAt(targetMidi,
                 seconds * 1000.0 / framePeriod));
         }
+        constexpr std::size_t edgeContextFrames = 16;
+        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames);
         auto modelOutput = infer(*ortSession.model, *config, mel, f0,
                                  ortSession.runMutex.get());
         if (modelOutput.empty())
@@ -680,7 +857,19 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             result.buffer.setSize(0, 0);
             return result;
         }
-        const auto output = resample(modelOutput.data(), static_cast<int>(modelOutput.size()),
+        const auto contextSamples = edgeContextFrames * static_cast<std::size_t>(config->hop);
+        const auto unpaddedSamples = targetFrames * static_cast<std::size_t>(config->hop);
+        if (modelOutput.size() < contextSamples + unpaddedSamples)
+        {
+            result.error = "NSF-HiFiGAN ONNX returned short context audio";
+            result.buffer.setSize(0, 0);
+            return result;
+        }
+        std::vector<float> croppedModelOutput(unpaddedSamples);
+        std::copy_n(modelOutput.begin() + static_cast<std::ptrdiff_t>(contextSamples),
+                    unpaddedSamples, croppedModelOutput.begin());
+        const auto output = resample(croppedModelOutput.data(),
+                                      static_cast<int>(croppedModelOutput.size()),
                                       config->sampleRate,
                                       static_cast<int>(std::llround(sampleRate)));
         const auto wanted = static_cast<std::size_t>(targetSamples);
@@ -698,11 +887,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             const auto copied = std::min(output.size(), wanted);
             std::copy_n(output.begin(), copied, destination);
             if (copied < wanted)
-            {
-                const auto hold = copied > 0 ? destination[copied - 1] : 0.0f;
                 std::fill(destination + static_cast<std::ptrdiff_t>(copied),
-                          destination + static_cast<std::ptrdiff_t>(wanted), hold);
-            }
+                          destination + static_cast<std::ptrdiff_t>(wanted), 0.0f);
             conditionNeuralBoundary(destination, targetSamples, sampleRate);
         }
         result.usedModel = true;
