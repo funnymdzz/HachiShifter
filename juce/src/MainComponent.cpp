@@ -1814,7 +1814,7 @@ void MainComponent::newProject()
         audio.stop();
         audio.setPosition(0.0);
         project.clear();
-        currentProjectFile = {};
+        currentProjectFile = juce::File{};
         savedProjectRevision = project.revisionNumber();
         selectedTrackId.clear();
         selectedClipId.clear();
