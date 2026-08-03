@@ -100,6 +100,16 @@ void PianoRollComponent::clearNoteSelection()
     repaint();
 }
 
+void PianoRollComponent::setSelectedNoteIds(const std::vector<juce::String>& noteIds)
+{
+    selectedNotes.clear();
+    for (const auto& id : noteIds)
+        if (id.isNotEmpty()) selectedNotes.insert(id.toStdString());
+    selectedNote = noteIds.empty() ? juce::String{} : noteIds.front();
+    if (onNoteSelected) onNoteSelected(selectedNote);
+    repaint();
+}
+
 std::vector<juce::String> PianoRollComponent::selectedNoteIds() const
 {
     std::vector<juce::String> result;

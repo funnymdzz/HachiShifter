@@ -896,6 +896,103 @@ void ProjectModel::quantizeNotesMidi(const std::vector<juce::String>& noteIds,
     sendChangeMessage();
 }
 
+std::vector<juce::String> ProjectModel::insertNotes(
+    const juce::String& clipId, const std::vector<NoteData>& noteTemplates,
+    double absoluteStartSeconds)
+{
+    std::vector<juce::String> inserted;
+    if (noteTemplates.empty()) return inserted;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    auto groupEnd = 0.0;
+                    for (const auto& note : noteTemplates)
+                        groupEnd = std::max(groupEnd,
+                            note.startSeconds + note.durationSeconds);
+                    if (groupEnd <= 0.0 || clip.durationSeconds <= 0.0) return inserted;
+                    const auto maximumOrigin = std::max(0.0,
+                        clip.durationSeconds - groupEnd);
+                    const auto localOrigin = juce::jlimit(0.0, maximumOrigin,
+                        absoluteStartSeconds - clip.startSeconds);
+                    std::vector<NoteData> candidates;
+                    candidates.reserve(noteTemplates.size());
+                    for (const auto& noteTemplate : noteTemplates)
+                    {
+                        auto note = noteTemplate;
+                        note.startSeconds = localOrigin
+                            + std::max(0.0, noteTemplate.startSeconds);
+                        const auto remaining = clip.durationSeconds - note.startSeconds;
+                        if (remaining < 0.01) continue;
+                        note.durationSeconds = std::min(
+                            std::max(0.01, noteTemplate.durationSeconds), remaining);
+                        note.consonantSeconds = std::min(note.consonantSeconds,
+                                                        note.durationSeconds);
+                        for (auto& point : note.contour)
+                            point.timeSeconds = juce::jlimit(0.0,
+                                note.durationSeconds, point.timeSeconds);
+                        for (auto& marker : note.sibilantMarkers)
+                            marker = juce::jlimit(0.0, note.durationSeconds, marker);
+                        candidates.push_back(std::move(note));
+                    }
+                    if (candidates.empty()) return inserted;
+                    candidates.front().connectedToPrevious = false;
+                    candidates.back().connectedToNext = false;
+                    pushUndoLocked();
+                    inserted.reserve(candidates.size());
+                    for (auto& note : candidates)
+                    {
+                        note.id = makeId("note");
+                        inserted.push_back(note.id);
+                        clip.notes.push_back(std::move(note));
+                    }
+                    std::stable_sort(clip.notes.begin(), clip.notes.end(),
+                        [](const auto& left, const auto& right)
+                        {
+                            return left.startSeconds < right.startSeconds;
+                        });
+                    break;
+                }
+    }
+    if (!inserted.empty()) sendChangeMessage();
+    return inserted;
+}
+
+std::vector<juce::String> ProjectModel::duplicateNotes(
+    const std::vector<juce::String>& noteIds, const juce::String& targetClipId,
+    double absoluteStartSeconds)
+{
+    const auto data = snapshot();
+    std::vector<std::pair<double, NoteData>> found;
+    juce::String destination = targetClipId;
+    for (const auto& track : data.tracks)
+        for (const auto& clip : track.clips)
+            for (const auto& note : clip.notes)
+                if (std::find(noteIds.begin(), noteIds.end(), note.id) != noteIds.end())
+                {
+                    if (destination.isEmpty()) destination = clip.id;
+                    found.emplace_back(clip.startSeconds + note.startSeconds, note);
+                }
+    if (found.empty() || destination.isEmpty()) return {};
+    std::stable_sort(found.begin(), found.end(), [](const auto& left, const auto& right)
+    {
+        return left.first < right.first;
+    });
+    const auto origin = found.front().first;
+    std::vector<NoteData> templates;
+    templates.reserve(found.size());
+    for (auto& [absolute, note] : found)
+    {
+        note.startSeconds = absolute - origin;
+        templates.push_back(std::move(note));
+    }
+    templates.front().connectedToPrevious = false;
+    templates.back().connectedToNext = false;
+    return insertNotes(destination, templates, absoluteStartSeconds);
+}
+
 void ProjectModel::resizeNote(const juce::String& noteId, double newStart, double newDuration)
 {
     auto changed = false;

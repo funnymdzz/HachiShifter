@@ -27,6 +27,7 @@ public:
     void setTool(Tool nextTool);
     void selectAllNotes();
     void clearNoteSelection();
+    void setSelectedNoteIds(const std::vector<juce::String>& noteIds);
     [[nodiscard]] std::vector<juce::String> selectedNoteIds() const;
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     [[nodiscard]] double secondsForPixel(int pixel) const;

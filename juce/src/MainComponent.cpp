@@ -727,16 +727,24 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
         pianoRoll.selectAllNotes();
         return true;
     }
-    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'C'
-        && selectedClipId.isNotEmpty())
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'C')
     {
-        copySelectedClip();
+        if (!pianoRoll.selectedNoteIds().empty()) copySelectedNotes(false);
+        else if (selectedClipId.isNotEmpty()) copySelectedClip();
+        else return false;
         return true;
     }
-    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'V'
-        && copiedClipId.isNotEmpty())
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'X'
+        && !pianoRoll.selectedNoteIds().empty())
     {
-        pasteCopiedClip();
+        copySelectedNotes(true);
+        return true;
+    }
+    if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'V')
+    {
+        if (!copiedNotes.empty()) pasteCopiedNotes();
+        else if (copiedClipId.isNotEmpty()) pasteCopiedClip();
+        else return false;
         return true;
     }
     if (key.getModifiers().isCommandDown() && key.getKeyCode() == 'D'
@@ -1350,6 +1358,11 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(26, strings.text("edit.deselect"));
         menu.addSeparator();
         const auto hasNotes = !pianoRoll.selectedNoteIds().empty();
+        menu.addItem(16, strings.text("edit.copyNotes"), hasNotes);
+        menu.addItem(17, strings.text("edit.cutNotes"), hasNotes);
+        menu.addItem(18, strings.text("edit.pasteNotes"), !copiedNotes.empty()
+                     && selectedClipId.isNotEmpty());
+        menu.addSeparator();
         menu.addItem(27, strings.text("edit.transposeCents"), hasNotes);
         menu.addItem(28, strings.text("edit.setPitch"), hasNotes);
         menu.addItem(29, strings.text("edit.averagePitch"), hasNotes);
@@ -1410,6 +1423,9 @@ void MainComponent::menuItemSelected(int id, int)
     else if (id == 21) project.redo();
     else if (id == 22) pianoRoll.selectAllNotes();
     else if (id == 26) pianoRoll.clearNoteSelection();
+    else if (id == 16) copySelectedNotes(false);
+    else if (id == 17) copySelectedNotes(true);
+    else if (id == 18) pasteCopiedNotes();
     else if (id == 27) showTransposeNotesDialog();
     else if (id == 28) showSetNotesPitchDialog();
     else if (id == 29) project.averageNotesMidi(pianoRoll.selectedNoteIds());
@@ -1638,6 +1654,55 @@ void MainComponent::showSetNotesPitchDialog()
         }), false);
 }
 
+void MainComponent::copySelectedNotes(bool cut)
+{
+    const auto ids = pianoRoll.selectedNoteIds();
+    if (ids.empty()) return;
+    std::vector<std::pair<double, NoteData>> notes;
+    for (const auto& track : project.snapshot().tracks)
+        for (const auto& clip : track.clips)
+            for (const auto& note : clip.notes)
+                if (std::find(ids.begin(), ids.end(), note.id) != ids.end())
+                    notes.emplace_back(clip.startSeconds + note.startSeconds, note);
+    if (notes.empty()) return;
+    std::stable_sort(notes.begin(), notes.end(), [](const auto& left, const auto& right)
+    {
+        return left.first < right.first;
+    });
+    const auto origin = notes.front().first;
+    copiedClipId.clear();
+    copiedNotes.clear();
+    copiedNotes.reserve(notes.size());
+    for (auto& [absolute, note] : notes)
+    {
+        note.startSeconds = absolute - origin;
+        copiedNotes.push_back(std::move(note));
+    }
+    copiedNotes.front().connectedToPrevious = false;
+    copiedNotes.back().connectedToNext = false;
+    if (cut)
+    {
+        project.removeNotes(ids);
+        pianoRoll.clearNoteSelection();
+    }
+    statusLabel.setText(strings.text(cut ? "status.notesCut" : "status.notesCopied"),
+                        juce::dontSendNotification);
+    menuItemsChanged();
+}
+
+void MainComponent::pasteCopiedNotes()
+{
+    if (copiedNotes.empty() || selectedClipId.isEmpty()) return;
+    const auto inserted = project.insertNotes(selectedClipId, copiedNotes,
+                                               std::max(0.0, audio.position()));
+    if (inserted.empty()) return;
+    pianoRoll.setSelectedNoteIds(inserted);
+    focusNote(inserted.front());
+    statusLabel.setText(strings.text("status.notesPasted"),
+                        juce::dontSendNotification);
+    menuItemsChanged();
+}
+
 void MainComponent::copySelectedClip()
 {
     if (selectedClipId.isEmpty()) return;
@@ -1646,6 +1711,7 @@ void MainComponent::copySelectedClip()
         for (const auto& clip : track.clips)
             if (clip.id == selectedClipId)
             {
+                copiedNotes.clear();
                 copiedClipId = clip.id;
                 selectedTrackId = track.id;
                 statusLabel.setText(strings.text("status.clipCopied"),

@@ -174,6 +174,35 @@ def main() -> int:
             "edit_notes_pitch",
             {"note_ids": [note_id], "action": "quantize", "step_semitones": 1.0},
         )
+        copy_note_id = client.call(
+            "add_note",
+            {
+                "clip_id": clip["id"],
+                "start_seconds": 0.05,
+                "duration_seconds": 0.10,
+                "midi": 67.0,
+            },
+        ).split("=", 1)[1]
+        pasted_note_ids = client.call(
+            "duplicate_notes",
+            {
+                "note_ids": [copy_note_id],
+                "clip_id": clip["id"],
+                "start_seconds": 0.30,
+            },
+        ).split("=", 1)[1].split(",")
+        copied_project = json.loads(client.call("project_snapshot"))
+        copied_notes = {
+            note["id"]: note
+            for item_track in copied_project["tracks"]
+            for item_clip in item_track["clips"]
+            for note in item_clip["notes"]
+        }
+        assert pasted_note_ids and pasted_note_ids[0] != copy_note_id
+        assert abs(copied_notes[pasted_note_ids[0]]["start_seconds"] - 0.30) < 1.0e-6
+        client.call("remove_note", {"note_id": copy_note_id})
+        for pasted_note_id in pasted_note_ids:
+            client.call("remove_note", {"note_id": pasted_note_id})
         client.call(
             "set_note",
             {"note_id": note_id, "modulation": 0.0, "robust_pitch_curve": True},

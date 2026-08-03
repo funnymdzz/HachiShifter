@@ -172,6 +172,12 @@ public:
     void setNotesMidi(const std::vector<juce::String>& noteIds, float midiNote);
     void averageNotesMidi(const std::vector<juce::String>& noteIds);
     void quantizeNotesMidi(const std::vector<juce::String>& noteIds, float stepSemitones = 1.0f);
+    [[nodiscard]] std::vector<juce::String> insertNotes(
+        const juce::String& clipId, const std::vector<NoteData>& noteTemplates,
+        double absoluteStartSeconds);
+    [[nodiscard]] std::vector<juce::String> duplicateNotes(
+        const std::vector<juce::String>& noteIds, const juce::String& targetClipId,
+        double absoluteStartSeconds);
     void resizeNote(const juce::String& noteId, double newStart, double newDuration);
     void setNoteModulation(const juce::String& noteId, float modulation);
     void setNoteDrift(const juce::String& noteId, float drift);

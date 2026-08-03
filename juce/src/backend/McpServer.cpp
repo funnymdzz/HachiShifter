@@ -269,6 +269,7 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
             makeTool("duplicate_clip", "Deep-copy a clip and its notes to a timeline position / 深度复制采样及其音符到指定位置"),
             makeTool("transpose_note", "Move a note and its whole contour / 整体移动音高线"),
             makeTool("edit_notes_pitch", "Batch transpose, set, average or quantize note pitches / 批量移调、设置、平均或量化音符"),
+            makeTool("duplicate_notes", "Deep-copy selected notes into a target clip / 深度复制所选音符到目标采样"),
             makeTool("resize_note", "Change note time bounds / 修改音符时间"),
             makeTool("set_note", "Set pitch, Robust Pitch Curve, tension, breath, formant, gain, Attack and consonant parameters / 设置稳健音高线及全部音符参数"),
             makeTool("set_pitch_curve", "Draw an absolute target-pitch curve without replacing source F0 / 绘制目标音高线并保留原始 F0"),
@@ -544,6 +545,18 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             project.transposeNotes(ids,
                 static_cast<float>(number(args, "cents") / 100.0));
         return toolResult("ok");
+    }
+    else if (name == "duplicate_notes")
+    {
+        auto ids = strings(args, "note_ids");
+        if (ids.empty())
+            if (const auto id = string(args, "note_id"); id.isNotEmpty()) ids.push_back(id);
+        const auto inserted = project.duplicateNotes(ids, string(args, "clip_id"),
+            number(args, "start_seconds"));
+        juce::StringArray insertedText;
+        for (const auto& id : inserted) insertedText.add(id);
+        return !inserted.empty() ? toolResult("note_ids=" + insertedText.joinIntoString(","))
+                                 : toolResult("Notes or target clip not found", true);
     }
     else if (name == "resize_note")
     {

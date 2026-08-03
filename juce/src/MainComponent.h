@@ -84,6 +84,8 @@ private:
     void showRenameTrackDialog();
     void showTransposeNotesDialog();
     void showSetNotesPitchDialog();
+    void copySelectedNotes(bool cut);
+    void pasteCopiedNotes();
     void copySelectedClip();
     void pasteCopiedClip();
     void duplicateSelectedClip();
@@ -181,6 +183,7 @@ private:
     juce::String selectedTrackId;
     juce::String selectedNoteId;
     juce::String copiedClipId;
+    std::vector<NoteData> copiedNotes;
     enum class ParameterMode { pitchSmooth, pitchDrift, attackSpeed, breath, tension, formant, volume };
     ParameterMode parameterMode = ParameterMode::pitchSmooth;
     bool updatingSmoothSlider = false;
