@@ -39,9 +39,20 @@ def audio_metrics(path: pathlib.Path) -> dict[str, float | int]:
         sample_rate = audio.getframerate()
         width = audio.getsampwidth()
         data = audio.readframes(frames)
-    assert width == 2, width
-    interleaved = struct.unpack(f"<{len(data) // 2}h", data)
-    values = [interleaved[index] / 32768.0 for index in range(0, len(interleaved), channels)]
+    if width == 2:
+        interleaved = struct.unpack(f"<{len(data) // 2}h", data)
+        decoded = [value / 32768.0 for value in interleaved]
+    elif width == 3:
+        decoded = [
+            int.from_bytes(data[index : index + 3], "little", signed=True) / 8388608.0
+            for index in range(0, len(data), 3)
+        ]
+    elif width == 4:
+        interleaved = struct.unpack(f"<{len(data) // 4}i", data)
+        decoded = [value / 2147483648.0 for value in interleaved]
+    else:
+        raise AssertionError(width)
+    values = [decoded[index] for index in range(0, len(decoded), channels)]
     peak = max((abs(value) for value in values), default=0.0)
     dc = abs(sum(values) / max(1, len(values)))
     edge = min(len(values) // 2, round(sample_rate * 0.004))
