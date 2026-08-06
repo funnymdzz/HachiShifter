@@ -446,21 +446,9 @@ void PianoRollComponent::paint(juce::Graphics& g)
         if (std::abs(left.start - right.start) > 1.0e-9) return left.start < right.start;
         return left.end < right.end;
     });
-    std::unordered_map<std::string, int> noteLanes;
-    std::unordered_map<int, std::vector<double>> laneEnds;
-    std::unordered_map<int, int> laneCounts;
-    for (const auto& positioned : visibleNotes)
-    {
-        auto& ends = laneEnds[positioned.midiRow];
-        auto lane = 0;
-        while (lane < static_cast<int>(ends.size())
-               && ends[static_cast<std::size_t>(lane)] > positioned.start + 1.0e-7)
-            ++lane;
-        if (lane == static_cast<int>(ends.size())) ends.push_back(positioned.end);
-        else ends[static_cast<std::size_t>(lane)] = positioned.end;
-        noteLanes[positioned.id.toStdString()] = lane;
-        laneCounts[positioned.midiRow] = std::max(laneCounts[positioned.midiRow], lane + 1);
-    }
+    // Note blocks are drawn at a uniform full-row height (z-order handles
+    // overlap), so the previous compact-sub-channel lane bookkeeping is no
+    // longer needed.
     std::size_t trackIndex = 0;
     for (const auto& track : snapshot.tracks)
     {
@@ -488,11 +476,16 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 const auto width = std::max(5.0f, static_cast<float>(note.durationSeconds * sourceScale)
                                                      * pixelsPerSecond);
                 const auto midiRow = static_cast<int>(std::lround(note.midiNote));
-                const auto laneCount = std::max(1, laneCounts[midiRow]);
-                const auto lane = noteLanes[note.id.toStdString()];
-                const auto laneHeight = std::max(4.0f, (rowHeight - 4.0f) / laneCount);
-                const auto bounds = juce::Rectangle<float>(x, y + 2.0f + lane * laneHeight,
-                    width, std::max(3.0f, laneHeight - 1.0f));
+                // Note blocks keep a uniform full-row height regardless of how
+                // many notes overlap on the same MIDI row.  Melodyne's editor
+                // draws overlapping notes at the same row height with z-order
+                // rather than shrinking each into a compact sub-channel, so
+                // the previous `laneHeight = (rowHeight - 4) / laneCount`
+                // behaviour is removed: the "amount" of overlap must not
+                // change the visible size of a note.
+                (void) midiRow;
+                const auto blockHeight = std::max(6.0f, rowHeight - 4.0f);
+                const auto bounds = juce::Rectangle<float>(x, y + 2.0f, width, blockHeight);
                 noteHits.push_back({ note.id, bounds, note.midiNote, note.startSeconds,
                                      note.durationSeconds, clip.startSeconds });
 
