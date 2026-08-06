@@ -18,12 +18,6 @@ enum class PitchRenderBackend
     llsm2 = 5
 };
 
-struct TimeMapPoint
-{
-    double targetSeconds = 0.0;
-    double sourceSeconds = 0.0;
-};
-
 struct Mld5FileRenderRequest
 {
     juce::File sourceFile;

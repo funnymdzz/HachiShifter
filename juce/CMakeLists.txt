@@ -113,6 +113,8 @@ target_sources(HachiShifterNext PRIVATE
     src/AssetManagerComponent.h
     src/backend/Mld5Renderer.cpp
     src/backend/Mld5Renderer.h
+    src/backend/Mld3Renderer.cpp
+    src/backend/Mld3Renderer.h
     src/backend/MelodyneImporter.cpp
     src/backend/MelodyneImporter.h
     src/backend/McpServer.cpp

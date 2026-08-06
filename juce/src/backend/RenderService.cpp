@@ -1,4 +1,5 @@
 #include "RenderService.h"
+#include "Mld3Renderer.h"
 #include "NsfHifiganRenderer.h"
 #include "Llsm2Renderer.h"
 #include "WorldRenderer.h"
@@ -134,41 +135,6 @@ void applyRobustPitchCurve(std::vector<float>& sourceMidi,
             sourceMidi[index] = filteredSource[index];
             targetMidi[index] = filteredSource[index] + originalDelta[index];
         }
-}
-
-void applyMld5SpectralFinish(juce::AudioBuffer<float>& audio, double sampleRate,
-                             double framePeriodMs,
-                             const std::vector<float>& sourceMidi,
-                             const std::vector<float>& targetMidi)
-{
-    if (audio.getNumSamples() <= 0 || sampleRate <= 0.0) return;
-    const auto framePeriod = std::max(0.1, framePeriodMs);
-    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
-    {
-        auto low = audio.getSample(channel, 0);
-        auto smoothedAmount = 0.0f;
-        for (int sample = 0; sample < audio.getNumSamples(); ++sample)
-        {
-            const auto curvePosition = static_cast<double>(sample) / sampleRate
-                * 1000.0 / framePeriod;
-            const auto pitch = pitchAt(sourceMidi, targetMidi, curvePosition);
-            const auto upward = pitch ? std::max(0.0f, pitch->second - pitch->first) : 0.0f;
-            // Reconstructed Melodyne-style anti-alias/formant finish: high
-            // upward shifts intentionally lose part of the brittle top band.
-            // Neutral and downward notes keep their original air.
-            const auto desiredAmount = upward > 0.75f
-                ? juce::jlimit(0.0f, 0.72f, (upward - 0.75f) / 10.0f) : 0.0f;
-            smoothedAmount += (desiredAmount - smoothedAmount) * 0.0025f;
-            const auto cutoff = juce::jlimit(4'800.0, 12'500.0,
-                12'500.0 - static_cast<double>(upward) * 680.0);
-            const auto coefficient = static_cast<float>(1.0
-                - std::exp(-juce::MathConstants<double>::twoPi * cutoff / sampleRate));
-            const auto current = audio.getSample(channel, sample);
-            low += coefficient * (current - low);
-            audio.setSample(channel, sample,
-                current + (low - current) * smoothedAmount);
-        }
-    }
 }
 
 void applyExpressionAndTension(juce::AudioBuffer<float>& audio, double sampleRate,
@@ -704,26 +670,45 @@ public:
         }
         else if (request.pitchBackend == PitchRenderBackend::mld5)
         {
-            // The file/playback entry must be one persistent render pass.  The
-            // previous neutral stretch + component pass processed every vowel
-            // twice and was the actual source of the reported mld5 echo.  The
-            // NSF fallback already demonstrated the correct clock and envelope
-            // behaviour, so mld5 now shares that proven base and adds its own
-            // high-band finish below.
-            rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                request.formantSemitones, request.noteGain, request.tension, request.breath,
-                request.timeMap,
-                request.pitchBackend, request.stretchAlgorithm);
-            applyMld5SpectralFinish(rendered, reader->sampleRate, request.framePeriodMs,
-                                    request.sourceMidi, request.targetMidi);
+            // Melodyne 5 algorithm path: independent MULSS spectral component
+            // renderer (bandlimited harmonic remap + formant compensation +
+            // granular hop), not the previous Signalsmith + finish-wrapper.
+            Mld5RenderRequest mld5Request;
+            mld5Request.input = &source;
+            mld5Request.sampleRate = reader->sampleRate;
+            mld5Request.framePeriodMs = request.framePeriodMs;
+            mld5Request.sourceMidi = request.sourceMidi;
+            mld5Request.targetMidi = request.targetMidi;
+            mld5Request.formantSemitones = request.formantSemitones;
+            mld5Request.noteGain = request.noteGain;
+            for (const auto& point : request.timeMap)
+                mld5Request.timeMap.push_back({ point.targetSeconds, point.sourceSeconds });
+            mld5Request.targetSamples = targetSamples;
+            Mld5Renderer mld5;
+            rendered = mld5.render(mld5Request);
+            applyExpressionAndTension(rendered, reader->sampleRate, request.framePeriodMs,
+                request.targetMidi, {}, request.tension, request.breath);
         }
         else if (request.pitchBackend == PitchRenderBackend::mld3)
         {
-            rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                request.formantSemitones, request.noteGain, request.tension, request.breath,
-                request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+            // Melodyne 3 algorithm path: independent PSOLA period-transition
+            // renderer with separate pitch / formant ratios, fully
+            // independent from the M5 MULSS spectral path.
+            Mld3RenderRequest mld3Request;
+            mld3Request.input = &source;
+            mld3Request.sampleRate = reader->sampleRate;
+            mld3Request.framePeriodMs = request.framePeriodMs;
+            mld3Request.sourceMidi = request.sourceMidi;
+            mld3Request.targetMidi = request.targetMidi;
+            mld3Request.formantSemitones = request.formantSemitones;
+            mld3Request.noteGain = request.noteGain;
+            for (const auto& point : request.timeMap)
+                mld3Request.timeMap.push_back({ point.targetSeconds, point.sourceSeconds });
+            mld3Request.targetSamples = targetSamples;
+            Mld3Renderer mld3;
+            rendered = mld3.render(mld3Request);
+            applyExpressionAndTension(rendered, reader->sampleRate, request.framePeriodMs,
+                request.targetMidi, {}, request.tension, request.breath);
         }
         else if (request.pitchBackend == PitchRenderBackend::llsm2)
         {
