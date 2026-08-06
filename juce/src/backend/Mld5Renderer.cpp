@@ -99,7 +99,7 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
                                        const std::vector<float>& sourceMidi,
                                        const std::vector<float>& targetMidi,
                                        const std::vector<float>& formantSemitones,
-                                       const std::vector<float>& timeMap)
+                                       const std::vector<TimeMapPoint>& timeMap)
 {
     if (inputLength < 32 || targetLength <= 0)
         return { input, input + std::max(0, inputLength) };
