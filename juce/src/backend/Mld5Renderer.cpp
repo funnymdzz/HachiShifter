@@ -418,7 +418,9 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
         for (int b = 0; b <= half; ++b)
             currentPhase[b] = std::arg(spectrum[b]);
         const auto srcHop = prevSrcCentre >= 0 ? std::max(1, srcCentre - prevSrcCentre) : analysisHop;
-        const auto targetHop = prevOutPos >= 0 ? std::max(1, outPos - prevOutPos) : analysisHop;
+        // Hop in target time between the previous and current OLA centres,
+        // used only to scale the phase advance of the phase vocoder.
+        const auto phaseHop = prevOutPos >= 0 ? std::max(1, outPos - prevOutPos) : analysisHop;
         if (prevSrcCentre < 0)
         {
             for (int b = 0; b <= half; ++b)
@@ -436,7 +438,7 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
                 auto delta = currentPhase[b] - prevPhase[b] - expected;
                 delta -= twoPi * std::round(delta / twoPi);
                 const auto trueFrequency = twoPi * b / fftSize + delta / srcHop;
-                synthesisPhase[b] += trueFrequency * pitchRatio * targetHop;
+                synthesisPhase[b] += trueFrequency * pitchRatio * phaseHop;
                 prevPhase[b] = currentPhase[b];
             }
         }
