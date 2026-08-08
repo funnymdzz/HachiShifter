@@ -467,18 +467,67 @@ MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
     }
     if (renderedSegments == 0) return result;
 
-    // A hop-rate change must not become an instantaneous spectral jump.  Blend
-    // only the two Mel frames touching each join so the Attack stays sharp and
-    // the decoder does not turn the boundary into a pop.
+    // A hop-rate change must not become an instantaneous spectral step.  Each
+    // source-time segment is analysed at its own hop and the two segment
+    // tails can carry a broadband level/spectral mismatch at the join; the
+    // NSF decoder turns that step into a wideband pop.  Two frames of a
+    // linear 0.78/0.22 blend were too abrupt, while a long crossfade smears a
+    // consonant attack.  Match the incoming segment's short-term level to the
+    // outgoing tail, then cosine-crossfade a few frames each side of the join.
+    constexpr std::size_t joinBlend = 4;
     for (const auto join : joins)
+    {
+        if (join == 0 || join >= targetFrames) continue;
+        const auto beforeStart = join >= joinBlend ? join - joinBlend : 0;
+        const auto afterEnd = std::min(targetFrames, join + joinBlend);
+
+        // Broadband level of the frames on each side of the join.
+        auto beforeLevel = 0.0, afterLevel = 0.0;
         for (int band = 0; band < config.melBands; ++band)
         {
             const auto row = static_cast<std::size_t>(band) * targetFrames;
-            const auto before = result.values[row + join - 1];
-            const auto after = result.values[row + join];
-            result.values[row + join - 1] = before * 0.78f + after * 0.22f;
-            result.values[row + join] = before * 0.22f + after * 0.78f;
+            for (std::size_t frame = beforeStart; frame < join; ++frame)
+                beforeLevel += std::exp(result.values[row + frame]);
+            for (std::size_t frame = join; frame < afterEnd; ++frame)
+                afterLevel += std::exp(result.values[row + frame]);
         }
+        const auto beforeCount = static_cast<double>(join - beforeStart) * config.melBands;
+        const auto afterCount = static_cast<double>(afterEnd - join) * config.melBands;
+        beforeLevel /= std::max(1.0, beforeCount);
+        afterLevel /= std::max(1.0, afterCount);
+        // Level-match the incoming tail so there is no broadband step, bounded
+        // so an extreme mismatch cannot pump the whole segment.
+        const auto levelScale = afterLevel > 1.0e-12 && beforeLevel > 1.0e-12
+            ? std::clamp(std::sqrt(beforeLevel / afterLevel), 0.5, 2.0)
+            : 1.0;
+        const auto logScale = std::log(std::max(1.0e-9, levelScale));
+        for (std::size_t frame = join; frame < afterEnd; ++frame)
+            for (int band = 0; band < config.melBands; ++band)
+            {
+                const auto row = static_cast<std::size_t>(band) * targetFrames;
+                result.values[row + frame] += static_cast<float>(logScale);
+            }
+
+        // Cosine crossfade across the join in the log-mel domain (geometric in
+        // amplitude), clamped to the existing buffers so the untouched region
+        // keeps the sharp onset.
+        for (std::size_t frame = beforeStart; frame < afterEnd; ++frame)
+        {
+            const auto phase = static_cast<float>(frame - beforeStart)
+                / static_cast<float>(std::max<std::size_t>(1, afterEnd - beforeStart - 1));
+            const auto weight = 0.5f - 0.5f * std::cos(
+                juce::MathConstants<float>::pi * std::clamp(phase, 0.0f, 1.0f));
+            for (int band = 0; band < config.melBands; ++band)
+            {
+                const auto row = static_cast<std::size_t>(band) * targetFrames;
+                const auto leftFrame = std::min(join - 1, frame);
+                const auto rightFrame = std::max(join, frame);
+                const auto left = result.values[row + leftFrame];
+                const auto right = result.values[row + rightFrame];
+                result.values[row + frame] = left + (right - left) * weight;
+            }
+        }
+    }
     return result;
 }
 
@@ -615,13 +664,26 @@ void conditionNeuralBoundary(float* samples, int count, double sampleRate)
         previousOutput = samples[index];
     }
     // Repair isolated decoder impulses while leaving genuine multi-sample
-    // consonant attacks untouched.
-    for (int index = 1; index + 1 < count; ++index)
+    // consonant attacks untouched.  An NSF pop is a 1-3 sample broadband
+    // spike: its value deviates far from the local mean while the immediate
+    // neighbours stay smooth (a real attack ramps, it does not jump-and-hold).
+    // A relative threshold makes the repair catch mid-level pops too, not only
+    // near-full-scale single-sample clicks.
+    for (int index = 2; index + 2 < count; ++index)
     {
-        const auto expected = 0.5f * (samples[index - 1] + samples[index + 1]);
-        if (std::abs(samples[index] - expected) > 0.58f
-            && std::abs(samples[index + 1] - samples[index - 1]) < 0.22f)
-            samples[index] = expected;
+        const auto localMean = 0.25f * (samples[index - 2] + samples[index - 1]
+                                      + samples[index + 1] + samples[index + 2]);
+        const auto localRms = std::sqrt(std::max(1.0e-9f,
+            0.25f * (samples[index - 2] * samples[index - 2]
+                   + samples[index - 1] * samples[index - 1]
+                   + samples[index + 1] * samples[index + 1]
+                   + samples[index + 2] * samples[index + 2])));
+        const auto deviation = std::abs(samples[index] - localMean);
+        const auto surroundingSmooth =
+               std::abs(samples[index + 1] - samples[index - 1]) < 0.18f
+            && std::abs(samples[index + 2] - samples[index - 2]) < 0.32f;
+        if (deviation > std::max(0.16f, 2.5f * localRms) && surroundingSmooth)
+            samples[index] = localMean;
     }
     // Clip boundaries are not guaranteed to coincide with a decoder source
     // phase.  A 3 ms equal-power guard suppresses that isolated discontinuity
@@ -846,6 +908,17 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             const auto seconds = static_cast<double>(frame) * hopSeconds;
             f0[frame] = midiToHz(curveAt(targetMidi,
                 seconds * 1000.0 / framePeriod));
+        }
+        // A hard voiced->unvoiced f0 step (e.g. 240 Hz -> 0 in one frame) makes
+        // the NSF source filter switch its excitation abruptly and pops at the
+        // vowel/consonant boundary.  Taper the frame that touches the edge so
+        // the drop/rise is a short glide instead of an impulse.
+        for (std::size_t frame = 1; frame + 1 < f0.size(); ++frame)
+        {
+            if (f0[frame] > 0.0f && f0[frame + 1] <= 0.0f && f0[frame - 1] > 0.0f)
+                f0[frame] *= 0.55f;
+            else if (f0[frame] <= 0.0f && f0[frame + 1] > 0.0f && f0[frame - 1] <= 0.0f)
+                f0[frame] = f0[frame + 1] * 0.55f;
         }
         constexpr std::size_t edgeContextFrames = 16;
         addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames);

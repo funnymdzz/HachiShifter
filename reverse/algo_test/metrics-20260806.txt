@@ -1,0 +1,40 @@
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.8291 rms=0.1267 clips=0 diff_p99=0.17464 diff_p999=0.31015 diff_max=0.66338 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1080 clips=0 diff_p99=0.14892 diff_p999=0.26448 diff_max=0.56569 spec_flat=0.0000
+wrote out_mld5_0.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.8254 rms=0.0782 clips=0 diff_p99=0.14003 diff_p999=0.24387 diff_max=0.58840 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0670 clips=0 diff_p99=0.11994 diff_p999=0.20888 diff_max=0.50399 spec_flat=0.0000
+wrote out_mld5_3.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5965 rms=0.0878 clips=0 diff_p99=0.13001 diff_p999=0.22674 diff_max=0.54292 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1040 clips=0 diff_p99=0.15410 diff_p999=0.26875 diff_max=0.64351 spec_flat=0.0000
+wrote out_mld5_7.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.8562 rms=0.0759 clips=0 diff_p99=0.14008 diff_p999=0.25761 diff_max=0.59918 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0627 clips=0 diff_p99=0.11567 diff_p999=0.21271 diff_max=0.49475 spec_flat=0.0000
+wrote out_mld5_-5.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5446 rms=0.0885 clips=0 diff_p99=0.12056 diff_p999=0.21227 diff_max=0.51945 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1149 clips=0 diff_p99=0.15652 diff_p999=0.27559 diff_max=0.67440 spec_flat=0.0000
+wrote out_mld5_12.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5371 rms=0.0891 clips=0 diff_p99=0.10877 diff_p999=0.19619 diff_max=0.33157 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1173 clips=0 diff_p99=0.14317 diff_p999=0.25824 diff_max=0.43645 spec_flat=0.0000
+wrote out_mld3_0.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5371 rms=0.0824 clips=0 diff_p99=0.11552 diff_p999=0.20817 diff_max=0.36796 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1085 clips=0 diff_p99=0.15206 diff_p999=0.27401 diff_max=0.48435 spec_flat=0.0000
+wrote out_mld3_3.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5371 rms=0.0748 clips=0 diff_p99=0.12953 diff_p999=0.23759 diff_max=0.47556 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.0984 clips=0 diff_p99=0.17050 diff_p999=0.31274 diff_max=0.62598 spec_flat=0.0000
+wrote out_mld3_7.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5371 rms=0.0810 clips=0 diff_p99=0.08131 diff_p999=0.15293 diff_max=0.26779 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1066 clips=0 diff_p99=0.10703 diff_p999=0.20131 diff_max=0.35249 spec_flat=0.0000
+wrote out_mld3_-5.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5371 rms=0.0665 clips=0 diff_p99=0.14639 diff_p999=0.27204 diff_max=0.48944 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.0875 clips=0 diff_p99=0.19269 diff_p999=0.35809 diff_max=0.64426 spec_flat=0.0000
+wrote out_mld3_12.wav

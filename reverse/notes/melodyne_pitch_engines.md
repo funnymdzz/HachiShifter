@@ -66,6 +66,46 @@ plus a **Catmull-Rom time-domain resampling** stage for the melodic/hybrid stret
     accumulated_output[bin] / accumulated_source[bin] * blockNorm` with `FLT_MIN`
     floor and a `/1.5` factor when no formant amplitude is requested.
 
+Caller argument recovery on 2026-08-07 refined the coordinate interpretation.
+At `0x1819ffc31`, `MULSS_processSpectralFrame` receives a quarter/remainder
+falling/rising window split plus `fVar70`, `fVar53`, and `fVar65` as its source,
+target, and formant pitch-bin controls. These values are produced by the
+melodic stretch driver's fractional frame clock. Therefore the harmonic centre
+formula below is in the driver's normalized component/frame domain; it must not
+be applied directly to raw FFT bin indices without reproducing that conversion.
+
+Further instruction-level recovery on 2026-08-08 fixed the remaining kernel
+geometry and normalisation details:
+
+- `componentPitchBins = sourcePitchBins / normalizedBinScale` is emitted at
+  `0x181a04937`; the harmonic count is
+  `ceil(numBins / componentPitchBins)`, capped at 1023;
+- the extraction radius is exactly `ceil(componentPitchBins)` (`0x181a055f0`),
+  giving a `2*radius+1` window around each harmonic;
+- every source-band sample is first multiplied by
+  `kernel01(1 - abs(bin-centre)/componentPitchBins)`; the target/formant band is
+  accumulated with the same radius and kernel;
+- the per-harmonic formant gain is `targetBandEnergy/sourceBandEnergy`;
+- the reconstructed frame is spectrally normalised by
+  `sourceAccumSum/targetAccumSum` (capped at 100) before the final per-bin mask
+  `targetAccum/sourceAccum * blockNorm` is written;
+- the optional noise path normalises an external per-harmonic table, floors it
+  at `1e-7`, and applies
+  `gain *= pow(noiseTable[h] / sourceHarmonicEnergy, noiseExponent)` at
+  `0x181a05de4`; `0x18290708f` is confirmed as `powf`. The exponent is caller
+  argument 26 = the current block object's field `+0xC0`; the noise base table
+  is argument 30 = the block `+0x88` object's `+0x18` payload. Both are guarded
+  off when zero/null, and for the `a` reference element they are indeed null
+  (`noiseRanges`/`harmonicSpectrum` absent, `MUSpectrumShaperParameterSet` null
+  on the primary generator), so the noise path is inactive for this corpus;
+- the harmonic count is derived as `numBins * formantPitchBins/sourcePitchBins`
+  (argument 12 divided by argument 22 = `sourcePitchBins/formantPitchBins`,
+  then `round(numBins / ratio)` clamped to `0x3ff`); with formants preserved
+  this equals the target pitch-bin count;
+- `FUN_1819f0050` and `FUN_181a04830` are now persistently named
+  `MULSS_prepareAndRenderSpectralBlock` and
+  `MULSS_reconstructSpectralComponents` in the Ghidra project.
+
 ```
 % This block intentionally displayed for grep; ratio mapping direction:
 % source_bin_of_harmonic(h) = h * pitchRatio   (param_22 = pitchRatio).

@@ -66,7 +66,9 @@ std::optional<std::vector<std::uint8_t>> decodeGraph(const juce::File& file, juc
         const auto entryName = juce::String::fromUTF8(name.data()).toLowerCase();
         if (!entryName.contains("melodyne.graph"))
         {
-            if (!stream.setPosition(payloadStart + static_cast<juce::int64>(storedLength)))
+            const auto nextEntry = (payloadStart + static_cast<juce::int64>(storedLength) + 7)
+                & ~juce::int64(7);
+            if (!stream.setPosition(nextEntry))
             { error = "Truncated MPD container"; return std::nullopt; }
             continue;
         }
@@ -185,7 +187,8 @@ public:
         for (std::uint32_t i = 0; i < *objectCount; ++i)
         {
             const auto classId = takeU32();
-            if (!classId || *classId >= classes.size()) { error = "Invalid MPD object class"; return false; }
+            if (!classId || (*classId >= classes.size() && *classId != nullReference))
+            { error = "Invalid MPD object class"; return false; }
             objectClasses.push_back(*classId);
         }
         const auto serializedCount = takeU32();

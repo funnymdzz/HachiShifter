@@ -1,0 +1,42 @@
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20888 diff_max=0.42110 f0_p10=266.67 f0_med=335.66 f0_p90=480.00 voiced=252 spec_flat=0.0000
+[identity] nrmse=0.00002590 corr=1.00000000 max_error=0.00002503
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1325 clips=0 diff_p99=0.15781 diff_p999=0.27209 diff_max=0.54852 f0_p10=266.67 f0_med=335.66 f0_p90=480.00 voiced=252 spec_flat=0.0000
+wrote f0_mld5_0.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.4433 rms=0.0773 clips=0 diff_p99=0.10982 diff_p999=0.18620 diff_max=0.34693 f0_p10=107.38 f0_med=307.69 f0_p90=406.78 voiced=255 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1233 clips=0 diff_p99=0.17513 diff_p999=0.29693 diff_max=0.55325 f0_p10=107.38 f0_med=307.69 f0_p90=406.78 voiced=255 spec_flat=0.0000
+wrote f0_mld5_3.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.4215 rms=0.0672 clips=0 diff_p99=0.13297 diff_p999=0.24724 diff_max=0.54492 f0_p10=135.21 f0_med=282.35 f0_p90=494.85 voiced=288 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1128 clips=0 diff_p99=0.22305 diff_p999=0.41472 diff_max=0.91405 f0_p10=135.21 f0_med=282.35 f0_p90=494.85 voiced=288 spec_flat=0.0000
+wrote f0_mld5_7.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.6737 rms=0.0763 clips=0 diff_p99=0.04685 diff_p999=0.07779 diff_max=0.13660 f0_p10=98.36 f0_med=333.33 f0_p90=484.85 voiced=268 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0800 clips=0 diff_p99=0.04917 diff_p999=0.08164 diff_max=0.14335 f0_p10=98.36 f0_med=333.33 f0_p90=484.85 voiced=268 spec_flat=0.0000
+wrote f0_mld5_-5.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5311 rms=0.0636 clips=0 diff_p99=0.17673 diff_p999=0.32710 diff_max=0.65715 f0_p10=119.70 f0_med=187.50 f0_p90=187.50 voiced=292 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0847 clips=0 diff_p99=0.23527 diff_p999=0.43546 diff_max=0.87486 f0_p10=119.70 f0_med=187.50 f0_p90=187.50 voiced=292 spec_flat=0.0000
+wrote f0_mld5_12.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1005 clips=0 diff_p99=0.11920 diff_p999=0.20856 diff_max=0.42111 f0_p10=156.35 f0_med=331.03 f0_p90=461.54 voiced=233 spec_flat=0.0000
+[identity] nrmse=1.38600365 corr=0.02793099 max_error=0.76135254
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1309 clips=0 diff_p99=0.15527 diff_p999=0.27165 diff_max=0.54852 f0_p10=156.35 f0_med=331.03 f0_p90=461.54 voiced=233 spec_flat=0.0000
+wrote f0_mld3_0.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1006 clips=0 diff_p99=0.12967 diff_p999=0.21665 diff_max=0.42111 f0_p10=184.62 f0_med=350.36 f0_p90=466.02 voiced=220 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1311 clips=0 diff_p99=0.16890 diff_p999=0.28220 diff_max=0.54852 f0_p10=184.62 f0_med=350.36 f0_p90=466.02 voiced=220 spec_flat=0.0000
+wrote f0_mld3_3.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1007 clips=0 diff_p99=0.14732 diff_p999=0.23392 diff_max=0.42111 f0_p10=188.24 f0_med=342.86 f0_p90=494.85 voiced=230 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1311 clips=0 diff_p99=0.19188 diff_p999=0.30470 diff_max=0.54852 f0_p10=188.24 f0_med=342.86 f0_p90=494.85 voiced=230 spec_flat=0.0000
+wrote f0_mld3_7.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1004 clips=0 diff_p99=0.10666 diff_p999=0.20078 diff_max=0.42111 f0_p10=177.78 f0_med=326.53 f0_p90=494.85 voiced=234 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1308 clips=0 diff_p99=0.13893 diff_p999=0.26152 diff_max=0.54852 f0_p10=177.78 f0_med=326.53 f0_p90=494.85 voiced=234 spec_flat=0.0000
+wrote f0_mld3_-5.wav
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 f0_p10=279.07 f0_med=340.43 f0_p90=480.00 voiced=244 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1010 clips=0 diff_p99=0.17600 diff_p999=0.27551 diff_max=0.46432 f0_p10=280.70 f0_med=410.26 f0_p90=470.59 voiced=224 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1316 clips=0 diff_p99=0.22925 diff_p999=0.35887 diff_max=0.60480 f0_p10=280.70 f0_med=410.26 f0_p90=470.59 voiced=224 spec_flat=0.0000
+wrote f0_mld3_12.wav

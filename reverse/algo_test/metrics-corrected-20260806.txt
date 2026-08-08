@@ -1,0 +1,50 @@
+=== mld5 0 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20888 diff_max=0.42110 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1325 clips=0 diff_p99=0.15781 diff_p999=0.27209 diff_max=0.54852 spec_flat=0.0000
+wrote new_mld5_0.wav
+=== mld5 3 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.4433 rms=0.0773 clips=0 diff_p99=0.10982 diff_p999=0.18620 diff_max=0.34693 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1233 clips=0 diff_p99=0.17513 diff_p999=0.29693 diff_max=0.55325 spec_flat=0.0000
+wrote new_mld5_3.wav
+=== mld5 7 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.4215 rms=0.0672 clips=0 diff_p99=0.13297 diff_p999=0.24724 diff_max=0.54492 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.1128 clips=0 diff_p99=0.22305 diff_p999=0.41472 diff_max=0.91405 spec_flat=0.0000
+wrote new_mld5_7.wav
+=== mld5 -5 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.6737 rms=0.0763 clips=0 diff_p99=0.04685 diff_p999=0.07779 diff_max=0.13660 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0800 clips=0 diff_p99=0.04917 diff_p999=0.08164 diff_max=0.14335 spec_flat=0.0000
+wrote new_mld5_-5.wav
+=== mld5 12 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld5_raw] samples=192000 peak=0.5311 rms=0.0636 clips=0 diff_p99=0.17673 diff_p999=0.32710 diff_max=0.65715 spec_flat=0.0000
+[mld5_norm] samples=192000 peak=0.7070 rms=0.0847 clips=0 diff_p99=0.23527 diff_p999=0.43546 diff_max=0.87486 spec_flat=0.0000
+wrote new_mld5_12.wav
+=== mld3 0 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1005 clips=0 diff_p99=0.11920 diff_p999=0.20856 diff_max=0.42111 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1309 clips=0 diff_p99=0.15527 diff_p999=0.27165 diff_max=0.54852 spec_flat=0.0000
+wrote new_mld3_0.wav
+=== mld3 3 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1006 clips=0 diff_p99=0.12967 diff_p999=0.21665 diff_max=0.42111 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1311 clips=0 diff_p99=0.16890 diff_p999=0.28220 diff_max=0.54852 spec_flat=0.0000
+wrote new_mld3_3.wav
+=== mld3 7 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1007 clips=0 diff_p99=0.14732 diff_p999=0.23392 diff_max=0.42111 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1311 clips=0 diff_p99=0.19188 diff_p999=0.30470 diff_max=0.54852 spec_flat=0.0000
+wrote new_mld3_7.wav
+=== mld3 -5 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1004 clips=0 diff_p99=0.10666 diff_p999=0.20078 diff_max=0.42111 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1308 clips=0 diff_p99=0.13893 diff_p999=0.26152 diff_max=0.54852 spec_flat=0.0000
+wrote new_mld3_-5.wav
+=== mld3 12 ===
+[input] samples=192000 peak=0.5428 rms=0.1017 clips=0 diff_p99=0.12115 diff_p999=0.20889 diff_max=0.42111 spec_flat=0.0000
+[mld3_raw] samples=192000 peak=0.5428 rms=0.1010 clips=0 diff_p99=0.17600 diff_p999=0.27551 diff_max=0.46432 spec_flat=0.0000
+[mld3_norm] samples=192000 peak=0.7070 rms=0.1316 clips=0 diff_p99=0.22925 diff_p999=0.35887 diff_max=0.60480 spec_flat=0.0000
+wrote new_mld3_12.wav
