@@ -920,6 +920,29 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             else if (f0[frame] <= 0.0f && f0[frame + 1] > 0.0f && f0[frame - 1] <= 0.0f)
                 f0[frame] = f0[frame + 1] * 0.55f;
         }
+        // A hard voiced->voiced f0 step (e.g. a Melodyne hard-disconnect split:
+        // AudioEngine only glides connected notes) jumps the NSF excitation by
+        // a musical interval in one hop, which the decoder turns into a click.
+        // Glide the single transition frame to the geometric midpoint so the
+        // interval becomes a ~2 frame portamento without smearing a real
+        // glissando (neighbours are read from a snapshot to avoid cascading).
+        const auto f0Snapshot = f0;
+        for (std::size_t frame = 1; frame + 1 < f0.size(); ++frame)
+        {
+            const auto a = f0Snapshot[frame - 1];
+            const auto b = f0Snapshot[frame];
+            const auto c = f0Snapshot[frame + 1];
+            if (!(a > 0.0f && b > 0.0f && c > 0.0f)) continue;
+            const auto step = std::abs(12.0 * std::log2(c / a));
+            if (step <= 1.5) continue;
+            // A real glissando has the middle frame mid-slope (b roughly the
+            // geometric mean of a and c), so it is flat against neither
+            // neighbour.  Only a hard step sits flat against one side.
+            const auto leftGap = std::abs(12.0 * std::log2(b / a));
+            const auto rightGap = std::abs(12.0 * std::log2(c / b));
+            if (leftGap < 0.5 || rightGap < 0.5)
+                f0[frame] = std::sqrt(a * c);
+        }
         constexpr std::size_t edgeContextFrames = 16;
         addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames);
         auto modelOutput = infer(*ortSession.model, *config, mel, f0,

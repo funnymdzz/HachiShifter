@@ -69,6 +69,22 @@ inline int clampBin(float bin, int half) noexcept
     return std::max(0, std::min(half, static_cast<int>(std::round(bin))));
 }
 
+// Catmull-Rom interpolation (harness `catmullRom`), used to resample the
+// pitch-stretched synthesis buffer back onto the target-time grid.
+inline float catmullRom(const std::vector<float>& x, int n, float pos) noexcept
+{
+    if (n <= 0) return 0.0f;
+    if (pos < 0.0f) pos = 0.0f;
+    if (pos > static_cast<float>(n - 1)) pos = static_cast<float>(n - 1);
+    const auto l = static_cast<int>(pos);
+    const auto f = pos - static_cast<float>(l);
+    const auto at = [&](int i) { return x[static_cast<std::size_t>(std::clamp(i, 0, n - 1))]; };
+    const auto a = at(l - 1), b = at(l), c = at(l + 1), d = at(l + 2);
+    return b + 0.5f * (c - a) * f
+         + (2.0f * a - 5.0f * b + 4.0f * c - d) * f * f * 0.5f
+         + (3.0f * (b - c) + d - a) * f * f * f * 0.5f;
+}
+
 // Tuning knobs mirror the standalone harness (reverse/algo_test/test_algo.cpp).
 // Every MLD5_* environment variable the harness honours is honoured here with
 // the same default, so a configuration tuned in the harness reproduces exactly
@@ -142,13 +158,15 @@ std::vector<std::pair<double, double>> parseEq(const char* cfg)
 //    4. optional harmonic-component map (per-harmonic energy redistribution,
 //       component scale/exponent, legacy or block normalisation);
 //    5. phase-vocoder synthesis: instantaneous bin frequency from phase
-//       unwrap, accumulated at the pitch-scaled *target* hop so pitch and
-//       the time warp move independently;
+//       unwrap, accumulated over the *pitch-stretched* hop (harness-exact),
+//       so the stretched buffer carries the original frequency;
 //    6. spectral-peak locking (synthesisPhase of the nearest peak plus the
 //       current relative phase), optional peak boost / valley cut / pure
 //       harmonic synthesis, floor, tilt and EQ;
-//    7. IFFT and overlap-add at the target-time grid following the local
-//       time map; optional post-envelope and per-block power normalisation.
+//    7. IFFT and overlap-add onto the pitch-stretched source grid, then
+//       Catmull-Rom resample back onto the target-time grid (this is what
+//       raises the pitch by pitchRatio); optional post-envelope and
+//       per-block power normalisation.
 //
 //  Unlike the earlier MULSS binary reimplementation this is the phase-vocoder
 //  form the harness was tuned on, and the MLD5_* knobs drive the same results.
@@ -232,8 +250,23 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
             juce::MathConstants<float>::twoPi * static_cast<float>(i)
             / static_cast<float>(fftSize - 1));
 
-    std::vector<float> output(targetLength + fftSize, 0.0f);
-    std::vector<float> norm(targetLength + fftSize, 0.0f);
+    // Upper bound on the pitch ratio across the whole target, used to size the
+    // pitch-stretched synthesis buffer.
+    float maxPitchRatio = 1.0f;
+    for (int t = 0; t < targetLength; t += analysisHop)
+    {
+        const auto cp = static_cast<double>(t) / sampleRate * 1000.0 / framePeriod;
+        const auto sp = curveAt(sourceMidi, cp);
+        const auto tp = curveAt(targetMidi, cp);
+        if (sp > 0.0f && tp > 0.0f)
+            maxPitchRatio = std::max(maxPitchRatio,
+                std::pow(2.0f, (tp - sp + pitchCents / 100.0f) / 12.0f));
+    }
+    const auto stretchedLength = static_cast<int>(
+        std::ceil(targetLength * maxPitchRatio)) + fftSize * 4;
+    std::vector<float> stretched(stretchedLength, 0.0f);
+    std::vector<float> norm(stretchedLength, 0.0f);
+    std::vector<float> output(targetLength, 0.0f);
     std::vector<std::complex<float>> timeFrame(fftSize);
     std::vector<std::complex<float>> spectrum(fftSize);
     std::vector<std::complex<float>> shiftedFrame(fftSize);
@@ -252,6 +285,7 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
     auto outPos = 0;
     auto prevSrcCentre = -1;
     auto prevOutPos = -1;
+    auto prevSynthesisPosition = -1;
     int guard = 0;
     const auto guardMax = 64 * std::max(targetLength, 1);
 
@@ -276,6 +310,18 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
                 (targetPitch - sourcePitch + pitchCents / 100.0f) / 12.0f);
             formantFactor = std::pow(2.0f, formantSemi / 12.0f);
         }
+
+        // Pitch-stretched position of this frame on the synthesis grid. The
+        // harness places frame m at lround(analysisPosition * pitchRatio);
+        // here the *target* clock (outPos) is stretched, so a time warp only
+        // changes which source content each frame reads (via srcCentre) while
+        // the pitch shift stays exactly pitchRatio — the two stay independent.
+        // The phase vocoder advances by the stretched hop so the stretched
+        // buffer carries the *original* frequency, which the resample stage
+        // (below) raises by pitchRatio.
+        const auto synthesisPosition = static_cast<int>(std::lround(outPos * pitchRatio));
+        const auto synthesisHop = prevSynthesisPosition >= 0
+            ? std::max(1, synthesisPosition - prevSynthesisPosition) : analysisHop;
 
         // -------- windowed analysis --------
         for (int i = 0; i < fftSize; ++i)
@@ -418,9 +464,6 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
         for (int b = 0; b <= half; ++b)
             currentPhase[b] = std::arg(spectrum[b]);
         const auto srcHop = prevSrcCentre >= 0 ? std::max(1, srcCentre - prevSrcCentre) : analysisHop;
-        // Hop in target time between the previous and current OLA centres,
-        // used only to scale the phase advance of the phase vocoder.
-        const auto phaseHop = prevOutPos >= 0 ? std::max(1, outPos - prevOutPos) : analysisHop;
         if (prevSrcCentre < 0)
         {
             for (int b = 0; b <= half; ++b)
@@ -438,7 +481,7 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
                 auto delta = currentPhase[b] - prevPhase[b] - expected;
                 delta -= twoPi * std::round(delta / twoPi);
                 const auto trueFrequency = twoPi * b / fftSize + delta / srcHop;
-                synthesisPhase[b] += trueFrequency * pitchRatio * phaseHop;
+                synthesisPhase[b] += trueFrequency * synthesisHop;
                 prevPhase[b] = currentPhase[b];
             }
         }
@@ -580,25 +623,49 @@ std::vector<float> mulssProcessChannel(const float* input, int inputLength,
 
         fft.perform(shiftedFrame.data(), inverse.data(), true);
 
-        // -------- OLA following the local time map --------
+    // -------- OLA onto the pitch-stretched target grid --------
+    // Frames are placed at synthesisPosition (the target position scaled by
+    // pitchRatio), mirroring the harness; the resample stage below reads the
+    // stretched buffer back onto the target-time grid, which is what raises
+    // the pitch by pitchRatio. The target hop still advances the target
+    // clock through the local time map.
         const auto warp = localWarpRatio(timeMap, targetSeconds);
         const auto targetHop = std::max(1, static_cast<int>(
             std::round(static_cast<float>(analysisHop) * warp)));
         for (int i = 0; i < fftSize; ++i)
         {
-            const auto dest = outPos - pad + i;
-            if (dest < 0 || dest >= targetLength + fftSize) continue;
+            const auto dest = synthesisPosition + i;
+            if (dest < 0 || dest >= stretchedLength) continue;
             const auto w = window[i];
-            output[dest] += inverse[i].real() * w;
+            stretched[dest] += inverse[i].real() * w;
             norm[dest] += w * w;
         }
         prevSrcCentre = srcCentre;
         prevOutPos = outPos;
+        prevSynthesisPosition = synthesisPosition;
         outPos += targetHop;
     }
 
-    for (int i = 0; i < targetLength + fftSize; ++i)
-        if (norm[i] > 1.0e-6f) output[i] /= norm[i];
+    for (int i = 0; i < stretchedLength; ++i)
+        if (norm[i] > 1.0e-6f) stretched[i] /= norm[i];
+
+    // -------- resample the stretched buffer onto the target-time grid --------
+    // output[t] = stretched[latency + t * pitchRatio(t)] with
+    // latency = fftSize/2 * pitchRatio(t), exactly the harness resample
+    // (stretched[latency + i * pitchRatio]) generalised to a time-varying
+    // ratio. Reading on the *target* clock (not sourceTimeAtTarget) keeps the
+    // pitch shift equal to pitchRatio independent of the time warp, while the
+    // content still follows the time map through the frame placement above.
+    for (int t = 0; t < targetLength; ++t)
+    {
+        const auto cp = static_cast<double>(t) / sampleRate * 1000.0 / framePeriod;
+        const auto sp = curveAt(sourceMidi, cp);
+        const auto tp = curveAt(targetMidi, cp);
+        const auto ratio = sp > 0.0f && tp > 0.0f
+            ? std::pow(2.0f, (tp - sp + pitchCents / 100.0f) / 12.0f) : 1.0f;
+        const auto position = (static_cast<float>(t) + 0.5f * static_cast<float>(fftSize)) * ratio;
+        output[t] = catmullRom(stretched, stretchedLength, position);
+    }
 
     // -------- optional post-envelope correction --------
     if (postEnvelope)
