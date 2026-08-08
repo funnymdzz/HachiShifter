@@ -254,11 +254,10 @@ struct MelData
     std::size_t frames = 0;
 };
 
-// Forward declaration: buildVariableHopSplicedMel applies the per-segment
-// formant curve before the join (shift-first order) and needs this helper.
+// buildVariableHopSplicedMel applies the shift-first order before returning.
 void shiftMelFormants(MelData& mel, const Config& config,
                       const std::vector<float>& formantSemitones,
-                      double framePeriodMs, std::size_t frameOffset);
+                      double framePeriodMs, std::size_t frameOffset = 0);
 
 MelData buildMelWithHop(const std::vector<float>& waveform, const Config& config,
                         int analysisHop)
@@ -327,6 +326,54 @@ MelData buildMelWithHop(const std::vector<float>& waveform, const Config& config
         }
     }
     return { std::move(mel), frames };
+}
+
+// Windowed Mel frame centred on an absolute source sample index.  Consecutive
+// target frames may therefore use different source hops without segment-local
+// padding or an additional time interpolation pass.
+std::vector<float> melFrameAt(const std::vector<float>& waveform,
+                              const Config& config, double centerSample,
+                              const std::vector<float>& filterWeights,
+                              const std::vector<float>& window)
+{
+    const auto size = static_cast<std::ptrdiff_t>(waveform.size());
+    if (size <= 0 || config.windowSize <= 0 || config.fftSize <= 0)
+        return {};
+    auto order = 0;
+    for (auto fft = config.fftSize; fft > 1; fft >>= 1) ++order;
+    juce::dsp::FFT fft(order);
+    std::vector<std::complex<float>> input(static_cast<std::size_t>(config.fftSize));
+    std::vector<std::complex<float>> spectrum(static_cast<std::size_t>(config.fftSize));
+    const auto windowStart = static_cast<std::ptrdiff_t>(std::llround(centerSample))
+        - static_cast<std::ptrdiff_t>(config.windowSize) / 2;
+    for (int index = 0; index < config.windowSize; ++index)
+    {
+        auto sourceIndex = windowStart + index;
+        // Periodic reflection of the whole waveform, mirroring reflectIndex.
+        if (size > 1)
+        {
+            const auto period = 2 * (size - 1);
+            sourceIndex %= period;
+            if (sourceIndex < 0) sourceIndex += period;
+            if (sourceIndex >= size) sourceIndex = period - sourceIndex;
+        }
+        else sourceIndex = 0;
+        input[static_cast<std::size_t>(index)] = {
+            waveform[static_cast<std::size_t>(sourceIndex)]
+                * window[static_cast<std::size_t>(index)], 0.0f };
+    }
+    fft.perform(input.data(), spectrum.data(), false);
+    const auto frequencies = config.fftSize / 2 + 1;
+    std::vector<float> mel(static_cast<std::size_t>(config.melBands));
+    for (int band = 0; band < config.melBands; ++band)
+    {
+        auto sum = 0.0f;
+        for (int bin = 0; bin < frequencies; ++bin)
+            sum += filterWeights[static_cast<std::size_t>(band * frequencies + bin)]
+                * std::abs(spectrum[static_cast<std::size_t>(bin)]);
+        mel[static_cast<std::size_t>(band)] = std::log(std::max(1.0e-9f, sum));
+    }
+    return mel;
 }
 
 MelData interpolateMelTime(const MelData& source, int melBands,
@@ -408,144 +455,64 @@ MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
                                    const std::vector<float>* formantSemitones = nullptr,
                                    double framePeriodMs = 5.0)
 {
-    const auto sourceMel = buildMelWithHop(waveform, config, config.hop);
+    if (targetFrames == 0 || waveform.empty()) return {};
     const auto targetHopSeconds = static_cast<double>(config.hop) / config.sampleRate;
-    const auto sourceHopSeconds = targetHopSeconds;
-    auto result = spliceMelToTimeMap(sourceMel, config.melBands, targetFrames,
-                                     targetHopSeconds, sourceHopSeconds, timeMap);
-    if (timeMap.size() < 2 || targetFrames == 0 || waveform.empty()) return result;
+    if (timeMap.size() < 2)
+        return interpolateMelTime(buildMelWithHop(waveform, config, config.hop),
+                                  config.melBands, targetFrames);
+    MelData result;
+    result.frames = targetFrames;
+    result.values.assign(static_cast<std::size_t>(config.melBands) * targetFrames,
+                         std::log(1.0e-9f));
 
-    std::vector<std::size_t> joins;
-    auto renderedSegments = 0;
-    for (std::size_t index = 0; index + 1 < timeMap.size(); ++index)
+    // Analyse one non-uniformly spaced source window for each target Mel frame.
+    // Melodyne time maps can be much denser than the model hop (for example,
+    // 173 anchors for about 30 target frames).  Quantising every anchor pair to
+    // targetBegin/targetEnd made five or six source segments overwrite the same
+    // target frame, leaving hard spectral jumps that the NSF decoder amplified
+    // into full-scale bursts.  Sampling the complete map once per target frame
+    // preserves every timing edit without creating overlapping Mel segments.
+    std::vector<float> window(static_cast<std::size_t>(config.windowSize));
+    for (int index = 0; index < config.windowSize; ++index)
+        window[static_cast<std::size_t>(index)] = 0.5f - 0.5f * std::cos(
+            juce::MathConstants<float>::twoPi * index
+                / static_cast<float>(std::max(1, config.windowSize - 1)));
+    const auto filterWeights = filterbank(config);
+    std::size_t segment = 0;
+    for (std::size_t frame = 0; frame < targetFrames; ++frame)
     {
-        const auto& left = timeMap[index];
-        const auto& right = timeMap[index + 1];
-        const auto targetDuration = right.targetSeconds - left.targetSeconds;
-        const auto sourceDuration = right.sourceSeconds - left.sourceSeconds;
-        if (!(targetDuration > 1.0e-7 && sourceDuration > 1.0e-7)) continue;
-
-        const auto targetBegin = std::min(targetFrames - 1,
-            static_cast<std::size_t>(std::max<juce::int64>(0,
-                static_cast<juce::int64>(std::llround(left.targetSeconds
-                    / targetHopSeconds)))));
-        const auto targetEnd = std::min(targetFrames,
-            std::max(targetBegin + 1,
-                static_cast<std::size_t>(std::max<juce::int64>(0,
-                    static_cast<juce::int64>(std::llround(right.targetSeconds
-                        / targetHopSeconds))))));
-        const auto segmentFrames = targetEnd - targetBegin;
-        if (segmentFrames == 0) continue;
-
-        const auto sourceBegin = std::min(waveform.size() - 1,
-            static_cast<std::size_t>(std::max<juce::int64>(0,
-                static_cast<juce::int64>(std::llround(left.sourceSeconds
-                    * config.sampleRate)))));
-        const auto sourceEnd = std::min(waveform.size(),
-            std::max(sourceBegin + 1,
-                static_cast<std::size_t>(std::max<juce::int64>(0,
-                    static_cast<juce::int64>(std::llround(right.sourceSeconds
-                        * config.sampleRate))))));
-        if (sourceEnd <= sourceBegin) continue;
-
-        std::vector<float> segment(waveform.begin()
-                + static_cast<std::ptrdiff_t>(sourceBegin),
-            waveform.begin() + static_cast<std::ptrdiff_t>(sourceEnd));
-        // This is the NSF-exclusive order requested by the editor: each
-        // source-time segment is analysed using the hop that directly yields
-        // its target duration, all target Mel segments are joined, and the
-        // neural decoder runs once afterwards.
-        const auto exactHop = static_cast<double>(segment.size())
-            / static_cast<double>(segmentFrames);
-        const auto minimumHop = std::max(1, config.hop / 4);
-        const auto maximumHop = std::max(minimumHop, config.hop * 4);
-        const auto analysisHop = juce::jlimit(minimumHop, maximumHop,
-            static_cast<int>(std::llround(exactHop)));
-        auto segmentMel = buildMelWithHop(segment, config, analysisHop);
-        segmentMel = interpolateMelTime(segmentMel, config.melBands, segmentFrames);
-        if (segmentMel.frames != segmentFrames) continue;
-
-        // Shift-first order (Melodyne5): pitch-shift each source-time segment
-        // independently before joining it, so the formant curve is evaluated
-        // on the segment's own target-time position before the join blend.
-        // frameOffset keeps the formant curve aligned with the target timeline.
-        if (shiftBeforeSplice && formantSemitones != nullptr
-            && !formantSemitones->empty())
-            shiftMelFormants(segmentMel, config, *formantSemitones, framePeriodMs,
-                             targetBegin);
-
+        const auto targetSeconds = (static_cast<double>(frame) + 0.5)
+            * targetHopSeconds;
+        while (segment + 1 < timeMap.size()
+               && targetSeconds > timeMap[segment + 1].targetSeconds)
+            ++segment;
+        const auto rightIndex = std::min(segment + 1, timeMap.size() - 1);
+        const auto& leftPoint = timeMap[std::min(segment, timeMap.size() - 1)];
+        const auto& rightPoint = timeMap[rightIndex];
+        const auto duration = rightPoint.targetSeconds - leftPoint.targetSeconds;
+        const auto amount = duration > 1.0e-9
+            ? juce::jlimit(0.0, 1.0,
+                (targetSeconds - leftPoint.targetSeconds) / duration)
+            : 0.0;
+        const auto sourceSeconds = leftPoint.sourceSeconds
+            + (rightPoint.sourceSeconds - leftPoint.sourceSeconds) * amount;
+        const auto centerSample = juce::jlimit(0.0,
+            static_cast<double>(waveform.size() - 1),
+            sourceSeconds * config.sampleRate);
+        const auto frameMel = melFrameAt(waveform, config, centerSample,
+                                         filterWeights, window);
+        if (frameMel.size() != static_cast<std::size_t>(config.melBands)) continue;
         for (int band = 0; band < config.melBands; ++band)
-            std::copy_n(segmentMel.values.begin() + static_cast<std::ptrdiff_t>(
-                            static_cast<std::size_t>(band) * segmentFrames),
-                        segmentFrames,
-                        result.values.begin() + static_cast<std::ptrdiff_t>(
-                            static_cast<std::size_t>(band) * targetFrames + targetBegin));
-        if (targetBegin > 0 && targetBegin < targetFrames) joins.push_back(targetBegin);
-        ++renderedSegments;
+            result.values[static_cast<std::size_t>(band) * targetFrames + frame]
+                = frameMel[static_cast<std::size_t>(band)];
     }
-    if (renderedSegments == 0) return result;
 
-    // A hop-rate change must not become an instantaneous spectral step.  Each
-    // source-time segment is analysed at its own hop and the two segment
-    // tails can carry a broadband level/spectral mismatch at the join; the
-    // NSF decoder turns that step into a wideband pop.  Two frames of a
-    // linear 0.78/0.22 blend were too abrupt, while a long crossfade smears a
-    // consonant attack.  Match the incoming segment's short-term level to the
-    // outgoing tail, then cosine-crossfade a few frames each side of the join.
-    constexpr std::size_t joinBlend = 4;
-    for (const auto join : joins)
-    {
-        if (join == 0 || join >= targetFrames) continue;
-        const auto beforeStart = join >= joinBlend ? join - joinBlend : 0;
-        const auto afterEnd = std::min(targetFrames, join + joinBlend);
-
-        // Broadband level of the frames on each side of the join.
-        auto beforeLevel = 0.0, afterLevel = 0.0;
-        for (int band = 0; band < config.melBands; ++band)
-        {
-            const auto row = static_cast<std::size_t>(band) * targetFrames;
-            for (std::size_t frame = beforeStart; frame < join; ++frame)
-                beforeLevel += std::exp(result.values[row + frame]);
-            for (std::size_t frame = join; frame < afterEnd; ++frame)
-                afterLevel += std::exp(result.values[row + frame]);
-        }
-        const auto beforeCount = static_cast<double>(join - beforeStart) * config.melBands;
-        const auto afterCount = static_cast<double>(afterEnd - join) * config.melBands;
-        beforeLevel /= std::max(1.0, beforeCount);
-        afterLevel /= std::max(1.0, afterCount);
-        // Level-match the incoming tail so there is no broadband step, bounded
-        // so an extreme mismatch cannot pump the whole segment.
-        const auto levelScale = afterLevel > 1.0e-12 && beforeLevel > 1.0e-12
-            ? std::clamp(std::sqrt(beforeLevel / afterLevel), 0.5, 2.0)
-            : 1.0;
-        const auto logScale = std::log(std::max(1.0e-9, levelScale));
-        for (std::size_t frame = join; frame < afterEnd; ++frame)
-            for (int band = 0; band < config.melBands; ++band)
-            {
-                const auto row = static_cast<std::size_t>(band) * targetFrames;
-                result.values[row + frame] += static_cast<float>(logScale);
-            }
-
-        // Cosine crossfade across the join in the log-mel domain (geometric in
-        // amplitude), clamped to the existing buffers so the untouched region
-        // keeps the sharp onset.
-        for (std::size_t frame = beforeStart; frame < afterEnd; ++frame)
-        {
-            const auto phase = static_cast<float>(frame - beforeStart)
-                / static_cast<float>(std::max<std::size_t>(1, afterEnd - beforeStart - 1));
-            const auto weight = 0.5f - 0.5f * std::cos(
-                juce::MathConstants<float>::pi * std::clamp(phase, 0.0f, 1.0f));
-            for (int band = 0; band < config.melBands; ++band)
-            {
-                const auto row = static_cast<std::size_t>(band) * targetFrames;
-                const auto leftFrame = std::min(join - 1, frame);
-                const auto rightFrame = std::max(join, frame);
-                const auto left = result.values[row + leftFrame];
-                const auto right = result.values[row + rightFrame];
-                result.values[row + frame] = left + (right - left) * weight;
-            }
-        }
-    }
+    // Formant shifting is pointwise in target Mel time.  With one mapped frame
+    // per target frame there is no interpolation/crossfade for it to commute
+    // across, so applying it here is the shift-then-splice order exactly.
+    if (shiftBeforeSplice && formantSemitones != nullptr
+        && !formantSemitones->empty())
+        shiftMelFormants(result, config, *formantSemitones, framePeriodMs);
     return result;
 }
 
@@ -614,7 +581,7 @@ void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
 
 void shiftMelFormants(MelData& mel, const Config& config,
                       const std::vector<float>& formantSemitones,
-                      double framePeriodMs, std::size_t frameOffset = 0)
+                      double framePeriodMs, std::size_t frameOffset)
 {
     if (mel.frames == 0 || formantSemitones.empty()) return;
     const auto melMinimum = hzToMel(std::max(0.0f, config.minimumHz));
