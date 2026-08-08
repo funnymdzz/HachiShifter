@@ -7,6 +7,18 @@
 
 namespace hachi::backend
 {
+// Variable-hop Mel stretch order.  Mirrors the two compositions an editor can
+// choose between: splice the per-segment stretched Mel first and pitch-shift
+// afterwards (the HachiShifter variable-mel-hop default), or pitch-shift every
+// source-time segment before joining them (Melodyne5's order: its frequency
+// mask runs on each element before the Catmull-Rom time stretch and splice).
+enum class NsfHifiganStretchOrder
+{
+    fixedHop,
+    spliceThenShift,
+    shiftThenSplice
+};
+
 struct NsfHifiganTimeMapPoint
 {
     double targetSeconds = 0.0;
@@ -35,6 +47,6 @@ public:
         const std::vector<NsfHifiganTimeMapPoint>& timeMap,
         const juce::File& configuredModelDirectory,
         const OrtExecutionConfig& execution,
-        bool variableHopMel);
+        NsfHifiganStretchOrder stretchOrder);
 };
 }

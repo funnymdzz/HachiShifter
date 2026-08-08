@@ -57,6 +57,7 @@ juce::String stretchAlgorithmName(StretchAlgorithm value)
         case StretchAlgorithm::variableMelHop: return "variable-mel-hop";
         case StretchAlgorithm::loop: return "loop";
         case StretchAlgorithm::soundTouch: return "soundtouch";
+        case StretchAlgorithm::nsfShiftThenSplice: return "nsf-shift-then-splice";
     }
     return "melodyne-hybrid";
 }
@@ -66,6 +67,7 @@ StretchAlgorithm parseStretchAlgorithm(const juce::String& value)
     if (value == "variable-mel-hop") return StretchAlgorithm::variableMelHop;
     if (value == "loop") return StretchAlgorithm::loop;
     if (value == "soundtouch") return StretchAlgorithm::soundTouch;
+    if (value == "nsf-shift-then-splice") return StretchAlgorithm::nsfShiftThenSplice;
     return StretchAlgorithm::melodyneHybrid;
 }
 }

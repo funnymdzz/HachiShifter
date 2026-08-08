@@ -733,9 +733,16 @@ public:
             // Both neural routes extract the spectral envelope directly from
             // original PCM.  This avoids a preliminary time-domain stretch
             // changing the vocal tract before the vocoder sees it.  Standard
-            // mode maps fixed-hop Mel frames; the NSF-exclusive mode extracts
-            // per-segment variable-hop Mel, joins it, then decodes once.
-            const auto variableHopMel = request.stretchAlgorithm == 1;
+            // mode maps fixed-hop Mel frames; the NSF-exclusive modes extract
+            // per-segment variable-hop Mel and join it before decoding once.
+            // splice-first (variableMelHop) joins then shifts the formants,
+            // shift-first (nsfShiftThenSplice) applies the formant curve to
+            // every source-time segment before the join (Melodyne5's order).
+            const auto stretchOrder = request.stretchAlgorithm == 4
+                ? NsfHifiganStretchOrder::shiftThenSplice
+                : request.stretchAlgorithm == 1
+                    ? NsfHifiganStretchOrder::spliceThenShift
+                    : NsfHifiganStretchOrder::fixedHop;
             std::vector<NsfHifiganTimeMapPoint> neuralTimeMap;
             neuralTimeMap.reserve(request.timeMap.size());
             for (const auto& point : request.timeMap)
@@ -743,7 +750,7 @@ public:
             auto neural = NsfHifiganRenderer::render(source, reader->sampleRate,
                 targetSamples, request.framePeriodMs, request.targetMidi,
                 request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,
-                request.inference, variableHopMel);
+                request.inference, stretchOrder);
             if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
             {
                 rendered = std::move(neural.buffer);
@@ -778,6 +785,7 @@ public:
             : juce::String("vslib");
         if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";
         backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop-splice-first"
+            : request.stretchAlgorithm == 4 ? "+nsf-shift-then-splice"
             : request.stretchAlgorithm == 2 ? "+loop"
             : request.stretchAlgorithm == 3 ? "+soundtouch"
             : "+melodyne-hybrid";

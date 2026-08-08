@@ -291,10 +291,14 @@ void SettingsComponent::refreshImportedStretchItems(int preferredId)
     importedStretchAlgorithm.clear(juce::dontSendNotification);
     importedStretchAlgorithm.addItem(strings.text("algo.stretch.melodyneHybrid"), 1);
     if (importedAlgorithm.getSelectedId() == 2)
+    {
         importedStretchAlgorithm.addItem(strings.text("algo.stretch.nsfVariableMel"), 2);
+        importedStretchAlgorithm.addItem(strings.text("algo.stretch.nsfShiftThenSplice"), 5);
+    }
     importedStretchAlgorithm.addItem(strings.text("algo.stretch.loop"), 3);
     importedStretchAlgorithm.addItem(strings.text("algo.stretch.soundTouch"), 4);
-    const auto canUsePreferred = previous != 2 || importedAlgorithm.getSelectedId() == 2;
+    const auto canUsePreferred = (previous != 2 && previous != 5)
+        || importedAlgorithm.getSelectedId() == 2;
     importedStretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
                                              juce::dontSendNotification);
 }

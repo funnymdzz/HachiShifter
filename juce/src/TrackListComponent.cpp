@@ -20,6 +20,8 @@ juce::String algorithmLabel(const TrackData& track)
         ? juce::String("variable-mel-hop")
         : track.stretchAlgorithm == StretchAlgorithm::loop ? juce::String("loop")
         : track.stretchAlgorithm == StretchAlgorithm::soundTouch ? juce::String("soundtouch")
+        : track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice
+            ? juce::String("nsf-shift-then-splice")
         : juce::String("melodyne-hybrid");
     return pitch + " / " + stretch;
 }

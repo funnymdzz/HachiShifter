@@ -254,6 +254,12 @@ struct MelData
     std::size_t frames = 0;
 };
 
+// Forward declaration: buildVariableHopSplicedMel applies the per-segment
+// formant curve before the join (shift-first order) and needs this helper.
+void shiftMelFormants(MelData& mel, const Config& config,
+                      const std::vector<float>& formantSemitones,
+                      double framePeriodMs, std::size_t frameOffset);
+
 MelData buildMelWithHop(const std::vector<float>& waveform, const Config& config,
                         int analysisHop)
 {
@@ -397,7 +403,10 @@ MelData spliceMelToTimeMap(const MelData& source, int melBands,
 MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
                                    const Config& config,
                                    std::size_t targetFrames,
-                                   const std::vector<NsfHifiganTimeMapPoint>& timeMap)
+                                   const std::vector<NsfHifiganTimeMapPoint>& timeMap,
+                                   bool shiftBeforeSplice = false,
+                                   const std::vector<float>* formantSemitones = nullptr,
+                                   double framePeriodMs = 5.0)
 {
     const auto sourceMel = buildMelWithHop(waveform, config, config.hop);
     const auto targetHopSeconds = static_cast<double>(config.hop) / config.sampleRate;
@@ -455,6 +464,15 @@ MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
         auto segmentMel = buildMelWithHop(segment, config, analysisHop);
         segmentMel = interpolateMelTime(segmentMel, config.melBands, segmentFrames);
         if (segmentMel.frames != segmentFrames) continue;
+
+        // Shift-first order (Melodyne5): pitch-shift each source-time segment
+        // independently before joining it, so the formant curve is evaluated
+        // on the segment's own target-time position before the join blend.
+        // frameOffset keeps the formant curve aligned with the target timeline.
+        if (shiftBeforeSplice && formantSemitones != nullptr
+            && !formantSemitones->empty())
+            shiftMelFormants(segmentMel, config, *formantSemitones, framePeriodMs,
+                             targetBegin);
 
         for (int band = 0; band < config.melBands; ++band)
             std::copy_n(segmentMel.values.begin() + static_cast<std::ptrdiff_t>(
@@ -596,7 +614,7 @@ void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
 
 void shiftMelFormants(MelData& mel, const Config& config,
                       const std::vector<float>& formantSemitones,
-                      double framePeriodMs)
+                      double framePeriodMs, std::size_t frameOffset = 0)
 {
     if (mel.frames == 0 || formantSemitones.empty()) return;
     const auto melMinimum = hzToMel(std::max(0.0f, config.minimumHz));
@@ -614,7 +632,7 @@ void shiftMelFormants(MelData& mel, const Config& config,
     for (std::size_t frame = 0; frame < mel.frames; ++frame)
     {
         const auto shift = scalarCurveAt(formantSemitones,
-            static_cast<double>(frame) * hopSeconds * 1000.0 / curvePeriod);
+            static_cast<double>(frameOffset + frame) * hopSeconds * 1000.0 / curvePeriod);
         if (!std::isfinite(shift) || std::abs(shift) < 5.0e-4f) continue;
         const auto ratio = std::exp2(shift / 12.0f);
         if (!std::isfinite(ratio) || ratio <= 0.0f) continue;
@@ -845,7 +863,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
     const std::vector<float>& formantSemitones,
     const std::vector<NsfHifiganTimeMapPoint>& timeMap,
     const juce::File& configuredModelDirectory,
-    const OrtExecutionConfig& execution, bool variableHopMel)
+    const OrtExecutionConfig& execution, NsfHifiganStretchOrder stretchOrder)
 {
     NsfHifiganRenderResult result;
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
@@ -887,19 +905,26 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         const auto targetFrames = std::max<std::size_t>(1,
             (targetModelSamples + static_cast<std::size_t>(config->hop) - 1)
                 / static_cast<std::size_t>(config->hop));
-        auto mel = variableHopMel
+        auto mel = stretchOrder == NsfHifiganStretchOrder::spliceThenShift
             ? buildVariableHopSplicedMel(modelInput, *config, targetFrames, timeMap)
-            : spliceMelToTimeMap(buildMelWithHop(modelInput, *config, config->hop),
-                config->melBands, targetFrames,
-                static_cast<double>(config->hop) / config->sampleRate,
-                static_cast<double>(config->hop) / config->sampleRate, timeMap);
+            : stretchOrder == NsfHifiganStretchOrder::shiftThenSplice
+                ? buildVariableHopSplicedMel(modelInput, *config, targetFrames, timeMap,
+                    true, &formantSemitones, framePeriodMs)
+                : spliceMelToTimeMap(buildMelWithHop(modelInput, *config, config->hop),
+                    config->melBands, targetFrames,
+                    static_cast<double>(config->hop) / config->sampleRate,
+                    static_cast<double>(config->hop) / config->sampleRate, timeMap);
         if (mel.frames == 0)
         {
             result.error = "NSF-HiFiGAN mel extraction returned no frames";
             result.buffer.setSize(0, 0);
             return result;
         }
-        shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
+        // Splice-first and fixed-hop orders shift the whole joined Mel once,
+        // after the segments are blended; the shift-first order already applied
+        // the formant curve inside buildVariableHopSplicedMel per segment.
+        if (stretchOrder != NsfHifiganStretchOrder::shiftThenSplice)
+            shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
         std::vector<float> f0(mel.frames);
         const auto hopSeconds = static_cast<double>(config->hop) / config->sampleRate;
         const auto framePeriod = std::max(0.1, framePeriodMs);
@@ -1001,7 +1026,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
 #else
     juce::ignoreUnused(source, sampleRate, targetSamples, framePeriodMs, targetMidi,
                        formantSemitones, timeMap, configuredModelDirectory, execution,
-                       variableHopMel);
+                       stretchOrder);
     result.error = "NSF-HiFiGAN ONNX runtime is not included";
 #endif
     return result;

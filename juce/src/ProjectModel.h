@@ -18,12 +18,18 @@ enum class PitchAlgorithm
     llsm2
 };
 
+// The two NSF-exclusive variable-hop Mel stretch orders.  Melodyne5 applies
+// its pitch/frequency-domain mask to each element before the time-domain
+// Catmull-Rom stretch/splice (pitch first, then splice), so the shift-first
+// path matches the original algorithm; the splice-first path is the HachiShifter
+// variable-mel-hop default and keeps the join blended before formant shifting.
 enum class StretchAlgorithm
 {
     melodyneHybrid,
     variableMelHop,
     loop,
-    soundTouch
+    soundTouch,
+    nsfShiftThenSplice
 };
 
 struct PitchPoint

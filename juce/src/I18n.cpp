@@ -76,6 +76,7 @@ const std::unordered_map<std::string, Row> strings {
     { "algo.stretch",    { "拉伸算法", "拉伸演算法", "タイムアルゴリズム", "타임 알고리즘", "Stretch Algorithm" } },
     { "algo.stretch.melodyneHybrid", { "Melodyne 混合拉伸", "Melodyne 混合拉伸", "Melodyne ハイブリッド", "Melodyne 하이브리드", "Melodyne Hybrid" } },
     { "algo.stretch.nsfVariableMel", { "NSF 可变 Hop Mel 先拼接后合成", "NSF 可變 Hop Mel 先拼接後合成", "NSF 可変 Hop Mel 結合後合成", "NSF 가변 Hop Mel 연결 후 합성", "NSF Variable-Hop Mel: Splice then Synthesize" } },
+    { "algo.stretch.nsfShiftThenSplice", { "NSF 先变调后拼接", "NSF 先變調後拼接", "NSF ピッチ後結合", "NSF 피치 먼저 연결", "NSF Shift then Splice" } },
     { "algo.stretch.loop", { "循环拉伸", "循環拉伸", "ループストレッチ", "루프 스트레치", "Loop Stretch" } },
     { "algo.stretch.soundTouch", { "SoundTouch 拉伸", "SoundTouch 拉伸", "SoundTouch ストレッチ", "SoundTouch 스트레치", "SoundTouch Stretch" } },
     { "track.compose",   { "旋律", "旋律", "メロディック", "멜로디", "Compose" } },

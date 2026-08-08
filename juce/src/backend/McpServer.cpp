@@ -114,6 +114,7 @@ juce::String stretchAlgorithmText(StretchAlgorithm value)
     if (value == StretchAlgorithm::variableMelHop) return "variable-mel-hop";
     if (value == StretchAlgorithm::loop) return "loop";
     if (value == StretchAlgorithm::soundTouch) return "soundtouch";
+    if (value == StretchAlgorithm::nsfShiftThenSplice) return "nsf-shift-then-splice";
     return "melodyne-hybrid";
 }
 
@@ -479,6 +480,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                 value == "variable-mel-hop" ? StretchAlgorithm::variableMelHop
                 : value == "loop" ? StretchAlgorithm::loop
                 : value == "soundtouch" ? StretchAlgorithm::soundTouch
+                : value == "nsf-shift-then-splice" ? StretchAlgorithm::nsfShiftThenSplice
                 : StretchAlgorithm::melodyneHybrid);
         }
         return toolResult("ok");

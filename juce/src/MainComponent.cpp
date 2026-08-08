@@ -268,7 +268,9 @@ MainComponent::MainComponent()
         const auto id = stretchAlgorithm.getSelectedId();
         const auto algorithm = id == 2 ? StretchAlgorithm::variableMelHop
             : id == 3 ? StretchAlgorithm::loop
-            : id == 4 ? StretchAlgorithm::soundTouch : StretchAlgorithm::melodyneHybrid;
+            : id == 4 ? StretchAlgorithm::soundTouch
+            : id == 5 ? StretchAlgorithm::nsfShiftThenSplice
+            : StretchAlgorithm::melodyneHybrid;
         const auto data = project.snapshot();
         const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
@@ -529,7 +531,8 @@ void MainComponent::refreshProjectControls()
             : selected->pitchAlgorithm == PitchAlgorithm::llsm2 ? 6 : 1;
         const auto stretchId = selected->stretchAlgorithm == StretchAlgorithm::variableMelHop ? 2
             : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
-            : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4 : 1;
+            : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4
+            : selected->stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice ? 5 : 1;
         pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
         refreshStretchAlgorithmItems(stretchId);
     }
@@ -646,10 +649,14 @@ void MainComponent::refreshStretchAlgorithmItems(int preferredId)
     stretchAlgorithm.clear(juce::dontSendNotification);
     stretchAlgorithm.addItem(strings.text("algo.stretch.melodyneHybrid"), 1);
     if (pitchAlgorithm.getSelectedId() == 2)
+    {
         stretchAlgorithm.addItem(strings.text("algo.stretch.nsfVariableMel"), 2);
+        stretchAlgorithm.addItem(strings.text("algo.stretch.nsfShiftThenSplice"), 5);
+    }
     stretchAlgorithm.addItem(strings.text("algo.stretch.loop"), 3);
     stretchAlgorithm.addItem(strings.text("algo.stretch.soundTouch"), 4);
-    const auto canUsePreferred = previous != 2 || pitchAlgorithm.getSelectedId() == 2;
+    const auto canUsePreferred = (previous != 2 && previous != 5)
+        || pitchAlgorithm.getSelectedId() == 2;
     stretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
                                    juce::dontSendNotification);
 }
@@ -2198,12 +2205,15 @@ void MainComponent::presentMelodyneComposeSelection(backend::MelodyneImportResul
     auto importedStretch = stretchAlgorithmId == 2 ? StretchAlgorithm::variableMelHop
         : stretchAlgorithmId == 3 ? StretchAlgorithm::loop
         : stretchAlgorithmId == 4 ? StretchAlgorithm::soundTouch
+        : stretchAlgorithmId == 5 ? StretchAlgorithm::nsfShiftThenSplice
         : StretchAlgorithm::melodyneHybrid;
-    // Variable-mel-hop is the NSF-HiFiGAN-specific duration path.  Keep an
-    // imported project immediately renderable when another pitch backend is
-    // selected in Settings, matching the toolbar's available choices.
+    // The two NSF variable-mel-hop orders are the NSF-HiFiGAN-specific
+    // duration paths.  Keep an imported project immediately renderable when
+    // another pitch backend is selected in Settings, matching the toolbar's
+    // available choices.
     if (importedPitch != PitchAlgorithm::nsfHifigan
-        && importedStretch == StretchAlgorithm::variableMelHop)
+        && (importedStretch == StretchAlgorithm::variableMelHop
+            || importedStretch == StretchAlgorithm::nsfShiftThenSplice))
         importedStretch = StretchAlgorithm::melodyneHybrid;
     for (auto& track : imported.project.tracks)
     {
