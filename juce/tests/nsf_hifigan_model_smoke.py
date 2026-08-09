@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import pathlib
 import hashlib
@@ -66,6 +67,22 @@ def audio_metrics(path: pathlib.Path) -> dict[str, float | int]:
         default=0.0,
     )
     jumps = [abs(values[index] - values[index - 1]) for index in range(1, len(values))]
+    window = max(1, round(sample_rate * 0.010))
+    window_rms = []
+    step = max(1, window // 2)
+    for start in range(window * 2, max(window * 2, len(values) - window * 2), step):
+        part = values[start : start + window]
+        if part:
+            window_rms.append((sum(value * value for value in part) / len(part)) ** 0.5)
+    active_floor = max(window_rms, default=0.0) * 0.01
+    maximum_drop_db = max(
+        (
+            20.0 * math.log10(previous / max(1.0e-12, current))
+            for previous, current in zip(window_rms, window_rms[1:])
+            if previous > active_floor and previous > current
+        ),
+        default=0.0,
+    )
     return {
         "peak": peak,
         "frames": frames,
@@ -75,6 +92,7 @@ def audio_metrics(path: pathlib.Path) -> dict[str, float | int]:
         "maximum_jump": max(jumps, default=0.0),
         "first": abs(values[0]) if values else 0.0,
         "last": abs(values[-1]) if values else 0.0,
+        "maximum_drop_db": maximum_drop_db,
     }
 
 
@@ -93,6 +111,9 @@ def main() -> int:
         source = directory / "source.wav"
         standard_output = directory / "rendered-standard.wav"
         variable_output = directory / "rendered-variable-hop.wav"
+        shift_first_output = directory / "rendered-shift-first.wav"
+        merged_variable_output = directory / "rendered-merged-variable-hop.wav"
+        merged_shift_first_output = directory / "rendered-merged-shift-first.wav"
         make_fixture(source)
         client = ModelMcpClient(binary, model_directory)
         try:
@@ -136,6 +157,29 @@ def main() -> int:
             assert exported["size"] > 44, exported
             client.call(
                 "set_track",
+                {"track_id": track["id"], "stretch_algorithm": "nsf-shift-then-splice"},
+            )
+            shift_first_status = json.loads(
+                client.call("render_prepare", {"wait": True, "timeout_seconds": 180.0})
+            )
+            assert shift_first_status["prepared"] and not shift_first_status["rendering"], (
+                shift_first_status
+            )
+            assert "nsf-hifigan-onnx" in shift_first_status["backend"].lower(), (
+                shift_first_status
+            )
+            assert "nsf-shift-then-splice" in shift_first_status["backend"].lower(), (
+                shift_first_status
+            )
+            exported = json.loads(
+                client.call(
+                    "export_wav",
+                    {"path": str(shift_first_output), "timeout_seconds": 180.0},
+                )
+            )
+            assert exported["size"] > 44, exported
+            client.call(
+                "set_track",
                 {"track_id": track["id"], "stretch_algorithm": "variable-mel-hop"},
             )
             variable_status = json.loads(
@@ -151,21 +195,92 @@ def main() -> int:
                 )
             )
             assert exported["size"] > 44, exported
+
+            client.call(
+                "duplicate_clip",
+                {
+                    "clip_id": clip["id"],
+                    "track_id": track["id"],
+                    "start_seconds": 0.55,
+                },
+            )
+            client.call(
+                "set_track",
+                {
+                    "track_id": track["id"],
+                    "render_order": "stretch-splice-then-pitch",
+                    "stretch_algorithm": "variable-mel-hop",
+                    "smooth_overlaps": False,
+                },
+            )
+            merged_variable_status = json.loads(
+                client.call("render_prepare", {"wait": True, "timeout_seconds": 180.0})
+            )
+            assert merged_variable_status["prepared"] and not merged_variable_status["rendering"], (
+                merged_variable_status
+            )
+            assert "variable-mel-hop" in merged_variable_status["backend"].lower(), (
+                merged_variable_status
+            )
+            assert "nsf-hifigan-onnx" in merged_variable_status["backend"].lower(), (
+                merged_variable_status
+            )
+            exported = json.loads(
+                client.call(
+                    "export_wav",
+                    {"path": str(merged_variable_output), "timeout_seconds": 180.0},
+                )
+            )
+            assert exported["size"] > 44, exported
+
+            client.call(
+                "set_track",
+                {"track_id": track["id"], "stretch_algorithm": "nsf-shift-then-splice"},
+            )
+            merged_shift_status = json.loads(
+                client.call("render_prepare", {"wait": True, "timeout_seconds": 180.0})
+            )
+            assert merged_shift_status["prepared"] and not merged_shift_status["rendering"], (
+                merged_shift_status
+            )
+            assert "nsf-shift-then-splice" in merged_shift_status["backend"].lower(), (
+                merged_shift_status
+            )
+            assert "nsf-hifigan-onnx" in merged_shift_status["backend"].lower(), (
+                merged_shift_status
+            )
+            exported = json.loads(
+                client.call(
+                    "export_wav",
+                    {"path": str(merged_shift_first_output), "timeout_seconds": 180.0},
+                )
+            )
+            assert exported["size"] > 44, exported
         finally:
             client.close()
 
-        metrics = {
-            "standard": audio_metrics(standard_output),
-            "variable_hop": audio_metrics(variable_output),
+        outputs = {
+            "standard": (standard_output, 0.55),
+            "variable_hop": (variable_output, 0.55),
+            "shift_then_splice": (shift_first_output, 0.55),
+            "merged_variable_hop": (merged_variable_output, 1.10),
+            "merged_shift_then_splice": (merged_shift_first_output, 1.10),
         }
+        metrics = {route: audio_metrics(path) for route, (path, _) in outputs.items()}
         for route, values in metrics.items():
             assert values["channels"] == 2, (route, values)
-            assert abs(values["frames"] - round(0.55 * 48_000)) <= 2, (route, values)
+            expected_duration = outputs[route][1]
+            assert abs(values["frames"] - round(expected_duration * 48_000)) <= 2, (
+                route,
+                values,
+            )
             assert values["peak"] > 1.0e-4, (route, values)
             assert values["dc"] < 0.02, (route, values)
             assert values["first"] < 0.08 and values["last"] < 0.08, (route, values)
             assert values["edge_jump"] < 0.45, (route, values)
             assert values["maximum_jump"] < 0.82, (route, values)
+            if route != "standard":
+                assert values["maximum_drop_db"] < 6.0, (route, values)
         assert hashlib.sha256(standard_output.read_bytes()).digest() != hashlib.sha256(
             variable_output.read_bytes()
         ).digest()
@@ -174,6 +289,9 @@ def main() -> int:
                 {
                     "standard_backend": standard_status["backend"],
                     "variable_backend": variable_status["backend"],
+                    "shift_then_splice_backend": shift_first_status["backend"],
+                    "merged_variable_backend": merged_variable_status["backend"],
+                    "merged_shift_then_splice_backend": merged_shift_status["backend"],
                     "metrics": metrics,
                 }
             )

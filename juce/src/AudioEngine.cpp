@@ -357,70 +357,105 @@ backend::Mld5FileRenderRequest makeMergedRenderRequest(
     request.pitchBackend = backend::PitchRenderBackend::nsfHifigan;
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
     request.normalizeVolume = track.normalizeVolume;
+    const auto preserveSourceSeams = track.stretchAlgorithm == StretchAlgorithm::variableMelHop
+        || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice;
 
-    std::vector<backend::TimeMapPoint> timeAnchors;
     for (std::size_t index = 0; index < group.size(); ++index)
     {
         const auto& clip = *group[index];
         const auto targetOffset = targetOffsets[index];
         const auto sourceOffset = clip.sourceOffsetSeconds - sourceStart;
+        std::vector<backend::TimeMapPoint> localAnchors;
         if (!clip.sourceTimeMap.empty())
         {
             for (const auto& point : clip.sourceTimeMap)
-                timeAnchors.push_back({
-                    targetOffset + juce::jlimit(0.0, clip.durationSeconds, point.targetSeconds),
-                    sourceOffset + juce::jlimit(0.0, clip.sourceDurationSeconds, point.sourceSeconds) });
+                localAnchors.push_back({
+                    juce::jlimit(0.0, clip.durationSeconds, point.targetSeconds),
+                    juce::jlimit(0.0, clip.sourceDurationSeconds, point.sourceSeconds) });
         }
         else
         {
-            timeAnchors.push_back({ targetOffset, sourceOffset });
             for (const auto& note : clip.notes)
             {
                 const auto noteStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
                 const auto srcStart = clip.durationSeconds > 1.0e-9
                     ? noteStart / clip.durationSeconds * clip.sourceDurationSeconds : 0.0;
-                timeAnchors.push_back({ targetOffset + noteStart, sourceOffset + srcStart });
+                localAnchors.push_back({ noteStart, srcStart });
                 if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
                 const auto targetAttack = juce::jlimit(noteStart, clip.durationSeconds,
                     noteStart + note.consonantSeconds);
                 const auto sourceAttack = juce::jlimit(srcStart, clip.sourceDurationSeconds,
                     srcStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
-                timeAnchors.push_back({ targetOffset + targetAttack, sourceOffset + sourceAttack });
+                localAnchors.push_back({ targetAttack, sourceAttack });
             }
-            timeAnchors.push_back({ targetOffset + clip.durationSeconds,
-                sourceOffset + clip.sourceDurationSeconds });
+        }
+        localAnchors.push_back({ 0.0, 0.0 });
+        localAnchors.push_back({ clip.durationSeconds, clip.sourceDurationSeconds });
+        std::stable_sort(localAnchors.begin(), localAnchors.end(), [](const auto& left,
+                                                                      const auto& right)
+        {
+            if (std::abs(left.targetSeconds - right.targetSeconds) > 1.0e-9)
+                return left.targetSeconds < right.targetSeconds;
+            return left.sourceSeconds < right.sourceSeconds;
+        });
+        std::vector<backend::TimeMapPoint> localMap;
+        for (const auto& anchor : localAnchors)
+        {
+            if (localMap.empty())
+            {
+                localMap.push_back(anchor);
+                continue;
+            }
+            auto& previous = localMap.back();
+            if (std::abs(anchor.targetSeconds - previous.targetSeconds) <= 1.0e-7)
+            {
+                previous.sourceSeconds = std::max(previous.sourceSeconds, anchor.sourceSeconds);
+                continue;
+            }
+            if (anchor.sourceSeconds > previous.sourceSeconds + 1.0e-7)
+                localMap.push_back(anchor);
+        }
+        for (const auto& anchor : localMap)
+        {
+            const backend::TimeMapPoint mapped {
+                targetOffset + anchor.targetSeconds,
+                sourceOffset + anchor.sourceSeconds
+            };
+            if (!request.timeMap.empty()
+                && std::abs(mapped.targetSeconds - request.timeMap.back().targetSeconds) <= 1.0e-7
+                && std::abs(mapped.sourceSeconds - request.timeMap.back().sourceSeconds) <= 1.0e-7)
+                continue;
+            // Keep both sides of a source discontinuity at an element seam.
+            // The variable-hop renderer uses their order to select the old
+            // source before the seam and the new source immediately after it.
+            request.timeMap.push_back(mapped);
         }
     }
-    // Element boundaries become hard time-map anchors so a target frame at the
-    // seam never samples the neighbouring element's source region.
-    for (std::size_t index = 0; index < group.size(); ++index)
+    if (!preserveSourceSeams)
     {
-        timeAnchors.push_back({ targetOffsets[index],
-            group[index]->sourceOffsetSeconds - sourceStart });
-        timeAnchors.push_back({ targetOffsets[index] + group[index]->durationSeconds,
-            group[index]->sourceOffsetSeconds + group[index]->sourceDurationSeconds - sourceStart });
-    }
-    std::stable_sort(timeAnchors.begin(), timeAnchors.end(), [](const auto& left, const auto& right)
-    {
-        if (std::abs(left.targetSeconds - right.targetSeconds) > 1.0e-9)
-            return left.targetSeconds < right.targetSeconds;
-        return left.sourceSeconds < right.sourceSeconds;
-    });
-    for (const auto& anchor : timeAnchors)
-    {
-        if (request.timeMap.empty())
+        auto anchors = std::move(request.timeMap);
+        std::stable_sort(anchors.begin(), anchors.end(), [](const auto& left, const auto& right)
         {
-            request.timeMap.push_back(anchor);
-            continue;
-        }
-        auto& previous = request.timeMap.back();
-        if (std::abs(anchor.targetSeconds - previous.targetSeconds) <= 1.0e-7)
+            if (std::abs(left.targetSeconds - right.targetSeconds) > 1.0e-9)
+                return left.targetSeconds < right.targetSeconds;
+            return left.sourceSeconds < right.sourceSeconds;
+        });
+        for (const auto& anchor : anchors)
         {
-            previous.sourceSeconds = std::max(previous.sourceSeconds, anchor.sourceSeconds);
-            continue;
+            if (request.timeMap.empty())
+            {
+                request.timeMap.push_back(anchor);
+                continue;
+            }
+            auto& previous = request.timeMap.back();
+            if (std::abs(anchor.targetSeconds - previous.targetSeconds) <= 1.0e-7)
+            {
+                previous.sourceSeconds = std::max(previous.sourceSeconds, anchor.sourceSeconds);
+                continue;
+            }
+            if (anchor.sourceSeconds > previous.sourceSeconds + 1.0e-7)
+                request.timeMap.push_back(anchor);
         }
-        if (anchor.sourceSeconds > previous.sourceSeconds + 1.0e-7)
-            request.timeMap.push_back(anchor);
     }
     if (request.timeMap.empty() || request.timeMap.back().targetSeconds < targetDuration - 1.0e-7)
         request.timeMap.push_back({ targetDuration, sourceEnd - sourceStart });
@@ -725,13 +760,22 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 if (reader == nullptr) continue;
                 readers[sourceKey] = reader;
             }
+            const auto exclusiveNeuralPath = track.compose && !clip.notes.empty()
+                && track.pitchAlgorithm == PitchAlgorithm::nsfHifigan
+                && (track.stretchAlgorithm == StretchAlgorithm::variableMelHop
+                    || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice);
+            const auto inMerged = mergedMode
+                && (connectedPrev[clipIndex] || connectedNext[clipIndex]);
+            const auto continuousNeuralSeam = inMerged && exclusiveNeuralPath;
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
             loaded->trackId = track.id.toStdString();
             loaded->smoothOverlaps = track.smoothOverlaps;
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
-            loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
-            loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
+            if (!(continuousNeuralSeam && connectedPrev[clipIndex]))
+                loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
+            if (!(continuousNeuralSeam && connectedNext[clipIndex]))
+                loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
             if (track.smoothOverlaps && clipIndex > 0)
             {
                 const auto& previous = *orderedClips[clipIndex - 1];
@@ -741,6 +785,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
                          && connectedPrev[clipIndex]
+                         && !exclusiveNeuralPath
                          && clip.crossfadeInSeconds <= 1.0e-6)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
@@ -754,6 +799,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
                          && connectedNext[clipIndex]
+                         && !exclusiveNeuralPath
                          && clip.crossfadeOutSeconds <= 1.0e-6)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
@@ -768,7 +814,6 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             // shifts both F0 and formants and creates the "old/child voice" failure mode.
             if (track.compose && !clip.notes.empty())
             {
-                const auto inMerged = mergedMode && (connectedPrev[clipIndex] || connectedNext[clipIndex]);
                 if (inMerged)
                 {
                     loaded->rendered = std::make_shared<RenderedClip>();

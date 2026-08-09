@@ -405,7 +405,9 @@ MelData interpolateMelTime(const MelData& source, int melBands,
 MelData spliceMelToTimeMap(const MelData& source, int melBands,
                            std::size_t targetFrames, double targetHopSeconds,
                            double sourceHopSeconds,
-                           const std::vector<NsfHifiganTimeMapPoint>& timeMap)
+                           const std::vector<NsfHifiganTimeMapPoint>& timeMap,
+                           double targetFrameOffset = 0.0,
+                           double sourceFrameOffset = 0.0)
 {
     if (timeMap.size() < 2 || source.frames == 0 || targetFrames == 0
         || targetHopSeconds <= 0.0 || sourceHopSeconds <= 0.0)
@@ -416,7 +418,8 @@ MelData spliceMelToTimeMap(const MelData& source, int melBands,
     std::size_t segment = 0;
     for (std::size_t frame = 0; frame < targetFrames; ++frame)
     {
-        const auto targetSeconds = static_cast<double>(frame) * targetHopSeconds;
+        const auto targetSeconds = (static_cast<double>(frame) + targetFrameOffset)
+            * targetHopSeconds;
         while (segment + 1 < timeMap.size()
                && targetSeconds > timeMap[segment + 1].targetSeconds)
             ++segment;
@@ -431,7 +434,8 @@ MelData spliceMelToTimeMap(const MelData& source, int melBands,
         const auto sourceSeconds = leftPoint.sourceSeconds
             + (rightPoint.sourceSeconds - leftPoint.sourceSeconds) * amount;
         const auto sourcePosition = juce::jlimit(0.0,
-            static_cast<double>(source.frames - 1), sourceSeconds / sourceHopSeconds);
+            static_cast<double>(source.frames - 1),
+            sourceSeconds / sourceHopSeconds - sourceFrameOffset);
         const auto sourceLeft = static_cast<std::size_t>(std::floor(sourcePosition));
         const auto sourceRight = std::min(source.frames - 1, sourceLeft + 1);
         const auto sourceAmount = static_cast<float>(sourcePosition - std::floor(sourcePosition));
@@ -462,8 +466,11 @@ void normalizeMelToReference(MelData& mel, const MelData& reference, int melBand
             target += std::exp(static_cast<double>(reference.values[offset]));
         }
         if (current > 1.0e-10 && target > 1.0e-10)
+        {
+            const auto maximumCorrection = 2.0 * std::log(10.0) / 20.0;
             correction[frame] = static_cast<float>(std::clamp(
-                std::log(target / current), -std::log(2.0), std::log(2.0)));
+                std::log(target / current), -maximumCorrection, maximumCorrection));
+        }
     }
     const auto raw = correction;
     constexpr std::ptrdiff_t radius = 2;
@@ -518,6 +525,12 @@ MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
             juce::MathConstants<float>::twoPi * index
                 / static_cast<float>(std::max(1, config.windowSize - 1)));
     const auto filterWeights = filterbank(config);
+    std::vector<double> seamSeconds;
+    for (std::size_t index = 1; index < timeMap.size(); ++index)
+        if (std::abs(timeMap[index].targetSeconds - timeMap[index - 1].targetSeconds) <= 1.0e-7
+            && std::abs(timeMap[index].sourceSeconds - timeMap[index - 1].sourceSeconds)
+                > targetHopSeconds * 0.5)
+            seamSeconds.push_back(timeMap[index].targetSeconds);
     std::size_t segment = 0;
     for (std::size_t frame = 0; frame < targetFrames; ++frame)
     {
@@ -547,12 +560,43 @@ MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
                 = frameMel[static_cast<std::size_t>(band)];
     }
 
-    // Formant shifting is pointwise in target Mel time.  With one mapped frame
-    // per target frame there is no interpolation/crossfade for it to commute
-    // across, so applying it here is the shift-then-splice order exactly.
+    // Shift-first applies its per-frame frequency mapping before the explicit
+    // source discontinuity is blended below.  Splice-first is shifted by the
+    // caller after this function returns.
     if (shiftBeforeSplice && formantSemitones != nullptr
         && !formantSemitones->empty())
         shiftMelFormants(result, config, *formantSemitones, framePeriodMs);
+
+    // A duplicate target anchor represents a real element splice: source time
+    // jumps at that instant instead of interpolating through the gap/overlap.
+    // Blend only the two Mel frames on either side so the decoder does not turn
+    // the valid discontinuity into a burst followed by limiter gain reduction.
+    constexpr std::size_t seamRadius = 2;
+    for (const auto seam : seamSeconds)
+    {
+        const auto firstAfter = static_cast<std::size_t>(std::clamp<juce::int64>(
+            static_cast<juce::int64>(std::floor(seam / targetHopSeconds + 0.5)),
+            0, static_cast<juce::int64>(targetFrames - 1)));
+        const auto begin = firstAfter > seamRadius ? firstAfter - seamRadius : 0;
+        const auto end = std::min(targetFrames - 1, firstAfter + seamRadius - 1);
+        if (end <= begin) continue;
+        for (int band = 0; band < config.melBands; ++band)
+        {
+            const auto row = static_cast<std::size_t>(band) * targetFrames;
+            const auto left = result.values[row + begin];
+            const auto right = result.values[row + end];
+            const auto leftAmplitude = std::exp(static_cast<double>(left));
+            const auto rightAmplitude = std::exp(static_cast<double>(right));
+            for (auto frame = begin + 1; frame < end; ++frame)
+            {
+                const auto amount = static_cast<float>(frame - begin)
+                    / static_cast<float>(end - begin);
+                const auto smooth = amount * amount * (3.0f - 2.0f * amount);
+                result.values[row + frame] = static_cast<float>(std::log(std::max(1.0e-9,
+                    leftAmplitude + (rightAmplitude - leftAmplitude) * smooth)));
+            }
+        }
+    }
     return result;
 }
 
@@ -926,11 +970,13 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         const auto targetFrames = std::max<std::size_t>(1,
             (targetModelSamples + static_cast<std::size_t>(config->hop) - 1)
                 / static_cast<std::size_t>(config->hop));
+        const auto variableHop = stretchOrder != NsfHifiganStretchOrder::fixedHop;
         auto referenceMel = normalizeVolume
             ? spliceMelToTimeMap(buildMelWithHop(modelInput, *config, config->hop),
                 config->melBands, targetFrames,
                 static_cast<double>(config->hop) / config->sampleRate,
-                static_cast<double>(config->hop) / config->sampleRate, timeMap)
+                static_cast<double>(config->hop) / config->sampleRate, timeMap,
+                variableHop ? 0.5 : 0.0, variableHop ? 0.5 : 0.0)
             : MelData{};
         auto mel = stretchOrder == NsfHifiganStretchOrder::spliceThenShift
             ? buildVariableHopSplicedMel(modelInput, *config, targetFrames, timeMap)
@@ -952,9 +998,10 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         // the formant curve inside buildVariableHopSplicedMel per segment.
         if (stretchOrder != NsfHifiganStretchOrder::shiftThenSplice)
             shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
+        if (referenceMel.frames != 0)
+            shiftMelFormants(referenceMel, *config, formantSemitones, framePeriodMs);
         if (normalizeVolume)
         {
-            shiftMelFormants(referenceMel, *config, formantSemitones, framePeriodMs);
             normalizeMelToReference(mel, referenceMel, config->melBands);
         }
         std::vector<float> f0(mel.frames);
