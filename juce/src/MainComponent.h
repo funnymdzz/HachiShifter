@@ -42,6 +42,8 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
+    void updateHorizontalZoom(int x);
+    void updateVerticalZoom(int y);
     void openExternalFile(const juce::File& file);
     void requestClose(std::function<void()> approved);
     bool keyPressed(const juce::KeyPress& key) override;
@@ -160,6 +162,10 @@ private:
     juce::Slider smoothSlider;
     juce::Slider zoomSlider;
     juce::Slider vZoomSlider;
+    juce::Component zoomBar;
+    juce::Component vZoomBar;
+    bool draggingZoomBar = false;
+    bool draggingVZoomBar = false;
     bool showWaveforms = true;
     double progress = 0.0;
     juce::ProgressBar progressBar;

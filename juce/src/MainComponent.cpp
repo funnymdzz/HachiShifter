@@ -66,6 +66,7 @@ MainComponent::MainComponent()
     savedProjectRevision = project.revisionNumber();
     audio.restoreDeviceState(*preferences);
     applyPreferences();
+    menuItemsChanged();
     setLookAndFeel(&lookAndFeel);
     setOpaque(true);
     setWantsKeyboardFocus(true);
@@ -109,11 +110,10 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&otoExportButton),
                              static_cast<juce::Component*>(&parameterTitle),
                              static_cast<juce::Component*>(&smoothCaption),
-                             static_cast<juce::Component*>(&smoothSlider),
-                             static_cast<juce::Component*>(&robustPitchCurveButton),
-                             static_cast<juce::Component*>(&zoomSlider),
-                             static_cast<juce::Component*>(&vZoomSlider),
-                             static_cast<juce::Component*>(&progressBar),
+                              static_cast<juce::Component*>(&smoothSlider),
+                              static_cast<juce::Component*>(&zoomBar),
+                              static_cast<juce::Component*>(&vZoomBar),
+                              static_cast<juce::Component*>(&progressBar),
                              static_cast<juce::Component*>(&trackViewport),
                              static_cast<juce::Component*>(&timelineViewport),
                              static_cast<juce::Component*>(&pianoViewport),
@@ -122,6 +122,10 @@ MainComponent::MainComponent()
 
     panelSplitter.setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
     panelSplitter.addMouseListener(this, false);
+    zoomBar.setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+    zoomBar.addMouseListener(this, false);
+    vZoomBar.setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+    vZoomBar.addMouseListener(this, false);
 
     for (auto* editor : { &sampleAliasEditor, &sampleStartEditor, &sampleEndEditor,
                           &sampleAlignmentEditor, &sampleFixedEditor })
@@ -218,6 +222,14 @@ MainComponent::MainComponent()
         auto delta = wheel.deltaY;
         if (wheel.isReversed) delta = -delta;
         const auto factor = std::exp(static_cast<double>(delta) * 1.35);
+        if (event.mods.isCommandDown())
+        {
+            const auto hZoom = juce::jlimit(40.0, 600.0, zoomSlider.getValue() * factor);
+            const auto vZoom = juce::jlimit(0.5, 2.0, vZoomSlider.getValue() * factor);
+            zoomSlider.setValue(hZoom);
+            vZoomSlider.setValue(vZoom);
+            return true;
+        }
         if (event.mods.isShiftDown())
         {
             vZoomSlider.setValue(juce::jlimit(0.5, 2.0,
@@ -324,6 +336,7 @@ MainComponent::MainComponent()
         const auto zoom = static_cast<float>(zoomSlider.getValue());
         timeline.setPixelsPerSecond(zoom);
         pianoRoll.setPixelsPerSecond(zoom);
+        repaint();
     };
 
     vZoomSlider.setRange(0.5, 2.0, 0.05);
@@ -340,6 +353,7 @@ MainComponent::MainComponent()
         trackList.setRowHeight(row);
         if (preferences != nullptr)
             preferences->setValue("ui.vZoom", vZoomSlider.getValue());
+        repaint();
     };
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
@@ -759,6 +773,21 @@ void MainComponent::paint(juce::Graphics& g)
                          static_cast<float>(splitterBounds.getRight()));
     g.drawHorizontalLine(splitterBounds.getBottom() - 1, static_cast<float>(splitterBounds.getX()),
                          static_cast<float>(splitterBounds.getRight()));
+    g.setColour(Palette::panel);
+    g.fillRect(zoomBar.getBounds());
+    g.fillRect(vZoomBar.getBounds());
+    g.setColour(Palette::border);
+    g.drawHorizontalLine(zoomBar.getBounds().getY(), static_cast<float>(zoomBar.getX()),
+                         static_cast<float>(zoomBar.getRight()));
+    g.drawVerticalLine(vZoomBar.getBounds().getX(), static_cast<float>(vZoomBar.getY()),
+                       static_cast<float>(vZoomBar.getBottom()));
+    const auto zoomRatio = (zoomSlider.getValue() - 40.0) / (600.0 - 40.0);
+    const auto thumbX = zoomBar.getX() + static_cast<int>(zoomRatio * zoomBar.getWidth());
+    g.setColour(Palette::accent);
+    g.fillRect(thumbX - 2, zoomBar.getY() + 2, 4, zoomBar.getHeight() - 4);
+    const auto vZoomRatio = (vZoomSlider.getValue() - 0.5) / (2.0 - 0.5);
+    const auto thumbY = vZoomBar.getY() + static_cast<int>((1.0 - vZoomRatio) * vZoomBar.getHeight());
+    g.fillRect(vZoomBar.getX() + 2, thumbY - 2, vZoomBar.getWidth() - 4, 4);
 }
 
 bool MainComponent::keyPressed(const juce::KeyPress& key)
@@ -923,8 +952,6 @@ void MainComponent::resized()
     take(saveButton, 28);
     take(audioButton, 32);
     take(melodyneButton, 32);
-    zoomSlider.setBounds(toolbar.removeFromRight(100));
-    vZoomSlider.setBounds(toolbar.removeFromRight(70));
     progressBar.setBounds(toolbar.removeFromRight(100).reduced(4, 5));
 
     auto footer = area.removeFromBottom(24);
@@ -1002,6 +1029,9 @@ void MainComponent::resized()
         takeSample(otoImportButton, 82);
         takeSample(otoExportButton, 82);
     }
+    constexpr auto zoomStrip = 14;
+    zoomBar.setBounds(area.removeFromBottom(zoomStrip));
+    vZoomBar.setBounds(area.removeFromRight(zoomStrip));
     pianoViewport.setBounds(area);
     if (!pianoInitialScrollSet && pianoViewport.getHeight() > 0)
     {
@@ -1012,14 +1042,36 @@ void MainComponent::resized()
 
 void MainComponent::mouseDown(const juce::MouseEvent& event)
 {
-    if (event.eventComponent != &panelSplitter) return;
-    draggingPanelSplitter = true;
-    panelSplitterDragScreenY = event.getScreenY();
-    panelSplitterDragRatio = panelSplitRatio;
+    if (event.eventComponent == &panelSplitter)
+    {
+        draggingPanelSplitter = true;
+        panelSplitterDragScreenY = event.getScreenY();
+        panelSplitterDragRatio = panelSplitRatio;
+    }
+    else if (event.eventComponent == &zoomBar)
+    {
+        draggingZoomBar = true;
+        updateHorizontalZoom(event.getPosition().x);
+    }
+    else if (event.eventComponent == &vZoomBar)
+    {
+        draggingVZoomBar = true;
+        updateVerticalZoom(event.getPosition().y);
+    }
 }
 
 void MainComponent::mouseDrag(const juce::MouseEvent& event)
 {
+    if (draggingZoomBar && event.eventComponent == &zoomBar)
+    {
+        updateHorizontalZoom(event.getPosition().x);
+        return;
+    }
+    if (draggingVZoomBar && event.eventComponent == &vZoomBar)
+    {
+        updateVerticalZoom(event.getPosition().y);
+        return;
+    }
     if (!draggingPanelSplitter || event.eventComponent != &panelSplitter) return;
     const auto splitAvailable = std::max(1, getHeight() - 27 - 34 - 24 - 8 - 36);
     panelSplitRatio = juce::jlimit(0.15f, 0.85f,
@@ -1032,6 +1084,22 @@ void MainComponent::mouseDrag(const juce::MouseEvent& event)
 void MainComponent::mouseUp(const juce::MouseEvent&)
 {
     draggingPanelSplitter = false;
+    draggingZoomBar = false;
+    draggingVZoomBar = false;
+}
+
+void MainComponent::updateHorizontalZoom(int x)
+{
+    const auto width = std::max(1, zoomBar.getWidth());
+    zoomSlider.setValue(juce::jlimit(40.0, 600.0,
+        40.0 + static_cast<double>(x) / width * (600.0 - 40.0)));
+}
+
+void MainComponent::updateVerticalZoom(int y)
+{
+    const auto height = std::max(1, vZoomBar.getHeight());
+    vZoomSlider.setValue(juce::jlimit(0.5, 2.0,
+        2.0 - static_cast<double>(y) / height * (2.0 - 0.5)));
 }
 
 void MainComponent::changeListenerCallback(juce::ChangeBroadcaster* source)
