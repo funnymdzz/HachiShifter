@@ -50,6 +50,17 @@ private:
         std::atomic<bool> scheduled { false };
         std::atomic<bool> ready { false };
         std::atomic<bool> finished { false };
+        // For a stretch-splice-then-pitch phrase, this entry holds the full
+        // merged buffer; each target is a per-element slice that is filled when
+        // the merged render completes (or immediately if it is already ready).
+        struct SliceTarget
+        {
+            std::shared_ptr<RenderedClip> clip;
+            int startSample = 0;
+            int sampleCount = 0;
+        };
+        std::vector<SliceTarget> pendingSlices;
+        juce::CriticalSection sliceLock;
     };
 
     struct LoadedClip

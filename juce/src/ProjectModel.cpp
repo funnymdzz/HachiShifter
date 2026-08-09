@@ -70,6 +70,22 @@ StretchAlgorithm parseStretchAlgorithm(const juce::String& value)
     if (value == "nsf-shift-then-splice") return StretchAlgorithm::nsfShiftThenSplice;
     return StretchAlgorithm::melodyneHybrid;
 }
+
+juce::String renderOrderName(RenderOrder value)
+{
+    switch (value)
+    {
+        case RenderOrder::processThenSplice: return "process-then-splice";
+        case RenderOrder::stretchSpliceThenPitch: return "stretch-splice-then-pitch";
+    }
+    return "process-then-splice";
+}
+
+RenderOrder parseRenderOrder(const juce::String& value)
+{
+    if (value == "stretch-splice-then-pitch") return RenderOrder::stretchSpliceThenPitch;
+    return RenderOrder::processThenSplice;
+}
 }
 
 double ProjectData::durationSeconds() const
@@ -280,6 +296,7 @@ juce::String ProjectModel::addTrack(const juce::String& requestedName, bool comp
         {
             track.pitchAlgorithm = project.tracks.back().pitchAlgorithm;
             track.stretchAlgorithm = project.tracks.back().stretchAlgorithm;
+            track.renderOrder = project.tracks.back().renderOrder;
         }
         id = track.id;
         project.tracks.push_back(std::move(track));
@@ -603,6 +620,40 @@ void ProjectModel::setTrackStretchAlgorithm(const juce::String& trackId,
             {
                 pushUndoLocked();
                 track.stretchAlgorithm = algorithm;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setRenderOrder(RenderOrder order)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.renderOrder != order)
+            {
+                if (!changed) pushUndoLocked();
+                track.renderOrder = order;
+                changed = true;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setTrackRenderOrder(const juce::String& trackId,
+                                       RenderOrder order)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.renderOrder != order)
+            {
+                pushUndoLocked();
+                track.renderOrder = order;
                 changed = true;
                 break;
             }
@@ -1704,6 +1755,7 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
         trackTree.setProperty("normalizeVolume", track.normalizeVolume, nullptr);
         trackTree.setProperty("pitchAlgorithm", pitchAlgorithmName(track.pitchAlgorithm), nullptr);
         trackTree.setProperty("stretchAlgorithm", stretchAlgorithmName(track.stretchAlgorithm), nullptr);
+        trackTree.setProperty("renderOrder", renderOrderName(track.renderOrder), nullptr);
 
         for (const auto& clip : track.clips)
         {
@@ -1841,6 +1893,7 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
         track.normalizeVolume = static_cast<bool>(trackTree.getProperty("normalizeVolume", false));
         track.pitchAlgorithm = parsePitchAlgorithm(trackTree.getProperty("pitchAlgorithm", "mld5").toString());
         track.stretchAlgorithm = parseStretchAlgorithm(trackTree.getProperty("stretchAlgorithm", "melodyne-hybrid").toString());
+        track.renderOrder = parseRenderOrder(trackTree.getProperty("renderOrder", "process-then-splice").toString());
 
         for (const auto clipTree : trackTree)
         {

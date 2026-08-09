@@ -41,6 +41,12 @@ struct Mld5FileRenderRequest
     PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;
     int stretchAlgorithm = 0;
     bool normalizeVolume = false;
+    // Per-edge neural guard overrides for the nsf-hifigan backend.  A negative
+    // value keeps the renderer default (3 ms both sides).  A connected seam
+    // sets the matching edge to 0 so the mixer crossfade owns the hand-off
+    // instead of a baked-in 3 ms level dip at every splice point.
+    float neuralGuardStartSeconds = -1.0f;
+    float neuralGuardEndSeconds = -1.0f;
 };
 
 struct RenderedAudio

@@ -45,7 +45,9 @@ std::pair<float, float> panGains(float pan, bool mono)
 
 backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const TrackData& track,
                                                   const juce::File& hifiganModelDirectory,
-                                                  const backend::OrtExecutionConfig& inference)
+                                                  const backend::OrtExecutionConfig& inference,
+                                                  bool connectedToPreviousClip = false,
+                                                  bool connectedToNextClip = false)
 {
     backend::Mld5FileRenderRequest request;
     request.sourceFile = clip.sourceFile;
@@ -171,7 +173,8 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
 
     for (const auto& joinedNote : clip.notes)
     {
-        if (!joinedNote.connectedToPrevious) continue;
+        const auto joinsHere = joinedNote.connectedToPrevious || connectedToPreviousClip;
+        if (!joinsHere) continue;
         const NoteData* previousNote = nullptr;
         auto previousEnd = -std::numeric_limits<double>::infinity();
         const auto joinedStart = clip.startSeconds + joinedNote.startSeconds;
@@ -180,7 +183,11 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             {
                 const auto end = candidateClip.startSeconds + candidate.startSeconds
                     + candidate.durationSeconds;
-                if (end <= joinedStart + 0.002
+                // The joined partner may overlap the note head (a CVVC connector
+                // sits under the previous vowel tail), so accept partners whose
+                // end lands no more than 80 ms past the join start and take the
+                // closest one.
+                if (end <= joinedStart + 0.08
                     && end > previousEnd && candidate.id != joinedNote.id)
                 {
                     previousEnd = end;
@@ -215,7 +222,12 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
 
 std::string renderKey(const ClipData& clip, const TrackData& track,
                       const juce::File& hifiganModelDirectory,
-                      const backend::OrtExecutionConfig& inference)
+                      const backend::OrtExecutionConfig& inference,
+                      bool connectedToPreviousClip = false,
+                      bool connectedToNextClip = false,
+                      const ClipData* previousNeighbour = nullptr,
+                      const ClipData* nextNeighbour = nullptr,
+                      RenderOrder renderOrder = RenderOrder::processThenSplice)
 {
     juce::MemoryOutputStream stream;
     const auto path = clip.sourceFile.getFullPathName().toUTF8();
@@ -232,7 +244,41 @@ std::string renderKey(const ClipData& clip, const TrackData& track,
     }
     stream.writeInt(static_cast<int>(track.pitchAlgorithm));
     stream.writeInt(static_cast<int>(track.stretchAlgorithm));
+    stream.writeInt(static_cast<int>(renderOrder));
     stream.writeBool(track.normalizeVolume);
+    stream.writeByte(static_cast<char>(connectedToPreviousClip ? 1 : 0));
+    stream.writeByte(static_cast<char>(connectedToNextClip ? 1 : 0));
+    // A boundary f0 glide and a reduced neural guard make a clip's render depend
+    // on the pitch of its connected partners, so key on a compact summary of
+    // those neighbours as well.
+    const auto writeNeighbour = [&stream](const ClipData* neighbour)
+    {
+        if (neighbour == nullptr)
+        {
+            stream.writeByte(0);
+            return;
+        }
+        stream.writeByte(1);
+        stream.writeDouble(neighbour->startSeconds);
+        stream.writeDouble(neighbour->durationSeconds);
+        for (const auto& note : neighbour->notes)
+        {
+            stream.writeFloat(note.midiNote);
+            stream.writeFloat(note.sourceMidiCenter);
+            if (note.contour.empty())
+            {
+                stream.writeByte(0);
+                continue;
+            }
+            stream.writeByte(1);
+            const auto& tail = note.contour.back();
+            stream.writeDouble(tail.timeSeconds);
+            stream.writeFloat(tail.relativeCents);
+            stream.writeFloat(tail.withoutVibratoCents);
+        }
+    };
+    writeNeighbour(previousNeighbour);
+    writeNeighbour(nextNeighbour);
     const auto modelPath = hifiganModelDirectory.getFullPathName().toUTF8();
     stream.write(modelPath.getAddress(), modelPath.sizeInBytes());
     const auto modelDirectory = hifiganModelDirectory.existsAsFile()
@@ -274,6 +320,186 @@ std::string renderKey(const ClipData& clip, const TrackData& track,
         }
     }
     return std::string(static_cast<const char*>(stream.getData()), stream.getDataSize());
+}
+
+// stretch-splice-then-pitch: render a whole connected phrase as one request.
+// The source is the single contiguous media range spanning every element's
+// selected source region; the time map maps each element's target seconds onto
+// its own source seconds (concatenated in target time), and the pitch/formant
+// curves are sampled from the element owning each target frame with a smooth
+// glide across every seam.  One NSF-HiFiGAN decode then covers the whole phrase
+// with continuous mel/F0/phase, and the caller cuts the result back into
+// per-element buffers.
+backend::Mld5FileRenderRequest makeMergedRenderRequest(
+    const std::vector<const ClipData*>& group, const TrackData& track,
+    const juce::File& hifiganModelDirectory,
+    const backend::OrtExecutionConfig& inference)
+{
+    backend::Mld5FileRenderRequest request;
+    request.sourceFile = group.front()->sourceFile;
+    auto sourceStart = std::numeric_limits<double>::max();
+    auto sourceEnd = 0.0;
+    std::vector<double> targetOffsets;
+    targetOffsets.reserve(group.size());
+    auto targetDuration = 0.0;
+    for (const auto* clip : group)
+    {
+        targetOffsets.push_back(targetDuration);
+        targetDuration += clip->durationSeconds;
+        sourceStart = std::min(sourceStart, clip->sourceOffsetSeconds);
+        sourceEnd = std::max(sourceEnd, clip->sourceOffsetSeconds + clip->sourceDurationSeconds);
+    }
+    request.sourceOffsetSeconds = sourceStart;
+    request.sourceDurationSeconds = std::max(1.0e-6, sourceEnd - sourceStart);
+    request.targetDurationSeconds = targetDuration;
+    request.hifiganModelDirectory = hifiganModelDirectory;
+    request.inference = inference;
+    request.pitchBackend = backend::PitchRenderBackend::nsfHifigan;
+    request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
+    request.normalizeVolume = track.normalizeVolume;
+
+    std::vector<backend::TimeMapPoint> timeAnchors;
+    for (std::size_t index = 0; index < group.size(); ++index)
+    {
+        const auto& clip = *group[index];
+        const auto targetOffset = targetOffsets[index];
+        const auto sourceOffset = clip.sourceOffsetSeconds - sourceStart;
+        if (!clip.sourceTimeMap.empty())
+        {
+            for (const auto& point : clip.sourceTimeMap)
+                timeAnchors.push_back({
+                    targetOffset + juce::jlimit(0.0, clip.durationSeconds, point.targetSeconds),
+                    sourceOffset + juce::jlimit(0.0, clip.sourceDurationSeconds, point.sourceSeconds) });
+        }
+        else
+        {
+            timeAnchors.push_back({ targetOffset, sourceOffset });
+            for (const auto& note : clip.notes)
+            {
+                const auto noteStart = juce::jlimit(0.0, clip.durationSeconds, note.startSeconds);
+                const auto srcStart = clip.durationSeconds > 1.0e-9
+                    ? noteStart / clip.durationSeconds * clip.sourceDurationSeconds : 0.0;
+                timeAnchors.push_back({ targetOffset + noteStart, sourceOffset + srcStart });
+                if (note.consonantSeconds <= 1.0e-6 || note.attackSpeed <= 1.0e-6f) continue;
+                const auto targetAttack = juce::jlimit(noteStart, clip.durationSeconds,
+                    noteStart + note.consonantSeconds);
+                const auto sourceAttack = juce::jlimit(srcStart, clip.sourceDurationSeconds,
+                    srcStart + note.consonantSeconds * static_cast<double>(note.attackSpeed));
+                timeAnchors.push_back({ targetOffset + targetAttack, sourceOffset + sourceAttack });
+            }
+            timeAnchors.push_back({ targetOffset + clip.durationSeconds,
+                sourceOffset + clip.sourceDurationSeconds });
+        }
+    }
+    // Element boundaries become hard time-map anchors so a target frame at the
+    // seam never samples the neighbouring element's source region.
+    for (std::size_t index = 0; index < group.size(); ++index)
+    {
+        timeAnchors.push_back({ targetOffsets[index],
+            group[index]->sourceOffsetSeconds - sourceStart });
+        timeAnchors.push_back({ targetOffsets[index] + group[index]->durationSeconds,
+            group[index]->sourceOffsetSeconds + group[index]->sourceDurationSeconds - sourceStart });
+    }
+    std::stable_sort(timeAnchors.begin(), timeAnchors.end(), [](const auto& left, const auto& right)
+    {
+        if (std::abs(left.targetSeconds - right.targetSeconds) > 1.0e-9)
+            return left.targetSeconds < right.targetSeconds;
+        return left.sourceSeconds < right.sourceSeconds;
+    });
+    for (const auto& anchor : timeAnchors)
+    {
+        if (request.timeMap.empty())
+        {
+            request.timeMap.push_back(anchor);
+            continue;
+        }
+        auto& previous = request.timeMap.back();
+        if (std::abs(anchor.targetSeconds - previous.targetSeconds) <= 1.0e-7)
+        {
+            previous.sourceSeconds = std::max(previous.sourceSeconds, anchor.sourceSeconds);
+            continue;
+        }
+        if (anchor.sourceSeconds > previous.sourceSeconds + 1.0e-7)
+            request.timeMap.push_back(anchor);
+    }
+    if (request.timeMap.empty() || request.timeMap.back().targetSeconds < targetDuration - 1.0e-7)
+        request.timeMap.push_back({ targetDuration, sourceEnd - sourceStart });
+
+    constexpr auto framePeriodSeconds = 0.005;
+    request.framePeriodMs = framePeriodSeconds * 1000.0;
+    const auto frameCount = std::max(2, static_cast<int>(std::ceil(targetDuration / framePeriodSeconds)) + 1);
+    request.sourceMidi.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    request.targetMidi.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    request.formantSemitones.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    request.noteGain.assign(static_cast<std::size_t>(frameCount), 1.0f);
+    request.tension.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    request.breath.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    request.robustPitchCurve.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    for (int frame = 0; frame < frameCount; ++frame)
+    {
+        const auto time = std::min(targetDuration, static_cast<double>(frame) * framePeriodSeconds);
+        std::size_t index = 0;
+        while (index + 1 < group.size() && targetOffsets[index + 1] <= time) ++index;
+        const auto& clip = *group[index];
+        const auto local = time - targetOffsets[index];
+        for (const auto& note : clip.notes)
+        {
+            const auto noteLocal = local - note.startSeconds;
+            if (noteLocal < -1.0e-9 || noteLocal > note.durationSeconds + 1.0e-9) continue;
+            request.formantSemitones[static_cast<std::size_t>(frame)] = note.formantSemitones;
+            request.noteGain[static_cast<std::size_t>(frame)] = note.gain;
+            request.tension[static_cast<std::size_t>(frame)] = note.tension;
+            request.breath[static_cast<std::size_t>(frame)] = note.breath;
+            request.robustPitchCurve[static_cast<std::size_t>(frame)] =
+                note.robustPitchCurve ? static_cast<float>(index + 1) : 0.0f;
+            const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, noteLocal));
+            if (!cents) break;
+            const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;
+            request.sourceMidi[static_cast<std::size_t>(frame)] = sourceCenter + cents->first / 100.0f;
+            request.targetMidi[static_cast<std::size_t>(frame)] = note.midiNote + cents->second / 100.0f;
+            break;
+        }
+    }
+    // Continuous pitch line: glide every seam from the previous element's tail
+    // pitch into the next element so the single decode never sees a hard f0
+    // step inside the phrase.
+    for (std::size_t index = 1; index < group.size(); ++index)
+    {
+        const auto& prevClip = *group[index - 1];
+        const auto& nextClip = *group[index];
+        auto prevPitch = prevClip.notes.empty() ? 0.0 : prevClip.notes.back().midiNote;
+        if (!prevClip.notes.empty())
+        {
+            const auto& note = prevClip.notes.back();
+            const auto cents = contourAt(note, note.durationSeconds);
+            prevPitch = note.midiNote + (cents ? cents->second / 100.0f : 0.0f);
+        }
+        const auto joinSeconds = std::min(0.08, std::max(0.012, nextClip.durationSeconds * 0.22));
+        const auto firstFrame = juce::jlimit(0, frameCount - 1,
+            static_cast<int>(std::llround(targetOffsets[index] / framePeriodSeconds)));
+        const auto joinFrames = std::min(frameCount - firstFrame,
+            std::max(2, static_cast<int>(std::ceil(joinSeconds / framePeriodSeconds))));
+        if (joinFrames < 2) continue;
+        for (int frame = 0; frame < joinFrames; ++frame)
+        {
+            auto& target = request.targetMidi[static_cast<std::size_t>(firstFrame + frame)];
+            if (!(target > 0.0f)) continue;
+            const auto x = static_cast<float>(frame) / static_cast<float>(joinFrames - 1);
+            const auto smooth = x * x * (3.0f - 2.0f * x);
+            target = static_cast<float>(prevPitch + (target - prevPitch) * smooth);
+        }
+    }
+    return request;
+}
+
+std::string mergedRenderKey(const std::vector<const ClipData*>& group, const TrackData& track,
+                            const juce::File& hifiganModelDirectory,
+                            const backend::OrtExecutionConfig& inference)
+{
+    std::string key = "merged|" + std::to_string(static_cast<int>(track.renderOrder)) + "|";
+    for (const auto* clip : group)
+        key += renderKey(*clip, track, hifiganModelDirectory, inference) + ";";
+    return key;
 }
 }
 
@@ -425,6 +651,38 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
     std::unordered_set<std::string> activeRenderKeys;
     const auto anySolo = std::any_of(project.tracks.begin(), project.tracks.end(),
                                      [](const auto& track) { return track.solo; });
+    // A connection is the smallest shared unit the two neural pathways agree
+    // on: the next element starts at most 20 ms after the previous one ends and
+    // no earlier than 80 ms before it (a CVVC connector sits under the vowel
+    // tail), and its source region continues the previous element's source
+    // range so independent overlapping layers are never fused into a phrase.
+    const auto clipsConnected = [](const ClipData& left, const ClipData& right) -> bool
+    {
+        if (left.sourceFile.getFullPathName() != right.sourceFile.getFullPathName()) return false;
+        const auto gap = right.startSeconds - (left.startSeconds + left.durationSeconds);
+        if (gap > 0.02) return false;
+        if (gap < -0.08) return false;
+        if (right.sourceOffsetSeconds < left.sourceOffsetSeconds - 1.0e-6) return false;
+        if (right.sourceOffsetSeconds > left.sourceOffsetSeconds + left.sourceDurationSeconds + 0.03)
+            return false;
+        return true;
+    };
+    const auto sliceInto = [](const RenderedClip& source, const RenderedClip::SliceTarget& target)
+    {
+        if (target.clip == nullptr || source.buffer.getNumSamples() <= 0) return;
+        const auto channels = source.buffer.getNumChannels();
+        const auto copied = std::min(target.sampleCount,
+            std::max(0, source.buffer.getNumSamples() - target.startSample));
+        target.clip->buffer.setSize(channels, target.sampleCount);
+        target.clip->buffer.clear();
+        for (int channel = 0; channel < channels; ++channel)
+            target.clip->buffer.copyFrom(channel, 0, source.buffer, channel,
+                target.startSample, copied);
+        target.clip->sampleRate = source.sampleRate;
+        target.clip->backend = source.backend;
+        target.clip->ready.store(true, std::memory_order_release);
+        target.clip->finished.store(true, std::memory_order_release);
+    };
     for (const auto& track : project.tracks)
     {
         auto meter = std::make_shared<std::atomic<float>>(0.0f);
@@ -437,7 +695,25 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         {
             return left->startSeconds < right->startSeconds;
         });
-        for (std::size_t clipIndex = 0; clipIndex < orderedClips.size(); ++clipIndex)
+        const auto count = orderedClips.size();
+        std::vector<bool> connectedPrev(count, false);
+        std::vector<bool> connectedNext(count, false);
+        for (std::size_t index = 1; index < count; ++index)
+            if (clipsConnected(*orderedClips[index - 1], *orderedClips[index]))
+            {
+                connectedPrev[index] = true;
+                connectedNext[index - 1] = true;
+            }
+        const auto mergedMode = track.compose
+            && track.pitchAlgorithm == PitchAlgorithm::nsfHifigan
+            && track.renderOrder == RenderOrder::stretchSpliceThenPitch;
+        struct PendingGroup
+        {
+            std::vector<const ClipData*> clips;
+            std::vector<LoadedClip*> loaded;
+        };
+        std::vector<PendingGroup> pendingGroups;
+        for (std::size_t clipIndex = 0; clipIndex < count; ++clipIndex)
         {
             const auto& clip = *orderedClips[clipIndex];
             if (clip.muted || !clip.sourceFile.existsAsFile()) continue;
@@ -464,12 +740,12 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
-                         && !clip.notes.empty() && clip.notes.front().connectedToPrevious
+                         && connectedPrev[clipIndex]
                          && clip.crossfadeInSeconds <= 1.0e-6)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
-            if (track.smoothOverlaps && clipIndex + 1 < orderedClips.size())
+            if (track.smoothOverlaps && clipIndex + 1 < count)
             {
                 const auto& next = *orderedClips[clipIndex + 1];
                 const auto overlap = clip.startSeconds + clip.durationSeconds - next.startSeconds;
@@ -477,7 +753,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
-                         && !clip.notes.empty() && clip.notes.back().connectedToNext
+                         && connectedNext[clipIndex]
                          && clip.crossfadeOutSeconds <= 1.0e-6)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
@@ -492,29 +768,65 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             // shifts both F0 and formants and creates the "old/child voice" failure mode.
             if (track.compose && !clip.notes.empty())
             {
-                const auto cacheKey = renderKey(
-                    clip, track, hifiganModelDirectory, inferenceConfiguration);
-                activeRenderKeys.insert(cacheKey);
-                auto& state = renderCache[cacheKey];
-                if (state == nullptr) state = std::make_shared<RenderedClip>();
-                loaded->rendered = state;
-                if (!state->scheduled.exchange(true))
+                const auto inMerged = mergedMode && (connectedPrev[clipIndex] || connectedNext[clipIndex]);
+                if (inMerged)
                 {
-                    auto request = makeRenderRequest(
-                        clip, track, hifiganModelDirectory, inferenceConfiguration);
-                    renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
+                    loaded->rendered = std::make_shared<RenderedClip>();
+                    if (connectedPrev[clipIndex] && !pendingGroups.empty()
+                        && pendingGroups.back().clips.back() == orderedClips[clipIndex - 1])
                     {
-                        if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
+                        pendingGroups.back().clips.push_back(&clip);
+                        pendingGroups.back().loaded.push_back(loaded.get());
+                    }
+                    else
+                    {
+                        PendingGroup group;
+                        group.clips.push_back(&clip);
+                        group.loaded.push_back(loaded.get());
+                        pendingGroups.push_back(std::move(group));
+                    }
+                }
+                else
+                {
+                    const auto connectedPrevFlag = connectedPrev[clipIndex];
+                    const auto connectedNextFlag = connectedNext[clipIndex];
+                    const auto cacheKey = renderKey(clip, track,
+                        hifiganModelDirectory, inferenceConfiguration,
+                        connectedPrevFlag, connectedNextFlag,
+                        connectedPrevFlag ? orderedClips[clipIndex - 1] : nullptr,
+                        connectedNextFlag ? orderedClips[clipIndex + 1] : nullptr,
+                        track.renderOrder);
+                    activeRenderKeys.insert(cacheKey);
+                    auto& state = renderCache[cacheKey];
+                    if (state == nullptr) state = std::make_shared<RenderedClip>();
+                    loaded->rendered = state;
+                    if (!state->scheduled.exchange(true))
+                    {
+                        auto request = makeRenderRequest(clip, track,
+                            hifiganModelDirectory, inferenceConfiguration,
+                            connectedPrevFlag, connectedNextFlag);
+                        if (track.pitchAlgorithm == PitchAlgorithm::nsfHifigan)
                         {
-                            state->finished.store(true, std::memory_order_release);
-                            return;
+                            // A connected seam is covered by the mixer crossfade,
+                            // so shrink the baked-in neural guard there to a bare
+                            // de-click instead of a 3 ms level dip.
+                            if (connectedPrevFlag) request.neuralGuardStartSeconds = 0.0005f;
+                            if (connectedNextFlag) request.neuralGuardEndSeconds = 0.0005f;
                         }
-                        state->buffer = std::move(result.buffer);
-                        state->sampleRate = result.sampleRate;
-                        state->backend = std::move(result.backend);
-                        state->ready.store(true, std::memory_order_release);
-                        state->finished.store(true, std::memory_order_release);
-                    });
+                        renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
+                        {
+                            if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
+                            {
+                                state->finished.store(true, std::memory_order_release);
+                                return;
+                            }
+                            state->buffer = std::move(result.buffer);
+                            state->sampleRate = result.sampleRate;
+                            state->backend = std::move(result.backend);
+                            state->ready.store(true, std::memory_order_release);
+                            state->finished.store(true, std::memory_order_release);
+                        });
+                    }
                 }
             }
             // Playback only needs clip timing/gain after the render request is
@@ -523,6 +835,71 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             loaded->clip.notes.clear();
             loaded->clip.notes.shrink_to_fit();
             loadedClips.push_back(std::move(loaded));
+        }
+
+        // Schedule the merged phrase renders for this track.  Each connected
+        // group becomes one stretch-splice-then-pitch request whose output is
+        // cut back into the per-element buffers the mixer expects.
+        for (auto& group : pendingGroups)
+        {
+            if (group.clips.size() < 2) continue;
+            const auto mergedKey = mergedRenderKey(group.clips, track,
+                hifiganModelDirectory, inferenceConfiguration);
+            activeRenderKeys.insert(mergedKey);
+            auto& mergedEntry = renderCache[mergedKey];
+            if (mergedEntry == nullptr) mergedEntry = std::make_shared<RenderedClip>();
+            const auto sourceKey = group.clips.front()->sourceFile.getFullPathName().toStdString();
+            const auto readerIt = readers.find(sourceKey);
+            const auto fileRate = readerIt != readers.end() && readerIt->second != nullptr
+                ? readerIt->second->sampleRate : outputSampleRate.load();
+            std::vector<RenderedClip::SliceTarget> targets;
+            targets.reserve(group.clips.size());
+            double targetOffset = 0.0;
+            for (std::size_t index = 0; index < group.clips.size(); ++index)
+            {
+                const auto start = static_cast<int>(std::llround(targetOffset * fileRate));
+                targetOffset += group.clips[index]->durationSeconds;
+                const auto end = static_cast<int>(std::llround(targetOffset * fileRate));
+                targets.push_back({ group.loaded[index]->rendered, start, std::max(1, end - start) });
+            }
+            {
+                const juce::ScopedLock sliceGuard(mergedEntry->sliceLock);
+                if (mergedEntry->ready.load(std::memory_order_acquire))
+                {
+                    for (const auto& target : targets)
+                        sliceInto(*mergedEntry, target);
+                }
+                else
+                {
+                    for (auto& target : targets)
+                        mergedEntry->pendingSlices.push_back(std::move(target));
+                }
+            }
+            if (!mergedEntry->scheduled.exchange(true))
+            {
+                auto request = makeMergedRenderRequest(group.clips, track,
+                    hifiganModelDirectory, inferenceConfiguration);
+                renderService.renderMld5File(std::move(request),
+                    [mergedEntry, sliceInto](backend::RenderedAudio result) mutable
+                    {
+                        if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
+                        {
+                            mergedEntry->finished.store(true, std::memory_order_release);
+                            return;
+                        }
+                        mergedEntry->buffer = result.buffer;
+                        mergedEntry->sampleRate = result.sampleRate;
+                        mergedEntry->backend = std::move(result.backend);
+                        {
+                            const juce::ScopedLock sliceGuard(mergedEntry->sliceLock);
+                            for (const auto& target : mergedEntry->pendingSlices)
+                                sliceInto(*mergedEntry, target);
+                            mergedEntry->pendingSlices.clear();
+                            mergedEntry->ready.store(true, std::memory_order_release);
+                            mergedEntry->finished.store(true, std::memory_order_release);
+                        }
+                    });
+            }
         }
     }
     std::erase_if(renderCache, [&](const auto& item)

@@ -195,6 +195,7 @@ private:
     void refreshSelectedNoteParameter();
     void applySelectedNoteParameter();
     void refreshStretchAlgorithmItems(int preferredId = 0);
+    void refreshRenderOrderItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
     void togglePlayback();
     void newProject();
@@ -277,8 +278,10 @@ private:
     juce::ToggleButton robustPitchCurveButton;
     juce::ComboBox pitchAlgorithm;
     juce::ComboBox stretchAlgorithm;
+    juce::ComboBox renderOrder;
     juce::Label pitchLabel;
     juce::Label stretchLabel;
+    juce::Label renderOrderLabel;
     juce::Label statusLabel;
     juce::Label sourceEditHint;
     juce::ComboBox sampleRegionSelector;

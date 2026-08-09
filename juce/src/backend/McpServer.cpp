@@ -118,6 +118,12 @@ juce::String stretchAlgorithmText(StretchAlgorithm value)
     return "melodyne-hybrid";
 }
 
+juce::String renderOrderText(RenderOrder value)
+{
+    if (value == RenderOrder::stretchSpliceThenPitch) return "stretch-splice-then-pitch";
+    return "process-then-splice";
+}
+
 juce::String summary(const ProjectData& project)
 {
     std::size_t clips = 0;
@@ -487,6 +493,13 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                 : value == "nsf-shift-then-splice" ? StretchAlgorithm::nsfShiftThenSplice
                 : StretchAlgorithm::melodyneHybrid);
         }
+        if (args.hasProperty("render_order"))
+        {
+            const auto value = string(args, "render_order").toLowerCase();
+            project.setTrackRenderOrder(id,
+                value == "stretch-splice-then-pitch" ? RenderOrder::stretchSpliceThenPitch
+                : RenderOrder::processThenSplice);
+        }
         return toolResult("ok");
     }
     else if (name == "set_clip")
@@ -849,6 +862,7 @@ juce::var McpServer::projectJson() const
         set(trackValue, "normalize_volume", track.normalizeVolume);
         set(trackValue, "pitch_algorithm", pitchAlgorithmText(track.pitchAlgorithm));
         set(trackValue, "stretch_algorithm", stretchAlgorithmText(track.stretchAlgorithm));
+        set(trackValue, "render_order", renderOrderText(track.renderOrder));
         std::vector<juce::var> clips;
         for (const auto& clip : track.clips)
         {

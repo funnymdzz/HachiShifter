@@ -32,6 +32,23 @@ enum class StretchAlgorithm
     nsfShiftThenSplice
 };
 
+// Track-level processing order for the neural (nsf-hifigan) backend.  The two
+// compositions mirror two editor workflows:
+//  - processThenSplice (Utau-style): every element is time-stretched and
+//    pitch-shifted by its own decode, then the samples are concatenated on the
+//    timeline.  Adjacent elements still glide their F0 across the seam so the
+//    splice lands on a continuous pitch.
+//  - stretchSpliceThenPitch (DAW/Melodyne-style): connected elements are
+//    assembled into one phrase - their per-element mels are stitched through a
+//    continuous time map and decoded in a single NSF-HiFiGAN pass against one
+//    continuous pitch line, then cut back into per-element clips.  This keeps
+//    phase/F0/mel continuous across every internal seam.
+enum class RenderOrder
+{
+    processThenSplice,
+    stretchSpliceThenPitch
+};
+
 struct PitchPoint
 {
     double timeSeconds = 0.0;
@@ -124,6 +141,7 @@ struct TrackData
     bool normalizeVolume = false;
     PitchAlgorithm pitchAlgorithm = PitchAlgorithm::mld5;
     StretchAlgorithm stretchAlgorithm = StretchAlgorithm::melodyneHybrid;
+    RenderOrder renderOrder = RenderOrder::processThenSplice;
     std::vector<ClipData> clips;
 };
 
@@ -174,8 +192,10 @@ public:
     void setTrackNormalizeVolume(const juce::String& trackId, bool enabled);
     void setTrackPitchAlgorithm(const juce::String& trackId, PitchAlgorithm algorithm);
     void setTrackStretchAlgorithm(const juce::String& trackId, StretchAlgorithm algorithm);
+    void setTrackRenderOrder(const juce::String& trackId, RenderOrder order);
     void setPitchAlgorithm(PitchAlgorithm algorithm);
     void setStretchAlgorithm(StretchAlgorithm algorithm);
+    void setRenderOrder(RenderOrder order);
     void moveClip(const juce::String& clipId, double startSeconds);
     [[nodiscard]] juce::String duplicateClip(const juce::String& clipId,
                                              double startSeconds = -1.0,

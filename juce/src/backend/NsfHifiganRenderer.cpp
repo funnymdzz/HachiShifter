@@ -671,7 +671,8 @@ void shiftMelFormants(MelData& mel, const Config& config,
     }
 }
 
-void conditionNeuralBoundary(float* samples, int count, double sampleRate)
+void conditionNeuralBoundary(float* samples, int count, double sampleRate,
+                             double guardStartSeconds, double guardEndSeconds)
 {
     if (samples == nullptr || count <= 0 || sampleRate <= 0.0) return;
     // Neural segments can carry a small DC step even when their Mel/F0 inputs
@@ -711,19 +712,31 @@ void conditionNeuralBoundary(float* samples, int count, double sampleRate)
             samples[index] = localMean;
     }
     // Clip boundaries are not guaranteed to coincide with a decoder source
-    // phase.  A 3 ms equal-power guard suppresses that isolated discontinuity
-    // without smearing attacks or creating an audible long crossfade.
-    const auto fade = std::min(count / 2, std::max(1,
-        static_cast<int>(std::llround(sampleRate * 0.003))));
-    for (int index = 0; index < fade; ++index)
+    // phase.  An equal-power guard suppresses that isolated discontinuity
+    // without smearing attacks or creating an audible long crossfade.  Each
+    // edge can be disabled: connected phrase seams are decoded continuously in
+    // the stretch-splice-then-pitch order, and per-element seams are covered by
+    // a longer mixer crossfade, so a baked-in 3 ms dip there only adds noise.
+    const auto fadeIn = guardStartSeconds > 0.0
+        ? std::min(count / 2, std::max(1,
+            static_cast<int>(std::llround(sampleRate * guardStartSeconds)))) : 0;
+    const auto fadeOut = guardEndSeconds > 0.0
+        ? std::min(count / 2, std::max(1,
+            static_cast<int>(std::llround(sampleRate * guardEndSeconds)))) : 0;
+    for (int index = 0; index < fadeIn; ++index)
     {
         const auto phase = (static_cast<double>(index) + 1.0)
-            / (static_cast<double>(fade) + 1.0);
+            / (static_cast<double>(fadeIn) + 1.0);
         const auto gainIn = static_cast<float>(std::sin(
             juce::MathConstants<double>::halfPi * phase));
-        const auto gainOut = static_cast<float>(std::sin(
-            juce::MathConstants<double>::halfPi * (1.0 - phase)));
         samples[index] *= gainIn;
+    }
+    for (int index = 0; index < fadeOut; ++index)
+    {
+        const auto phase = (static_cast<double>(index) + 1.0)
+            / (static_cast<double>(fadeOut) + 1.0);
+        const auto gainOut = static_cast<float>(std::sin(
+            juce::MathConstants<double>::halfPi * phase));
         samples[count - 1 - index] *= gainOut;
     }
 }
@@ -871,7 +884,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
     const std::vector<NsfHifiganTimeMapPoint>& timeMap,
     const juce::File& configuredModelDirectory,
     const OrtExecutionConfig& execution, NsfHifiganStretchOrder stretchOrder,
-    bool normalizeVolume)
+    bool normalizeVolume, const NsfHifiganEdgeGuard& edgeGuard)
 {
     NsfHifiganRenderResult result;
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
@@ -1029,7 +1042,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
             if (copied < wanted)
                 std::fill(destination + static_cast<std::ptrdiff_t>(copied),
                           destination + static_cast<std::ptrdiff_t>(wanted), 0.0f);
-            conditionNeuralBoundary(destination, targetSamples, sampleRate);
+            conditionNeuralBoundary(destination, targetSamples, sampleRate,
+                edgeGuard.startSeconds, edgeGuard.endSeconds);
         }
         result.usedModel = true;
         return result;

@@ -34,6 +34,18 @@ struct NsfHifiganRenderResult
     bool usedModel = false;
 };
 
+// Per-edge amplitude guard applied after a neural decode.  Each edge fade is an
+// equal-power sine ramp that suppresses the isolated discontinuity at a clip
+// boundary whose source phase is unrelated to the next clip.  Connected phrase
+// seams (which are decoded inside the same pass) and mixer-crossfaded seams do
+// not need it, so the caller can zero the corresponding edge to avoid the
+// small 3 ms level dip it would otherwise bake into every splice point.
+struct NsfHifiganEdgeGuard
+{
+    float startSeconds = 0.003f;
+    float endSeconds = 0.003f;
+};
+
 class NsfHifiganRenderer final
 {
 public:
@@ -48,6 +60,7 @@ public:
         const juce::File& configuredModelDirectory,
         const OrtExecutionConfig& execution,
         NsfHifiganStretchOrder stretchOrder,
-        bool normalizeVolume = false);
+        bool normalizeVolume = false,
+        const NsfHifiganEdgeGuard& edgeGuard = NsfHifiganEdgeGuard{});
 };
 }

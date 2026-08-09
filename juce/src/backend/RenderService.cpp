@@ -783,10 +783,15 @@ public:
             neuralTimeMap.reserve(request.timeMap.size());
             for (const auto& point : request.timeMap)
                 neuralTimeMap.push_back({ point.targetSeconds, point.sourceSeconds });
+            NsfHifiganEdgeGuard edgeGuard;
+            if (request.neuralGuardStartSeconds >= 0.0f)
+                edgeGuard.startSeconds = request.neuralGuardStartSeconds;
+            if (request.neuralGuardEndSeconds >= 0.0f)
+                edgeGuard.endSeconds = request.neuralGuardEndSeconds;
             auto neural = NsfHifiganRenderer::render(source, reader->sampleRate,
                 targetSamples, request.framePeriodMs, request.targetMidi,
                 request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,
-                request.inference, stretchOrder, request.normalizeVolume);
+                request.inference, stretchOrder, request.normalizeVolume, edgeGuard);
             if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
             {
                 rendered = std::move(neural.buffer);

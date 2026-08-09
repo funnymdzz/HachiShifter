@@ -297,6 +297,12 @@ MainComponent::MainComponent()
             else
                 project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
         }
+        const auto showRenderOrder = id == 2;
+        if (renderOrder.isVisible() != showRenderOrder)
+        {
+            renderOrder.setVisible(showRenderOrder);
+            renderOrderLabel.setVisible(showRenderOrder);
+        }
         refreshSelectedNoteParameter();
         resized();
     };
@@ -318,6 +324,22 @@ MainComponent::MainComponent()
             project.setTrackStretchAlgorithm(selectedTrack->id, algorithm);
         else
             project.setStretchAlgorithm(algorithm);
+    };
+    refreshRenderOrderItems(1);
+    renderOrder.onChange = [this]
+    {
+        const auto order = renderOrder.getSelectedId() == 2
+            ? RenderOrder::stretchSpliceThenPitch : RenderOrder::processThenSplice;
+        const auto data = project.snapshot();
+        const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
+            [this](const auto& track)
+            {
+                return track.id == selectedTrackId;
+            });
+        if (selectedTrack != data.tracks.end())
+            project.setTrackRenderOrder(selectedTrack->id, order);
+        else
+            project.setRenderOrder(order);
     };
 
     smoothSlider.setRange(0.0, 100.0, 1.0);
@@ -561,9 +583,12 @@ void MainComponent::refreshTexts()
     scaleCaption.setText(strings.text("base.scale"), juce::dontSendNotification);
     pitchLabel.setText(strings.text("algo.pitch"), juce::dontSendNotification);
     stretchLabel.setText(strings.text("algo.stretch"), juce::dontSendNotification);
+    renderOrderLabel.setText(strings.text("algo.order"), juce::dontSendNotification);
     pitchAlgorithm.setTooltip(strings.text("algo.pitch"));
     stretchAlgorithm.setTooltip(strings.text("algo.stretch"));
+    renderOrder.setTooltip(strings.text("algo.order"));
     refreshStretchAlgorithmItems(stretchAlgorithm.getSelectedId());
+    refreshRenderOrderItems(renderOrder.getSelectedId());
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
     sampleAliasLabel.setText(strings.text("sample.alias"), juce::dontSendNotification);
@@ -603,8 +628,19 @@ void MainComponent::refreshProjectControls()
             : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
             : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4
             : selected->stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice ? 5 : 1;
+        const auto orderId = selected->renderOrder == RenderOrder::stretchSpliceThenPitch ? 2 : 1;
         pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
         refreshStretchAlgorithmItems(stretchId);
+        renderOrder.setSelectedId(orderId, juce::dontSendNotification);
+        // Render order only affects the NSF-HiFiGAN phrase path; the mld5-only
+        // Robust Pitch Curve button and this control never compete for width.
+        const auto showRenderOrder = pitchId == 2;
+        if (renderOrder.isVisible() != showRenderOrder)
+        {
+            renderOrder.setVisible(showRenderOrder);
+            renderOrderLabel.setVisible(showRenderOrder);
+            resized();
+        }
     }
     refreshSelectedNoteParameter();
 }
@@ -729,6 +765,15 @@ void MainComponent::refreshStretchAlgorithmItems(int preferredId)
         || pitchAlgorithm.getSelectedId() == 2;
     stretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
                                    juce::dontSendNotification);
+}
+
+void MainComponent::refreshRenderOrderItems(int preferredId)
+{
+    const auto previous = preferredId > 0 ? preferredId : renderOrder.getSelectedId();
+    renderOrder.clear(juce::dontSendNotification);
+    renderOrder.addItem(strings.text("algo.order.processThenSplice"), 1);
+    renderOrder.addItem(strings.text("algo.order.stretchSpliceThenPitch"), 2);
+    renderOrder.setSelectedId(previous > 0 ? previous : 1, juce::dontSendNotification);
 }
 
 void MainComponent::setToolButton(juce::Button& selected)
@@ -975,9 +1020,14 @@ void MainComponent::resized()
         component.setBounds(parameterHeader.removeFromRight(width));
         parameterHeader.removeFromRight(3);
     };
-    takeParameterRight(stretchAlgorithm, 124);
+    takeParameterRight(stretchAlgorithm, 118);
     takeParameterRight(stretchLabel, 52);
-    takeParameterRight(pitchAlgorithm, 106);
+    if (renderOrder.isVisible())
+    {
+        takeParameterRight(renderOrder, 108);
+        takeParameterRight(renderOrderLabel, 38);
+    }
+    takeParameterRight(pitchAlgorithm, 100);
     takeParameterRight(pitchLabel, 50);
     auto takeParameter = [&parameterHeader](juce::Component& component, int width)
     {
