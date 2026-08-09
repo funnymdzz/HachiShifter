@@ -447,6 +447,46 @@ MelData spliceMelToTimeMap(const MelData& source, int melBands,
     return result;
 }
 
+void normalizeMelToReference(MelData& mel, const MelData& reference, int melBands)
+{
+    if (mel.frames == 0 || mel.frames != reference.frames || melBands <= 0) return;
+    std::vector<float> correction(mel.frames, 0.0f);
+    for (std::size_t frame = 0; frame < mel.frames; ++frame)
+    {
+        auto current = 0.0;
+        auto target = 0.0;
+        for (int band = 0; band < melBands; ++band)
+        {
+            const auto offset = static_cast<std::size_t>(band) * mel.frames + frame;
+            current += std::exp(static_cast<double>(mel.values[offset]));
+            target += std::exp(static_cast<double>(reference.values[offset]));
+        }
+        if (current > 1.0e-10 && target > 1.0e-10)
+            correction[frame] = static_cast<float>(std::clamp(
+                std::log(target / current), -std::log(2.0), std::log(2.0)));
+    }
+    const auto raw = correction;
+    constexpr std::ptrdiff_t radius = 2;
+    for (std::size_t frame = 0; frame < mel.frames; ++frame)
+    {
+        auto sum = 0.0f;
+        auto count = 0;
+        const auto centre = static_cast<std::ptrdiff_t>(frame);
+        for (auto offset = -radius; offset <= radius; ++offset)
+        {
+            const auto index = centre + offset;
+            if (index < 0 || index >= static_cast<std::ptrdiff_t>(mel.frames)) continue;
+            sum += raw[static_cast<std::size_t>(index)];
+            ++count;
+        }
+        correction[frame] = count > 0 ? sum / static_cast<float>(count) : 0.0f;
+    }
+    for (int band = 0; band < melBands; ++band)
+        for (std::size_t frame = 0; frame < mel.frames; ++frame)
+            mel.values[static_cast<std::size_t>(band) * mel.frames + frame]
+                += correction[frame];
+}
+
 MelData buildVariableHopSplicedMel(const std::vector<float>& waveform,
                                    const Config& config,
                                    std::size_t targetFrames,
@@ -830,7 +870,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
     const std::vector<float>& formantSemitones,
     const std::vector<NsfHifiganTimeMapPoint>& timeMap,
     const juce::File& configuredModelDirectory,
-    const OrtExecutionConfig& execution, NsfHifiganStretchOrder stretchOrder)
+    const OrtExecutionConfig& execution, NsfHifiganStretchOrder stretchOrder,
+    bool normalizeVolume)
 {
     NsfHifiganRenderResult result;
 #if defined(HACHI_HAS_ONNX_ANALYSIS) && HACHI_HAS_ONNX_ANALYSIS
@@ -872,6 +913,12 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         const auto targetFrames = std::max<std::size_t>(1,
             (targetModelSamples + static_cast<std::size_t>(config->hop) - 1)
                 / static_cast<std::size_t>(config->hop));
+        auto referenceMel = normalizeVolume
+            ? spliceMelToTimeMap(buildMelWithHop(modelInput, *config, config->hop),
+                config->melBands, targetFrames,
+                static_cast<double>(config->hop) / config->sampleRate,
+                static_cast<double>(config->hop) / config->sampleRate, timeMap)
+            : MelData{};
         auto mel = stretchOrder == NsfHifiganStretchOrder::spliceThenShift
             ? buildVariableHopSplicedMel(modelInput, *config, targetFrames, timeMap)
             : stretchOrder == NsfHifiganStretchOrder::shiftThenSplice
@@ -892,6 +939,11 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
         // the formant curve inside buildVariableHopSplicedMel per segment.
         if (stretchOrder != NsfHifiganStretchOrder::shiftThenSplice)
             shiftMelFormants(mel, *config, formantSemitones, framePeriodMs);
+        if (normalizeVolume)
+        {
+            shiftMelFormants(referenceMel, *config, formantSemitones, framePeriodMs);
+            normalizeMelToReference(mel, referenceMel, config->melBands);
+        }
         std::vector<float> f0(mel.frames);
         const auto hopSeconds = static_cast<double>(config->hop) / config->sampleRate;
         const auto framePeriod = std::max(0.1, framePeriodMs);
@@ -993,7 +1045,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
 #else
     juce::ignoreUnused(source, sampleRate, targetSamples, framePeriodMs, targetMidi,
                        formantSemitones, timeMap, configuredModelDirectory, execution,
-                       stretchOrder);
+                       stretchOrder, normalizeVolume);
     result.error = "NSF-HiFiGAN ONNX runtime is not included";
 #endif
     return result;

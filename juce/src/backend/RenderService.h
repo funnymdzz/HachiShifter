@@ -40,6 +40,7 @@ struct Mld5FileRenderRequest
     OrtExecutionConfig inference;
     PitchRenderBackend pitchBackend = PitchRenderBackend::mld5;
     int stretchAlgorithm = 0;
+    bool normalizeVolume = false;
 };
 
 struct RenderedAudio

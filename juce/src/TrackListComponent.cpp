@@ -31,7 +31,7 @@ TrackListComponent::TrackListComponent(ProjectModel& modelToUse, I18n& stringsTo
     : model(modelToUse), strings(stringsToUse), snapshot(model.snapshot())
 {
     model.addChangeListener(this);
-    setSize(226, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+    setSize(280, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
 }
 
 TrackListComponent::~TrackListComponent()
@@ -52,7 +52,7 @@ void TrackListComponent::changeListenerCallback(juce::ChangeBroadcaster*)
     const auto selectedStillExists = std::any_of(snapshot.tracks.begin(), snapshot.tracks.end(),
         [this](const auto& track) { return track.id == selectedTrack; });
     if (!selectedStillExists) selectedTrack.clear();
-    setSize(226, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+    setSize(280, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
     repaint();
 }
 
@@ -114,11 +114,13 @@ void TrackListComponent::paint(juce::Graphics& g)
             g.drawText(label, bounds.toNearestInt(), juce::Justification::centred);
         };
         drawToggle(10.0f, "C", track.compose, Palette::accentLight);
-        drawToggle(43.0f, "M", track.muted, Palette::noteFill);
-        drawToggle(76.0f, "S", track.solo, Palette::accent);
+        drawToggle(41.0f, "M", track.muted, Palette::noteFill);
+        drawToggle(72.0f, "S", track.solo, Palette::accent);
+        drawToggle(103.0f, "A", track.smoothOverlaps, juce::Colour(0xff34b56f));
+        drawToggle(134.0f, "N", track.normalizeVolume, juce::Colour(0xffff9f2f));
 
-        const auto slider = juce::Rectangle<float>(112.0f, buttonY + 6.0f,
-                                                    std::max(20.0f, static_cast<float>(getWidth()) - 152.0f), 8.0f);
+        const auto slider = juce::Rectangle<float>(170.0f, buttonY + 6.0f,
+                                                     std::max(20.0f, static_cast<float>(getWidth()) - 210.0f), 8.0f);
         g.setColour(Palette::background);
         g.fillRoundedRectangle(slider, 4.0f);
         const auto displayedVolume = track.id == volumeDragTrack ? volumeDragPreview : track.volume;
@@ -132,14 +134,14 @@ void TrackListComponent::paint(juce::Graphics& g)
             : juce::String(20.0f * std::log10(displayedVolume), 1);
         g.setColour(Palette::textMuted);
         g.setFont(10.0f);
-        g.drawText(strings.text("track.volume") + "  " + db + " dB", 112, row.getY() + 61, getWidth() - 150, 19,
+        g.drawText(strings.text("track.volume") + "  " + db + " dB", 170, row.getY() + 61, getWidth() - 208, 19,
                    juce::Justification::centredLeft);
         g.drawText(track.compose ? strings.text("track.compose") : strings.text("track.audio"),
                    10, row.getY() + 61, 94, 19, juce::Justification::centredLeft);
 
         const auto displayedPan = track.id == panDragTrack ? panDragPreview : track.pan;
-        const juce::Rectangle<float> panRail(112.0f, static_cast<float>(row.getY() + 84),
-                                             std::max(20.0f, static_cast<float>(getWidth()) - 152.0f), 5.0f);
+        const juce::Rectangle<float> panRail(170.0f, static_cast<float>(row.getY() + 84),
+                                              std::max(20.0f, static_cast<float>(getWidth()) - 210.0f), 5.0f);
         g.setColour(Palette::background);
         g.fillRoundedRectangle(panRail, 2.5f);
         g.setColour(Palette::grid.brighter(0.25f));
@@ -189,18 +191,22 @@ void TrackListComponent::mouseDown(const juce::MouseEvent& event)
     const auto localY = event.y - rulerHeight - index * rowHeight;
     if (localY >= 34 && localY < 56 && event.x >= 10 && event.x < 38)
         model.setTrackCompose(track.id, !track.compose);
-    else if (localY >= 34 && localY < 56 && event.x >= 43 && event.x < 71)
+    else if (localY >= 34 && localY < 56 && event.x >= 41 && event.x < 69)
         model.setTrackMuted(track.id, !track.muted);
-    else if (localY >= 34 && localY < 56 && event.x >= 76 && event.x < 104)
+    else if (localY >= 34 && localY < 56 && event.x >= 72 && event.x < 100)
         model.setTrackSolo(track.id, !track.solo);
-    else if (localY >= 34 && localY < 58 && event.x >= 108 && event.x < getWidth() - 32)
+    else if (localY >= 34 && localY < 56 && event.x >= 103 && event.x < 131)
+        model.setTrackSmoothOverlaps(track.id, !track.smoothOverlaps);
+    else if (localY >= 34 && localY < 56 && event.x >= 134 && event.x < 162)
+        model.setTrackNormalizeVolume(track.id, !track.normalizeVolume);
+    else if (localY >= 34 && localY < 58 && event.x >= 166 && event.x < getWidth() - 32)
     {
         volumeDragTrack = track.id;
         volumeDragRow = index;
         volumeDragPreview = track.volume;
         mouseDrag(event);
     }
-    else if (localY >= 77 && localY < 96 && event.x >= 108 && event.x < getWidth() - 32)
+    else if (localY >= 77 && localY < 96 && event.x >= 166 && event.x < getWidth() - 32)
     {
         panDragTrack = track.id;
         panDragPreview = track.pan;
@@ -210,9 +216,9 @@ void TrackListComponent::mouseDown(const juce::MouseEvent& event)
 
 void TrackListComponent::mouseDrag(const juce::MouseEvent& event)
 {
-    const auto width = std::max(20, getWidth() - 152);
+    const auto width = std::max(20, getWidth() - 210);
     const auto normalized = juce::jlimit(0.0f, 1.0f,
-        static_cast<float>(event.x - 112) / static_cast<float>(width));
+        static_cast<float>(event.x - 170) / static_cast<float>(width));
     if (volumeDragTrack.isNotEmpty()) volumeDragPreview = normalized * 2.0f;
     else if (panDragTrack.isNotEmpty()) panDragPreview = normalized * 2.0f - 1.0f;
     else return;

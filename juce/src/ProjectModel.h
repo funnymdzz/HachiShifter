@@ -113,6 +113,8 @@ struct TrackData
     bool solo = false;
     float volume = 1.0f;
     float pan = 0.0f;
+    bool smoothOverlaps = true;
+    bool normalizeVolume = false;
     PitchAlgorithm pitchAlgorithm = PitchAlgorithm::mld5;
     StretchAlgorithm stretchAlgorithm = StretchAlgorithm::melodyneHybrid;
     std::vector<ClipData> clips;
@@ -161,6 +163,8 @@ public:
     void setTrackSolo(const juce::String& trackId, bool solo);
     void setTrackVolume(const juce::String& trackId, float volume);
     void setTrackPan(const juce::String& trackId, float pan);
+    void setTrackSmoothOverlaps(const juce::String& trackId, bool enabled);
+    void setTrackNormalizeVolume(const juce::String& trackId, bool enabled);
     void setTrackPitchAlgorithm(const juce::String& trackId, PitchAlgorithm algorithm);
     void setTrackStretchAlgorithm(const juce::String& trackId, StretchAlgorithm algorithm);
     void setPitchAlgorithm(PitchAlgorithm algorithm);

@@ -254,8 +254,8 @@ juce::var McpServer::handle(const juce::var& request, bool& shouldRespond)
         auto result = object();
         set(result, "tools", array({
             makeTool("project_new", "Create an empty HachiShifter project / 新建工程"),
-            makeTool("project_open", "Open HSPX, MPD, MIDI, or audio from path / 打开工程或素材"),
-            makeTool("project_save", "Save current project as HSPX / 保存工程"),
+            makeTool("project_open", "Open HJPX, legacy HSPX, MPD, MIDI, or audio from path / 打开工程或素材"),
+            makeTool("project_save", "Save current project as HJPX / 保存工程"),
             makeTool("project_snapshot", "Read every current track, clip, note, pitch and marker / 读取全部工程内容"),
             makeTool("import_audio", "Import an audio file at start_seconds / 导入音频"),
             makeTool("analyse_audio", "Run configured GAME+FCPE analysis with native fallback and return actual backend / 执行 GAME+FCPE 分析并报告实际后端"),
@@ -367,7 +367,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
             project.clear();
             if (project.addMidiFile(file, error)) return toolResult(summary(project.snapshot()));
         }
-        else if (file.hasFileExtension("hspx"))
+        else if (file.hasFileExtension("hjpx;hspx"))
         {
             if (project.load(file, error))
                 return toolResult(summary(project.snapshot())
@@ -463,6 +463,10 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
         if (args.hasProperty("solo")) project.setTrackSolo(id, static_cast<bool>(args["solo"]));
         if (args.hasProperty("volume")) project.setTrackVolume(id, static_cast<float>(number(args, "volume", 1.0)));
         if (args.hasProperty("pan")) project.setTrackPan(id, static_cast<float>(number(args, "pan")));
+        if (args.hasProperty("smooth_overlaps"))
+            project.setTrackSmoothOverlaps(id, static_cast<bool>(args["smooth_overlaps"]));
+        if (args.hasProperty("normalize_volume"))
+            project.setTrackNormalizeVolume(id, static_cast<bool>(args["normalize_volume"]));
         if (args.hasProperty("pitch_algorithm"))
         {
             const auto value = string(args, "pitch_algorithm").toLowerCase();
@@ -841,6 +845,8 @@ juce::var McpServer::projectJson() const
         set(trackValue, "solo", track.solo);
         set(trackValue, "volume", track.volume);
         set(trackValue, "pan", track.pan);
+        set(trackValue, "smooth_overlaps", track.smoothOverlaps);
+        set(trackValue, "normalize_volume", track.normalizeVolume);
         set(trackValue, "pitch_algorithm", pitchAlgorithmText(track.pitchAlgorithm));
         set(trackValue, "stretch_algorithm", stretchAlgorithmText(track.stretchAlgorithm));
         std::vector<juce::var> clips;

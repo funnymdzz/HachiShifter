@@ -34,8 +34,8 @@ remains available on `main` for regression reference.
   GPU 0-7 and DirectML runtime packaging on Windows;
 - editable Melodyne Attack boundary and Attack Speed with independent time mapping;
 - voiced gaps, consonant shading, sibilant markers and note joins;
-- native project save/load (`.hspx`);
-- portable HSPX media paths with relative and recursive project-folder relinking;
+- native project save/load (`.hjpx`, with legacy `.hspx` open compatibility);
+- portable HJPX media paths with relative and recursive project-folder relinking;
 - MCP project editing, pre-render, WAV export and transport control, including
   selected-backend and render-progress inspection;
 - MCP HJM region editing, UTAU oto import/export and recursive voicebank registration;

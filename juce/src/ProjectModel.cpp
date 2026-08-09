@@ -508,6 +508,40 @@ void ProjectModel::setTrackPan(const juce::String& trackId, float pan)
     sendChangeMessage();
 }
 
+void ProjectModel::setTrackSmoothOverlaps(const juce::String& trackId, bool enabled)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.smoothOverlaps != enabled)
+            {
+                pushUndoLocked();
+                track.smoothOverlaps = enabled;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::setTrackNormalizeVolume(const juce::String& trackId, bool enabled)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            if (track.id == trackId && track.normalizeVolume != enabled)
+            {
+                pushUndoLocked();
+                track.normalizeVolume = enabled;
+                changed = true;
+                break;
+            }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::setPitchAlgorithm(PitchAlgorithm algorithm)
 {
     auto changed = false;
@@ -1664,6 +1698,8 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
         trackTree.setProperty("solo", track.solo, nullptr);
         trackTree.setProperty("volume", track.volume, nullptr);
         trackTree.setProperty("pan", track.pan, nullptr);
+        trackTree.setProperty("smoothOverlaps", track.smoothOverlaps, nullptr);
+        trackTree.setProperty("normalizeVolume", track.normalizeVolume, nullptr);
         trackTree.setProperty("pitchAlgorithm", pitchAlgorithmName(track.pitchAlgorithm), nullptr);
         trackTree.setProperty("stretchAlgorithm", stretchAlgorithmName(track.stretchAlgorithm), nullptr);
 
@@ -1797,6 +1833,8 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
         track.solo = static_cast<bool>(trackTree.getProperty("solo", false));
         track.volume = static_cast<float>(trackTree.getProperty("volume", 1.0));
         track.pan = static_cast<float>(trackTree.getProperty("pan", 0.0));
+        track.smoothOverlaps = static_cast<bool>(trackTree.getProperty("smoothOverlaps", true));
+        track.normalizeVolume = static_cast<bool>(trackTree.getProperty("normalizeVolume", false));
         track.pitchAlgorithm = parsePitchAlgorithm(trackTree.getProperty("pitchAlgorithm", "mld5").toString());
         track.stretchAlgorithm = parseStretchAlgorithm(trackTree.getProperty("stretchAlgorithm", "melodyne-hybrid").toString());
 

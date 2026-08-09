@@ -59,6 +59,42 @@ float median(std::vector<float>& values)
     return result;
 }
 
+double activeRms(const juce::AudioBuffer<float>& audio)
+{
+    auto peak = 0.0f;
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+        for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+            peak = std::max(peak, std::abs(audio.getSample(channel, sample)));
+    if (peak <= 1.0e-7f) return 0.0;
+    const auto gate = std::max(1.0e-5f, peak * 0.01f);
+    auto power = 0.0;
+    auto count = std::size_t{};
+    for (int channel = 0; channel < audio.getNumChannels(); ++channel)
+        for (int sample = 0; sample < audio.getNumSamples(); ++sample)
+        {
+            const auto value = audio.getSample(channel, sample);
+            if (!std::isfinite(value) || std::abs(value) < gate) continue;
+            power += static_cast<double>(value) * value;
+            ++count;
+        }
+    return count > 0 ? std::sqrt(power / static_cast<double>(count)) : 0.0;
+}
+
+void matchActiveRms(juce::AudioBuffer<float>& rendered,
+                    const juce::AudioBuffer<float>& source)
+{
+    const auto sourceRms = activeRms(source);
+    const auto renderedRms = activeRms(rendered);
+    if (!(sourceRms > 1.0e-8 && renderedRms > 1.0e-8)) return;
+    auto gain = static_cast<float>(std::clamp(sourceRms / renderedRms, 0.25, 4.0));
+    auto peak = 0.0f;
+    for (int channel = 0; channel < rendered.getNumChannels(); ++channel)
+        for (int sample = 0; sample < rendered.getNumSamples(); ++sample)
+            peak = std::max(peak, std::abs(rendered.getSample(channel, sample)));
+    if (peak * gain > 0.98f) gain = 0.98f / peak;
+    rendered.applyGain(gain);
+}
+
 // Reconstructed Robust Pitch Curve stage.  The binary handler changes a flag
 // on the detection audio source (boolean at source+0x1ac), before note edits
 // are rendered.  Robustify source F0, then reapply the original target-source
@@ -750,7 +786,7 @@ public:
             auto neural = NsfHifiganRenderer::render(source, reader->sampleRate,
                 targetSamples, request.framePeriodMs, request.targetMidi,
                 request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,
-                request.inference, stretchOrder);
+                request.inference, stretchOrder, request.normalizeVolume);
             if (neural.usedModel && neural.buffer.getNumSamples() == targetSamples)
             {
                 rendered = std::move(neural.buffer);
@@ -772,6 +808,8 @@ public:
                 request.formantSemitones, request.noteGain, request.tension, request.breath,
                 request.timeMap,
                 request.pitchBackend, request.stretchAlgorithm);
+        if (request.normalizeVolume && !usedNsfModel)
+            matchActiveRms(rendered, source);
         auto backend = request.pitchBackend == PitchRenderBackend::mld5
             ? juce::String("mld5-single-pass-stable-clock")
             : request.pitchBackend == PitchRenderBackend::mld3
@@ -784,6 +822,7 @@ public:
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";
+        if (request.normalizeVolume) backend << "+normalized";
         backend += request.stretchAlgorithm == 1 ? "+variable-mel-hop-splice-first"
             : request.stretchAlgorithm == 4 ? "+nsf-shift-then-splice"
             : request.stretchAlgorithm == 2 ? "+loop"

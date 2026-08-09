@@ -78,6 +78,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
             break;
     }
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
+    request.normalizeVolume = track.normalizeVolume;
     const auto sourceDuration = request.sourceDurationSeconds;
     std::vector<backend::TimeMapPoint> timeAnchors;
     if (!clip.sourceTimeMap.empty())
@@ -231,6 +232,7 @@ std::string renderKey(const ClipData& clip, const TrackData& track,
     }
     stream.writeInt(static_cast<int>(track.pitchAlgorithm));
     stream.writeInt(static_cast<int>(track.stretchAlgorithm));
+    stream.writeBool(track.normalizeVolume);
     const auto modelPath = hifiganModelDirectory.getFullPathName().toUTF8();
     stream.write(modelPath.getAddress(), modelPath.sizeInBytes());
     const auto modelDirectory = hifiganModelDirectory.existsAsFile()
@@ -449,10 +451,12 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             }
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
+            loaded->trackId = track.id.toStdString();
+            loaded->smoothOverlaps = track.smoothOverlaps;
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
             loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
             loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
-            if (clipIndex > 0)
+            if (track.smoothOverlaps && clipIndex > 0)
             {
                 const auto& previous = *orderedClips[clipIndex - 1];
                 const auto overlap = previous.startSeconds + previous.durationSeconds - clip.startSeconds;
@@ -464,7 +468,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
-            if (clipIndex + 1 < orderedClips.size())
+            if (track.smoothOverlaps && clipIndex + 1 < orderedClips.size())
             {
                 const auto& next = *orderedClips[clipIndex + 1];
                 const auto overlap = clip.startSeconds + clip.durationSeconds - next.startSeconds;
@@ -525,20 +529,20 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
     });
 }
 
-float AudioEngine::fadeGain(const ClipData& clip, double localSeconds)
+float AudioEngine::fadeEnvelope(const ClipData& clip, double localSeconds)
 {
-    float gain = clip.gain;
+    auto gain = 1.0f;
     if (clip.fadeInSeconds > 1.0e-6)
     {
         const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
             localSeconds / clip.fadeInSeconds));
-        gain *= std::sin(juce::MathConstants<float>::halfPi * phase);
+        gain *= phase * phase * (3.0f - 2.0f * phase);
     }
     if (clip.fadeOutSeconds > 1.0e-6)
     {
         const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
             (clip.durationSeconds - localSeconds) / clip.fadeOutSeconds));
-        gain *= std::sin(juce::MathConstants<float>::halfPi * phase);
+        gain *= phase * phase * (3.0f - 2.0f * phase);
     }
     return gain;
 }
@@ -603,6 +607,51 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
         return;
     }
 
+    std::unordered_map<std::string, std::vector<float>> overlapEnvelopeSums;
+    std::unordered_map<std::string, std::vector<unsigned short>> overlapCounts;
+    for (const auto& loaded : loadedClips)
+    {
+        if (!loaded->smoothOverlaps) continue;
+        const auto& clip = loaded->clip;
+        const auto clipEnd = clip.startSeconds + clip.durationSeconds;
+        const auto overlapStart = std::max(blockStart, clip.startSeconds);
+        const auto overlapEnd = std::min(blockEnd, clipEnd);
+        if (overlapEnd <= overlapStart) continue;
+        auto& sums = overlapEnvelopeSums[loaded->trackId];
+        auto& counts = overlapCounts[loaded->trackId];
+        if (sums.empty()) sums.assign(static_cast<std::size_t>(info.numSamples), 0.0f);
+        if (counts.empty()) counts.assign(static_cast<std::size_t>(info.numSamples), 0);
+        const auto begin = juce::jlimit(0, info.numSamples,
+            static_cast<int>(std::floor((overlapStart - blockStart) * sampleRate)));
+        const auto end = juce::jlimit(begin, info.numSamples,
+            static_cast<int>(std::ceil((overlapEnd - blockStart) * sampleRate)));
+        for (auto output = begin; output < end; ++output)
+        {
+            const auto absoluteSeconds = blockStart + static_cast<double>(output) / sampleRate;
+            sums[static_cast<std::size_t>(output)] += fadeEnvelope(
+                clip, absoluteSeconds - clip.startSeconds);
+            ++counts[static_cast<std::size_t>(output)];
+        }
+    }
+
+    const auto smoothedGain = [&](const LoadedClip& loaded, double localSeconds,
+                                  int blockOffset)
+    {
+        auto envelope = fadeEnvelope(loaded.clip, localSeconds);
+        if (loaded.smoothOverlaps)
+        {
+            const auto sums = overlapEnvelopeSums.find(loaded.trackId);
+            const auto counts = overlapCounts.find(loaded.trackId);
+            if (sums != overlapEnvelopeSums.end() && counts != overlapCounts.end()
+                && counts->second[static_cast<std::size_t>(blockOffset)] > 1)
+            {
+                const auto total = sums->second[static_cast<std::size_t>(blockOffset)];
+                if (total > 1.0e-6f) envelope /= std::max(0.5f, total);
+            }
+        }
+        return loaded.clip.gain * envelope;
+    };
+
     for (auto& loaded : loadedClips)
     {
         const auto& clip = loaded->clip;
@@ -645,7 +694,9 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
                 const auto sourceRight = renderedChannels > 1 ? interpolate(1) : sourceLeft;
                 const auto absoluteSeconds = blockStart
                     + static_cast<double>(outputBegin + outputOffset) / sampleRate;
-                const auto gain = fadeGain(clip, absoluteSeconds - clip.startSeconds) * loaded->trackGain;
+                const auto gain = smoothedGain(*loaded,
+                    absoluteSeconds - clip.startSeconds, outputBegin + outputOffset)
+                    * loaded->trackGain;
                 const auto destination = info.startSample + outputBegin + outputOffset;
                 const auto renderedLeft = sourceLeft * gain * leftPan;
                 const auto renderedRight = sourceRight * gain * rightPan;
@@ -698,7 +749,9 @@ void AudioEngine::getNextAudioBlock(const juce::AudioSourceChannelInfo& info)
             const auto sourceLeft = interpolate(0);
             const auto sourceRight = sourceChannels > 1 ? interpolate(1) : sourceLeft;
             const auto absoluteSeconds = blockStart + static_cast<double>(outputBegin + outputOffset) / sampleRate;
-            const auto gain = fadeGain(clip, absoluteSeconds - clip.startSeconds) * loaded->trackGain;
+            const auto gain = smoothedGain(*loaded,
+                absoluteSeconds - clip.startSeconds, outputBegin + outputOffset)
+                * loaded->trackGain;
             const auto destination = info.startSample + outputBegin + outputOffset;
             const auto renderedLeft = sourceLeft * gain * leftPan;
             const auto renderedRight = sourceRight * gain * rightPan;

@@ -47,6 +47,7 @@ public:
         const std::vector<NsfHifiganTimeMapPoint>& timeMap,
         const juce::File& configuredModelDirectory,
         const OrtExecutionConfig& execution,
-        NsfHifiganStretchOrder stretchOrder);
+        NsfHifiganStretchOrder stretchOrder,
+        bool normalizeVolume = false);
 };
 }

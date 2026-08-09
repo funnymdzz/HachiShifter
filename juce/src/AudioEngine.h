@@ -55,6 +55,8 @@ private:
     struct LoadedClip
     {
         ClipData clip;
+        std::string trackId;
+        bool smoothOverlaps = true;
         float trackGain = 1.0f;
         float trackPan = 0.0f;
         std::shared_ptr<std::atomic<float>> meter;
@@ -63,7 +65,7 @@ private:
         juce::AudioBuffer<float> scratch;
     };
 
-    static float fadeGain(const ClipData& clip, double localSeconds);
+    static float fadeEnvelope(const ClipData& clip, double localSeconds);
     void rebuildLoadedClips(const ProjectData& project);
 
     juce::AudioFormatManager formatManager;

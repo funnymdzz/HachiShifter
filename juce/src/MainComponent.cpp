@@ -802,7 +802,7 @@ bool MainComponent::keyPressed(const juce::KeyPress& key)
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray& files)
 {
     for (const auto& path : files)
-        if (juce::File(path).hasFileExtension("wav;flac;aif;aiff;mp3;ogg;hspx;mpd;mid;midi"))
+        if (juce::File(path).hasFileExtension("wav;flac;aif;aiff;mp3;ogg;hjpx;hspx;mpd;mid;midi"))
             return true;
     return false;
 }
@@ -811,7 +811,7 @@ void MainComponent::openExternalFile(const juce::File& file)
 {
     if (file.hasFileExtension("mpd"))
         loadMelodyneFile(file);
-    else if (file.hasFileExtension("hspx"))
+    else if (file.hasFileExtension("hjpx;hspx"))
         performWithUnsavedCheck([this, file] { loadProjectFile(file); });
     else if (file.hasFileExtension("mid;midi"))
     {
@@ -895,7 +895,7 @@ void MainComponent::resized()
     const auto upperHeight = juce::jlimit(150, std::max(150, splitAvailable - 120),
         static_cast<int>(std::round(static_cast<float>(splitAvailable) * panelSplitRatio)));
     auto upper = area.removeFromTop(upperHeight);
-    trackViewport.setBounds(upper.removeFromLeft(226));
+    trackViewport.setBounds(upper.removeFromLeft(280));
     timelineViewport.setBounds(upper);
 
     panelSplitter.setBounds(area.removeFromTop(8));
@@ -1850,7 +1850,7 @@ void MainComponent::newProject()
 
 void MainComponent::openProject()
 {
-    chooser = std::make_unique<juce::FileChooser>(strings.text("file.open"), juce::File{}, "*.hspx");
+    chooser = std::make_unique<juce::FileChooser>(strings.text("file.open"), juce::File{}, "*.hjpx;*.hspx");
     chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
         [this](const juce::FileChooser& selected)
         {
@@ -1892,10 +1892,10 @@ void MainComponent::saveProjectAs(std::function<void(bool)> completion)
 {
     const auto initial = currentProjectFile != juce::File{} ? currentProjectFile
         : juce::File::getSpecialLocation(juce::File::userDocumentsDirectory)
-            .getChildFile(project.snapshot().name + ".hspx");
+            .getChildFile(project.snapshot().name + ".hjpx");
     chooser = std::make_unique<juce::FileChooser>(strings.text("file.saveAs"),
                                                    initial,
-                                                   "*.hspx");
+                                                   "*.hjpx");
     chooser->launchAsync(juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
         [this, completion = std::move(completion)](const juce::FileChooser& selected) mutable
         {
@@ -1905,7 +1905,7 @@ void MainComponent::saveProjectAs(std::function<void(bool)> completion)
                 if (completion) completion(false);
                 return;
             }
-            if (!file.hasFileExtension("hspx")) file = file.withFileExtension("hspx");
+            if (!file.hasFileExtension("hjpx")) file = file.withFileExtension("hjpx");
             const auto saved = saveProjectTo(file);
             if (completion) completion(saved);
         });
