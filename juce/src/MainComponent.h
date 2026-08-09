@@ -15,7 +15,133 @@
 
 namespace hachi
 {
-class EditorViewport final : public juce::Viewport
+class ZoomScrollBar final : public juce::ScrollBar
+{
+public:
+    explicit ZoomScrollBar(bool isVertical) : juce::ScrollBar(isVertical) {}
+
+    std::function<void(double)> onZoomChanged;
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        const auto geo = getThumbGeometry();
+        const auto pos = isVertical() ? event.position.y : event.position.x;
+        resizeMode = ResizeMode::none;
+        if (onZoomChanged != nullptr && geo.size > 10.0)
+        {
+            if (std::abs(pos - geo.start) <= 5.0)
+                resizeMode = ResizeMode::leading;
+            else if (std::abs(pos - (geo.start + geo.size)) <= 5.0)
+                resizeMode = ResizeMode::trailing;
+        }
+        if (resizeMode == ResizeMode::none)
+        {
+            juce::ScrollBar::mouseDown(event);
+            return;
+        }
+        fixedEdge = resizeMode == ResizeMode::leading ? geo.start + geo.size : geo.start;
+    }
+
+    void mouseDrag(const juce::MouseEvent& event) override
+    {
+        if (resizeMode == ResizeMode::none)
+        {
+            juce::ScrollBar::mouseDrag(event);
+            return;
+        }
+        const auto length = isVertical() ? static_cast<double>(getHeight())
+                                         : static_cast<double>(getWidth());
+        const auto pos = isVertical() ? event.position.y : event.position.x;
+        const auto minThumb = static_cast<double>(
+            getLookAndFeel().getMinimumScrollbarThumbSize(*this));
+        double newSize = resizeMode == ResizeMode::leading ? fixedEdge - pos : pos - fixedEdge;
+        newSize = juce::jlimit(minThumb, length, newSize);
+        if (onZoomChanged != nullptr && length > 0.0)
+            onZoomChanged(newSize / length);
+    }
+
+    void mouseUp(const juce::MouseEvent& event) override
+    {
+        resizeMode = ResizeMode::none;
+        juce::ScrollBar::mouseUp(event);
+    }
+
+    void mouseMove(const juce::MouseEvent& event) override
+    {
+        if (onZoomChanged == nullptr)
+        {
+            juce::ScrollBar::mouseMove(event);
+            return;
+        }
+        const auto geo = getThumbGeometry();
+        const auto pos = isVertical() ? event.position.y : event.position.x;
+        const auto nearEdge = geo.size > 10.0
+            && (std::abs(pos - geo.start) <= 5.0
+                || std::abs(pos - (geo.start + geo.size)) <= 5.0);
+        setMouseCursor(nearEdge ? (isVertical() ? juce::MouseCursor::UpDownResizeCursor
+                                                : juce::MouseCursor::LeftRightResizeCursor)
+                                : juce::MouseCursor::NormalCursor);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        juce::ScrollBar::paint(g);
+        if (onZoomChanged == nullptr) return;
+        const auto geo = getThumbGeometry();
+        if (geo.size < 10.0) return;
+        g.setColour(Palette::accentLight.withAlpha(0.85f));
+        if (isVertical())
+        {
+            const auto x = static_cast<float>(getWidth()) * 0.5f;
+            g.drawVerticalLine(static_cast<float>(geo.start) + 2.0f, x - 3.0f, x + 3.0f);
+            g.drawVerticalLine(static_cast<float>(geo.start + geo.size) - 2.0f, x - 3.0f, x + 3.0f);
+        }
+        else
+        {
+            const auto y = static_cast<float>(getHeight()) * 0.5f;
+            g.drawHorizontalLine(y, static_cast<float>(geo.start) + 2.0f,
+                                 static_cast<float>(geo.start) + 7.0f);
+            g.drawHorizontalLine(y, static_cast<float>(geo.start + geo.size) - 7.0f,
+                                 static_cast<float>(geo.start + geo.size) - 2.0f);
+        }
+    }
+
+private:
+    struct ThumbGeometry
+    {
+        double start;
+        double size;
+    };
+
+    ThumbGeometry getThumbGeometry()
+    {
+        const auto length = isVertical() ? static_cast<double>(getHeight())
+                                         : static_cast<double>(getWidth());
+        const auto total = getRangeLimit();
+        const auto visible = getCurrentRange();
+        const auto minThumb = static_cast<double>(
+            getLookAndFeel().getMinimumScrollbarThumbSize(*this));
+        double size = length;
+        if (total.getLength() > 0.0 && visible.getLength() < total.getLength())
+        {
+            size = visible.getLength() * length / total.getLength();
+            if (size < minThumb) size = juce::jmin(minThumb, length - 1.0);
+            if (size > length) size = length;
+        }
+        double start = 0.0;
+        if (total.getLength() > visible.getLength())
+            start = (visible.getStart() - total.getStart()) * (length - size)
+                    / (total.getLength() - visible.getLength());
+        start = juce::jmax(0.0, juce::jmin(length - size, start));
+        return { start, size };
+    }
+
+    enum class ResizeMode { none, leading, trailing };
+    ResizeMode resizeMode = ResizeMode::none;
+    double fixedEdge = 0.0;
+};
+
+class EditorViewport : public juce::Viewport
 {
 public:
     std::function<bool(const juce::MouseEvent&, const juce::MouseWheelDetails&)> onWheel;
@@ -24,6 +150,15 @@ public:
     {
         if (onWheel && onWheel(event, wheel)) return;
         juce::Viewport::mouseWheelMove(event, wheel);
+    }
+};
+
+class ZoomViewport final : public EditorViewport
+{
+public:
+    juce::ScrollBar* createScrollBarComponent(bool isVertical) override
+    {
+        return new ZoomScrollBar(isVertical);
     }
 };
 
@@ -42,8 +177,6 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
-    void updateHorizontalZoom(int x);
-    void updateVerticalZoom(int y);
     void openExternalFile(const juce::File& file);
     void requestClose(std::function<void()> approved);
     bool keyPressed(const juce::KeyPress& key) override;
@@ -162,10 +295,6 @@ private:
     juce::Slider smoothSlider;
     juce::Slider zoomSlider;
     juce::Slider vZoomSlider;
-    juce::Component zoomBar;
-    juce::Component vZoomBar;
-    bool draggingZoomBar = false;
-    bool draggingVZoomBar = false;
     bool showWaveforms = true;
     double progress = 0.0;
     juce::ProgressBar progressBar;
@@ -181,7 +310,7 @@ private:
     PianoRollComponent pianoRoll;
     juce::Viewport trackViewport;
     EditorViewport timelineViewport;
-    EditorViewport pianoViewport;
+    ZoomViewport pianoViewport;
     juce::Component panelSplitter;
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<juce::PropertiesFile> preferences;
