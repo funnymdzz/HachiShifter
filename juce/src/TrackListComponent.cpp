@@ -46,6 +46,13 @@ void TrackListComponent::setSelectedTrack(const juce::String& trackId)
     repaint();
 }
 
+void TrackListComponent::setRowHeight(float value)
+{
+    rowHeight = juce::jlimit(40, 220, static_cast<int>(std::round(value)));
+    setSize(280, rulerHeight + std::max(rowHeight, static_cast<int>(snapshot.tracks.size()) * rowHeight));
+    repaint();
+}
+
 void TrackListComponent::changeListenerCallback(juce::ChangeBroadcaster*)
 {
     snapshot = model.snapshot();

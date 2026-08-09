@@ -20,10 +20,12 @@ public:
     ~PianoRollComponent() override;
 
     void setPixelsPerSecond(float value);
+    void setRowHeight(float value);
     void setSourceEditMode(bool enabled);
     void setFocusedClip(const juce::String& clipId);
     void setFocusedTrack(const juce::String& trackId);
     void setShowNoteLabels(bool enabled);
+    void setShowWaveforms(bool enabled);
     void setSampleRegions(const std::vector<SampleRegionSetting>& regions, int activeRegion);
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
@@ -83,11 +85,12 @@ private:
     int draggedSampleRegion = -1;
     RegionHandle draggedRegionHandle = RegionHandle::none;
     float pixelsPerSecond = 140.0f;
-    float rowHeight = 18.0f;
+    float rowHeight = 22.0f;
     int highestMidi = 96;
     int lowestMidi = 24;
     bool sourceEditMode = false;
     bool showNoteLabels = false;
+    bool showWaveforms = true;
     Tool tool = Tool::note;
     juce::String focusedClip;
     juce::String focusedTrack;

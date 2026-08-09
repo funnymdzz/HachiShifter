@@ -27,6 +27,13 @@ void PianoRollComponent::setPixelsPerSecond(float value)
     rebuildLayout();
 }
 
+void PianoRollComponent::setRowHeight(float value)
+{
+    rowHeight = juce::jlimit(12.0f, 48.0f, value);
+    updateCanvasSize();
+    repaint();
+}
+
 void PianoRollComponent::setSourceEditMode(bool enabled)
 {
     sourceEditMode = enabled;
@@ -58,6 +65,13 @@ void PianoRollComponent::setShowNoteLabels(bool enabled)
 {
     if (showNoteLabels == enabled) return;
     showNoteLabels = enabled;
+    repaint();
+}
+
+void PianoRollComponent::setShowWaveforms(bool enabled)
+{
+    if (showWaveforms == enabled) return;
+    showWaveforms = enabled;
     repaint();
 }
 
@@ -333,20 +347,25 @@ void PianoRollComponent::paint(juce::Graphics& g)
     };
 
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
-    const auto firstBeat = std::floor((0.0 - snapshot.beatOriginSeconds) / secondsPerBeat) - 1.0;
-    for (double beat = firstBeat;; beat += 1.0)
+    const auto gridStep = gridSeconds();
+    const auto firstTick = std::floor((0.0 - snapshot.beatOriginSeconds) / gridStep) - 1.0;
+    for (double tick = firstTick;; tick += 1.0)
     {
-        const auto seconds = snapshot.beatOriginSeconds + beat * secondsPerBeat;
+        const auto seconds = snapshot.beatOriginSeconds + tick * gridStep;
         const auto x = timeToX(seconds);
         if (x > getWidth()) break;
         if (x < 58.0f) continue;
+        const auto beat = seconds / secondsPerBeat;
+        const auto isBeat = std::abs(beat - std::llround(beat)) < 1.0e-6;
         const auto barBeat = static_cast<int>(std::llround(beat));
-        const auto isBar = ((barBeat % std::max(1, snapshot.numerator)) + snapshot.numerator) % snapshot.numerator == 0;
-        g.setColour(isBar ? Palette::beatGrid.brighter(0.35f) : Palette::beatGrid.withAlpha(0.55f));
+        const auto isBar = isBeat && ((barBeat % std::max(1, snapshot.numerator)) + snapshot.numerator)
+            % snapshot.numerator == 0;
+        g.setColour(isBar ? Palette::beatGrid.brighter(0.35f)
+                   : isBeat ? Palette::beatGrid.withAlpha(0.60f) : Palette::beatGrid.withAlpha(0.30f));
         g.drawVerticalLine(static_cast<int>(x), 0.0f, static_cast<float>(getHeight()));
     }
 
-    drawClipWaveforms(g);
+    if (showWaveforms) drawClipWaveforms(g);
 
     // In wrench mode all timing edits are made against the untouched source.
     // The four handles mirror the main-branch HJM editor and intentionally sit

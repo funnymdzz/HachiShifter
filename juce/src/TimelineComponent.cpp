@@ -43,6 +43,21 @@ double TimelineComponent::secondsForPixel(int pixel) const
     return std::max(0.0, static_cast<double>(pixel) / pixelsPerSecond);
 }
 
+double TimelineComponent::gridSeconds() const
+{
+    auto text = snapshot.gridDivision.trim().toLowerCase();
+    auto dotted = text.endsWithChar('.');
+    auto triplet = text.endsWithChar('t');
+    if (dotted || triplet) text = text.dropLastCharacters(1);
+    const auto slash = text.indexOfChar('/');
+    const auto denominator = slash >= 0 ? text.substring(slash + 1).getIntValue() : 16;
+    auto duration = 60.0 / std::max(1.0, snapshot.bpm)
+        * 4.0 / static_cast<double>(std::max(1, denominator));
+    if (dotted) duration *= 1.5;
+    if (triplet) duration *= 2.0 / 3.0;
+    return std::max(0.005, duration);
+}
+
 juce::String TimelineComponent::trackIdForPixel(int pixel) const
 {
     if (pixel < rulerHeight) return {};
@@ -54,6 +69,12 @@ juce::String TimelineComponent::trackIdForPixel(int pixel) const
 void TimelineComponent::setPixelsPerSecond(float value)
 {
     pixelsPerSecond = juce::jlimit(40.0f, 600.0f, value);
+    rebuild();
+}
+
+void TimelineComponent::setRowHeight(float value)
+{
+    rowHeight = juce::jlimit(40, 220, static_cast<int>(std::round(value)));
     rebuild();
 }
 
@@ -115,22 +136,27 @@ void TimelineComponent::paint(juce::Graphics& g)
     g.setColour(Palette::border);
     g.drawHorizontalLine(rulerHeight - 1, 0.0f, static_cast<float>(getWidth()));
     const auto secondsPerBeat = 60.0 / std::max(1.0, snapshot.bpm);
-    const auto firstBeat = static_cast<int>(std::floor(-snapshot.beatOriginSeconds / secondsPerBeat)) - 1;
-    for (int beat = firstBeat;; ++beat)
+    const auto gridStep = gridSeconds();
+    const auto firstTick = static_cast<int>(std::floor(-snapshot.beatOriginSeconds / gridStep)) - 1;
+    for (int tick = firstTick;; ++tick)
     {
-        const auto seconds = snapshot.beatOriginSeconds + static_cast<double>(beat) * secondsPerBeat;
+        const auto seconds = snapshot.beatOriginSeconds + static_cast<double>(tick) * gridStep;
         const auto x = timeToX(seconds);
         if (x > static_cast<float>(getWidth())) break;
         if (x < 0.0f) continue;
-        const auto isBar = ((beat % std::max(1, snapshot.numerator)) + snapshot.numerator)
+        const auto beat = seconds / secondsPerBeat;
+        const auto isBeat = std::abs(beat - std::llround(beat)) < 1.0e-6;
+        const auto barBeat = static_cast<int>(std::llround(beat));
+        const auto isBar = isBeat && ((barBeat % std::max(1, snapshot.numerator)) + snapshot.numerator)
             % snapshot.numerator == 0;
-        g.setColour(isBar ? Palette::grid.brighter(0.28f) : Palette::grid.withAlpha(0.52f));
+        g.setColour(isBar ? Palette::grid.brighter(0.28f)
+                   : isBeat ? Palette::grid.withAlpha(0.62f) : Palette::grid.withAlpha(0.30f));
         g.drawVerticalLine(static_cast<int>(x), 0.0f, static_cast<float>(getHeight()));
         if (isBar)
         {
             g.setColour(Palette::textMuted);
             g.setFont(10.0f);
-            g.drawText(juce::String(beat / std::max(1, snapshot.numerator) + 1) + ".1",
+            g.drawText(juce::String(barBeat / std::max(1, snapshot.numerator) + 1) + ".1",
                        static_cast<int>(x) + 4, 3, 42, 16, juce::Justification::left);
         }
     }

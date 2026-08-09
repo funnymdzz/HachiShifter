@@ -81,6 +81,7 @@ private:
     void importMelodyne();
     void showSettings();
     void applyPreferences();
+    void applyUiScale();
     void loadSampleSettings();
     void refreshSampleEditors();
     void commitSampleEditors();
@@ -139,7 +140,6 @@ private:
     juce::TextButton formantParamButton;
     juce::TextButton volumeParamButton;
     juce::ToggleButton robustPitchCurveButton;
-    juce::TextButton midiButton;
     juce::ComboBox pitchAlgorithm;
     juce::ComboBox stretchAlgorithm;
     juce::Label pitchLabel;
@@ -159,6 +159,8 @@ private:
     juce::Label smoothCaption;
     juce::Slider smoothSlider;
     juce::Slider zoomSlider;
+    juce::Slider vZoomSlider;
+    bool showWaveforms = true;
     double progress = 0.0;
     juce::ProgressBar progressBar;
     bool importInProgress = false;

@@ -46,6 +46,9 @@ const std::unordered_map<std::string, Row> strings {
     { "view.zoomIn",     { "放大", "放大", "拡大", "확대", "Zoom In" } },
     { "view.zoomOut",    { "缩小", "縮小", "縮小", "축소", "Zoom Out" } },
     { "view.zoomFit",    { "适合工程", "符合工程", "プロジェクト全体", "프로젝트 맞춤", "Fit Project" } },
+    { "view.showWaveforms", { "显示波形", "顯示波形", "波形を表示", "파형 표시", "Show Waveforms" } },
+    { "view.vZoomIn", { "纵向放大", "縱向放大", "縦方向に拡大", "세로 확대", "Zoom In Vertically" } },
+    { "view.vZoomOut", { "纵向缩小", "縱向縮小", "縦方向に縮小", "세로 축소", "Zoom Out Vertically" } },
     { "help.about",      { "关于 HachiShifter", "關於 HachiShifter", "HachiShifterについて", "HachiShifter 정보", "About HachiShifter" } },
     { "help.aboutText",  { "HachiShifter Next · JUCE/C++ 原生重构版", "HachiShifter Next · JUCE/C++ 原生重構版", "HachiShifter Next · JUCE/C++ ネイティブ版", "HachiShifter Next · JUCE/C++ 네이티브 버전", "HachiShifter Next · Native JUCE/C++ edition" } },
     { "transport.play",  { "播放", "播放", "再生", "재생", "Play" } },
@@ -153,6 +156,7 @@ const std::unordered_map<std::string, Row> strings {
     ,{ "settings.accentLight", { "浅主色（Hex）", "淺主色（Hex）", "明るい主色（Hex）", "밝은 강조색 (Hex)", "Light Accent (Hex)" } }
     ,{ "settings.noteColour", { "音符色（Hex）", "音符色（Hex）", "ノート色（Hex）", "노트 색상 (Hex)", "Note Colour (Hex)" } }
     ,{ "settings.showNoteLabels", { "显示已标注的发音/别名", "顯示已標註的發音/別名", "注釈済みの発音・別名を表示", "표시된 발음/별칭 표시", "Show annotated pronunciation/alias" } }
+    ,{ "settings.uiScale", { "界面缩放", "介面縮放", "UIスケール", "UI 배율", "UI Scale" } }
     ,{ "settings.gamePath", { "GAME 模型目录", "GAME 模型目錄", "GAMEモデルフォルダー", "GAME 모델 폴더", "GAME Model Directory" } }
     ,{ "settings.gameModel", { "GAME 默认模型", "GAME 預設模型", "GAME既定モデル", "GAME 기본 모델", "Default GAME Model" } }
     ,{ "settings.fcpePath", { "FCPE 模型或目录", "FCPE 模型或目錄", "FCPEモデルまたはフォルダー", "FCPE 모델 또는 폴더", "FCPE Model or Directory" } }

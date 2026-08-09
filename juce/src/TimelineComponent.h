@@ -24,6 +24,7 @@ public:
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
     void setPixelsPerSecond(float value);
+    void setRowHeight(float value);
     void setPlayheadSeconds(double seconds);
     [[nodiscard]] int pixelForSeconds(double seconds) const;
     [[nodiscard]] double secondsForPixel(int pixel) const;
@@ -37,6 +38,7 @@ private:
     void timerCallback() override;
     void rebuild();
     [[nodiscard]] float timeToX(double seconds) const;
+    [[nodiscard]] double gridSeconds() const;
 
     struct ClipHit
     {

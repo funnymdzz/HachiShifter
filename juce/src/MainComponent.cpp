@@ -75,7 +75,7 @@ MainComponent::MainComponent()
                           &drawButton, &lineButton, &connectButton, &pitchParamButton,
                           &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton, &formantParamButton,
-                          &volumeParamButton, &midiButton })
+                          &volumeParamButton })
         addAndMakeVisible(*button);
     for (auto* component : { static_cast<juce::Component*>(&menuBar),
                              static_cast<juce::Component*>(&bpmCaption),
@@ -112,6 +112,7 @@ MainComponent::MainComponent()
                              static_cast<juce::Component*>(&smoothSlider),
                              static_cast<juce::Component*>(&robustPitchCurveButton),
                              static_cast<juce::Component*>(&zoomSlider),
+                             static_cast<juce::Component*>(&vZoomSlider),
                              static_cast<juce::Component*>(&progressBar),
                              static_cast<juce::Component*>(&trackViewport),
                              static_cast<juce::Component*>(&timelineViewport),
@@ -208,7 +209,7 @@ MainComponent::MainComponent()
     pianoViewport.setViewedComponent(&pianoRoll, false);
     pianoViewport.setScrollBarsShown(true, true);
     pianoViewport.setScrollBarThickness(10);
-    const auto editorWheel = [this](const juce::MouseEvent&,
+    const auto editorWheel = [this](const juce::MouseEvent& event,
                                     const juce::MouseWheelDetails& wheel)
     {
         if (preferences == nullptr
@@ -217,6 +218,12 @@ MainComponent::MainComponent()
         auto delta = wheel.deltaY;
         if (wheel.isReversed) delta = -delta;
         const auto factor = std::exp(static_cast<double>(delta) * 1.35);
+        if (event.mods.isShiftDown())
+        {
+            vZoomSlider.setValue(juce::jlimit(0.5, 2.0,
+                vZoomSlider.getValue() * factor));
+            return true;
+        }
         zoomSlider.setValue(juce::jlimit(40.0, 600.0,
             zoomSlider.getValue() * factor));
         return true;
@@ -318,6 +325,22 @@ MainComponent::MainComponent()
         timeline.setPixelsPerSecond(zoom);
         pianoRoll.setPixelsPerSecond(zoom);
     };
+
+    vZoomSlider.setRange(0.5, 2.0, 0.05);
+    vZoomSlider.setValue(1.0);
+    vZoomSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    vZoomSlider.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
+    vZoomSlider.onValueChange = [this]
+    {
+        const auto factor = static_cast<float>(vZoomSlider.getValue());
+        const auto pianoRow = 22.0f * factor;
+        pianoRoll.setRowHeight(pianoRow);
+        const auto row = 96.0f * factor;
+        timeline.setRowHeight(row);
+        trackList.setRowHeight(row);
+        if (preferences != nullptr)
+            preferences->setValue("ui.vZoom", vZoomSlider.getValue());
+    };
     timeline.onSeek = [this](double seconds) { audio.setPosition(seconds); };
     timeline.onClipSelected = [this](const juce::String& clipId) { focusClip(clipId); };
     timeline.onClipGainRequested = [this](const juce::String& clipId)
@@ -394,7 +417,6 @@ MainComponent::MainComponent()
                 : ParameterMode::pitchSmooth;
             refreshSelectedNoteParameter();
         };
-    midiButton.onClick = [this] { importMidi(); };
     noteEditButton.setClickingTogglesState(false);
     wrenchButton.setClickingTogglesState(false);
 
@@ -441,11 +463,28 @@ void MainComponent::applyPreferences()
     const auto analysisConfig = backend::AnalysisService::configFromProperties(preferences.get());
     audio.setInferenceConfiguration(analysisConfig.inference, analysisConfig.deviceIndex);
     pianoRoll.setShowNoteLabels(preferences->getBoolValue("ui.showNoteLabels", false));
+    showWaveforms = preferences->getBoolValue("ui.showWaveforms", true);
+    pianoRoll.setShowWaveforms(showWaveforms);
+    const auto vZoom = juce::jlimit(0.5, 2.0, preferences->getDoubleValue("ui.vZoom", 1.0));
+    vZoomSlider.setValue(vZoom, juce::dontSendNotification);
+    pianoRoll.setRowHeight(22.0f * static_cast<float>(vZoom));
+    const auto row = 96.0f * static_cast<float>(vZoom);
+    timeline.setRowHeight(row);
+    trackList.setRowHeight(row);
     // Applying a new model path must invalidate and immediately reschedule
     // already imported compose clips; waiting for a later edit made the
     // settings change appear ineffective.
     audio.syncProject(project.snapshot());
     lookAndFeel.refreshColours();
+    applyUiScale();
+}
+
+void MainComponent::applyUiScale()
+{
+    static const float systemScale = juce::Desktop::getInstance().getGlobalScaleFactor();
+    const auto uiScale = static_cast<float>(juce::jlimit(0.6, 2.0,
+        preferences != nullptr ? preferences->getDoubleValue("ui.uiScale", 1.0) : 1.0));
+    juce::Desktop::getInstance().setGlobalScaleFactor(systemScale * uiScale);
 }
 
 void MainComponent::refreshTexts()
@@ -483,7 +522,6 @@ void MainComponent::refreshTexts()
     volumeParamButton.setButtonText(strings.text("param.volume"));
     robustPitchCurveButton.setButtonText(strings.text("param.robustPitchCurveShort"));
     robustPitchCurveButton.setTooltip(strings.text("param.robustPitchCurve"));
-    midiButton.setButtonText(strings.text("file.midi"));
     bpmCaption.setText("BPM", juce::dontSendNotification);
     beatsCaption.setText(strings.text("beats.bar"), juce::dontSendNotification);
     denominatorLabel.setText("/ 4", juce::dontSendNotification);
@@ -886,6 +924,7 @@ void MainComponent::resized()
     take(audioButton, 32);
     take(melodyneButton, 32);
     zoomSlider.setBounds(toolbar.removeFromRight(100));
+    vZoomSlider.setBounds(toolbar.removeFromRight(70));
     progressBar.setBounds(toolbar.removeFromRight(100).reduced(4, 5));
 
     auto footer = area.removeFromBottom(24);
@@ -906,7 +945,6 @@ void MainComponent::resized()
         component.setBounds(parameterHeader.removeFromRight(width));
         parameterHeader.removeFromRight(3);
     };
-    takeParameterRight(midiButton, 72);
     takeParameterRight(stretchAlgorithm, 124);
     takeParameterRight(stretchLabel, 52);
     takeParameterRight(pitchAlgorithm, 106);
@@ -923,7 +961,7 @@ void MainComponent::resized()
     takeParameter(wrenchButton, 27);
     takeParameter(connectButton, 27);
     takeParameter(smoothCaption, 42);
-    takeParameter(smoothSlider, 98);
+    takeParameter(smoothSlider, 118);
     takeParameter(pitchParamButton, 50);
     takeParameter(driftParamButton, 50);
     takeParameter(attackParamButton, 50);
@@ -1438,6 +1476,10 @@ juce::PopupMenu MainComponent::getMenuForIndex(int index, const juce::String&)
         menu.addItem(40, strings.text("view.zoomIn"));
         menu.addItem(41, strings.text("view.zoomOut"));
         menu.addItem(42, strings.text("view.zoomFit"));
+        menu.addItem(44, strings.text("view.vZoomIn"));
+        menu.addItem(45, strings.text("view.vZoomOut"));
+        menu.addSeparator();
+        menu.addItem(43, strings.text("view.showWaveforms"), true, showWaveforms);
     }
     else
         menu.addItem(50, strings.text("help.about"));
@@ -1524,6 +1566,16 @@ void MainComponent::menuItemSelected(int id, int)
         const auto available = std::max(200, timelineViewport.getWidth());
         zoomSlider.setValue(static_cast<double>(available) / std::max(1.0, project.snapshot().durationSeconds()));
     }
+    else if (id == 43)
+    {
+        showWaveforms = !showWaveforms;
+        pianoRoll.setShowWaveforms(showWaveforms);
+        if (preferences != nullptr)
+            preferences->setValue("ui.showWaveforms", showWaveforms);
+        menuItemsChanged();
+    }
+    else if (id == 44) vZoomSlider.setValue(vZoomSlider.getValue() * 1.2);
+    else if (id == 45) vZoomSlider.setValue(vZoomSlider.getValue() / 1.2);
     else if (id == 50)
         juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
             strings.text("app.title"), strings.text("help.aboutText"));

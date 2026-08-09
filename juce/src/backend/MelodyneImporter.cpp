@@ -901,6 +901,19 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             if (const auto join = graph.reference(element, "followingJoin"))
             {
                 note.connectedToNext = graph.boolean(*join, "joinsPitches");
+                // Melodyne's real crossfade: a LINEAR amplitude transition of
+                // MUSuccessiveJoin.amplitudeTransitionDuration when amplitudes
+                // are joined.  The element is placed exactly back-to-back with
+                // its join partner, so each side ramps for half the duration.
+                if (graph.boolean(*join, "joinsAmplitudes"))
+                    if (const auto atd = graph.number(*join, "amplitudeTransitionDuration"))
+                        clip.crossfadeOutSeconds = std::clamp(*atd * 0.5, 0.0, duration);
+            }
+            if (const auto join = graph.reference(element, "precedingJoin"))
+            {
+                if (graph.boolean(*join, "joinsAmplitudes"))
+                    if (const auto atd = graph.number(*join, "amplitudeTransitionDuration"))
+                        clip.crossfadeInSeconds = std::clamp(*atd * 0.5, 0.0, duration);
             }
             if (!options.preserveProjectEdits)
             {
@@ -920,6 +933,8 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 clip.muted = false;
                 clip.fadeInSeconds = 0.0;
                 clip.fadeOutSeconds = 0.0;
+                clip.crossfadeInSeconds = 0.0;
+                clip.crossfadeOutSeconds = 0.0;
                 clip.gain = 1.0f;
             }
             clip.notes.push_back(std::move(note));

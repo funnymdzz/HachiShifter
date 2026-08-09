@@ -67,6 +67,8 @@ private:
     juce::ComboBox language, theme;
     juce::TextEditor accent, accentLight, noteColour;
     juce::ToggleButton showNoteLabels;
+    juce::Label uiScaleLabel;
+    juce::Slider uiScale;
 
     juce::Label audioDeviceLabel, sampleRateLabel, bufferSizeLabel, currentAudioDevice;
     juce::ComboBox sampleRate, bufferSize;

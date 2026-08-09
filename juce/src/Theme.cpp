@@ -120,26 +120,49 @@ void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
     }
     else if (id == "icon.pointer")
     {
-        path.startNewSubPath(bounds.getX() + 2.0f, bounds.getY());
-        path.lineTo(bounds.getX() + 3.0f, bounds.getBottom() - 2.0f);
-        path.lineTo(bounds.getCentreX(), bounds.getCentreY() + 2.0f);
-        path.lineTo(bounds.getRight() - 1.0f, bounds.getCentreY());
+        // Cursor arrow with a straight top edge and angular tip.
+        path.startNewSubPath(bounds.getX() + 1.5f, bounds.getY() + 1.5f);
+        path.lineTo(bounds.getX() + 1.5f, bounds.getBottom() - 4.5f);
+        path.lineTo(bounds.getX() + 6.0f, bounds.getBottom() - 9.0f);
+        path.lineTo(bounds.getX() + 9.0f, bounds.getBottom() - 1.5f);
+        path.lineTo(bounds.getX() + 11.5f, bounds.getBottom() - 4.0f);
+        path.lineTo(bounds.getX() + 8.5f, bounds.getBottom() - 11.0f);
+        path.lineTo(bounds.getRight() - 2.5f, bounds.getBottom() - 9.5f);
         path.closeSubPath();
     }
     else if (id == "icon.draw")
     {
-        path.addRectangle(bounds.getCentreX() - 1.5f, bounds.getY(), 3.0f, bounds.getHeight() - 3.0f);
-        path.applyTransform(juce::AffineTransform::rotation(-0.68f, bounds.getCentreX(), bounds.getCentreY()));
+        // Pencil: diagonal body, pointed tip, visible lead.
+        path.startNewSubPath(bounds.getX() + 1.5f, bounds.getBottom() - 3.0f);
+        path.lineTo(bounds.getX() + 2.5f, bounds.getBottom() - 6.0f);
+        path.lineTo(bounds.getRight() - 2.5f, bounds.getY() + 2.0f);
+        path.lineTo(bounds.getRight() - 4.5f, bounds.getY() + 0.5f);
+        path.lineTo(bounds.getX() + 5.5f, bounds.getBottom() - 7.5f);
+        path.lineTo(bounds.getX() + 3.0f, bounds.getBottom() - 5.0f);
+        path.lineTo(bounds.getX() + 1.5f, bounds.getBottom() - 3.0f);
+        path.closeSubPath();
     }
     else if (id == "icon.line")
     {
-        path.startNewSubPath(bounds.getX(), bounds.getBottom());
-        path.lineTo(bounds.getRight(), bounds.getY());
+        // Diagonal line with small start/end caps like a straight-line tool.
+        path.startNewSubPath(bounds.getX() + 1.0f, bounds.getBottom() - 1.0f);
+        path.lineTo(bounds.getRight() - 1.0f, bounds.getY() + 1.0f);
     }
     else if (id == "icon.wrench")
     {
-        path.addEllipse(bounds.getX(), bounds.getY(), 7.0f, 7.0f);
-        path.addRectangle(bounds.getX() + 5.0f, bounds.getY() + 5.0f, bounds.getWidth() - 7.0f, 3.0f);
+        // Open-end wrench: C-shaped jaw and shaft with an angled end.
+        path.startNewSubPath(bounds.getX() + 2.0f, bounds.getCentreY() - 3.5f);
+        path.lineTo(bounds.getX() + 2.0f, bounds.getY() + 2.0f);
+        path.lineTo(bounds.getX() + 6.5f, bounds.getY() + 2.0f);
+        path.lineTo(bounds.getX() + 6.5f, bounds.getCentreY() - 4.0f);
+        path.closeSubPath();
+        path.startNewSubPath(bounds.getX() + 2.0f, bounds.getCentreY() + 3.5f);
+        path.lineTo(bounds.getX() + 2.0f, bounds.getBottom() - 2.0f);
+        path.lineTo(bounds.getX() + 6.5f, bounds.getBottom() - 2.0f);
+        path.lineTo(bounds.getX() + 6.5f, bounds.getCentreY() + 4.0f);
+        path.closeSubPath();
+        path.startNewSubPath(bounds.getX() + 6.0f, bounds.getCentreY() + 4.0f);
+        path.lineTo(bounds.getRight() - 1.0f, bounds.getCentreY() - 2.0f);
     }
     else if (id == "icon.connect")
     {

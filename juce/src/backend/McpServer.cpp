@@ -861,6 +861,8 @@ juce::var McpServer::projectJson() const
             set(clipValue, "duration_seconds", clip.durationSeconds);
             set(clipValue, "fade_in_seconds", clip.fadeInSeconds);
             set(clipValue, "fade_out_seconds", clip.fadeOutSeconds);
+            set(clipValue, "crossfade_in_seconds", clip.crossfadeInSeconds);
+            set(clipValue, "crossfade_out_seconds", clip.crossfadeOutSeconds);
             set(clipValue, "gain", clip.gain);
             set(clipValue, "muted", clip.muted);
             std::vector<juce::var> sourceTimeMap;

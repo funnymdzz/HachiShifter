@@ -725,6 +725,8 @@ void ProjectModel::resizeClip(const juce::String& clipId, double startSeconds,
                         point.targetSeconds *= ratio;
                     clip.fadeInSeconds = std::min(nextDuration, clip.fadeInSeconds * ratio);
                     clip.fadeOutSeconds = std::min(nextDuration, clip.fadeOutSeconds * ratio);
+                    clip.crossfadeInSeconds = std::min(nextDuration, clip.crossfadeInSeconds * ratio);
+                    clip.crossfadeOutSeconds = std::min(nextDuration, clip.crossfadeOutSeconds * ratio);
                     clip.startSeconds = nextStart;
                     clip.durationSeconds = nextDuration;
                     changed = true;
@@ -1721,6 +1723,8 @@ juce::ValueTree ProjectModel::toValueTree(const juce::File& projectFile) const
             clipTree.setProperty("durationSeconds", clip.durationSeconds, nullptr);
             clipTree.setProperty("fadeInSeconds", clip.fadeInSeconds, nullptr);
             clipTree.setProperty("fadeOutSeconds", clip.fadeOutSeconds, nullptr);
+            clipTree.setProperty("crossfadeInSeconds", clip.crossfadeInSeconds, nullptr);
+            clipTree.setProperty("crossfadeOutSeconds", clip.crossfadeOutSeconds, nullptr);
             clipTree.setProperty("gain", clip.gain, nullptr);
             clipTree.setProperty("muted", clip.muted, nullptr);
 
@@ -1850,6 +1854,8 @@ ProjectData ProjectModel::fromValueTree(const juce::ValueTree& root,
             clip.durationSeconds = static_cast<double>(clipTree.getProperty("durationSeconds", 1.0));
             clip.fadeInSeconds = static_cast<double>(clipTree.getProperty("fadeInSeconds", 0.0));
             clip.fadeOutSeconds = static_cast<double>(clipTree.getProperty("fadeOutSeconds", 0.0));
+            clip.crossfadeInSeconds = static_cast<double>(clipTree.getProperty("crossfadeInSeconds", 0.0));
+            clip.crossfadeOutSeconds = static_cast<double>(clipTree.getProperty("crossfadeOutSeconds", 0.0));
             clip.gain = static_cast<float>(clipTree.getProperty("gain", 1.0));
             clip.muted = static_cast<bool>(clipTree.getProperty("muted", false));
 

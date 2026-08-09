@@ -19,6 +19,7 @@ public:
     void mouseDrag(const juce::MouseEvent& event) override;
     void mouseUp(const juce::MouseEvent& event) override;
     void setSelectedTrack(const juce::String& trackId);
+    void setRowHeight(float value);
     std::function<float(const juce::String&)> peakProvider;
     std::function<void(const juce::String&)> onTrackSelected;
 

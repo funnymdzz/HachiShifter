@@ -464,7 +464,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
-                         && !clip.notes.empty() && clip.notes.front().connectedToPrevious)
+                         && !clip.notes.empty() && clip.notes.front().connectedToPrevious
+                         && clip.crossfadeInSeconds <= 1.0e-6)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
@@ -476,7 +477,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
                 else if (std::abs(overlap) <= 0.002
-                         && !clip.notes.empty() && clip.notes.back().connectedToNext)
+                         && !clip.notes.empty() && clip.notes.back().connectedToNext
+                         && clip.crossfadeOutSeconds <= 1.0e-6)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
@@ -532,6 +534,23 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
 float AudioEngine::fadeEnvelope(const ClipData& clip, double localSeconds)
 {
     auto gain = 1.0f;
+    // Melodyne successive-join amplitude transitions are LINEAR complementary
+    // fades (element amplitudeFadeIn/OutShapePow are always 1.0).  Each joined
+    // element is back-to-back with its partner, so the fade-in of the following
+    // element and the fade-out of the preceding element meet at the boundary
+    // and together span the full MUSuccessiveJoin.amplitudeTransitionDuration.
+    if (clip.crossfadeInSeconds > 1.0e-6)
+    {
+        const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
+            localSeconds / clip.crossfadeInSeconds));
+        gain *= phase;
+    }
+    if (clip.crossfadeOutSeconds > 1.0e-6)
+    {
+        const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,
+            (clip.durationSeconds - localSeconds) / clip.crossfadeOutSeconds));
+        gain *= phase;
+    }
     if (clip.fadeInSeconds > 1.0e-6)
     {
         const auto phase = static_cast<float>(juce::jlimit(0.0, 1.0,

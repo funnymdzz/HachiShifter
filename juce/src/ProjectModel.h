@@ -98,6 +98,13 @@ struct ClipData
     double durationSeconds = 1.0;
     double fadeInSeconds = 0.0;
     double fadeOutSeconds = 0.0;
+    // Melodyne successive-join amplitude transitions.  These are the actual
+    // crossfade mechanism in a Melodyne project: MUSuccessiveJoin.amplitudeTransitionDuration
+    // with joinsAmplitudes=true, applied as a LINEAR complementary fade at the
+    // join boundary (element shape powers are 1.0).  The legacy fadeInTime/
+    // fadeOutTime fields are always NaN in saved projects.
+    double crossfadeInSeconds = 0.0;
+    double crossfadeOutSeconds = 0.0;
     float gain = 1.0f;
     bool muted = false;
     std::vector<SourceTimePoint> sourceTimeMap;
