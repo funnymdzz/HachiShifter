@@ -1051,7 +1051,8 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
                 f0[frame] = std::sqrt(a * c);
         }
         constexpr std::size_t edgeContextFrames = 16;
-        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames, variableHop);
+        const auto holdShortClipEdges = variableHop && mel.frames <= 4;
+        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames, holdShortClipEdges);
         auto modelOutput = infer(*ortSession.model, *config, mel, f0,
                                  ortSession.runMutex.get());
         if (modelOutput.empty())
