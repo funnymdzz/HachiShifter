@@ -913,6 +913,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         }
                         // Same-source pitch-split: pass neighbor F0 so the
                         // model edge context interpolates instead of reflecting.
+                        // Search across non-adjacent clips too (CVVC chains).
                         const auto neighborF0 = [](const ClipData& c, bool atStart)
                         {
                             for (const auto& note : c.notes)
@@ -929,16 +930,36 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                             }
                             return 0.0f;
                         };
-                        if (connectedPrevFlag
-                            && clipIndex > 0
-                            && clip.sourceFile == orderedClips[clipIndex - 1]->sourceFile)
-                            request.neighborEdgeF0Start = neighborF0(
-                                *orderedClips[clipIndex - 1], false);
-                        if (connectedNextFlag
-                            && clipIndex + 1 < count
-                            && clip.sourceFile == orderedClips[clipIndex + 1]->sourceFile)
-                            request.neighborEdgeF0End = neighborF0(
-                                *orderedClips[clipIndex + 1], true);
+                        // Start edge: find touching same-source predecessor
+                        for (std::size_t prev = clipIndex; prev > 0; --prev)
+                        {
+                            const auto& cand = *orderedClips[prev - 1];
+                            if (cand.sourceFile != clip.sourceFile) break;
+                            const auto candEndSource = cand.sourceOffsetSeconds
+                                + cand.sourceDurationSeconds;
+                            if (std::abs(candEndSource - clip.sourceOffsetSeconds) <= 0.001
+                                && std::abs(cand.startSeconds + cand.durationSeconds
+                                            - clip.startSeconds) <= 0.002)
+                            {
+                                request.neighborEdgeF0Start = neighborF0(cand, false);
+                                break;
+                            }
+                        }
+                        // End edge: find touching same-source successor
+                        for (std::size_t nxt = clipIndex + 1; nxt < count; ++nxt)
+                        {
+                            const auto& cand = *orderedClips[nxt];
+                            if (cand.sourceFile != clip.sourceFile) break;
+                            const auto clipEndSource = clip.sourceOffsetSeconds
+                                + clip.sourceDurationSeconds;
+                            if (std::abs(cand.sourceOffsetSeconds - clipEndSource) <= 0.001
+                                && std::abs(cand.startSeconds
+                                            - (clip.startSeconds + clip.durationSeconds)) <= 0.002)
+                            {
+                                request.neighborEdgeF0End = neighborF0(cand, true);
+                                break;
+                            }
+                        }
                         renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
                         {
                             if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)
