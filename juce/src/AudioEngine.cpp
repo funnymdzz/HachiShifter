@@ -753,6 +753,36 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             std::vector<LoadedClip*> loaded;
         };
         std::vector<PendingGroup> pendingGroups;
+        // Merged mode: pre-build same-source touching chains for pitch-split
+        // clips that are separated by different-source inserts.
+        std::vector<bool> inSameSourceGroup(count, false);
+        if (mergedMode)
+            for (std::size_t i = 0; i < count; ++i)
+            {
+                if (inSameSourceGroup[i]) continue;
+                const auto& start = *orderedClips[i];
+                if (start.muted || !start.sourceFile.existsAsFile()
+                    || start.notes.empty())
+                    continue;
+                PendingGroup group;
+                group.clips.push_back(&start);
+                inSameSourceGroup[i] = true;
+                for (std::size_t j = i + 1; j < count; ++j)
+                {
+                    if (inSameSourceGroup[j]) continue;
+                    const auto& next = *orderedClips[j];
+                    if (next.sourceFile != start.sourceFile) continue;
+                    if (clipsConnected(*group.clips.back(), next))
+                    {
+                        group.clips.push_back(&next);
+                        inSameSourceGroup[j] = true;
+                    }
+                }
+                if (group.clips.size() >= 2)
+                    pendingGroups.push_back(std::move(group));
+                else
+                    inSameSourceGroup[i] = false;
+            }
         for (std::size_t clipIndex = 0; clipIndex < count; ++clipIndex)
         {
             const auto& clip = *orderedClips[clipIndex];
@@ -770,7 +800,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 && (track.stretchAlgorithm == StretchAlgorithm::variableMelHop
                     || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice);
             const auto inMerged = mergedMode
-                && (connectedPrev[clipIndex] || connectedNext[clipIndex]);
+                && (connectedPrev[clipIndex] || connectedNext[clipIndex]
+                    || inSameSourceGroup[clipIndex]);
             const auto continuousNeuralSeam = inMerged && exclusiveNeuralPath;
             const auto previousGap = clipIndex > 0
                 ? clip.startSeconds - (orderedClips[clipIndex - 1]->startSeconds
@@ -838,7 +869,20 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 if (inMerged)
                 {
                     loaded->rendered = std::make_shared<RenderedClip>();
-                    if (connectedPrev[clipIndex] && !pendingGroups.empty()
+                    if (inSameSourceGroup[clipIndex])
+                    {
+                        // Add to the pre-built same-source group
+                        for (auto& group : pendingGroups)
+                        {
+                            for (auto* gclip : group.clips)
+                                if (gclip == &clip)
+                                {
+                                    group.loaded.push_back(loaded.get());
+                                    break;
+                                }
+                        }
+                    }
+                    else if (connectedPrev[clipIndex] && !pendingGroups.empty()
                         && pendingGroups.back().clips.back() == orderedClips[clipIndex - 1])
                     {
                         pendingGroups.back().clips.push_back(&clip);
@@ -934,7 +978,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         for (std::size_t prev = clipIndex; prev > 0; --prev)
                         {
                             const auto& cand = *orderedClips[prev - 1];
-                            if (cand.sourceFile != clip.sourceFile) break;
+                            if (cand.sourceFile != clip.sourceFile) continue;
                             const auto candEndSource = cand.sourceOffsetSeconds
                                 + cand.sourceDurationSeconds;
                             if (std::abs(candEndSource - clip.sourceOffsetSeconds) <= 0.001
@@ -950,7 +994,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         for (std::size_t nxt = clipIndex + 1; nxt < count; ++nxt)
                         {
                             const auto& cand = *orderedClips[nxt];
-                            if (cand.sourceFile != clip.sourceFile) break;
+                            if (cand.sourceFile != clip.sourceFile) continue;
                             const auto clipEndSource = clip.sourceOffsetSeconds
                                 + clip.sourceDurationSeconds;
                             if (std::abs(cand.sourceOffsetSeconds - clipEndSource) <= 0.001
