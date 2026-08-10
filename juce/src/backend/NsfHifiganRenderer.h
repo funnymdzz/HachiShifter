@@ -44,6 +44,8 @@ struct NsfHifiganEdgeGuard
 {
     float startSeconds = 0.003f;
     float endSeconds = 0.003f;
+    float neighborStartF0 = 0.0f;
+    float neighborEndF0 = 0.0f;
 };
 
 class NsfHifiganRenderer final

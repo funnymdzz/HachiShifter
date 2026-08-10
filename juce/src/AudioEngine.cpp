@@ -911,6 +911,34 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                             if (connectedPrevFlag) request.neuralGuardStartSeconds = 0.0005f;
                             if (connectedNextFlag) request.neuralGuardEndSeconds = 0.0005f;
                         }
+                        // Same-source pitch-split: pass neighbor F0 so the
+                        // model edge context interpolates instead of reflecting.
+                        const auto neighborF0 = [](const ClipData& c, bool atStart)
+                        {
+                            for (const auto& note : c.notes)
+                            {
+                                if (note.contour.empty()) continue;
+                                const auto& point = atStart
+                                    ? note.contour.front()
+                                    : note.contour.back();
+                                if (!point.voiced) continue;
+                                const auto midi = note.midiNote
+                                    + point.rendered_target_cents / 100.0f;
+                                if (!std::isfinite(midi) || midi <= 0.0f) continue;
+                                return 440.0f * std::exp2((midi - 69.0f) / 12.0f);
+                            }
+                            return 0.0f;
+                        };
+                        if (connectedPrevFlag
+                            && clipIndex > 0
+                            && clip.sourceFile == orderedClips[clipIndex - 1]->sourceFile)
+                            request.neighborEdgeF0Start = neighborF0(
+                                *orderedClips[clipIndex - 1], false);
+                        if (connectedNextFlag
+                            && clipIndex + 1 < count
+                            && clip.sourceFile == orderedClips[clipIndex + 1]->sourceFile)
+                            request.neighborEdgeF0End = neighborF0(
+                                *orderedClips[clipIndex + 1], true);
                         renderService.renderMld5File(std::move(request), [state](backend::RenderedAudio result) mutable
                         {
                             if (result.buffer.getNumSamples() <= 0 || result.sampleRate <= 0.0)

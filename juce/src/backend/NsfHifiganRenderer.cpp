@@ -640,7 +640,8 @@ std::vector<float> stableMonoInput(const juce::AudioBuffer<float>& source)
 }
 
 void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
-                         std::size_t contextFrames)
+                         std::size_t contextFrames,
+                         const NsfHifiganEdgeGuard& edgeGuard = {})
 {
     if (mel.frames == 0 || f0.size() != mel.frames || melBands <= 0
         || contextFrames == 0) return;
@@ -651,13 +652,35 @@ void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
     std::vector<float> paddedF0(padded.frames);
     for (std::size_t frame = 0; frame < padded.frames; ++frame)
     {
-        const auto sourceFrame = reflectIndex(
-            static_cast<std::ptrdiff_t>(frame) - static_cast<std::ptrdiff_t>(contextFrames),
-            originalFrames);
+        const auto relative = static_cast<std::ptrdiff_t>(frame)
+            - static_cast<std::ptrdiff_t>(contextFrames);
+        const auto sourceFrame = reflectIndex(relative, originalFrames);
         paddedF0[frame] = f0[sourceFrame];
         for (int band = 0; band < melBands; ++band)
             padded.values[static_cast<std::size_t>(band) * padded.frames + frame]
                 = mel.values[static_cast<std::size_t>(band) * originalFrames + sourceFrame];
+    }
+    // Interpolate F0 at edges when neighbor F0 is known (same-source
+    // pitch-split).  The model then sees a smooth pitch glide across the
+    // boundary instead of a hard reflected step.
+    if (edgeGuard.neighborStartF0 > 0.0f && f0.front() > 0.0f)
+        for (std::size_t frame = 0; frame < contextFrames; ++frame)
+        {
+            const auto amount = static_cast<float>(frame + 1)
+                / static_cast<float>(contextFrames + 1);
+            paddedF0[frame] = edgeGuard.neighborStartF0
+                + (f0.front() - edgeGuard.neighborStartF0) * amount;
+        }
+    if (edgeGuard.neighborEndF0 > 0.0f && f0.back() > 0.0f)
+    {
+        const auto offset = originalFrames + contextFrames;
+        for (std::size_t frame = 0; frame < contextFrames; ++frame)
+        {
+            const auto amount = static_cast<float>(frame + 1)
+                / static_cast<float>(contextFrames + 1);
+            paddedF0[offset + frame] = f0.back()
+                + (edgeGuard.neighborEndF0 - f0.back()) * amount;
+        }
     }
     mel = std::move(padded);
     f0 = std::move(paddedF0);
@@ -1048,7 +1071,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
                 f0[frame] = std::sqrt(a * c);
         }
         constexpr std::size_t edgeContextFrames = 16;
-        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames);
+        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames, edgeGuard);
         auto modelOutput = infer(*ortSession.model, *config, mel, f0,
                                  ortSession.runMutex.get());
         if (modelOutput.empty())

@@ -831,6 +831,8 @@ public:
                 edgeGuard.startSeconds = request.neuralGuardStartSeconds;
             if (request.neuralGuardEndSeconds >= 0.0f)
                 edgeGuard.endSeconds = request.neuralGuardEndSeconds;
+            edgeGuard.neighborStartF0 = request.neighborEdgeF0Start;
+            edgeGuard.neighborEndF0 = request.neighborEdgeF0End;
             auto neural = NsfHifiganRenderer::render(source, reader->sampleRate,
                 targetSamples, request.framePeriodMs, request.targetMidi,
                 request.formantSemitones, neuralTimeMap, request.hifiganModelDirectory,

@@ -48,6 +48,11 @@ struct Mld5FileRenderRequest
     // instead of a baked-in 3 ms level dip at every splice point.
     float neuralGuardStartSeconds = -1.0f;
     float neuralGuardEndSeconds = -1.0f;
+    // Neighbor F0 at boundary edges for same-source pitch-split transitions.
+    // When 0.0f the edge context uses normal reflection; a positive value
+    // interpolates from/to the neighbor's actual F0 at that seam.
+    float neighborEdgeF0Start = 0.0f;
+    float neighborEdgeF0End = 0.0f;
 };
 
 struct RenderedAudio
