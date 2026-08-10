@@ -857,7 +857,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             if (joinedStart) { loaded->clip.crossfadeInSeconds = 0.0; loaded->clip.fadeInSeconds = 0.0; }
             if (joinedEnd) { loaded->clip.crossfadeOutSeconds = 0.0; loaded->clip.fadeOutSeconds = 0.0; }
             loaded->trackId = track.id.toStdString();
-            loaded->smoothOverlaps = track.smoothOverlaps;
+            loaded->smoothOverlaps = track.smoothOverlaps && !inGlideGroup[clipIndex];
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
             if (!(joinedStart || (continuousNeuralSeam && connectedPrev[clipIndex])))
                 loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
