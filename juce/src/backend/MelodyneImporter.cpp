@@ -842,6 +842,16 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 note.robustPitchCurve = note.robustPitchCurve
                     || graph.booleanAlias(*parameterSet, robustFields);
             note.connectedToPrevious = connectedPrevious.contains(element);
+            note.connectedToNext = false;
+            if (const auto join = graph.reference(element, "followingJoin"))
+            {
+                note.connectedToNext = graph.boolean(*join, "joinsPitches");
+                if (graph.boolean(*join, "joinsAmplitudes"))
+                    if (const auto atd = graph.number(*join, "amplitudeTransitionDuration"))
+                        clip.crossfadeOutSeconds = std::clamp(*atd * 0.5, 0.0, duration);
+            }
+            clip.glideConnectedToNext = note.connectedToNext;
+            clip.glideConnectedFromPrevious = note.connectedToPrevious;
 
             std::vector<SourcePitchPoint> propertyPoints;
             if (const auto propertyList = graph.reference(item, "propertyPoints"))
@@ -898,17 +908,6 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             addSibilant("startSibilantEndSampleOffset");
             addSibilant("endSibilantStartSampleOffset");
 
-            if (const auto join = graph.reference(element, "followingJoin"))
-            {
-                note.connectedToNext = graph.boolean(*join, "joinsPitches");
-                // Melodyne's real crossfade: a LINEAR amplitude transition of
-                // MUSuccessiveJoin.amplitudeTransitionDuration when amplitudes
-                // are joined.  The element is placed exactly back-to-back with
-                // its join partner, so each side ramps for half the duration.
-                if (graph.boolean(*join, "joinsAmplitudes"))
-                    if (const auto atd = graph.number(*join, "amplitudeTransitionDuration"))
-                        clip.crossfadeOutSeconds = std::clamp(*atd * 0.5, 0.0, duration);
-            }
             if (const auto join = graph.reference(element, "precedingJoin"))
             {
                 if (graph.boolean(*join, "joinsAmplitudes"))

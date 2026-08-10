@@ -753,35 +753,47 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             std::vector<LoadedClip*> loaded;
         };
         std::vector<PendingGroup> pendingGroups;
-        // Merged mode: pre-build same-source touching chains for pitch-split
-        // clips that are separated by different-source inserts.
-        std::vector<bool> inSameSourceGroup(count, false);
+        // Build glide-connected chains from explicit Melodyne pitch-join flags.
+        // These clips share a source file and are joined by followingJoin.joinsPitches;
+        // they must render as one continuous phrase with smooth F0 transition.
+        std::vector<bool> inGlideGroup(count, false);
         if (mergedMode)
             for (std::size_t i = 0; i < count; ++i)
             {
-                if (inSameSourceGroup[i]) continue;
+                if (inGlideGroup[i]) continue;
                 const auto& start = *orderedClips[i];
-                if (start.muted || !start.sourceFile.existsAsFile()
-                    || start.notes.empty())
+                if (!start.glideConnectedToNext || start.muted
+                    || !start.sourceFile.existsAsFile() || start.notes.empty())
                     continue;
                 PendingGroup group;
                 group.clips.push_back(&start);
-                inSameSourceGroup[i] = true;
-                for (std::size_t j = i + 1; j < count; ++j)
+                inGlideGroup[i] = true;
+                const auto* cursor = &start;
+                for (;;)
                 {
-                    if (inSameSourceGroup[j]) continue;
-                    const auto& next = *orderedClips[j];
-                    if (next.sourceFile != start.sourceFile) continue;
-                    if (clipsConnected(*group.clips.back(), next))
-                    {
-                        group.clips.push_back(&next);
-                        inSameSourceGroup[j] = true;
-                    }
+                    // Find the glide successor (may not be adjacent in the array)
+                    const auto* found = static_cast<const ClipData*>(nullptr);
+                    for (std::size_t j = 0; j < count; ++j)
+                        if (!inGlideGroup[j]
+                            && orderedClips[j]->sourceFile == cursor->sourceFile
+                            && orderedClips[j]->glideConnectedFromPrevious
+                            && std::abs(orderedClips[j]->sourceOffsetSeconds
+                                - (cursor->sourceOffsetSeconds + cursor->sourceDurationSeconds)) <= 0.01)
+                        {
+                            found = orderedClips[j];
+                            break;
+                        }
+                    if (found == nullptr) break;
+                    group.clips.push_back(found);
+                    for (std::size_t pos = 0; pos < count; ++pos)
+                        if (orderedClips[pos] == found) { inGlideGroup[pos] = true; break; }
+                    cursor = found;
+                    if (!cursor->glideConnectedToNext) break;
                 }
                 if (group.clips.size() >= 2)
                     pendingGroups.push_back(std::move(group));
                 else
-                    inSameSourceGroup[i] = false;
+                    inGlideGroup[i] = false;
             }
         for (std::size_t clipIndex = 0; clipIndex < count; ++clipIndex)
         {
@@ -801,7 +813,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice);
             const auto inMerged = mergedMode
                 && (connectedPrev[clipIndex] || connectedNext[clipIndex]
-                    || inSameSourceGroup[clipIndex]);
+                    || inGlideGroup[clipIndex]);
             const auto continuousNeuralSeam = inMerged && exclusiveNeuralPath;
             const auto previousGap = clipIndex > 0
                 ? clip.startSeconds - (orderedClips[clipIndex - 1]->startSeconds
@@ -813,14 +825,14 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 : std::numeric_limits<double>::infinity();
             const auto joinedStart = (connectedPrev[clipIndex]
                 && previousGap >= -1.0e-6 && previousGap <= 0.002)
-                || (inSameSourceGroup[clipIndex]
+                || (inGlideGroup[clipIndex]
                     && [&] { for (auto& g : pendingGroups)
                         for (size_t p = 1; p < g.clips.size(); ++p)
                             if (g.clips[p] == &clip) return true;
                         return false; }());
             const auto joinedEnd = (connectedNext[clipIndex]
                 && nextGap >= -1.0e-6 && nextGap <= 0.002)
-                || (inSameSourceGroup[clipIndex]
+                || (inGlideGroup[clipIndex]
                     && [&] { for (auto& g : pendingGroups)
                         for (size_t p = 0; p + 1 < g.clips.size(); ++p)
                             if (g.clips[p] == &clip) return true;
@@ -879,7 +891,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 if (inMerged)
                 {
                     loaded->rendered = std::make_shared<RenderedClip>();
-                    if (inSameSourceGroup[clipIndex])
+                    if (inGlideGroup[clipIndex])
                     {
                         // Add to the pre-built same-source group
                         for (auto& group : pendingGroups)

@@ -124,6 +124,12 @@ struct ClipData
     double crossfadeOutSeconds = 0.0;
     float gain = 1.0f;
     bool muted = false;
+    // Melodyne glide-split: two elements joined by followingJoin.joinsPitches.
+    // The source audio is continuous but pitch/duration are edited independently.
+    // HachiShifter renders glide-connected chains as one merged phrase and marks
+    // the seam with a dashed line in the track view.
+    bool glideConnectedToNext = false;
+    bool glideConnectedFromPrevious = false;
     std::vector<SourceTimePoint> sourceTimeMap;
     std::vector<NoteData> notes;
 };
