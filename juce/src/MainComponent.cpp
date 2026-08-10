@@ -589,6 +589,10 @@ void MainComponent::refreshTexts()
     renderOrder.setTooltip(strings.text("algo.order"));
     refreshStretchAlgorithmItems(stretchAlgorithm.getSelectedId());
     refreshRenderOrderItems(renderOrder.getSelectedId());
+    addAndMakeVisible(renderOrder);
+    addAndMakeVisible(renderOrderLabel);
+    renderOrder.setVisible(false);
+    renderOrderLabel.setVisible(false);
     statusLabel.setText(strings.text("status.ready"), juce::dontSendNotification);
     sourceEditHint.setText(strings.text("edit.source"), juce::dontSendNotification);
     sampleAliasLabel.setText(strings.text("sample.alias"), juce::dontSendNotification);
