@@ -767,14 +767,28 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             const auto inMerged = mergedMode
                 && (connectedPrev[clipIndex] || connectedNext[clipIndex]);
             const auto continuousNeuralSeam = inMerged && exclusiveNeuralPath;
+            const auto previousGap = clipIndex > 0
+                ? clip.startSeconds - (orderedClips[clipIndex - 1]->startSeconds
+                    + orderedClips[clipIndex - 1]->durationSeconds)
+                : std::numeric_limits<double>::infinity();
+            const auto nextGap = clipIndex + 1 < count
+                ? orderedClips[clipIndex + 1]->startSeconds
+                    - (clip.startSeconds + clip.durationSeconds)
+                : std::numeric_limits<double>::infinity();
+            const auto joinedNeuralStart = exclusiveNeuralPath && connectedPrev[clipIndex]
+                && std::abs(previousGap) <= 0.002;
+            const auto joinedNeuralEnd = exclusiveNeuralPath && connectedNext[clipIndex]
+                && std::abs(nextGap) <= 0.002;
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
+            if (joinedNeuralStart) loaded->clip.crossfadeInSeconds = 0.0;
+            if (joinedNeuralEnd) loaded->clip.crossfadeOutSeconds = 0.0;
             loaded->trackId = track.id.toStdString();
             loaded->smoothOverlaps = track.smoothOverlaps;
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
-            if (!(continuousNeuralSeam && connectedPrev[clipIndex]))
+            if (!(joinedNeuralStart || (continuousNeuralSeam && connectedPrev[clipIndex])))
                 loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
-            if (!(continuousNeuralSeam && connectedNext[clipIndex]))
+            if (!(joinedNeuralEnd || (continuousNeuralSeam && connectedNext[clipIndex])))
                 loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
             if (track.smoothOverlaps && clipIndex > 0)
             {
