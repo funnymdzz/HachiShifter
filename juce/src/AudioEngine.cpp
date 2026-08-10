@@ -81,6 +81,7 @@ backend::Mld5FileRenderRequest makeRenderRequest(const ClipData& clip, const Tra
     }
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
     request.normalizeVolume = track.normalizeVolume;
+    request.matchNsfSourceLevel = track.renderOrder == RenderOrder::processThenSplice;
     const auto sourceDuration = request.sourceDurationSeconds;
     std::vector<backend::TimeMapPoint> timeAnchors;
     if (!clip.sourceTimeMap.empty())

@@ -812,7 +812,8 @@ public:
                 rendered = std::move(neural.buffer);
                 usedNsfModel = true;
                 nsfInference = neural.activeInference;
-                if (request.stretchAlgorithm == 1 || request.stretchAlgorithm == 4)
+                if (request.matchNsfSourceLevel
+                    && (request.stretchAlgorithm == 1 || request.stretchAlgorithm == 4))
                     raiseActiveRmsFloor(rendered, source);
                 applyExpressionAndTension(rendered, reader->sampleRate,
                     request.framePeriodMs, request.targetMidi, request.noteGain,
