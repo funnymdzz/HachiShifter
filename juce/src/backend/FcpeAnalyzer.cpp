@@ -1,4 +1,5 @@
 #include "FcpeAnalyzer.h"
+#include "AudioFileReader.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_dsp/juce_dsp.h>
 #include <algorithm>
@@ -36,7 +37,7 @@ DecodedAudio decodeMono(const juce::File& file, juce::String& error)
 {
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
-    auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file));
+    auto reader = createAudioReader(formats, file);
     if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0
         || reader->lengthInSamples > std::numeric_limits<int>::max())
     {

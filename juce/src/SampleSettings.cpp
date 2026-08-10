@@ -1,4 +1,5 @@
 #include "SampleSettings.h"
+#include "backend/AudioFileReader.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
 #include <array>
@@ -378,7 +379,7 @@ bool SampleSettings::importVoicebank(const juce::File& root, juce::StringArray& 
         {
             if (!sample.hasFileExtension("wav;flac;aif;aiff;mp3;ogg")) continue;
             audioFiles.addIfNotAlreadyThere(sample.getFullPathName(), false);
-            auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(sample));
+            auto reader = backend::createAudioReader(formats, sample);
             if (reader == nullptr || reader->sampleRate <= 0.0) continue;
             const auto duration = static_cast<double>(reader->lengthInSamples) / reader->sampleRate;
             std::vector<SampleRegionSetting> rows;

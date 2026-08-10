@@ -143,11 +143,11 @@ struct TrackData
     bool solo = false;
     float volume = 1.0f;
     float pan = 0.0f;
-    bool smoothOverlaps = true;
+    bool smoothOverlaps = false;
     bool normalizeVolume = false;
     PitchAlgorithm pitchAlgorithm = PitchAlgorithm::mld5;
-    StretchAlgorithm stretchAlgorithm = StretchAlgorithm::melodyneHybrid;
-    RenderOrder renderOrder = RenderOrder::processThenSplice;
+    StretchAlgorithm stretchAlgorithm = StretchAlgorithm::variableMelHop;
+    RenderOrder renderOrder = RenderOrder::stretchSpliceThenPitch;
     std::vector<ClipData> clips;
 };
 

@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "backend/McpServer.h"
 #include "backend/AnalysisService.h"
+#include "backend/AudioFileReader.h"
 #include "backend/FcpeAnalyzer.h"
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <algorithm>
@@ -137,7 +138,7 @@ public:
             juce::AudioFormatManager formats;
             formats.registerBasicFormats();
             auto reader = std::unique_ptr<juce::AudioFormatReader>(
-                formats.createReaderFor(juce::File(arguments[1])));
+                backend::createAudioReader(formats, juce::File(arguments[1])).release());
             if (reader == nullptr)
             {
                 std::cerr << "error=audio_read" << std::endl;
@@ -252,7 +253,7 @@ public:
             juce::AudioFormatManager formats;
             formats.registerBasicFormats();
             const auto file = juce::File(arguments[1]);
-            auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file));
+            auto reader = backend::createAudioReader(formats, file);
             if (reader == nullptr || reader->sampleRate <= 0.0)
             {
                 std::cerr << "error=audio_read" << std::endl;

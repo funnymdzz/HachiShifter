@@ -1,4 +1,5 @@
 #include "GameAnalyzer.h"
+#include "AudioFileReader.h"
 #include "FcpeAnalyzer.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <algorithm>
@@ -48,7 +49,7 @@ DecodedAudio decodeMono(const juce::File& file, juce::String& error)
 {
     juce::AudioFormatManager formats;
     formats.registerBasicFormats();
-    auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file));
+    auto reader = createAudioReader(formats, file);
     if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
     {
         error = "GAME could not read audio: " + file.getFullPathName();

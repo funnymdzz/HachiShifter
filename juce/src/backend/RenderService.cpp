@@ -882,7 +882,6 @@ public:
             : request.stretchAlgorithm == 2 ? "+loop"
             : request.stretchAlgorithm == 3 ? "+soundtouch"
             : "+melodyne-hybrid";
-        if (request.isGlideMerged) backend << "+glide-merged";
         RenderedAudio result { std::move(rendered), reader->sampleRate, backend };
         if (shouldExit()) return jobHasFinished;
         // AudioEngine publishes the completed buffer through release/acquire

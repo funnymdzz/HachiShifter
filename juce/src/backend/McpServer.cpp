@@ -1,5 +1,6 @@
 #include "McpServer.h"
 #include "AnalysisService.h"
+#include "AudioFileReader.h"
 #include <cmath>
 #include <iostream>
 
@@ -379,7 +380,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
                 return toolResult(summary(project.snapshot())
                     + (error.isNotEmpty() ? "; missing_media=" + error : juce::String()));
         }
-        else if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
+        else if (auto reader = createAudioReader(formats, file))
         {
             project.clear();
             const auto clipId = project.addAudioFile(file,
@@ -393,7 +394,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     else if (name == "import_audio")
     {
         const juce::File file(string(args, "path"));
-        if (auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(file)))
+        if (auto reader = createAudioReader(formats, file))
         {
             const auto clipId = project.addAudioFile(file,
                 static_cast<double>(reader->lengthInSamples) / reader->sampleRate,
@@ -742,7 +743,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     else if (name == "oto_import")
     {
         const juce::File audioFile(string(args, "audio_path"));
-        auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(audioFile));
+        auto reader = createAudioReader(formats, audioFile);
         if (reader == nullptr || reader->sampleRate <= 0.0)
             return toolResult("Audio read failed", true);
         std::vector<SampleRegionSetting> rows;
@@ -762,7 +763,7 @@ juce::var McpServer::callTool(const juce::String& name, const juce::var& args)
     else if (name == "oto_export")
     {
         const juce::File audioFile(string(args, "audio_path"));
-        auto reader = std::unique_ptr<juce::AudioFormatReader>(formats.createReaderFor(audioFile));
+        auto reader = createAudioReader(formats, audioFile);
         if (reader == nullptr || reader->sampleRate <= 0.0)
             return toolResult("Audio read failed", true);
         const auto rows = SampleSettings::loadOrDerive(audioFile, project.snapshot());

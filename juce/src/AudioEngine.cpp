@@ -361,7 +361,7 @@ backend::Mld5FileRenderRequest makeMergedRenderRequest(
     request.normalizeVolume = track.normalizeVolume;
     request.isGlideMerged = true;
     const auto preserveSourceSeams = track.stretchAlgorithm == StretchAlgorithm::variableMelHop
-        || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice;
+        || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice; // compat
 
     for (std::size_t index = 0; index < group.size(); ++index)
     {
@@ -760,7 +760,6 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 connectedNext[index - 1] = true;
             }
         const auto mergedMode = track.compose
-            && track.pitchAlgorithm == PitchAlgorithm::nsfHifigan
             && track.renderOrder == RenderOrder::stretchSpliceThenPitch;
         struct PendingGroup
         {
@@ -827,6 +826,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 && (track.stretchAlgorithm == StretchAlgorithm::variableMelHop
                     || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice);
             const auto inMerged = mergedMode
+                && track.pitchAlgorithm == PitchAlgorithm::nsfHifigan
                 && (connectedPrev[clipIndex] || connectedNext[clipIndex]
                     || inGlideGroup[clipIndex]);
             const auto continuousNeuralSeam = inMerged && exclusiveNeuralPath;

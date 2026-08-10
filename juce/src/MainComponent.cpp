@@ -297,7 +297,7 @@ MainComponent::MainComponent()
             else
                 project.setStretchAlgorithm(StretchAlgorithm::melodyneHybrid);
         }
-        const auto showRenderOrder = id == 2;
+        const auto showRenderOrder = true;
         if (renderOrder.isVisible() != showRenderOrder)
         {
             renderOrder.setVisible(showRenderOrder);
@@ -312,8 +312,7 @@ MainComponent::MainComponent()
         const auto algorithm = id == 2 ? StretchAlgorithm::variableMelHop
             : id == 3 ? StretchAlgorithm::loop
             : id == 4 ? StretchAlgorithm::soundTouch
-            : id == 5 ? StretchAlgorithm::nsfShiftThenSplice
-            : StretchAlgorithm::melodyneHybrid;
+            : StretchAlgorithm::variableMelHop;
         const auto data = project.snapshot();
         const auto selectedTrack = std::find_if(data.tracks.begin(), data.tracks.end(),
             [this](const auto& track)
@@ -630,8 +629,7 @@ void MainComponent::refreshProjectControls()
             : selected->pitchAlgorithm == PitchAlgorithm::llsm2 ? 6 : 1;
         const auto stretchId = selected->stretchAlgorithm == StretchAlgorithm::variableMelHop ? 2
             : selected->stretchAlgorithm == StretchAlgorithm::loop ? 3
-            : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4
-            : selected->stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice ? 5 : 1;
+            : selected->stretchAlgorithm == StretchAlgorithm::soundTouch ? 4 : 1;
         const auto orderId = selected->renderOrder == RenderOrder::stretchSpliceThenPitch ? 2 : 1;
         pitchAlgorithm.setSelectedId(pitchId, juce::dontSendNotification);
         refreshStretchAlgorithmItems(stretchId);
@@ -759,13 +757,10 @@ void MainComponent::refreshStretchAlgorithmItems(int preferredId)
     stretchAlgorithm.clear(juce::dontSendNotification);
     stretchAlgorithm.addItem(strings.text("algo.stretch.melodyneHybrid"), 1);
     if (pitchAlgorithm.getSelectedId() == 2)
-    {
         stretchAlgorithm.addItem(strings.text("algo.stretch.nsfVariableMel"), 2);
-        stretchAlgorithm.addItem(strings.text("algo.stretch.nsfShiftThenSplice"), 5);
-    }
     stretchAlgorithm.addItem(strings.text("algo.stretch.loop"), 3);
     stretchAlgorithm.addItem(strings.text("algo.stretch.soundTouch"), 4);
-    const auto canUsePreferred = (previous != 2 && previous != 5)
+    const auto canUsePreferred = previous != 2
         || pitchAlgorithm.getSelectedId() == 2;
     stretchAlgorithm.setSelectedId(canUsePreferred && previous > 0 ? previous : 1,
                                    juce::dontSendNotification);
