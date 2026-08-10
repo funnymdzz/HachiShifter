@@ -736,7 +736,10 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         std::vector<bool> connectedPrev(count, false);
         std::vector<bool> connectedNext(count, false);
         for (std::size_t index = 1; index < count; ++index)
-            if (clipsConnected(*orderedClips[index - 1], *orderedClips[index]))
+            if (!orderedClips[index - 1]->muted && !orderedClips[index]->muted
+                && orderedClips[index - 1]->sourceFile.existsAsFile()
+                && orderedClips[index]->sourceFile.existsAsFile()
+                && clipsConnected(*orderedClips[index - 1], *orderedClips[index]))
             {
                 connectedPrev[index] = true;
                 connectedNext[index - 1] = true;
@@ -777,20 +780,20 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 ? orderedClips[clipIndex + 1]->startSeconds
                     - (clip.startSeconds + clip.durationSeconds)
                 : std::numeric_limits<double>::infinity();
-            const auto joinedNeuralStart = exclusiveNeuralPath && connectedPrev[clipIndex]
-                && std::abs(previousGap) <= 0.002;
-            const auto joinedNeuralEnd = exclusiveNeuralPath && connectedNext[clipIndex]
-                && std::abs(nextGap) <= 0.002;
+            const auto joinedStart = connectedPrev[clipIndex]
+                && previousGap >= -1.0e-6 && previousGap <= 0.002;
+            const auto joinedEnd = connectedNext[clipIndex]
+                && nextGap >= -1.0e-6 && nextGap <= 0.002;
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
-            if (joinedNeuralStart) loaded->clip.crossfadeInSeconds = 0.0;
-            if (joinedNeuralEnd) loaded->clip.crossfadeOutSeconds = 0.0;
+            if (joinedStart) loaded->clip.crossfadeInSeconds = 0.0;
+            if (joinedEnd) loaded->clip.crossfadeOutSeconds = 0.0;
             loaded->trackId = track.id.toStdString();
             loaded->smoothOverlaps = track.smoothOverlaps;
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
-            if (!(joinedNeuralStart || (continuousNeuralSeam && connectedPrev[clipIndex])))
+            if (!(joinedStart || (continuousNeuralSeam && connectedPrev[clipIndex])))
                 loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
-            if (!(joinedNeuralEnd || (continuousNeuralSeam && connectedNext[clipIndex])))
+            if (!(joinedEnd || (continuousNeuralSeam && connectedNext[clipIndex])))
                 loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
             if (track.smoothOverlaps && clipIndex > 0)
             {
@@ -799,12 +802,6 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 if (overlap > 1.0e-6)
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
-                else if (std::abs(overlap) <= 0.002
-                         && connectedPrev[clipIndex]
-                         && !exclusiveNeuralPath
-                         && clip.crossfadeInSeconds <= 1.0e-6)
-                    loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
-                        std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
             if (track.smoothOverlaps && clipIndex + 1 < count)
             {
@@ -813,12 +810,6 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 if (overlap > 1.0e-6)
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
-                else if (std::abs(overlap) <= 0.002
-                         && connectedNext[clipIndex]
-                         && !exclusiveNeuralPath
-                         && clip.crossfadeOutSeconds <= 1.0e-6)
-                    loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
-                        std::min(0.006, loaded->clip.durationSeconds * 0.5));
             }
             loaded->trackGain = track.volume;
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
