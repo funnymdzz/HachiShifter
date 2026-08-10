@@ -795,21 +795,35 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds, compactDeclick);
             if (!(joinedEnd || (continuousNeuralSeam && connectedNext[clipIndex])))
                 loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds, compactDeclick);
+            // Overlap crossfade: linearly complementary fades for overlapping
+            // clips, so one fades in as the other fades out without a dip.
             if (track.smoothOverlaps && clipIndex > 0)
             {
                 const auto& previous = *orderedClips[clipIndex - 1];
                 const auto overlap = previous.startSeconds + previous.durationSeconds - clip.startSeconds;
                 if (overlap > 1.0e-6)
+                {
                     loaded->clip.fadeInSeconds = std::max(loaded->clip.fadeInSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
+                    if (!connectedPrev[clipIndex])
+                        loaded->clip.crossfadeInSeconds = std::max(
+                            loaded->clip.crossfadeInSeconds,
+                            std::min(overlap, loaded->clip.durationSeconds));
+                }
             }
             if (track.smoothOverlaps && clipIndex + 1 < count)
             {
                 const auto& next = *orderedClips[clipIndex + 1];
                 const auto overlap = clip.startSeconds + clip.durationSeconds - next.startSeconds;
                 if (overlap > 1.0e-6)
+                {
                     loaded->clip.fadeOutSeconds = std::max(loaded->clip.fadeOutSeconds,
                         std::min({ overlap, 0.1, loaded->clip.durationSeconds }));
+                    if (!connectedNext[clipIndex])
+                        loaded->clip.crossfadeOutSeconds = std::max(
+                            loaded->clip.crossfadeOutSeconds,
+                            std::min(overlap, loaded->clip.durationSeconds));
+                }
             }
             loaded->trackGain = track.volume;
             loaded->trackPan = juce::jlimit(-1.0f, 1.0f, track.pan);
@@ -842,7 +856,37 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 {
                     const auto connectedPrevFlag = connectedPrev[clipIndex];
                     const auto connectedNextFlag = connectedNext[clipIndex];
-                    const auto cacheKey = renderKey(clip, track,
+                    // Bridging: same-source adjacent clips with a target gap.
+                    // Melodyne renders source audio continuously between
+                    // elements; extend the earlier clip so the renderer sees
+                    // the whole source span without a gap in target time.
+                    if (!inMerged && connectedNextFlag && !joinedEnd
+                        && clipIndex + 1 < count
+                        && clip.sourceFile == orderedClips[clipIndex + 1]->sourceFile)
+                    {
+                        const auto& nextClip = *orderedClips[clipIndex + 1];
+                        const auto leftSourceEnd = clip.sourceOffsetSeconds
+                            + clip.sourceDurationSeconds;
+                        const auto rightSourceStart = nextClip.sourceOffsetSeconds;
+                        const auto sourceDelta = rightSourceStart - leftSourceEnd;
+                        if (sourceDelta >= -0.001 && sourceDelta <= 0.03
+                            && nextGap > 0.0 && nextGap <= 0.05)
+                        {
+                            loaded->clip.durationSeconds += nextGap;
+                            loaded->clip.sourceDurationSeconds += sourceDelta;
+                            auto extendedMap = clip.sourceTimeMap;
+                            if (extendedMap.empty())
+                            {
+                                extendedMap.push_back({ 0.0, 0.0 });
+                                extendedMap.push_back({ clip.durationSeconds,
+                                    clip.sourceDurationSeconds });
+                            }
+                            extendedMap.push_back({ loaded->clip.durationSeconds,
+                                loaded->clip.sourceDurationSeconds });
+                            loaded->clip.sourceTimeMap = std::move(extendedMap);
+                        }
+                    }
+                    const auto cacheKey = renderKey(loaded->clip, track,
                         hifiganModelDirectory, inferenceConfiguration,
                         connectedPrevFlag, connectedNextFlag,
                         connectedPrevFlag ? orderedClips[clipIndex - 1] : nullptr,
@@ -854,7 +898,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     loaded->rendered = state;
                     if (!state->scheduled.exchange(true))
                     {
-                        auto request = makeRenderRequest(clip, track,
+                        auto request = makeRenderRequest(loaded->clip, track,
                             hifiganModelDirectory, inferenceConfiguration,
                             connectedPrevFlag, connectedNextFlag);
                         if (previousGap < -1.0e-6 || nextGap < -1.0e-6)
