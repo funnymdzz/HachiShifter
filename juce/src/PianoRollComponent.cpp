@@ -93,7 +93,7 @@ void PianoRollComponent::setPlayheadSeconds(double seconds)
 void PianoRollComponent::setTool(Tool nextTool)
 {
     tool = nextTool;
-    setMouseCursor(tool == Tool::draw || tool == Tool::line
+    setMouseCursor(tool == Tool::draw || tool == Tool::line || tool == Tool::split
                        ? juce::MouseCursor::CrosshairCursor
                        : juce::MouseCursor::NormalCursor);
 }

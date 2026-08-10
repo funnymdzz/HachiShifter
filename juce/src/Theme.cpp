@@ -139,13 +139,22 @@ void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         path.startNewSubPath(bounds.getX() + 5.0f, bounds.getCentreY());
         path.lineTo(bounds.getRight() - 5.0f, bounds.getCentreY());
     }
+    else if (id == "icon.split")
+    {
+        path.addEllipse(bounds.getX(), bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        path.addEllipse(bounds.getRight() - 6.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        path.startNewSubPath(bounds.getX() + 5.0f, bounds.getCentreY());
+        path.lineTo(bounds.getCentreX() - 2.0f, bounds.getCentreY());
+        path.startNewSubPath(bounds.getCentreX() + 2.0f, bounds.getCentreY());
+        path.lineTo(bounds.getRight() - 5.0f, bounds.getCentreY());
+    }
     else
     {
         g.setFont(10.0f);
         g.drawText(id == "icon.audio" ? "A+" : "M+", button.getLocalBounds(), juce::Justification::centred);
         return;
     }
-    if (id == "icon.line" || id == "icon.wrench" || id == "icon.connect")
+    if (id == "icon.line" || id == "icon.wrench" || id == "icon.connect" || id == "icon.split")
         g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved,
                                                 juce::PathStrokeType::rounded));
     else

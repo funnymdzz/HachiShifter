@@ -268,6 +268,7 @@ private:
     juce::TextButton drawButton;
     juce::TextButton lineButton;
     juce::TextButton connectButton;
+    juce::TextButton splitButton;
     juce::TextButton pitchParamButton;
     juce::TextButton driftParamButton;
     juce::TextButton attackParamButton;

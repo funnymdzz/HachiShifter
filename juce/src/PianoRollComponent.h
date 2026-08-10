@@ -14,7 +14,7 @@ class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener
 {
 public:
-    enum class Tool { note, draw, line, connect };
+    enum class Tool { note, draw, line, connect, split };
 
     explicit PianoRollComponent(ProjectModel& modelToUse);
     ~PianoRollComponent() override;

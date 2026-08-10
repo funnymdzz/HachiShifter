@@ -73,7 +73,7 @@ MainComponent::MainComponent()
 
     for (auto* button : { &openButton, &saveButton, &audioButton, &melodyneButton,
                           &playButton, &stopButton, &noteEditButton, &wrenchButton,
-                          &drawButton, &lineButton, &connectButton, &pitchParamButton,
+                           &drawButton, &lineButton, &connectButton, &splitButton, &pitchParamButton,
                           &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton, &formantParamButton,
                           &volumeParamButton })
@@ -162,6 +162,7 @@ MainComponent::MainComponent()
     lineButton.setComponentID("icon.line");
     wrenchButton.setComponentID("icon.wrench");
     connectButton.setComponentID("icon.connect");
+    splitButton.setComponentID("icon.split");
 
     bpmEditor.setEditable(true, false, false);
     beatsEditor.setEditable(true, false, false);
@@ -455,6 +456,12 @@ MainComponent::MainComponent()
         pianoRoll.setTool(PianoRollComponent::Tool::connect);
         setToolButton(connectButton);
     };
+    splitButton.onClick = [this]
+    {
+        setSourceEditMode(false);
+        pianoRoll.setTool(PianoRollComponent::Tool::split);
+        setToolButton(splitButton);
+    };
     for (auto* button : { &pitchParamButton, &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton,
                           &formantParamButton, &volumeParamButton })
@@ -564,6 +571,8 @@ void MainComponent::refreshTexts()
     lineButton.setTooltip(strings.text("tool.line"));
     connectButton.setButtonText({});
     connectButton.setTooltip(strings.text("tool.connect"));
+    splitButton.setButtonText({});
+    splitButton.setTooltip(strings.text("tool.split"));
     parameterTitle.setText(strings.text("editor.parameters"), juce::dontSendNotification);
     smoothCaption.setText(strings.text("editor.smooth"), juce::dontSendNotification);
     pitchParamButton.setButtonText(strings.text("param.pitch"));
@@ -636,7 +645,7 @@ void MainComponent::refreshProjectControls()
         renderOrder.setSelectedId(orderId, juce::dontSendNotification);
         // Render order only affects the NSF-HiFiGAN phrase path; the mld5-only
         // Robust Pitch Curve button and this control never compete for width.
-        const auto showRenderOrder = pitchId == 2;
+        const auto showRenderOrder = true;
         if (renderOrder.isVisible() != showRenderOrder)
         {
             renderOrder.setVisible(showRenderOrder);
@@ -778,7 +787,7 @@ void MainComponent::refreshRenderOrderItems(int preferredId)
 void MainComponent::setToolButton(juce::Button& selected)
 {
     const std::array<juce::Button*, 5> editTools {
-        &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton
+        &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton, &splitButton
     };
     for (auto* button : editTools)
         button->setToggleState(button == &selected, juce::dontSendNotification);
@@ -1039,6 +1048,7 @@ void MainComponent::resized()
     takeParameter(lineButton, 27);
     takeParameter(wrenchButton, 27);
     takeParameter(connectButton, 27);
+    takeParameter(splitButton, 27);
     takeParameter(smoothCaption, 42);
     takeParameter(smoothSlider, 118);
     takeParameter(pitchParamButton, 50);
