@@ -93,9 +93,20 @@ void PianoRollComponent::setPlayheadSeconds(double seconds)
 void PianoRollComponent::setTool(Tool nextTool)
 {
     tool = nextTool;
-    setMouseCursor(tool == Tool::draw || tool == Tool::line || tool == Tool::split
+    setMouseCursor(tool == Tool::draw || tool == Tool::line
+                       ? juce::MouseCursor::CrosshairCursor
+                   : tool == Tool::connect && connectMode != ConnectMode::merge
                        ? juce::MouseCursor::CrosshairCursor
                        : juce::MouseCursor::NormalCursor);
+}
+
+void PianoRollComponent::setConnectMode(ConnectMode mode)
+{
+    connectMode = mode;
+    if (tool == Tool::connect)
+        setMouseCursor(connectMode != ConnectMode::merge
+                           ? juce::MouseCursor::CrosshairCursor
+                           : juce::MouseCursor::NormalCursor);
 }
 
 void PianoRollComponent::selectAllNotes()

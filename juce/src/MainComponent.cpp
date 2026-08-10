@@ -73,7 +73,7 @@ MainComponent::MainComponent()
 
     for (auto* button : { &openButton, &saveButton, &audioButton, &melodyneButton,
                           &playButton, &stopButton, &noteEditButton, &wrenchButton,
-                           &drawButton, &lineButton, &connectButton, &splitButton, &pitchParamButton,
+                           &drawButton, &lineButton, &connectButton, &pitchParamButton,
                           &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton, &formantParamButton,
                           &volumeParamButton })
@@ -162,7 +162,6 @@ MainComponent::MainComponent()
     lineButton.setComponentID("icon.line");
     wrenchButton.setComponentID("icon.wrench");
     connectButton.setComponentID("icon.connect");
-    splitButton.setComponentID("icon.split");
 
     bpmEditor.setEditable(true, false, false);
     beatsEditor.setEditable(true, false, false);
@@ -453,14 +452,17 @@ MainComponent::MainComponent()
     connectButton.onClick = [this]
     {
         setSourceEditMode(false);
+        auto mode = pianoRoll.getConnectMode();
+        if (mode == PianoRollComponent::ConnectMode::merge)
+            mode = PianoRollComponent::ConnectMode::glideSplit;
+        else if (mode == PianoRollComponent::ConnectMode::glideSplit)
+            mode = PianoRollComponent::ConnectMode::fullSplit;
+        else
+            mode = PianoRollComponent::ConnectMode::merge;
+        pianoRoll.setConnectMode(mode);
         pianoRoll.setTool(PianoRollComponent::Tool::connect);
         setToolButton(connectButton);
-    };
-    splitButton.onClick = [this]
-    {
-        setSourceEditMode(false);
-        pianoRoll.setTool(PianoRollComponent::Tool::split);
-        setToolButton(splitButton);
+        updateConnectIcon(mode);
     };
     for (auto* button : { &pitchParamButton, &driftParamButton, &attackParamButton,
                           &breathParamButton, &tensionParamButton,
@@ -570,9 +572,8 @@ void MainComponent::refreshTexts()
     lineButton.setButtonText({});
     lineButton.setTooltip(strings.text("tool.line"));
     connectButton.setButtonText({});
-    connectButton.setTooltip(strings.text("tool.connect"));
-    splitButton.setButtonText({});
-    splitButton.setTooltip(strings.text("tool.split"));
+    connectButton.setTooltip(strings.text("tool.connect.merge"));
+    updateConnectIcon(PianoRollComponent::ConnectMode::merge);
     parameterTitle.setText(strings.text("editor.parameters"), juce::dontSendNotification);
     smoothCaption.setText(strings.text("editor.smooth"), juce::dontSendNotification);
     pitchParamButton.setButtonText(strings.text("param.pitch"));
@@ -786,8 +787,8 @@ void MainComponent::refreshRenderOrderItems(int preferredId)
 
 void MainComponent::setToolButton(juce::Button& selected)
 {
-    const std::array<juce::Button*, 6> editTools {
-        &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton, &splitButton
+    const std::array<juce::Button*, 5> editTools {
+        &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton
     };
     for (auto* button : editTools)
         button->setToggleState(button == &selected, juce::dontSendNotification);
@@ -803,6 +804,26 @@ void MainComponent::setToolButton(juce::Button& selected)
             || &selected == &tensionParamButton || &selected == &formantParamButton
             || &selected == &volumeParamButton)
             button->setToggleState(button == &selected, juce::dontSendNotification);
+}
+
+void MainComponent::updateConnectIcon(PianoRollComponent::ConnectMode mode)
+{
+    switch (mode)
+    {
+        case PianoRollComponent::ConnectMode::merge:
+            connectButton.setComponentID("icon.connect");
+            connectButton.setTooltip(strings.text("tool.connect.merge"));
+            break;
+        case PianoRollComponent::ConnectMode::glideSplit:
+            connectButton.setComponentID("icon.connectGlide");
+            connectButton.setTooltip(strings.text("tool.connect.glide"));
+            break;
+        case PianoRollComponent::ConnectMode::fullSplit:
+            connectButton.setComponentID("icon.connectSplit");
+            connectButton.setTooltip(strings.text("tool.connect.split"));
+            break;
+    }
+    connectButton.repaint();
 }
 
 void MainComponent::togglePlayback()
@@ -1048,7 +1069,6 @@ void MainComponent::resized()
     takeParameter(lineButton, 27);
     takeParameter(wrenchButton, 27);
     takeParameter(connectButton, 27);
-    takeParameter(splitButton, 27);
     takeParameter(smoothCaption, 42);
     takeParameter(smoothSlider, 118);
     takeParameter(pitchParamButton, 50);

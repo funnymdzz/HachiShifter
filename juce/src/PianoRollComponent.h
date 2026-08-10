@@ -14,7 +14,8 @@ class PianoRollComponent final : public juce::Component,
                                  private juce::ChangeListener
 {
 public:
-    enum class Tool { note, draw, line, connect, split };
+    enum class Tool { note, draw, line, connect };
+    enum class ConnectMode { merge, glideSplit, fullSplit };
 
     explicit PianoRollComponent(ProjectModel& modelToUse);
     ~PianoRollComponent() override;
@@ -29,6 +30,8 @@ public:
     void setSampleRegions(const std::vector<SampleRegionSetting>& regions, int activeRegion);
     void setPlayheadSeconds(double seconds);
     void setTool(Tool nextTool);
+    void setConnectMode(ConnectMode mode);
+    [[nodiscard]] ConnectMode getConnectMode() const { return connectMode; }
     void selectAllNotes();
     void clearNoteSelection();
     void setSelectedNoteIds(const std::vector<juce::String>& noteIds);
@@ -92,6 +95,7 @@ private:
     bool showNoteLabels = false;
     bool showWaveforms = true;
     Tool tool = Tool::note;
+    ConnectMode connectMode = ConnectMode::merge;
     juce::String focusedClip;
     juce::String focusedTrack;
     double playheadSeconds = 0.0;

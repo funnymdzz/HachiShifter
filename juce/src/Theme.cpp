@@ -134,13 +134,29 @@ void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         path = svgIcon("M9.1 2.1a3.1 3.1 0 0 0-3.8 3.8L2.1 9.1a1.55 1.55 0 1 0 2.2 2.2l3.2-3.2a3.1 3.1 0 0 0 3.8-3.8L9.5 6.1 7.9 4.5 9.1 2.1Z");
     else if (id == "icon.connect")
     {
+        // Two circles connected by a straight line (merge/connect)
         path.addEllipse(bounds.getX(), bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
         path.addEllipse(bounds.getRight() - 6.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
         path.startNewSubPath(bounds.getX() + 5.0f, bounds.getCentreY());
         path.lineTo(bounds.getRight() - 5.0f, bounds.getCentreY());
     }
-    else if (id == "icon.split")
+    else if (id == "icon.connectGlide")
     {
+        // Two circles with a curved line through the middle (glide split)
+        path.addEllipse(bounds.getX(), bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        path.addEllipse(bounds.getRight() - 6.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
+        const auto midY = bounds.getCentreY();
+        juce::Path curve;
+        curve.startNewSubPath(bounds.getX() + 4.0f, midY);
+        curve.quadraticTo(bounds.getCentreX(), midY - 5.0f,
+                          bounds.getCentreX() + 2.0f, midY);
+        curve.quadraticTo(bounds.getCentreX() + 4.0f, midY + 5.0f,
+                          bounds.getRight() - 4.0f, midY);
+        path.addPath(curve);
+    }
+    else if (id == "icon.connectSplit")
+    {
+        // Two circles with line broken in middle (full cut)
         path.addEllipse(bounds.getX(), bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
         path.addEllipse(bounds.getRight() - 6.0f, bounds.getCentreY() - 3.0f, 6.0f, 6.0f);
         path.startNewSubPath(bounds.getX() + 5.0f, bounds.getCentreY());
@@ -154,7 +170,8 @@ void HachiLookAndFeel::drawButtonText(juce::Graphics& g, juce::TextButton& butto
         g.drawText(id == "icon.audio" ? "A+" : "M+", button.getLocalBounds(), juce::Justification::centred);
         return;
     }
-    if (id == "icon.line" || id == "icon.wrench" || id == "icon.connect" || id == "icon.split")
+    if (id == "icon.line" || id == "icon.wrench" || id == "icon.connect"
+        || id == "icon.connectGlide" || id == "icon.connectSplit")
         g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved,
                                                 juce::PathStrokeType::rounded));
     else

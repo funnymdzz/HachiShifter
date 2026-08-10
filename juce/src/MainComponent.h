@@ -197,6 +197,7 @@ private:
     void refreshStretchAlgorithmItems(int preferredId = 0);
     void refreshRenderOrderItems(int preferredId = 0);
     void setToolButton(juce::Button& selected);
+    void updateConnectIcon(PianoRollComponent::ConnectMode mode);
     void togglePlayback();
     void newProject();
     void openProject();
@@ -268,7 +269,6 @@ private:
     juce::TextButton drawButton;
     juce::TextButton lineButton;
     juce::TextButton connectButton;
-    juce::TextButton splitButton;
     juce::TextButton pitchParamButton;
     juce::TextButton driftParamButton;
     juce::TextButton attackParamButton;
