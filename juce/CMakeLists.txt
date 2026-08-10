@@ -127,6 +127,8 @@ target_sources(HachiShifterNext PRIVATE
     src/backend/NativeAnalyzer.h
     src/backend/AnalysisService.cpp
     src/backend/AnalysisService.h
+    src/backend/AudioFileReader.cpp
+    src/backend/AudioFileReader.h
     src/backend/GameAnalyzer.cpp
     src/backend/GameAnalyzer.h
     src/backend/FcpeAnalyzer.cpp
@@ -159,6 +161,7 @@ target_compile_definitions(HachiShifterNext PRIVATE
     JUCE_USE_CURL=0
     JUCE_WEB_BROWSER=0
     JUCE_MODAL_LOOPS_PERMITTED=0
+    JUCE_USE_MP3AUDIOFORMAT=1
 )
 
 target_include_directories(HachiShifterNext PRIVATE
