@@ -942,6 +942,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                                             - clip.startSeconds) <= 0.002)
                             {
                                 request.neighborEdgeF0Start = neighborF0(cand, false);
+                                request.neuralGuardStartSeconds = 0.0005f;
                                 break;
                             }
                         }
@@ -957,6 +958,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                                             - (clip.startSeconds + clip.durationSeconds)) <= 0.002)
                             {
                                 request.neighborEdgeF0End = neighborF0(cand, true);
+                                request.neuralGuardEndSeconds = 0.0005f;
                                 break;
                             }
                         }
