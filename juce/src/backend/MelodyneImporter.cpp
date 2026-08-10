@@ -706,8 +706,11 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
         const auto elementIds = graph.list(*elementList);
         std::set<std::uint32_t> connectedPrevious;
         std::map<std::uint32_t, std::size_t> itemElementCounts;
+        std::map<std::uint32_t, std::size_t> sourceElementCounts;
         std::map<std::uint32_t, double> itemLastMappedEnd;
         std::map<std::uint32_t, std::uint32_t> itemLastElement;
+        std::map<std::uint32_t, double> sourceLastSourceEnd;
+        std::map<std::uint32_t, std::uint32_t> sourceLastElement;
         for (const auto element : elementIds)
         {
             if (const auto join = graph.reference(element, "followingJoin"))
@@ -720,9 +723,18 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             const auto item = std::get<1>(*chain);
             const auto duration = graph.number(element, "duration").value_or(0.0);
             if (duration <= 0.0 || !resolved.contains(source)) continue;
+            ++sourceElementCounts[source];
+            ++itemElementCounts[item];
             const auto timeFunction = graph.reference(element, "sourceTimeForElementTimeFunction");
             const auto mappedEnd = timeFunction ? graph.evaluate(*timeFunction, duration) : duration;
-            ++itemElementCounts[item];
+            const auto sampleRate = std::max(1.0, graph.number(source, "sampleRate").value_or(44100.0));
+            const auto itemStart = std::max(0.0, graph.number(item, "startSampleIndex").value_or(0.0)) / sampleRate;
+            const auto sourceEnd = itemStart + mappedEnd;
+            if (!sourceLastElement.contains(source) || sourceEnd >= sourceLastSourceEnd[source] - 1.0e-7)
+            {
+                sourceLastSourceEnd[source] = sourceEnd;
+                sourceLastElement[source] = element;
+            }
             if (!itemLastElement.contains(item) || mappedEnd >= itemLastMappedEnd[item] - 1.0e-7)
             {
                 itemLastMappedEnd[item] = mappedEnd;
@@ -755,7 +767,8 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             const auto sourceEnd = itemStart + std::max(mappedStart + 0.001, mappedEnd);
             auto tailSourceEnd = sourceEnd;
             auto tailTargetSeconds = 0.0;
-            auto extendTail = itemLastElement[item] == element;
+            auto extendTail = sourceLastElement[source] == element
+                && sourceElementCounts[source] > 1;
             if (extendTail)
             {
                 const auto join = graph.reference(element, "followingJoin");
@@ -766,8 +779,6 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 if (const auto itemSamples = graph.number(item, "sampleCount"); itemSamples && *itemSamples > 0.0)
                 {
                     auto itemEnd = itemStart + *itemSamples / sampleRate;
-                    // Source items can be sliced to match exactly one element;
-                    // extend to the full source file end when it has more audio.
                     if (const auto sourceSamples = graph.number(source, "sampleCount");
                         sourceSamples && *sourceSamples > 0.0)
                         itemEnd = std::max(itemEnd, *sourceSamples / sampleRate);
