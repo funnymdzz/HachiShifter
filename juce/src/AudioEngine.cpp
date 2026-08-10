@@ -866,6 +866,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         auto request = makeRenderRequest(clip, track,
                             hifiganModelDirectory, inferenceConfiguration,
                             connectedPrevFlag, connectedNextFlag);
+                        if (previousGap < -1.0e-6 || nextGap < -1.0e-6)
+                            request.matchNsfSourceLevel = false;
                         if (track.pitchAlgorithm == PitchAlgorithm::nsfHifigan)
                         {
                             // A connected seam is covered by the mixer crossfade,
