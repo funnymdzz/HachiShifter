@@ -811,10 +811,20 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                 ? orderedClips[clipIndex + 1]->startSeconds
                     - (clip.startSeconds + clip.durationSeconds)
                 : std::numeric_limits<double>::infinity();
-            const auto joinedStart = connectedPrev[clipIndex]
-                && previousGap >= -1.0e-6 && previousGap <= 0.002;
-            const auto joinedEnd = connectedNext[clipIndex]
-                && nextGap >= -1.0e-6 && nextGap <= 0.002;
+            const auto joinedStart = (connectedPrev[clipIndex]
+                && previousGap >= -1.0e-6 && previousGap <= 0.002)
+                || (inSameSourceGroup[clipIndex]
+                    && [&] { for (auto& g : pendingGroups)
+                        for (size_t p = 1; p < g.clips.size(); ++p)
+                            if (g.clips[p] == &clip) return true;
+                        return false; }());
+            const auto joinedEnd = (connectedNext[clipIndex]
+                && nextGap >= -1.0e-6 && nextGap <= 0.002)
+                || (inSameSourceGroup[clipIndex]
+                    && [&] { for (auto& g : pendingGroups)
+                        for (size_t p = 0; p + 1 < g.clips.size(); ++p)
+                            if (g.clips[p] == &clip) return true;
+                        return false; }());
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
             if (joinedStart) loaded->clip.crossfadeInSeconds = 0.0;
