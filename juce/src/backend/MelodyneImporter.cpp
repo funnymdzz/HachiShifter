@@ -941,76 +941,67 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             track.clips.push_back(std::move(clip));
         }
         // Merge pitch-joined same-source clips into single continuous clips.
-        // Melodyne's glide-split stores connected elements; importing them as
-        // one clip makes F0 naturally continuous without any renderer workaround.
-        for (std::size_t idx = 1; idx < track.clips.size(); )
+        for (std::size_t idx = 0; idx < track.clips.size(); ++idx)
         {
-            auto& prev = track.clips[idx - 1];
-            auto& curr = track.clips[idx];
-            if (prev.notes.empty() || curr.notes.empty()
-                || prev.sourceFile != curr.sourceFile) { ++idx; continue; }
+            auto& prev = track.clips[idx];
+            if (prev.notes.empty()) continue;
             auto& prevNote = prev.notes.front();
-            auto& currNote = curr.notes.front();
-            if (!prevNote.connectedToNext) { ++idx; continue; }
-            // Same source, pitch-joined: merge into prev.
-            const auto prevDur = prev.durationSeconds;
-            const auto prevSrcEnd = prev.sourceOffsetSeconds
-                + prev.sourceDurationSeconds;
-            // Extend source range to cover both clips
-            const auto newSrcEnd = std::max(prevSrcEnd,
-                curr.sourceOffsetSeconds + curr.sourceDurationSeconds);
-            prev.sourceDurationSeconds = newSrcEnd - prev.sourceOffsetSeconds;
-            prev.durationSeconds += curr.durationSeconds;
-            // Offset curr's time map points by prev's duration
-            const auto srcShift = curr.sourceOffsetSeconds - prev.sourceOffsetSeconds;
-            for (auto& point : curr.sourceTimeMap)
+            if (!prevNote.connectedToNext) continue;
+            // Find the connected successor (may not be adjacent)
+            for (std::size_t nxt = idx + 1; nxt < track.clips.size(); ++nxt)
             {
-                point.targetSeconds += prevDur;
-                point.sourceSeconds += srcShift;
+                auto& curr = track.clips[nxt];
+                if (curr.notes.empty() || curr.sourceFile != prev.sourceFile) continue;
+                auto& currNote = curr.notes.front();
+                if (!currNote.connectedToPrevious) continue;
+                // Found successor: merge curr into prev
+                const auto prevDur = prev.durationSeconds;
+                const auto srcShift = curr.sourceOffsetSeconds - prev.sourceOffsetSeconds;
+                const auto mergedSrcEnd = std::max(
+                    prev.sourceOffsetSeconds + prev.sourceDurationSeconds,
+                    curr.sourceOffsetSeconds + curr.sourceDurationSeconds);
+                prev.sourceDurationSeconds = mergedSrcEnd - prev.sourceOffsetSeconds;
+                prev.durationSeconds += curr.durationSeconds;
+                for (auto& point : curr.sourceTimeMap)
+                {
+                    point.targetSeconds += prevDur;
+                    point.sourceSeconds += srcShift;
+                }
+                if (prev.sourceTimeMap.empty())
+                {
+                    prev.sourceTimeMap.push_back({ 0.0, 0.0 });
+                    prev.sourceTimeMap.push_back({ prevDur, prev.sourceDurationSeconds });
+                }
+                for (const auto& point : curr.sourceTimeMap)
+                {
+                    if (!prev.sourceTimeMap.empty()
+                        && std::abs(point.targetSeconds - prev.sourceTimeMap.back().targetSeconds) <= 1.0e-7)
+                        prev.sourceTimeMap.back().sourceSeconds = std::max(
+                            prev.sourceTimeMap.back().sourceSeconds, point.sourceSeconds);
+                    else
+                        prev.sourceTimeMap.push_back(point);
+                }
+                auto& prevContour = prevNote.contour;
+                auto& currContour = currNote.contour;
+                if (!prevContour.empty() && !currContour.empty())
+                {
+                    if (prevContour.back().timeSeconds < prevDur - 0.001)
+                        prevContour.push_back({ prevDur, prevContour.back().relativeCents,
+                            prevContour.back().withoutVibratoCents, prevContour.back().voiced });
+                    for (auto& point : currContour)
+                        point.timeSeconds += prevDur;
+                    if (currContour.front().timeSeconds <= prevDur + 0.001)
+                        currContour.erase(currContour.begin());
+                    prevContour.insert(prevContour.end(), currContour.begin(), currContour.end());
+                }
+                prevNote.durationSeconds += currNote.durationSeconds;
+                prevNote.connectedToNext = currNote.connectedToNext;
+                prev.gain = std::max(prev.gain, curr.gain);
+                prev.crossfadeOutSeconds = curr.crossfadeOutSeconds;
+                track.clips.erase(track.clips.begin() + static_cast<std::ptrdiff_t>(nxt));
+                --idx;  // re-scan from current position
+                break;
             }
-            if (prev.sourceTimeMap.empty())
-            {
-                prev.sourceTimeMap.push_back({ 0.0, prev.sourceOffsetSeconds - prev.sourceOffsetSeconds });
-                prev.sourceTimeMap.push_back({ prevDur, prevSrcEnd - prev.sourceOffsetSeconds });
-            }
-            for (const auto& point : curr.sourceTimeMap)
-            {
-                if (!prev.sourceTimeMap.empty()
-                    && std::abs(point.targetSeconds
-                                - prev.sourceTimeMap.back().targetSeconds) <= 1.0e-7)
-                    prev.sourceTimeMap.back().sourceSeconds = std::max(
-                        prev.sourceTimeMap.back().sourceSeconds, point.sourceSeconds);
-                else
-                    prev.sourceTimeMap.push_back(point);
-            }
-            // Merge contours: append curr's with a smooth link at boundary
-            auto& prevContour = prevNote.contour;
-            auto& currContour = currNote.contour;
-            if (!prevContour.empty() && !currContour.empty())
-            {
-                const auto boundaryTime = prevDur;
-                const auto boundarySource = prevSrcEnd;
-                // Extend prev's contour to boundary if needed
-                if (prevContour.back().timeSeconds < boundaryTime - 0.001)
-                    prevContour.push_back({ boundaryTime,
-                        prevContour.back().relativeCents,
-                        prevContour.back().withoutVibratoCents,
-                        prevContour.back().voiced });
-                // Shift curr's contour times by prevDur
-                for (auto& point : currContour)
-                    point.timeSeconds += prevDur;
-                // Merge: keep prev's contour, append curr's (skip first if at boundary)
-                if (currContour.front().timeSeconds <= boundaryTime + 0.001)
-                    currContour.erase(currContour.begin());
-                prevContour.insert(prevContour.end(), currContour.begin(), currContour.end());
-            }
-            prevNote.durationSeconds += currNote.durationSeconds;
-            prevNote.connectedToNext = currNote.connectedToNext;
-            // Keep the larger gain
-            prev.gain = std::max(prev.gain, curr.gain);
-            prev.crossfadeOutSeconds = curr.crossfadeOutSeconds;
-            track.clips.erase(track.clips.begin() + static_cast<std::ptrdiff_t>(idx));
-            // Don't increment idx; the merged clip might connect to the next one
         }
         if (!track.clips.empty()) result.project.tracks.push_back(std::move(track));
     }
