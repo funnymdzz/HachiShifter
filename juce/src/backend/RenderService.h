@@ -53,6 +53,7 @@ struct Mld5FileRenderRequest
     // interpolates from/to the neighbor's actual F0 at that seam.
     float neighborEdgeF0Start = 0.0f;
     float neighborEdgeF0End = 0.0f;
+    bool isGlideMerged = false;
 };
 
 struct RenderedAudio

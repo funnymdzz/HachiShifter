@@ -359,6 +359,7 @@ backend::Mld5FileRenderRequest makeMergedRenderRequest(
     request.pitchBackend = backend::PitchRenderBackend::nsfHifigan;
     request.stretchAlgorithm = static_cast<int>(track.stretchAlgorithm);
     request.normalizeVolume = track.normalizeVolume;
+    request.isGlideMerged = true;
     const auto preserveSourceSeams = track.stretchAlgorithm == StretchAlgorithm::variableMelHop
         || track.stretchAlgorithm == StretchAlgorithm::nsfShiftThenSplice;
 
