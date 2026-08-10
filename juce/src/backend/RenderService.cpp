@@ -95,6 +95,21 @@ void matchActiveRms(juce::AudioBuffer<float>& rendered,
     rendered.applyGain(gain);
 }
 
+void raiseActiveRmsFloor(juce::AudioBuffer<float>& rendered,
+                         const juce::AudioBuffer<float>& source)
+{
+    const auto sourceRms = activeRms(source);
+    const auto renderedRms = activeRms(rendered);
+    if (!(sourceRms > 1.0e-8 && renderedRms > 1.0e-8) || renderedRms >= sourceRms) return;
+    auto gain = static_cast<float>(std::clamp(sourceRms / renderedRms, 1.0, 4.0));
+    auto peak = 0.0f;
+    for (int channel = 0; channel < rendered.getNumChannels(); ++channel)
+        for (int sample = 0; sample < rendered.getNumSamples(); ++sample)
+            peak = std::max(peak, std::abs(rendered.getSample(channel, sample)));
+    if (peak * gain > 0.98f) gain = 0.98f / peak;
+    if (gain > 1.0f) rendered.applyGain(gain);
+}
+
 // Reconstructed Robust Pitch Curve stage.  The binary handler changes a flag
 // on the detection audio source (boolean at source+0x1ac), before note edits
 // are rendered.  Robustify source F0, then reapply the original target-source
@@ -797,6 +812,8 @@ public:
                 rendered = std::move(neural.buffer);
                 usedNsfModel = true;
                 nsfInference = neural.activeInference;
+                if (request.stretchAlgorithm == 1 || request.stretchAlgorithm == 4)
+                    raiseActiveRmsFloor(rendered, source);
                 applyExpressionAndTension(rendered, reader->sampleRate,
                     request.framePeriodMs, request.targetMidi, request.noteGain,
                     request.tension, request.breath);
