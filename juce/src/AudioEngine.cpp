@@ -854,8 +854,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                         return false; }());
             auto loaded = std::make_unique<LoadedClip>();
             loaded->clip = clip;
-            if (joinedStart) loaded->clip.crossfadeInSeconds = 0.0;
-            if (joinedEnd) loaded->clip.crossfadeOutSeconds = 0.0;
+            if (joinedStart) { loaded->clip.crossfadeInSeconds = 0.0; loaded->clip.fadeInSeconds = 0.0; }
+            if (joinedEnd) { loaded->clip.crossfadeOutSeconds = 0.0; loaded->clip.fadeOutSeconds = 0.0; }
             loaded->trackId = track.id.toStdString();
             loaded->smoothOverlaps = track.smoothOverlaps;
             const auto compactDeclick = std::min(0.0025, loaded->clip.durationSeconds * 0.5);
