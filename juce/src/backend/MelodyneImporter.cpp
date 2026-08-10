@@ -705,42 +705,11 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
         if (!elementList) continue;
         const auto elementIds = graph.list(*elementList);
         std::set<std::uint32_t> connectedPrevious;
-        std::map<std::uint32_t, std::size_t> itemElementCounts;
-        std::map<std::uint32_t, std::size_t> sourceElementCounts;
-        std::map<std::uint32_t, double> itemLastMappedEnd;
-        std::map<std::uint32_t, std::uint32_t> itemLastElement;
-        std::map<std::uint32_t, double> sourceLastSourceEnd;
-        std::map<std::uint32_t, std::uint32_t> sourceLastElement;
         for (const auto element : elementIds)
-        {
             if (const auto join = graph.reference(element, "followingJoin"))
                 if (graph.boolean(*join, "joinsPitches"))
                     if (const auto following = graph.reference(*join, "followingElement"))
                         connectedPrevious.insert(*following);
-            const auto chain = sourceChain(graph, element);
-            if (!chain || graph.className(element) != "MUElement") continue;
-            const auto source = std::get<0>(*chain);
-            const auto item = std::get<1>(*chain);
-            const auto duration = graph.number(element, "duration").value_or(0.0);
-            if (duration <= 0.0 || !resolved.contains(source)) continue;
-            ++sourceElementCounts[source];
-            ++itemElementCounts[item];
-            const auto timeFunction = graph.reference(element, "sourceTimeForElementTimeFunction");
-            const auto mappedEnd = timeFunction ? graph.evaluate(*timeFunction, duration) : duration;
-            const auto sampleRate = std::max(1.0, graph.number(source, "sampleRate").value_or(44100.0));
-            const auto itemStart = std::max(0.0, graph.number(item, "startSampleIndex").value_or(0.0)) / sampleRate;
-            const auto sourceEnd = itemStart + mappedEnd;
-            if (!sourceLastElement.contains(source) || sourceEnd >= sourceLastSourceEnd[source] - 1.0e-7)
-            {
-                sourceLastSourceEnd[source] = sourceEnd;
-                sourceLastElement[source] = element;
-            }
-            if (!itemLastElement.contains(item) || mappedEnd >= itemLastMappedEnd[item] - 1.0e-7)
-            {
-                itemLastMappedEnd[item] = mappedEnd;
-                itemLastElement[item] = element;
-            }
-        }
         for (const auto element : elementIds)
         {
             if (graph.className(element) != "MUElement") continue;
@@ -765,40 +734,6 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             const auto mappedEnd = timeFunction ? graph.evaluate(*timeFunction, duration) : duration;
             const auto sourceStart = itemStart + std::max(0.0, mappedStart);
             const auto sourceEnd = itemStart + std::max(mappedStart + 0.001, mappedEnd);
-            auto tailSourceEnd = sourceEnd;
-            auto tailTargetSeconds = 0.0;
-            auto extendTail = sourceLastElement[source] == element
-                && sourceElementCounts[source] > 1;
-            if (extendTail)
-            {
-                const auto join = graph.reference(element, "followingJoin");
-                if (join && graph.boolean(*join, "joinsPitches"))
-                    extendTail = false;
-            }
-            if (extendTail)
-                if (const auto itemSamples = graph.number(item, "sampleCount"); itemSamples && *itemSamples > 0.0)
-                {
-                    auto itemEnd = itemStart + *itemSamples / sampleRate;
-                    if (const auto sourceSamples = graph.number(source, "sampleCount");
-                        sourceSamples && *sourceSamples > 0.0)
-                        itemEnd = std::max(itemEnd, *sourceSamples / sampleRate);
-                    const auto tailSourceSeconds = itemEnd - sourceEnd;
-                    if (tailSourceSeconds > 0.001)
-                    {
-                        const auto probeTarget = std::max(0.0,
-                            duration - std::min(0.02, duration * 0.25));
-                        const auto probeSource = timeFunction
-                            ? graph.evaluate(*timeFunction, probeTarget) : probeTarget;
-                        const auto targetSpan = duration - probeTarget;
-                        const auto endSlope = targetSpan > 1.0e-9
-                            ? (mappedEnd - probeSource) / targetSpan : 1.0;
-                        if (std::isfinite(endSlope) && endSlope > 0.05)
-                        {
-                            tailTargetSeconds = std::min(2.0, tailSourceSeconds / endSlope);
-                            tailSourceEnd = sourceEnd + tailTargetSeconds * endSlope;
-                        }
-                    }
-                }
 
             ClipData clip;
             clip.id = makeId("clip");
@@ -865,20 +800,6 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 }
                 if (clip.sourceTimeMap.size() < 2)
                     clip.sourceTimeMap.clear();
-            }
-            if (tailTargetSeconds > 1.0e-6)
-            {
-                const auto originalSourceDuration = clip.sourceDurationSeconds;
-                if (clip.sourceTimeMap.empty())
-                {
-                    clip.sourceTimeMap.push_back({ 0.0, 0.0 });
-                    clip.sourceTimeMap.push_back({ duration, originalSourceDuration });
-                }
-                if (clip.fadeOutSeconds > 1.0e-6)
-                    clip.fadeOutSeconds += tailTargetSeconds;
-                clip.durationSeconds += tailTargetSeconds;
-                clip.sourceDurationSeconds = tailSourceEnd - sourceStart;
-                clip.sourceTimeMap.push_back({ clip.durationSeconds, clip.sourceDurationSeconds });
             }
 
             NoteData note;
