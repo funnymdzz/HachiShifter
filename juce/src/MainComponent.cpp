@@ -786,7 +786,7 @@ void MainComponent::refreshRenderOrderItems(int preferredId)
 
 void MainComponent::setToolButton(juce::Button& selected)
 {
-    const std::array<juce::Button*, 5> editTools {
+    const std::array<juce::Button*, 6> editTools {
         &noteEditButton, &wrenchButton, &drawButton, &lineButton, &connectButton, &splitButton
     };
     for (auto* button : editTools)
