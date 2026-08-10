@@ -766,9 +766,11 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
                 if (const auto itemSamples = graph.number(item, "sampleCount"); itemSamples && *itemSamples > 0.0)
                 {
                     auto itemEnd = itemStart + *itemSamples / sampleRate;
+                    // Source items can be sliced to match exactly one element;
+                    // extend to the full source file end when it has more audio.
                     if (const auto sourceSamples = graph.number(source, "sampleCount");
                         sourceSamples && *sourceSamples > 0.0)
-                        itemEnd = std::min(itemEnd, *sourceSamples / sampleRate);
+                        itemEnd = std::max(itemEnd, *sourceSamples / sampleRate);
                     const auto tailSourceSeconds = itemEnd - sourceEnd;
                     if (tailSourceSeconds > 0.001)
                     {
