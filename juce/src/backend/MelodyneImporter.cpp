@@ -940,62 +940,6 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             clip.notes.push_back(std::move(note));
             track.clips.push_back(std::move(clip));
         }
-        // Merge pitch-joined same-source clips into single clips.
-        // Each joined pair becomes one clip with multiple notes (keeping
-        // their independent pitch centers), connected source range and
-        // a continuous time map so the renderer sees one phrase.
-        for (std::size_t idx = 0; idx < track.clips.size(); ++idx)
-        {
-            auto& prev = track.clips[idx];
-            if (prev.notes.empty()) continue;
-            auto& prevNote = prev.notes.back();
-            if (!prevNote.connectedToNext) continue;
-            for (std::size_t nxt = idx + 1; nxt < track.clips.size(); ++nxt)
-            {
-                auto& curr = track.clips[nxt];
-                if (curr.notes.empty() || curr.sourceFile != prev.sourceFile) continue;
-                auto& currNote = curr.notes.front();
-                if (!currNote.connectedToPrevious) continue;
-                const auto prevDur = prev.durationSeconds;
-                const auto srcShift = curr.sourceOffsetSeconds - prev.sourceOffsetSeconds;
-                const auto mergedSrcEnd = std::max(
-                    prev.sourceOffsetSeconds + prev.sourceDurationSeconds,
-                    curr.sourceOffsetSeconds + curr.sourceDurationSeconds);
-                prev.sourceDurationSeconds = mergedSrcEnd - prev.sourceOffsetSeconds;
-                prev.durationSeconds += curr.durationSeconds;
-                for (auto& point : curr.sourceTimeMap)
-                {
-                    point.targetSeconds += prevDur;
-                    point.sourceSeconds += srcShift;
-                }
-                if (prev.sourceTimeMap.empty())
-                {
-                    prev.sourceTimeMap.push_back({ 0.0, 0.0 });
-                    prev.sourceTimeMap.push_back({ prevDur, prev.sourceDurationSeconds });
-                }
-                for (const auto& point : curr.sourceTimeMap)
-                {
-                    if (!prev.sourceTimeMap.empty()
-                        && std::abs(point.targetSeconds - prev.sourceTimeMap.back().targetSeconds) <= 1.0e-7)
-                        prev.sourceTimeMap.back().sourceSeconds = std::max(
-                            prev.sourceTimeMap.back().sourceSeconds, point.sourceSeconds);
-                    else
-                        prev.sourceTimeMap.push_back(point);
-                }
-                // Shift curr's contour times and note start, keep separate note
-                for (auto& p : currNote.contour)
-                    p.timeSeconds += prevDur;
-                currNote.startSeconds += prevDur;
-                currNote.durationSeconds = curr.durationSeconds;
-                prevNote.connectedToNext = false;
-                prev.notes.push_back(std::move(currNote));
-                prev.gain = std::max(prev.gain, curr.gain);
-                prev.crossfadeOutSeconds = curr.crossfadeOutSeconds;
-                track.clips.erase(track.clips.begin() + static_cast<std::ptrdiff_t>(nxt));
-                --idx;
-                break;
-            }
-        }
         if (!track.clips.empty()) result.project.tracks.push_back(std::move(track));
     }
     if (result.project.tracks.empty())
