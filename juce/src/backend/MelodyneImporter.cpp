@@ -755,8 +755,14 @@ std::optional<MelodyneImportResult> MelodyneImporter::importProject(
             const auto sourceEnd = itemStart + std::max(mappedStart + 0.001, mappedEnd);
             auto tailSourceEnd = sourceEnd;
             auto tailTargetSeconds = 0.0;
-            if (itemLastElement[item] == element
-                && !graph.reference(element, "followingJoin"))
+            auto extendTail = itemLastElement[item] == element;
+            if (extendTail)
+            {
+                const auto join = graph.reference(element, "followingJoin");
+                if (join && graph.boolean(*join, "joinsPitches"))
+                    extendTail = false;
+            }
+            if (extendTail)
                 if (const auto itemSamples = graph.number(item, "sampleCount"); itemSamples && *itemSamples > 0.0)
                 {
                     auto itemEnd = itemStart + *itemSamples / sampleRate;
