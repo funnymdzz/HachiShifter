@@ -6,16 +6,21 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <signalsmith-stretch.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
+#include <new>
 #include <numeric>
 #include <optional>
+#include <mutex>
 #include <utility>
 
 namespace hachi::backend
 {
 namespace
 {
+std::timed_mutex llsmRenderMutex;
+
 std::optional<std::pair<float, float>> pitchAt(const std::vector<float>& sourceMidi,
                                                 const std::vector<float>& targetMidi,
                                                 double position)
@@ -697,6 +702,7 @@ public:
                                   request.robustPitchCurve);
         juce::AudioBuffer<float> rendered;
         auto usedNsfModel = false;
+        auto usedLlsm2 = false;
         juce::String nsfInference;
         if (request.pitchBackend == PitchRenderBackend::world)
         {
@@ -766,18 +772,40 @@ public:
             // Direct LLSM2 layer-0/layer-1 analysis and synthesis.  The vocal
             // tract envelope, glottal source phase, harmonic component and
             // noise component stay separate while time and F0 are remapped.
-            rendered = Llsm2Renderer::render(source, targetSamples, reader->sampleRate,
-                request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                request.formantSemitones, request.tension, request.timeMap);
+            std::unique_lock llsmLock(llsmRenderMutex, std::defer_lock);
+            while (!llsmLock.try_lock_for(std::chrono::milliseconds(50)))
+                if (shouldExit()) return jobHasFinished;
+            if (shouldExit()) return jobHasFinished;
+            try
+            {
+                rendered = Llsm2Renderer::render(source, targetSamples, reader->sampleRate,
+                    request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                    request.formantSemitones, request.tension, request.timeMap);
+            }
+            catch (const std::bad_alloc&)
+            {
+                rendered.setSize(0, 0);
+            }
+            llsmLock.unlock();
             if (rendered.getNumSamples() == targetSamples)
+            {
+                usedLlsm2 = true;
                 applyExpressionAndTension(rendered, reader->sampleRate,
                     request.framePeriodMs, request.targetMidi, request.noteGain,
                     {}, request.breath);
+            }
             else
-                rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
-                    request.framePeriodMs, request.sourceMidi, request.targetMidi,
-                    request.formantSemitones, request.noteGain, request.tension, request.breath,
-                    request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+                try
+                {
+                    rendered = renderFormantPreserved(source, targetSamples, reader->sampleRate,
+                        request.framePeriodMs, request.sourceMidi, request.targetMidi,
+                        request.formantSemitones, request.noteGain, request.tension, request.breath,
+                        request.timeMap, request.pitchBackend, request.stretchAlgorithm);
+                }
+                catch (const std::bad_alloc&)
+                {
+                    rendered.setSize(0, 0);
+                }
         }
         else if (request.pitchBackend == PitchRenderBackend::nsfHifigan)
         {
@@ -841,7 +869,8 @@ public:
                 ? (usedNsfModel ? juce::String("nsf-hifigan-onnx")
                                 : juce::String("nsf-hifigan-fallback"))
             : request.pitchBackend == PitchRenderBackend::llsm2
-                ? juce::String("llsm2-direct")
+                ? (usedLlsm2 ? juce::String("llsm2-direct")
+                             : juce::String("llsm2-fallback"))
             : request.pitchBackend == PitchRenderBackend::world ? juce::String("WORLD")
             : juce::String("vslib");
         if (usedNsfModel && nsfInference.isNotEmpty()) backend << "[" << nsfInference << "]";

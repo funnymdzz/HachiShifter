@@ -36,6 +36,12 @@ float midiToHz(float midi)
         ? 440.0f * std::exp2((midi - 69.0f) / 12.0f) : 0.0f;
 }
 
+bool validF0(float f0, double sampleRate)
+{
+    const auto maximum = static_cast<float>(std::min(8'000.0, sampleRate * 0.45));
+    return f0 == 0.0f || (std::isfinite(f0) && f0 >= 40.0f && f0 < maximum);
+}
+
 double sourceTimeAt(const std::vector<TimeMapPoint>& map, double targetSeconds,
                     double sourceDuration, double targetDuration)
 {
@@ -162,11 +168,12 @@ void interpolateLayer1(llsm_container* destination, const llsm_container* source
 
 void shiftVocalTract(float* envelope, float semitones)
 {
-    if (envelope == nullptr || std::abs(semitones) < 1.0e-4f) return;
+    if (envelope == nullptr || !std::isfinite(semitones)
+        || std::abs(semitones) < 1.0e-4f) return;
     const auto count = llsm_fparray_length(envelope);
     if (count < 2) return;
     std::vector<float> original(envelope, envelope + count);
-    const auto ratio = std::exp2(semitones / 12.0f);
+    const auto ratio = std::exp2(juce::jlimit(-24.0f, 24.0f, semitones) / 12.0f);
     for (int index = 0; index < count; ++index)
     {
         const auto sourceIndex = static_cast<float>(index) / ratio;
@@ -181,7 +188,8 @@ void shiftVocalTract(float* envelope, float semitones)
 
 void applySpectralTension(float* envelope, float tension)
 {
-    if (envelope == nullptr || std::abs(tension) < 1.0e-4f) return;
+    if (envelope == nullptr || !std::isfinite(tension)
+        || std::abs(tension) < 1.0e-4f) return;
     const auto count = llsm_fparray_length(envelope);
     const auto amount = juce::jlimit(-1.0f, 1.0f, tension);
     for (int index = 1; index < count; ++index)
@@ -199,14 +207,34 @@ juce::AudioBuffer<float> Llsm2Renderer::render(
     const std::vector<float>& tension, const std::vector<TimeMapPoint>& timeMap)
 {
     juce::AudioBuffer<float> empty;
-    if (source.getNumSamples() < 8 || targetSamples < 1 || sampleRate <= 0.0)
+    if (source.getNumSamples() < 8 || targetSamples < 1
+        || !std::isfinite(sampleRate) || sampleRate <= 0.0
+        || !std::isfinite(framePeriodMs) || framePeriodMs < 1.0 || framePeriodMs > 100.0)
         return empty;
 
     const auto hopSeconds = std::max(0.001, framePeriodMs / 1000.0);
     const auto sourceDuration = static_cast<double>(source.getNumSamples()) / sampleRate;
     const auto targetDuration = static_cast<double>(targetSamples) / sampleRate;
-    const auto sourceFrames = std::max(2, static_cast<int>(std::ceil(sourceDuration / hopSeconds)) + 1);
-    const auto targetFrames = std::max(2, static_cast<int>(std::ceil(targetDuration / hopSeconds)) + 1);
+    const auto sourceFrameEstimate = std::ceil(sourceDuration / hopSeconds) + 1.0;
+    const auto targetFrameEstimate = std::ceil(targetDuration / hopSeconds) + 1.0;
+    constexpr auto maxLlsmFrames = 1'200;
+    if (!std::isfinite(sourceFrameEstimate) || !std::isfinite(targetFrameEstimate)
+        || sourceFrameEstimate > maxLlsmFrames || targetFrameEstimate > maxLlsmFrames) return empty;
+    const auto sourceFrames = std::max(2, static_cast<int>(sourceFrameEstimate));
+    const auto targetFrames = std::max(2, static_cast<int>(targetFrameEstimate));
+    const auto durationTolerance = 1.0 / sampleRate + 1.0e-9;
+    auto previousTarget = -1.0;
+    auto previousSource = -1.0;
+    for (const auto& point : timeMap)
+    {
+        if (!std::isfinite(point.targetSeconds) || !std::isfinite(point.sourceSeconds)
+            || point.targetSeconds < previousTarget || point.sourceSeconds < previousSource
+            || point.targetSeconds < 0.0 || point.targetSeconds > targetDuration + durationTolerance
+            || point.sourceSeconds < 0.0 || point.sourceSeconds > sourceDuration + durationTolerance)
+            return empty;
+        previousTarget = point.targetSeconds;
+        previousSource = point.sourceSeconds;
+    }
 
     std::vector<float> mono(static_cast<std::size_t>(source.getNumSamples()), 0.0f);
     for (int sample = 0; sample < source.getNumSamples(); ++sample)
@@ -225,6 +253,16 @@ juce::AudioBuffer<float> Llsm2Renderer::render(
         const auto targetTime = targetTimeAtSource(timeMap, sourceTime, sourceDuration, targetDuration);
         analysisF0[static_cast<std::size_t>(frame)] = midiToHz(
             curveAt(sourceMidi, targetTime / hopSeconds));
+        if (!validF0(analysisF0[static_cast<std::size_t>(frame)], sampleRate)) return empty;
+    }
+
+    std::vector<float> targetF0Curve(static_cast<std::size_t>(targetFrames), 0.0f);
+    for (int frame = 0; frame < targetFrames; ++frame)
+    {
+        const auto targetTime = std::min(targetDuration, frame * hopSeconds);
+        auto& targetF0 = targetF0Curve[static_cast<std::size_t>(frame)];
+        targetF0 = midiToHz(curveAt(targetMidi, targetTime / hopSeconds));
+        if (!validF0(targetF0, sampleRate)) return empty;
     }
 
     AnalysisOptionsPtr analysis(llsm_create_aoptions(), llsm_delete_aoptions);
@@ -239,12 +277,20 @@ juce::AudioBuffer<float> Llsm2Renderer::render(
                                    sourceFrames, nullptr), llsm_delete_chunk);
     if (analysed == nullptr) return empty;
     llsm_chunk_tolayer1(analysed.get(), 2048);
+    for (int frame = 0; frame < sourceFrames; ++frame)
+        if (analysed->frames[frame] == nullptr
+            || !llsm_frame_checklayer1(analysed->frames[frame])) return empty;
     llsm_chunk_phasepropagate(analysed.get(), -1);
 
     auto* targetConfiguration = llsm_copy_container(analysed->conf);
     if (targetConfiguration == nullptr) return empty;
-    if (auto* frameCount = static_cast<int*>(llsm_container_get(targetConfiguration, LLSM_CONF_NFRM)))
-        *frameCount = targetFrames;
+    auto* frameCount = static_cast<int*>(llsm_container_get(targetConfiguration, LLSM_CONF_NFRM));
+    if (frameCount == nullptr)
+    {
+        llsm_delete_container(targetConfiguration);
+        return empty;
+    }
+    *frameCount = targetFrames;
     ChunkPtr transformed(llsm_create_chunk(targetConfiguration, 0), llsm_delete_chunk);
     llsm_delete_container(targetConfiguration);
     if (transformed == nullptr) return empty;
@@ -257,16 +303,25 @@ juce::AudioBuffer<float> Llsm2Renderer::render(
                                          sourceTime / hopSeconds);
         const auto left = juce::jlimit(0, sourceFrames - 1, static_cast<int>(std::floor(mapped)));
         const auto right = std::min(sourceFrames - 1, left + 1);
-        transformed->frames[frame] = llsm_copy_container(analysed->frames[left]);
+        const auto amount = static_cast<float>(mapped - left);
+        const auto* leftF0 = static_cast<const float*>(
+            llsm_container_get(analysed->frames[left], LLSM_FRAME_F0));
+        const auto* rightF0 = static_cast<const float*>(
+            llsm_container_get(analysed->frames[right], LLSM_FRAME_F0));
+        const auto sameVoicing = leftF0 != nullptr && rightF0 != nullptr
+            && ((*leftF0 > 0.0f) == (*rightF0 > 0.0f));
+        const auto sourceFrame = !sameVoicing && amount >= 0.5f ? right : left;
+        transformed->frames[frame] = llsm_copy_container(analysed->frames[sourceFrame]);
         if (transformed->frames[frame] == nullptr) return empty;
-        interpolateLayer1(transformed->frames[frame], analysed->frames[right],
-                          static_cast<float>(mapped - left));
+        if (sameVoicing)
+            interpolateLayer1(transformed->frames[frame], analysed->frames[right], amount);
 
         auto* f0 = static_cast<float*>(llsm_container_get(transformed->frames[frame], LLSM_FRAME_F0));
         const auto oldF0 = f0 != nullptr ? *f0 : 0.0f;
-        const auto targetF0 = midiToHz(curveAt(targetMidi, targetTime / hopSeconds));
+        const auto targetF0 = targetF0Curve[static_cast<std::size_t>(frame)];
         if (f0 != nullptr)
             *f0 = oldF0 > 0.0f && targetF0 > 0.0f ? std::max(20.0f, targetF0) : 0.0f;
+        if (!llsm_frame_checklayer1(transformed->frames[frame])) return empty;
         llsm_container_attach(transformed->frames[frame], LLSM_FRAME_HM, nullptr, nullptr, nullptr);
 
         auto* envelope = static_cast<float*>(
@@ -291,6 +346,8 @@ juce::AudioBuffer<float> Llsm2Renderer::render(
     const auto copySamples = std::min(targetSamples, output->ny);
     for (int channel = 0; channel < rendered.getNumChannels(); ++channel)
         std::copy_n(output->y, copySamples, rendered.getWritePointer(channel));
+    for (int sample = 0; sample < copySamples; ++sample)
+        if (!std::isfinite(rendered.getSample(0, sample))) return empty;
     return rendered;
 }
 }
