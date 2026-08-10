@@ -640,7 +640,7 @@ std::vector<float> stableMonoInput(const juce::AudioBuffer<float>& source)
 }
 
 void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
-                         std::size_t contextFrames, bool holdEdges)
+                         std::size_t contextFrames)
 {
     if (mel.frames == 0 || f0.size() != mel.frames || melBands <= 0
         || contextFrames == 0) return;
@@ -651,12 +651,9 @@ void addModelEdgeContext(MelData& mel, std::vector<float>& f0, int melBands,
     std::vector<float> paddedF0(padded.frames);
     for (std::size_t frame = 0; frame < padded.frames; ++frame)
     {
-        const auto relative = static_cast<std::ptrdiff_t>(frame)
-            - static_cast<std::ptrdiff_t>(contextFrames);
-        const auto sourceFrame = holdEdges
-            ? static_cast<std::size_t>(std::clamp<std::ptrdiff_t>(
-                relative, 0, static_cast<std::ptrdiff_t>(originalFrames - 1)))
-            : reflectIndex(relative, originalFrames);
+        const auto sourceFrame = reflectIndex(
+            static_cast<std::ptrdiff_t>(frame) - static_cast<std::ptrdiff_t>(contextFrames),
+            originalFrames);
         paddedF0[frame] = f0[sourceFrame];
         for (int band = 0; band < melBands; ++band)
             padded.values[static_cast<std::size_t>(band) * padded.frames + frame]
@@ -1051,8 +1048,7 @@ NsfHifiganRenderResult NsfHifiganRenderer::render(
                 f0[frame] = std::sqrt(a * c);
         }
         constexpr std::size_t edgeContextFrames = 16;
-        const auto holdShortClipEdges = variableHop && mel.frames <= 4;
-        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames, holdShortClipEdges);
+        addModelEdgeContext(mel, f0, config->melBands, edgeContextFrames);
         auto modelOutput = infer(*ortSession.model, *config, mel, f0,
                                  ortSession.runMutex.get());
         if (modelOutput.empty())
