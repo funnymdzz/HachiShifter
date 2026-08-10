@@ -923,7 +923,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                                     : note.contour.back();
                                 if (!point.voiced) continue;
                                 const auto midi = note.midiNote
-                                    + point.rendered_target_cents / 100.0f;
+                                    + renderedPitchCents(note, point) / 100.0f;
                                 if (!std::isfinite(midi) || midi <= 0.0f) continue;
                                 return 440.0f * std::exp2((midi - 69.0f) / 12.0f);
                             }
