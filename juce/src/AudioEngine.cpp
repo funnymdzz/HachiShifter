@@ -472,6 +472,8 @@ backend::Mld5FileRenderRequest makeMergedRenderRequest(
     request.tension.assign(static_cast<std::size_t>(frameCount), 0.0f);
     request.breath.assign(static_cast<std::size_t>(frameCount), 0.0f);
     request.robustPitchCurve.assign(static_cast<std::size_t>(frameCount), 0.0f);
+    auto lastSourceMidi = 0.0f;
+    auto lastTargetMidi = 0.0f;
     for (int frame = 0; frame < frameCount; ++frame)
     {
         const auto time = std::min(targetDuration, static_cast<double>(frame) * framePeriodSeconds);
@@ -490,10 +492,22 @@ backend::Mld5FileRenderRequest makeMergedRenderRequest(
             request.robustPitchCurve[static_cast<std::size_t>(frame)] =
                 note.robustPitchCurve ? static_cast<float>(index + 1) : 0.0f;
             const auto cents = contourAt(note, juce::jlimit(0.0, note.durationSeconds, noteLocal));
-            if (!cents) break;
+            if (!cents)
+            {
+                // Unvoiced frame: carry the last voiced pitch forward so the
+                // model still has a carrier reference for source consonant audio.
+                if (lastSourceMidi > 0.0f)
+                {
+                    request.sourceMidi[static_cast<std::size_t>(frame)] = lastSourceMidi;
+                    request.targetMidi[static_cast<std::size_t>(frame)] = lastTargetMidi;
+                }
+                continue;
+            }
             const auto sourceCenter = note.sourceMidiCenter >= 0.0f ? note.sourceMidiCenter : note.midiNote;
-            request.sourceMidi[static_cast<std::size_t>(frame)] = sourceCenter + cents->first / 100.0f;
-            request.targetMidi[static_cast<std::size_t>(frame)] = note.midiNote + cents->second / 100.0f;
+            lastSourceMidi = sourceCenter + cents->first / 100.0f;
+            lastTargetMidi = note.midiNote + cents->second / 100.0f;
+            request.sourceMidi[static_cast<std::size_t>(frame)] = lastSourceMidi;
+            request.targetMidi[static_cast<std::size_t>(frame)] = lastTargetMidi;
             break;
         }
     }
