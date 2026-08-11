@@ -52,7 +52,6 @@ private:
     struct NoteHit
     {
         juce::String id;
-        juce::String id;
         juce::Rectangle<float> bounds;
         juce::String clipId;
         float midi = 60.0f;
