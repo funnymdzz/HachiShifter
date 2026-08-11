@@ -852,6 +852,69 @@ void ProjectModel::setClipMuted(const juce::String& clipId, bool muted)
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::setClipGlideConnected(const juce::String& clipId, bool connectedToNext)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    if (clip.glideConnectedToNext == connectedToNext) return;
+                    pushUndoLocked();
+                    clip.glideConnectedToNext = connectedToNext;
+                    changed = true;
+                    if (connectedToNext)
+                    {
+                        // Find the next clip in time and mark it
+                        for (auto& next : track.clips)
+                            if (next.startSeconds >= clip.startSeconds + clip.durationSeconds - 0.01
+                                && next.id != clip.id)
+                                next.glideConnectedFromPrevious = true;
+                    }
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
+void ProjectModel::removeClipGlide(const juce::String& clipId)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+            for (auto& clip : track.clips)
+                if (clip.id == clipId)
+                {
+                    if (!clip.glideConnectedToNext && !clip.glideConnectedFromPrevious) return;
+                    pushUndoLocked();
+                    if (clip.glideConnectedToNext)
+                    {
+                        // Clear the successor's previous flag
+                        for (auto& next : track.clips)
+                            if (next.glideConnectedFromPrevious
+                                && std::abs(next.startSeconds - (clip.startSeconds + clip.durationSeconds)) < 0.01)
+                                next.glideConnectedFromPrevious = false;
+                    }
+                    if (clip.glideConnectedFromPrevious)
+                    {
+                        // Clear the predecessor's next flag
+                        for (auto& prev : track.clips)
+                            if (prev.glideConnectedToNext
+                                && std::abs(clip.startSeconds - (prev.startSeconds + prev.durationSeconds)) < 0.01)
+                                prev.glideConnectedToNext = false;
+                    }
+                    clip.glideConnectedToNext = false;
+                    clip.glideConnectedFromPrevious = false;
+                    changed = true;
+                    break;
+                }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::removeClip(const juce::String& clipId)
 {
     auto changed = false;

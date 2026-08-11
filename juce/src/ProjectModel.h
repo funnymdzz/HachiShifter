@@ -212,6 +212,8 @@ public:
     void setClipFades(const juce::String& clipId, double fadeInSeconds,
                       double fadeOutSeconds);
     void setClipMuted(const juce::String& clipId, bool muted);
+    void setClipGlideConnected(const juce::String& clipId, bool connectedToNext);
+    void removeClipGlide(const juce::String& clipId);
     void removeClip(const juce::String& clipId);
     void removeTrack(const juce::String& trackId);
     void transposeNote(const juce::String& noteId, float semitones);

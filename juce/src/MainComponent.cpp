@@ -1032,7 +1032,7 @@ void MainComponent::resized()
     progressBar.setBounds(toolbar.removeFromRight(100).reduced(4, 5));
 
     auto footer = area.removeFromBottom(24);
-    statusLabel.setBounds(footer.reduced(8, 0));
+    statusLabel.setBounds(footer.withTrimmedRight(260).reduced(8, 0));
     const auto sampleEditorHeight = sourceEditActive ? 36 : 0;
     const auto splitAvailable = std::max(1, area.getHeight() - 8 - 36 - sampleEditorHeight);
     const auto upperHeight = juce::jlimit(150, std::max(150, splitAvailable - 120),
