@@ -88,7 +88,7 @@ private:
     int activeSampleRegion = -1;
     int draggedSampleRegion = -1;
     RegionHandle draggedRegionHandle = RegionHandle::none;
-    float pixelsPerSecond = 140.0f;
+    float pixelsPerSecond = 220.0f;
     float rowHeight = 22.0f;
     int highestMidi = 96;
     int lowestMidi = 24;

@@ -823,6 +823,7 @@ void MainComponent::updateConnectIcon(PianoRollComponent::ConnectMode mode)
             connectButton.setTooltip(strings.text("tool.connect.split"));
             break;
     }
+    connectButton.resized();
     connectButton.repaint();
 }
 

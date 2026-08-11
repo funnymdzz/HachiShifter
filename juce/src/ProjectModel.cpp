@@ -867,11 +867,16 @@ void ProjectModel::setClipGlideConnected(const juce::String& clipId, bool connec
                     changed = true;
                     if (connectedToNext)
                     {
-                        // Find the next clip in time and mark it
                         for (auto& next : track.clips)
-                            if (next.startSeconds >= clip.startSeconds + clip.durationSeconds - 0.01
-                                && next.id != clip.id)
+                            if (next.id != clip.id
+                                && next.startSeconds >= clip.startSeconds
+                                    + clip.durationSeconds - 0.01
+                                && next.startSeconds <= clip.startSeconds
+                                    + clip.durationSeconds + 0.5)
+                            {
                                 next.glideConnectedFromPrevious = true;
+                                break;
+                            }
                     }
                     break;
                 }

@@ -702,8 +702,6 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             {
                 if (connectMode == ConnectMode::merge)
                 {
-                    // Toggle glide connection between clips: select first,
-                    // click second to create/remove a glide connection.
                     if (firstConnectClip.isEmpty())
                     {
                         firstConnectClip = it->clipId;
@@ -711,7 +709,14 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
                     }
                     else if (it->clipId != firstConnectClip)
                     {
+                        // Force-merge: set glide-connected if clips
+                        // overlap or are adjacent in target time.
                         model.setClipGlideConnected(firstConnectClip, true);
+                        firstConnectClip.clear();
+                        repaint();
+                    }
+                    else
+                    {
                         firstConnectClip.clear();
                         repaint();
                     }
