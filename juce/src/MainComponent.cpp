@@ -808,22 +808,19 @@ void MainComponent::setToolButton(juce::Button& selected)
 
 void MainComponent::updateConnectIcon(PianoRollComponent::ConnectMode mode)
 {
+    connectButton.getProperties().set("connectMode", static_cast<int>(mode));
     switch (mode)
     {
         case PianoRollComponent::ConnectMode::merge:
-            connectButton.setComponentID("icon.connect");
             connectButton.setTooltip(strings.text("tool.connect.merge"));
             break;
         case PianoRollComponent::ConnectMode::glideSplit:
-            connectButton.setComponentID("icon.connectGlide");
             connectButton.setTooltip(strings.text("tool.connect.glide"));
             break;
         case PianoRollComponent::ConnectMode::fullSplit:
-            connectButton.setComponentID("icon.connectSplit");
             connectButton.setTooltip(strings.text("tool.connect.split"));
             break;
     }
-    connectButton.resized();
     connectButton.repaint();
 }
 
