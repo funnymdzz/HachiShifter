@@ -646,7 +646,8 @@ void PianoRollComponent::paint(juce::Graphics& g)
             dash.startNewSubPath(seamX, 0.0f);
             dash.lineTo(seamX, static_cast<float>(getHeight()));
             juce::Path dashed;
-            juce::PathStrokeType(1.5f).createDashedStroke(dashed, dash, { 4.0f, 3.0f }, 0);
+            const float dashPattern[]{ 4.0f, 3.0f };
+            juce::PathStrokeType(1.5f).createDashedStroke(dashed, dash, dashPattern, 2);
             g.setColour(Palette::accentLight.withAlpha(0.7f));
             g.fillPath(dashed);
         }
