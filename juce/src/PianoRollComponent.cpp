@@ -633,6 +633,25 @@ void PianoRollComponent::paint(juce::Graphics& g)
         g.drawRect(selection, 1.0f);
     }
 
+    // Dotted vertical line at glide-connected clip boundaries
+    for (const auto& track : snapshot.tracks)
+    {
+        if (!track.compose && !sourceEditMode) continue;
+        for (const auto& clip : track.clips)
+        {
+            if (!clip.glideConnectedToNext) continue;
+            const auto seamX = timeToX(clip.startSeconds + clip.durationSeconds);
+            if (seamX < 58.0f || seamX > getWidth()) continue;
+            juce::Path dash;
+            dash.startNewSubPath(seamX, 0.0f);
+            dash.lineTo(seamX, static_cast<float>(getHeight()));
+            juce::Path dashed;
+            juce::PathStrokeType(1.5f).createDashedStroke(dashed, dash, { 4.0f, 3.0f }, 0);
+            g.setColour(Palette::accentLight.withAlpha(0.7f));
+            g.fillPath(dashed);
+        }
+    }
+
     g.setColour(juce::Colours::red.withAlpha(0.9f));
     g.drawVerticalLine(static_cast<int>(timeToX(playheadSeconds)), 0.0f, static_cast<float>(getHeight()));
     drawKeyboard();
