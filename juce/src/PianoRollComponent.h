@@ -52,7 +52,9 @@ private:
     struct NoteHit
     {
         juce::String id;
+        juce::String id;
         juce::Rectangle<float> bounds;
+        juce::String clipId;
         float midi = 60.0f;
         double startSeconds = 0.0;
         double durationSeconds = 0.0;
@@ -96,6 +98,7 @@ private:
     bool showWaveforms = true;
     Tool tool = Tool::note;
     ConnectMode connectMode = ConnectMode::merge;
+    juce::String firstConnectClip;
     juce::String focusedClip;
     juce::String focusedTrack;
     double playheadSeconds = 0.0;

@@ -516,7 +516,7 @@ void PianoRollComponent::paint(juce::Graphics& g)
                 (void) midiRow;
                 const auto blockHeight = std::max(6.0f, rowHeight - 4.0f);
                 const auto bounds = juce::Rectangle<float>(x, y + 2.0f, width, blockHeight);
-                noteHits.push_back({ note.id, bounds, note.midiNote, note.startSeconds,
+                noteHits.push_back({ note.id, bounds, clip.id, note.midiNote, note.startSeconds,
                                      note.durationSeconds, clip.startSeconds });
 
                 g.setColour(Palette::noteFill.darker(0.18f));
@@ -700,7 +700,27 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
             if (selectedNote.isEmpty()) { repaint(); return; }
             if (tool == Tool::connect && !sourceEditMode)
             {
-                model.toggleNoteConnection(selectedNote);
+                if (connectMode == ConnectMode::merge)
+                {
+                    // Toggle glide connection between clips: select first,
+                    // click second to create/remove a glide connection.
+                    if (firstConnectClip.isEmpty())
+                    {
+                        firstConnectClip = it->clipId;
+                        repaint();
+                    }
+                    else if (it->clipId != firstConnectClip)
+                    {
+                        model.setClipGlideConnected(firstConnectClip, true);
+                        firstConnectClip.clear();
+                        repaint();
+                    }
+                }
+                else if (connectMode == ConnectMode::fullSplit)
+                {
+                    model.removeClipGlide(it->clipId);
+                    repaint();
+                }
                 return;
             }
             draggedNote = it->id;
