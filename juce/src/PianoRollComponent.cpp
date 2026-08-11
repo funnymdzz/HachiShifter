@@ -709,9 +709,7 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent& event)
                     }
                     else if (it->clipId != firstConnectClip)
                     {
-                        // Force-merge: set glide-connected if clips
-                        // overlap or are adjacent in target time.
-                        model.setClipGlideConnected(firstConnectClip, true);
+                        model.forceConnectClips(firstConnectClip, it->clipId);
                         firstConnectClip.clear();
                         repaint();
                     }

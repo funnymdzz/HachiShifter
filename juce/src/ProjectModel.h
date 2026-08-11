@@ -213,6 +213,7 @@ public:
                       double fadeOutSeconds);
     void setClipMuted(const juce::String& clipId, bool muted);
     void setClipGlideConnected(const juce::String& clipId, bool connectedToNext);
+    void forceConnectClips(const juce::String& clipA, const juce::String& clipB);
     void removeClipGlide(const juce::String& clipId);
     void removeClip(const juce::String& clipId);
     void removeTrack(const juce::String& trackId);

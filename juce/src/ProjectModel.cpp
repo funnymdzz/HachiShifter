@@ -884,6 +884,40 @@ void ProjectModel::setClipGlideConnected(const juce::String& clipId, bool connec
     if (changed) sendChangeMessage();
 }
 
+void ProjectModel::forceConnectClips(const juce::String& clipA, const juce::String& clipB)
+{
+    auto changed = false;
+    {
+        const juce::ScopedLock guard(lock);
+        for (auto& track : project.tracks)
+        {
+            ClipData* first = nullptr;
+            ClipData* second = nullptr;
+            for (auto& clip : track.clips)
+            {
+                if (clip.id == clipA) first = &clip;
+                if (clip.id == clipB) second = &clip;
+            }
+            if (first == nullptr || second == nullptr) continue;
+            if (first->glideConnectedToNext && second->glideConnectedFromPrevious) return;
+            pushUndoLocked();
+            if (first->startSeconds <= second->startSeconds)
+            {
+                first->glideConnectedToNext = true;
+                second->glideConnectedFromPrevious = true;
+            }
+            else
+            {
+                second->glideConnectedToNext = true;
+                first->glideConnectedFromPrevious = true;
+            }
+            changed = true;
+            break;
+        }
+    }
+    if (changed) sendChangeMessage();
+}
+
 void ProjectModel::removeClipGlide(const juce::String& clipId)
 {
     auto changed = false;
