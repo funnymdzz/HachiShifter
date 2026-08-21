@@ -771,7 +771,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
         // These clips share a source file and are joined by followingJoin.joinsPitches;
         // they must render as one continuous phrase with smooth F0 transition.
         std::vector<bool> inGlideGroup(count, false);
-        if (mergedMode)
+        if (mergedMode && track.pitchAlgorithm == PitchAlgorithm::nsfHifigan)
             for (std::size_t i = 0; i < count; ++i)
             {
                 if (inGlideGroup[i]) continue;
