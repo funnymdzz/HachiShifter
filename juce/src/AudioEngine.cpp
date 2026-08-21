@@ -789,6 +789,8 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
                     const auto* found = static_cast<const ClipData*>(nullptr);
                     for (std::size_t j = 0; j < count; ++j)
                         if (!inGlideGroup[j]
+                            && !orderedClips[j]->muted
+                            && orderedClips[j]->sourceFile.existsAsFile()
                             && orderedClips[j]->sourceFile == cursor->sourceFile
                             && orderedClips[j]->glideConnectedFromPrevious
                             && std::abs(orderedClips[j]->sourceOffsetSeconds
@@ -1087,6 +1089,7 @@ void AudioEngine::rebuildLoadedClips(const ProjectData& project)
             double targetOffset = 0.0;
             for (std::size_t index = 0; index < group.clips.size(); ++index)
             {
+                if (index >= group.loaded.size()) break;
                 const auto start = static_cast<int>(std::llround(targetOffset * fileRate));
                 targetOffset += group.clips[index]->durationSeconds;
                 const auto end = static_cast<int>(std::llround(targetOffset * fileRate));
